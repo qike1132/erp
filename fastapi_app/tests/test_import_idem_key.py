@@ -15,15 +15,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SVC = _REPO_ROOT / 'fastapi_app' / 'services'
 # 所有「导入来源」写 InventoryLog 的模块（手工/审批/建品等路径不在此列，
 # 它们本就不设 idem_key）。
-# ⚠️ 已知未接第 2 层且**不在此列**：fastapi_app/tasks/batch_tasks.py 的
-#    /tasks/import-orders|stockins（ARQ 异步导入，前端无调用，缺口已在
-#    import_guard.py 留档）。将来若接线，本清单需同步。
 _IMPORT_MODULES = [
     _SVC / 'batch_import_service.py',
     _SVC / 'batch_import_core.py',
     _SVC / 'staging' / 'order.py',
     _SVC / 'staging' / 'stockin.py',
     _SVC / 'staging' / 'stockout.py',
+    # ARQ 异步导入（/tasks/import-orders|stockins）：Z06-R6 已接第 2 层行级幂等，
+    # 此前这条路径完全不写 idem_key → 唯一索引对异步导入形同虚设。
+    _REPO_ROOT / 'fastapi_app' / 'tasks' / 'batch_tasks.py',
 ]
 
 

@@ -6,6 +6,11 @@ Excel 批量导入耗时操作由 ARQ Worker 执行。行循环使用异步会�
 P1-7：ARQ 的 ``max_tries=3`` 会**重放**失败任务（``ctx["job_try"]`` 递增、``job_id`` 不变），
 故入口按 ``job_id + 行业务主键`` 做重放幂等（见 ``core/arq_app.py`` 的 ``job_idempotency``），
 行循环改为经 ``CommitBatcher`` 每批提交一次。
+
+Z06-R6：重放幂等只挡「同一 job 内重放」，挡不住「同一文件再上传一次」（新 job）。
+故导入行另接**第 2 层行级业务键**：``inventory_log.idem_key``（同类型/客户/产品/
+数量/业务日），撞 ``uq_inventory_log_idem`` 的行被跳过而不是重复建单/重复入库。
+冲突发生在 savepoint 退出的 autoflush 上，故行循环每行套一个 savepoint。
 """
 import contextlib
 import hashlib
@@ -14,6 +19,7 @@ import tempfile
 
 from sqlalchemy import or_
 from sqlalchemy import select as sa_select
+from sqlalchemy.exc import IntegrityError
 
 from fastapi_app.core.logger import logger
 from fastapi_app.shared_models import Product
@@ -130,6 +136,7 @@ async def _import_rows(db, data_list: list, build_row, task_label: str, *, job_i
     批次不会被标成「已处理」——否则重放时那些行就真的丢了，这比重复写更糟。
     """
     from fastapi_app.core.arq_app import CommitBatcher
+    from fastapi_app.services.batch_import_core import _row_failure_message
 
     imported_count = 0
     last_committed_count = 0
@@ -154,7 +161,18 @@ async def _import_rows(db, data_list: list, build_row, task_label: str, *, job_i
             logger.info(f'批量导入{task_label}行{i}已在本 job 提交过，重放跳过')
             continue
         try:
-            row_error = await build_row(db, row, i)
+            # Z06-R6：每行套一个 savepoint。幂等键冲突（uq_inventory_log_idem）
+            # 是在 savepoint 退出时的 autoflush 才爆发的——不套 savepoint 的话
+            # 整个批事务进入 aborted 状态，后续行全部失败、整批回滚。
+            async with db.begin_nested():
+                row_error = await build_row(db, row, i)
+        except IntegrityError as e:
+            if 'uq_inventory_log_idem' not in str(e):
+                raise
+            # 行级业务键重复：该行跳过，批次继续（与同步导入路径同口径）。
+            errors.append({'row': i, 'error': _row_failure_message(e)})
+            logger.info(f'批量导入{task_label}行{i}与已导入记录重复，已跳过')
+            continue
         except (ValueError, TypeError, OSError) as e:
             await db.rollback()
             # 保留已提交批次的计数，仅回滚当前未提交批次
@@ -250,6 +268,7 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
     async def _orders_row(db, row: dict, i: int) -> str | None:
         from datetime import UTC, datetime
 
+        from fastapi_app.services.batch_import_core import _import_idem_key
         from fastapi_app.services.numbering import generate_order_number
         from fastapi_app.shared_models import InventoryLog, Order
         product, row_error = await _resolve_row_product(db, row)
@@ -257,18 +276,26 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
             return row_error
         # row_error 为 None ⇒ 产品必然存在
         assert product is not None  # noqa: S101
+        customer = row.get('客户名称', '')
+        quantity = int(row.get('数量', 0))
+        # 订单导入无日期列（与 batch_import_core.import_orders_from_data 同口径）：
+        # 业务日取导入当日。
+        order_date = datetime.now(UTC)  # aware UTC：order_date 为 timestamptz
         order = Order(
             order_no=await generate_order_number(db),
-            product_id=product.id, customer=row.get('客户名称', ''),
-            quantity=int(row.get('数量', 0)),
-            order_date=datetime.now(UTC),  # aware UTC：order_date 为 timestamptz
+            product_id=product.id, customer=customer,
+            quantity=quantity,
+            order_date=order_date,
             status=ORDER_STATUS_PENDING_STOCK, note=row.get('备注', ''))
         db.add(order)
         await db.flush()
         log = InventoryLog(product_id=product.id, change_type='订单创建',
-                           change_quantity=int(row.get('数量', 0)),
-                           change_date=datetime.now(UTC), customer=row.get('客户名称', ''),
-                           related_id=str(order.id), note=f'批量导入订单 {order.order_no}')
+                           change_quantity=quantity,
+                           change_date=order_date, customer=customer,
+                           related_id=str(order.id), note=f'批量导入订单 {order.order_no}',
+                           # Z06-R6：接第 2 层行级幂等——同一文件重传时同键撞
+                           # uq_inventory_log_idem，该行被跳过而非重复建单。
+                           idem_key=_import_idem_key('order', customer, product.id, quantity, order_date))
         db.add(log)
         return None
 
@@ -285,6 +312,8 @@ async def batch_import_stockins_task(ctx, file_path: str, original_filename: str
     async def _stockins_row(db, row: dict, i: int) -> str | None:
         from datetime import UTC, datetime
 
+        from fastapi_app.services.batch_import_core import _import_idem_key
+        from fastapi_app.services.batch_import_parser import parse_date_value
         from fastapi_app.services.numbering import generate_stockin_number
         from fastapi_app.shared_models import InventoryLog, StockIn
         product, row_error = await _resolve_row_product(db, row)
@@ -292,11 +321,18 @@ async def batch_import_stockins_task(ctx, file_path: str, original_filename: str
             return row_error
         # row_error 为 None ⇒ 产品必然存在
         assert product is not None  # noqa: S101
+        customer = row.get('客户名称', '')
         quantity = int(row.get('数量', 0))
+        # 备货日期取 Excel 的「时间/备货时间」列，缺列才回落到导入当日 ——
+        # 与 batch_import_core.import_stockins_from_data 同一口径（列名与解析函数
+        # 都逐字对齐），否则同一份 Excel 在同步导入与异步导入两条路径上会落两个
+        # 不同的业务日，幂等键也就跟着分叉。
+        stockin_date = parse_date_value(row.get('时间') or row.get('备货时间')) \
+            or datetime.now(UTC)  # aware UTC：stockin_date 为 timestamptz
         stockin = StockIn(
             stockin_no=await generate_stockin_number(db),
-            product_id=product.id, customer=row.get('客户名称', ''),
-            quantity=quantity, stockin_date=datetime.now(UTC),
+            product_id=product.id, customer=customer,
+            quantity=quantity, stockin_date=stockin_date,
             note=row.get('备注', ''))
         db.add(stockin)
         await db.flush()
@@ -310,8 +346,11 @@ async def batch_import_stockins_task(ctx, file_path: str, original_filename: str
         await apply_stock_delta_locked(db, product, quantity)
         log = InventoryLog(product_id=product.id, change_type='备货入库',
                            change_quantity=quantity, change_date=datetime.now(UTC),
-                           customer=row.get('客户名称', ''), related_id=str(stockin.id),
-                           note=f'批量导入备货 {stockin.stockin_no}')
+                           customer=customer, related_id=str(stockin.id),
+                           note=f'批量导入备货 {stockin.stockin_no}',
+                           # Z06-R6：接第 2 层行级幂等——同一文件重传时同键撞
+                           # uq_inventory_log_idem，该行被跳过而非重复入库。
+                           idem_key=_import_idem_key('stockin', customer, product.id, quantity, stockin_date))
         db.add(log)
         return None
 

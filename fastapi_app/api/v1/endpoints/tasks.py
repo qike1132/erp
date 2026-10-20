@@ -171,9 +171,13 @@ async def async_import_orders(
 ):
     """异步批量导入订单（提交后台任务）
 
-    已知缺口：本端点**不走** ``import_guard.run_guarded_import``（文件指纹幂等）。
-    导入在 ARQ worker 中异步执行、与请求级事务分离，无法原子登记文件哈希；
-    故同一文件重复上传会重复建单，去重仅到 ARQ job_id 级（防 ``max_tries`` 重投）。
+    本端点**不走** ``import_guard.run_guarded_import``（文件指纹幂等）——
+    导入在 ARQ worker 中异步执行、与请求级事务分离，无法原子登记文件哈希。
+
+    去重由**第 2 层行级业务键**兜住（Z06-R6）：worker 写 ``inventory_log`` 时
+    带 ``idem_key``（同客户/产品/数量/业务日），撞 ``uq_inventory_log_idem`` 的行
+    被跳过而非重复建单。订单导入无日期列，业务日取导入当日 —— 同一文件跨日
+    重传按「不同日的同客户同产品同数量是合法重复」放行。
     详见 ``api/v1/endpoints/import_guard.py`` 模块文档。
     """
     _validate_import_file(file)
@@ -208,8 +212,12 @@ async def async_import_stockins(
 ):
     """异步批量导入备货（提交后台任务）
 
-    已知缺口：同 ``/tasks/import-orders`` —— 本端点**不走**文件指纹幂等守卫，
-    重复上传同一文件会重复入库；详见 ``api/v1/endpoints/import_guard.py`` 模块文档。
+    同 ``/tasks/import-orders`` —— 本端点**不走**文件指纹幂等守卫；去重由
+    第 2 层行级业务键兜住（Z06-R6）：worker 写 ``inventory_log`` 时带
+    ``idem_key``（同客户/产品/数量/业务日），撞 ``uq_inventory_log_idem`` 的行
+    被跳过而非重复入库。备货导入取 Excel 的「时间/备货时间」列作业务日，
+    缺列才回落到导入当日（与同步导入路径同口径）。
+    详见 ``api/v1/endpoints/import_guard.py`` 模块文档。
     """
     _validate_import_file(file)
 

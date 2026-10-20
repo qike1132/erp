@@ -16,10 +16,25 @@ def _row(i: int) -> dict:
     return {'产品名称': f'P{i}', '客户名称': 'c', '数量': 1}
 
 
+class _FakeSavepoint:
+    """空 savepoint 上下文（Z06-R6：行循环每行套一个 savepoint）。"""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class _SessionRecorder:
     def __init__(self):
         self.commits = 0
         self.rollbacks = 0
+        self.savepoints = 0
+
+    def begin_nested(self):
+        self.savepoints += 1
+        return _FakeSavepoint()
 
     async def commit(self):
         self.commits += 1

@@ -23,6 +23,16 @@ from fastapi_app.tasks import backup_tasks as bk
 from fastapi_app.tasks import batch_tasks as bt
 
 
+class _FakeSavepoint:
+    """空 savepoint 上下文（Z06-R6：行循环每行套一个 savepoint）。"""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
 class _FakeDb:
     """只记录 commit/rollback/close 的假会话。"""
 
@@ -30,6 +40,11 @@ class _FakeDb:
         self.commits = 0
         self.rollbacks = 0
         self.closed = False
+        self.savepoints = 0
+
+    def begin_nested(self):
+        self.savepoints += 1
+        return _FakeSavepoint()
 
     async def commit(self) -> None:
         self.commits += 1
