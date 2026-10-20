@@ -596,15 +596,12 @@ class BackupPolicyService:
                     'message': '存储同步未启用或未配置二级存储位置'
                 }
 
-            # 这里可以实现备份文件同步到二级存储的逻辑
-            # 例如：复制到远程存储、云存储等
-
-            return {
-                'applied': True,
-                'message': '存储策略应用成功（二级存储同步）',
-                'secondary_location': secondary_location,
-                'sync_enabled': sync_to_secondary
-            }
+            # Z05-R22：二级存储同步从未实现。旧代码在此直接返回「应用成功」，
+            # 用户以为备份已复制到二级位置。显式失败，避免假成功（默认未启用，
+            # 不影响现行清理链路）。
+            raise NotImplementedError(
+                '二级存储同步尚未实现，请关闭 storage.sync_to_secondary'
+            )
 
         except Exception as e:  # defensive: storage policy is currently a no-op placeholder
             logger.error(f"应用存储策略失败: {e}")
