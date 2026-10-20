@@ -271,6 +271,24 @@ rules:
     severity: "medium"
     description: "前端产物体积 ≤ 2MB"
 
+  - rule_id: "L7-CTE-INDEX-DOC-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "CTE 索引建议文档缺失/不可读"
+
+  - rule_id: "L7-CTE-INDEX-MISSING-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "含 CTE 查询的源文件未在建议文档的结构化清单中登记"
+
+  - rule_id: "L7-CTE-INDEX-REGISTRY-001"
+    version: "1.0"
+    source: "spec.md 5.7"
+    severity: "medium"
+    description: "建议文档的结构化清单缺失/格式非法/与实际 CTE 源文件不符"
+
   # =========================================================================
   # L8 可观测性审核
   # =========================================================================

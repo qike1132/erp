@@ -19,6 +19,7 @@ import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from scripts.prod_audit.base.issue_builder import IssueBuilder
 from scripts.prod_audit.base.layer_base import (
@@ -81,6 +82,88 @@ _BATCH_LOOP_MARKER: str = "batch-loop"
 
 # SELECT * 豁免注释标记(行内含该标记则跳过,用于 backup/restore 全表导出场景)
 _SELECT_ALL_MARKER: str = "select-all"
+
+# CTE 索引建议文档中的「结构化清单」标记(必须成对出现;缺失则无法核对 CTE 覆盖)
+_CTE_REGISTRY_START: str = "<!-- prod_audit:cte-index:start -->"
+_CTE_REGISTRY_END: str = "<!-- prod_audit:cte-index:end -->"
+
+# 结构化清单中「动作」字段的合法取值
+_CTE_REGISTRY_ACTIONS: frozenset[str] = frozenset({"index", "covered", "exempt"})
+
+
+class _CteRegistryEntry(NamedTuple):
+    """结构化清单中的一条 CTE 登记记录。"""
+
+    path: str
+    """源文件相对仓库根的路径(posix 风格)。"""
+
+    ctes: str
+    """该文件中的 CTE 名(逗号分隔)。"""
+
+    action: str
+    """处置动作: ``index``(建议加索引)/ ``covered``(现有索引已覆盖)/ ``exempt``(无需动作)。"""
+
+    tables: str
+    """涉及的表(逗号分隔)。"""
+
+
+def _parse_cte_registry(doc_content: str) -> tuple[dict[str, _CteRegistryEntry], list[str]]:
+    """解析建议文档中的结构化清单块。
+
+    清单块由 :data:`_CTE_REGISTRY_START` / :data:`_CTE_REGISTRY_END` 界定,
+    块内每行一条记录,字段以 ``|`` 分隔::
+
+        <源文件相对路径> | <CTE 名(逗号分隔)> | <动作> | <涉及表(逗号分隔)>
+
+    返回 ``(按源文件路径索引的登记条目, 错误信息列表)``。错误信息非空表示清单块
+    缺失或格式非法 —— 此时不能把「未登记」当成 CTE 漏登记(否则会全量误报)。
+    """
+    start = doc_content.find(_CTE_REGISTRY_START)
+    end = doc_content.find(_CTE_REGISTRY_END)
+    if start == -1 or end == -1 or end <= start:
+        return {}, ["未找到结构化清单标记块"]
+
+    entries: dict[str, _CteRegistryEntry] = {}
+    errors: list[str] = []
+    block = doc_content[start + len(_CTE_REGISTRY_START) : end]
+    for lineno, raw_line in enumerate(block.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith(("<!--", "#")):
+            continue
+        fields = [f.strip() for f in line.split("|")]
+        if len(fields) != 4:
+            errors.append(
+                f"第 {lineno} 行字段数应为 4(源文件|CTE|动作|表),实际 {len(fields)}"
+            )
+            continue
+        path, ctes, action, tables = fields
+        if not path.endswith(".py") or path.startswith("/") or ".." in path:
+            errors.append(f"第 {lineno} 行源文件路径非法: {path!r}")
+            continue
+        if not ctes:
+            errors.append(f"第 {lineno} 行缺少 CTE 名")
+            continue
+        if action not in _CTE_REGISTRY_ACTIONS:
+            errors.append(
+                f"第 {lineno} 行动作非法: {action!r}"
+                f"(允许 {sorted(_CTE_REGISTRY_ACTIONS)})"
+            )
+            continue
+        if path in entries:
+            errors.append(f"第 {lineno} 行源文件重复登记: {path}")
+            continue
+        entries[path] = _CteRegistryEntry(
+            path=path, ctes=ctes, action=action, tables=tables
+        )
+    return entries, errors
+
+
+def _rel_to_project(path: Path) -> str:
+    """把路径转成相对仓库根的 posix 字符串(仓库外则回退绝对路径)。"""
+    try:
+        return path.relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def _load_n1_whitelist(path: Path) -> frozenset[str]:
@@ -242,7 +325,7 @@ class L7Performance(LayerBase):
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.MEDIUM,
-                    file=str(_CTE_INDEX_DOC.relative_to(PROJECT_ROOT).as_posix()),
+                    file=_rel_to_project(_CTE_INDEX_DOC),
                     line=1,
                     description="CTE 索引建议文档缺失: docs/cte_index_suggestions.md",
                     suggestion="确认 docs/cte_index_suggestions.md 存在",
@@ -260,7 +343,7 @@ class L7Performance(LayerBase):
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.MEDIUM,
-                    file=str(_CTE_INDEX_DOC.relative_to(PROJECT_ROOT).as_posix()),
+                    file=_rel_to_project(_CTE_INDEX_DOC),
                     line=1,
                     description=f"读取 CTE 索引建议文档失败: {exc}",
                     suggestion="检查文件权限与编码",
@@ -270,15 +353,19 @@ class L7Performance(LayerBase):
                 )
             ], f"READ_ERROR: {exc}"
 
-        # 提取文档中建议的表名(## 表名 / ### 表名)
-        suggested_tables = set(re.findall(r"(?im)^#{2,3}\s+(\w+)", doc_content))
-        raw_parts.append(f"suggested_tables: {sorted(suggested_tables)}")
+        # 解析文档中的结构化清单(只认标记块内的登记行;标题是散文,不是表名)
+        registry, registry_errors = _parse_cte_registry(doc_content)
+        raw_parts.append(
+            f"cte_registry_entries: {len(registry)}"
+            + (f" errors: {registry_errors}" if registry_errors else "")
+        )
 
-        # 扫描 services/ 中 CTE 查询(WITH ... AS)并校验是否在建议表清单
+        # 扫描 services/ 中 CTE 查询(WITH ... AS),按源文件核对是否已登记
         cte_re = re.compile(r"(?i)\bWITH\s+(\w+)\s+AS\s*\(")
+        cte_files: dict[str, int] = {}
         scanned = 0
         if SERVICES_DIR.exists():
-            for py_file in SERVICES_DIR.rglob("*.py"):
+            for py_file in sorted(SERVICES_DIR.rglob("*.py")):
                 if "__pycache__" in py_file.parts:
                     continue
                 try:
@@ -288,25 +375,112 @@ class L7Performance(LayerBase):
                 scanned += 1
                 rel = py_file.relative_to(PROJECT_ROOT).as_posix()
                 for idx, line in enumerate(source.splitlines(), start=1):
-                    # 检查同文件是否引用了建议表(粗略)
-                    if cte_re.search(line) and suggested_tables and not any(
-                        t in source for t in suggested_tables
-                    ):
-                        issues.append(
-                                builder.build(
-                                    layer_id=self.layer_id,
-                                    severity=Severity.MEDIUM,
-                                    file=rel,
-                                    line=idx,
-                                    description="CTE 查询未在 docs/cte_index_suggestions.md 建议索引清单中",
-                                    suggestion="在 docs/cte_index_suggestions.md 补充该 CTE 的索引建议",
-                                    rule_id="L7-CTE-INDEX-MISSING-001",
-                                    owner=DEFAULT_OWNER,
-                                    due_date=DEFAULT_DUE_DATE,
-                                )
-                            )
+                    if cte_re.search(line):
+                        cte_files.setdefault(rel, idx)
+                        break
+
+        if registry_errors:
+            issues.append(
+                builder.build(
+                    layer_id=self.layer_id,
+                    severity=Severity.MEDIUM,
+                    file=_rel_to_project(_CTE_INDEX_DOC),
+                    line=1,
+                    description=(
+                        "CTE 索引建议文档结构化清单无效: "
+                        + "; ".join(registry_errors)
+                    ),
+                    suggestion=(
+                        "在 docs/cte_index_suggestions.md 中维护 "
+                        f"{_CTE_REGISTRY_START} / {_CTE_REGISTRY_END} 标记块,"
+                        "每行登记一个 CTE 源文件(源文件|CTE 名|动作|涉及表)"
+                    ),
+                    rule_id="L7-CTE-INDEX-REGISTRY-001",
+                    owner=DEFAULT_OWNER,
+                    due_date=DEFAULT_DUE_DATE,
+                )
+            )
+            return issues, "\n".join(raw_parts)
+
+        if not registry and cte_files:
+            issues.append(
+                builder.build(
+                    layer_id=self.layer_id,
+                    severity=Severity.MEDIUM,
+                    file=_rel_to_project(_CTE_INDEX_DOC),
+                    line=1,
+                    description=(
+                        "CTE 索引建议文档结构化清单为空,但存在 "
+                        f"{len(cte_files)} 个含 CTE 查询的源文件"
+                    ),
+                    suggestion=(
+                        "在 docs/cte_index_suggestions.md 的结构化清单块中登记这些文件"
+                        "(源文件|CTE 名|动作|涉及表)"
+                    ),
+                    rule_id="L7-CTE-INDEX-REGISTRY-001",
+                    owner=DEFAULT_OWNER,
+                    due_date=DEFAULT_DUE_DATE,
+                )
+            )
+            return issues, "\n".join(raw_parts)
+
+        raw_parts.append(
+            "suggested_tables: "
+            + str(
+                sorted(
+                    {
+                        t.strip()
+                        for entry in registry.values()
+                        for t in entry.tables.split(",")
+                        if t.strip()
+                    }
+                )
+            )
+        )
+
+        for rel, line in sorted(cte_files.items()):
+            if rel in registry:
+                continue
+            issues.append(
+                builder.build(
+                    layer_id=self.layer_id,
+                    severity=Severity.MEDIUM,
+                    file=rel,
+                    line=line,
+                    description="CTE 查询未在 docs/cte_index_suggestions.md 建议索引清单中登记",
+                    suggestion=(
+                        "在 docs/cte_index_suggestions.md 的结构化清单块中登记该文件"
+                        "(源文件|CTE 名|动作|涉及表)"
+                    ),
+                    rule_id="L7-CTE-INDEX-MISSING-001",
+                    owner=DEFAULT_OWNER,
+                    due_date=DEFAULT_DUE_DATE,
+                )
+            )
+
+        for path in sorted(registry):
+            if path in cte_files:
+                continue
+            issues.append(
+                builder.build(
+                    layer_id=self.layer_id,
+                    severity=Severity.MEDIUM,
+                    file=_rel_to_project(_CTE_INDEX_DOC),
+                    line=1,
+                    description=(
+                        f"结构化清单登记的源文件当前不含 CTE 查询(登记与实际不符): {path}"
+                    ),
+                    suggestion=(
+                        "确认该 CTE 是否已搬走/删除: 是则更新登记行,否则补回 CTE 的索引建议"
+                    ),
+                    rule_id="L7-CTE-INDEX-REGISTRY-001",
+                    owner=DEFAULT_OWNER,
+                    due_date=DEFAULT_DUE_DATE,
+                )
+            )
 
         raw_parts.append(f"scanned_files: {scanned}")
+        raw_parts.append(f"cte_files: {sorted(cte_files)}")
         return issues, "\n".join(raw_parts)
 
     # ------------------------------------------------------------------
