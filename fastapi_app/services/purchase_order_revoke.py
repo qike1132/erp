@@ -17,8 +17,10 @@
 import logging
 from functools import partial
 
-from sqlalchemy import select
+from sqlalchemy import exists, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi_app.services.purchase_utils import parse_source_order_ids
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,86 @@ async def _revoke_targets(db: AsyncSession, targets: list) -> dict:
     return {'revoked': len(targets), 'orders_reset': orders_reset}
 
 
+async def _product_source_ids(db: AsyncSession, product_id: int) -> list[int]:
+    """该产品涉及的来源记录 id（客户订单 id / 备货记录 id）。
+
+    口径是 :func:`fetch_po_sku_pids_map` 回退链（``order_item`` → ``order`` →
+    ``stock_in``）的**超集**：三条来源各自单独查、不做优先级仲裁，保证 SQL 侧
+    不会漏掉真正的目标采购单；「这张单是否真含该产品」仍由调用方的精确映射判定。
+    """
+    from fastapi_app.shared_models import StockIn
+    from fastapi_app.shared_models.order import Order
+    from fastapi_app.shared_models.order_item import OrderItem
+
+    order_item_ids = (await db.execute(
+        select(OrderItem.order_id).where(OrderItem.product_id == product_id)
+    )).scalars().all()
+    order_ids = (await db.execute(
+        select(Order.id).where(Order.product_id == product_id)
+    )).scalars().all()
+    stockin_ids = (await db.execute(
+        select(StockIn.id).where(StockIn.product_id == product_id)
+    )).scalars().all()
+    return sorted({int(x) for x in (*order_item_ids, *order_ids, *stockin_ids)})
+
+
+async def _candidate_pending_po_ids(db: AsyncSession, source_ids: list[int]) -> set[int]:
+    """SQL 侧反查：来源 id 命中 ``source_ids`` 的 pending 采购单 id 集合。
+
+    主路径（审计 Z02-R4 处方）：经 ``purchase_order_sku`` 快照表反查 po_id
+    （走 ``idx_purchase_order_sku_source`` 索引），**不再把全部 pending 单当实体载入内存**。
+
+    兜底：**没有快照行**的历史 pending 单（快照表是迁移 047 之后才有的），其来源
+    id 只能从采购单自身字段取；这类单只取 id + 来源两列，在 Python 侧做精确元素
+    匹配（口径同 ``order/beile.py``，不用 LIKE，避免 '6509' 误命中 '[65091]'）。
+    快照表整体不可用（迁移未执行）时退化为「全部 pending 单」，与旧实现同口径。
+    """
+    from fastapi_app.services.purchase_order_sku import po_sku_available
+    from fastapi_app.shared_models.purchase_order import (
+        PurchaseOrder,
+        PurchaseOrderSku,
+        PurchaseOrderStatus,
+    )
+
+    if not source_ids:
+        return set()
+
+    candidate_ids: set[int] = set()
+    if await po_sku_available(db):
+        snapshot_po_ids = select(PurchaseOrderSku.po_id).where(
+            PurchaseOrderSku.source_order_id.in_(source_ids),
+        )
+        rows = await db.execute(
+            select(PurchaseOrder.id).where(
+                PurchaseOrder.status == PurchaseOrderStatus.PENDING,
+                PurchaseOrder.id.in_(snapshot_po_ids),
+            )
+        )
+        candidate_ids = {row[0] for row in rows.all()}
+        legacy_filter = ~exists().where(PurchaseOrderSku.po_id == PurchaseOrder.id)
+    else:
+        legacy_filter = true()
+
+    legacy_rows = (await db.execute(
+        select(
+            PurchaseOrder.id,
+            PurchaseOrder.source_order_id,
+            PurchaseOrder.source_order_ids,
+        ).where(
+            PurchaseOrder.status == PurchaseOrderStatus.PENDING,
+            legacy_filter,
+        )
+    )).all()
+    wanted = set(source_ids)
+    for po_id, single_id, json_ids in legacy_rows:
+        ids = set(parse_source_order_ids(json_ids))
+        if single_id:
+            ids.add(int(single_id))
+        if ids & wanted:
+            candidate_ids.add(po_id)
+    return candidate_ids
+
+
 async def revoke_pending_purchase_orders_for_product(db: AsyncSession, product_id: int) -> dict:
     """若该产品当前**已无任何 BOM 物料**，撤销其 pending 采购单并重算来源订单状态。
 
@@ -77,15 +159,22 @@ async def revoke_pending_purchase_orders_for_product(db: AsyncSession, product_i
     if await _fetch_bom_product_ids(db, [product_id]):
         return {'revoked': 0, 'orders_reset': 0}
 
-    # 覆盖该产品的 pending 采购单（按 SKU 快照映射到 product_id，与汇总口径同源）。
-    # 注：purchase_order_sku 只存 product_name/barcode，没有 product_id 列，
-    # 无法直接 join 下推；按来源 OrderItem 反查会把查询复杂度反推到三表，
-    # 本轮保留全量 pending 加载（Z02-R4 待定：需给快照补 product_id 列后重做）。
-    pending = list((await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.status == PurchaseOrderStatus.PENDING)
-    )).scalars().unique().all())
-    if not pending:
+    # 先在 SQL 侧把范围缩到「可能含该产品」的候选单：旧实现把**全部** pending 单
+    # 当实体载入内存再逐单反推产品归属，pending 越多越慢（审计 Z02-R4）。
+    candidate_ids = await _candidate_pending_po_ids(
+        db, await _product_source_ids(db, product_id),
+    )
+    if not candidate_ids:
         return {'revoked': 0, 'orders_reset': 0}
+
+    pending = list((await db.execute(
+        select(PurchaseOrder).where(
+            PurchaseOrder.id.in_(candidate_ids),
+            PurchaseOrder.status == PurchaseOrderStatus.PENDING,
+        )
+    )).scalars().unique().all())
+    # 精确判定仍走原口径（来源订单 → order_item / order / stock_in 三级回退），
+    # 只是作用范围从「全部 pending 单」收窄到候选集，判定结果与旧实现逐字一致。
     pids_map = await fetch_po_sku_pids_map(db, pending)
     targets = [po for po in pending if product_id in pids_map.get(po.id, [])]
 

@@ -258,6 +258,10 @@ async def test_revoke_deletes_pending_pos_and_resets_source_orders():
 
     with patch('fastapi_app.services.purchase._unprocessed._fetch_bom_product_ids',
                new=AsyncMock(return_value=set())), \
+         patch('fastapi_app.services.purchase_order_revoke._product_source_ids',
+               new=AsyncMock(return_value=[68939])), \
+         patch('fastapi_app.services.purchase_order_revoke._candidate_pending_po_ids',
+               new=AsyncMock(return_value={501, 502})), \
          patch('fastapi_app.services.purchase._common.fetch_po_sku_pids_map',
                new=AsyncMock(return_value={501: [20909], 502: [999]})), \
          patch('fastapi_app.services.purchase_order_crud.delete_purchase_order', new=delete_po), \
