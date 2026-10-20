@@ -27,11 +27,12 @@ def test_affected_rows_rejects_multi_statement():
 
 @pytest.mark.parametrize('rel', [
     'scripts/database/db_manager.py',
+    'scripts/database/restore_db.py',
     'scripts/init_permissions.py',
     'scripts/backfill_purchase_order_sku.py',
 ])
 def test_dangerous_write_scripts_wire_the_guard(rel):
-    """F3-9：三处危险写入口必须出现 require_prod_write_consent。"""
+    """F3-9：危险写入口必须出现 require_prod_write_consent。"""
     source = (ROOT / rel).read_text(encoding='utf-8')
     assert 'require_prod_write_consent' in source
     assert '_prod_write_guard' in source

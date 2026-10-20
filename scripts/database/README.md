@@ -14,12 +14,40 @@
 |------|------|
 | `db_manager.py` | 手动备份/恢复/校验脚本（PostgreSQL 优先，保留 MySQL 兼容分支） |
 | `db_backup.bat` | Windows 手动备份入口，内部调用 `db_manager.py backup --type manual` |
-| `restore_db.py` | 由 `pg_dump` 产物恢复本地库（`psql` 驱动） |
+| `restore_core.py` | **恢复逻辑的唯一实现**（恢复前备份 / DROP+CREATE / psql 导入 / 落地校验） |
+| `restore_db.py` | 由备份产物恢复的 CLI（薄封装：取参数 → 取写库授权 → 调 `restore_core`） |
 | `failover_drill.sh` | 主备切换演练 |
 | `setup_read_replica.sh` | 只读副本搭建 |
 | `setup_replication.sql` | 流复制初始化 SQL |
 | `pg_stat_statements_setup.sql` | 慢查询统计扩展启用 |
 | `README.md` | 本使用说明 |
+
+## 恢复：唯一实现与不可协商的四条（审计 F1-7）
+
+`restore_db.py` 与 `db_manager.py restore` 走的是**同一份**恢复实现
+（`restore_core.py`）。恢复行为只允许改 `restore_core.py`；两个入口只负责
+「准备输入 → 调用 → 汇报结果」。收敛前两边各持一套且互不调用，任何修复只会落在
+一侧、漏到另一侧没人发现（P1-34「恢复假成功 + 无恢复前备份」就是这么漏的）。
+
+`restore_core.py` 的四条硬约束：
+
+1. **恢复前备份 fail-closed** —— DROP DATABASE 之前必须先有一份非空 `pg_dump`
+   产物，否则中止（这是唯一的回退手段）。确实没有备份时要继续，必须显式加
+   `--allow-missing-pre-restore-backup`。
+2. **psql 一律 `ON_ERROR_STOP=1`** —— 该选项为 0 时 SQL 错误不会让 psql 返回
+   非零退出码，失败判定会假绿。
+3. **恢复后校验落地** —— psql 退出码为 0 不代表数据真的进去了（dump 本身可能是
+   空的），必须查 `public` schema 的表数，为 0 判失败。
+4. **写生产库需显式授权** —— 走 `scripts/_prod_write_guard`：
+   `ERP_ALLOW_PROD_WRITE=1` 或命令行 `--allow-prod-write`，二者缺一即拒绝执行。
+
+```bash
+# 恢复（需显式授权写库）
+python scripts/database/restore_db.py --allow-prod-write <备份文件路径>
+```
+
+支持格式：`.sql`（流式导入）、`.sql.gz`、`.zip`（内含 `database/dump.sql.gz`）。
+ZIP 内若是 JSON 格式导出会明确报错——那种只能用 Web 界面恢复。
 
 ## 功能特性
 

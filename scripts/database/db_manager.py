@@ -32,6 +32,10 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 # scripts/ 下的 _prod_write_guard（本文件位于 scripts/database/）
 sys.path.insert(0, str(Path(__file__).parent.parent))
+# scripts/database/ 下的 restore_core（审计 F1-7：恢复实现的唯一来源）
+sys.path.insert(0, str(Path(__file__).parent))
+
+import restore_core
 
 BACKUP_DIR = PROJECT_ROOT / 'backups'
 DAILY_DIR = BACKUP_DIR / 'daily'
@@ -338,110 +342,32 @@ class DatabaseManager:
     # Restore
     # ============================================================
 
-    def restore_postgresql(self, backup_file: Path) -> tuple[bool, str]:
-        config = self.get_db_config()
-        env = os.environ.copy()
-        env['PGPASSWORD'] = config['password']
+    def restore_postgresql(self, backup_file: Path, *, require_consent: bool = True) -> tuple[bool, str]:
+        """PostgreSQL 恢复 —— 实现收敛在 restore_core（审计 F1-7）。
 
-        # Pre-restore backup
-        # 这是 DROP DATABASE 之前唯一的回退手段，因此失败必须中止恢复
-        self.log("正在创建恢复前备份...")
-        pre_backup_dir = BACKUP_DIR / 'pre_restore'
-        pre_backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_ok, backup_msg, _ = self.backup_postgresql(pre_backup_dir, compress=False)
-        if not backup_ok:
-            return False, f"恢复前备份失败，已中止恢复以避免数据丢失: {backup_msg}"
-        self.log(f"恢复前备份完成: {backup_msg}")
-
-        # Terminate existing connections
-        self.log("终止现有数据库连接...")
-        try:
-            subprocess.run([
-                'psql', '-h', config['host'], '-p', config['port'],
-                '-U', config['user'], '-d', 'postgres',
-                '-c', f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                      f"WHERE datname = '{config['database']}' AND pid <> pg_backend_pid();",
-            ], env=env, capture_output=True, timeout=30)
-        except Exception as e:
-            self.log(f"终止连接时出现警告: {e}", 'WARNING')
-
-        # Drop and recreate
-        self.log("重建数据库...")
-        try:
-            subprocess.run([
-                'psql', '-h', config['host'], '-p', config['port'],
-                '-U', config['user'], '-d', 'postgres',
-                '-c', f'DROP DATABASE IF EXISTS "{config["database"]}";',
-            ], env=env, capture_output=True, check=True, timeout=30)
-
-            subprocess.run([
-                'psql', '-h', config['host'], '-p', config['port'],
-                '-U', config['user'], '-d', 'postgres',
-                '-c', f'CREATE DATABASE "{config["database"]}" OWNER "{config["user"]}";',
-            ], env=env, capture_output=True, check=True, timeout=30)
-        except subprocess.CalledProcessError as e:
-            return False, f"数据库重建失败: {e.stderr.decode(errors='replace') if e.stderr else str(e)}"
-
-        # Restore
-        self.log("恢复数据库中...")
-        try:
-            with open(backup_file, 'rb') as f:
-                result = subprocess.run([
-                    'psql', '-h', config['host'], '-p', config['port'],
-                    '-U', config['user'], '-d', config['database'],
-                    '-v', 'ON_ERROR_STOP=1',
-                ], stdin=f, capture_output=True, env=env, timeout=600)
-
-            stderr_text = result.stderr.decode('utf-8', errors='replace')
-
-            error_lines = [
-                line for line in stderr_text.split('\n')
-                if line.strip().startswith('ERROR') or 'ERROR:' in line
-            ]
-
-            # psql 退出码：0=正常，1=自身致命错误，2=连接中断，3=脚本错误(需 ON_ERROR_STOP=1)
-            # 注意：库在恢复前刚 DROP+CREATE，因此"恢复失败"等价于"库是空的"
-            if result.returncode != 0 or error_lines:
-                detail = error_lines[0].strip() if error_lines else stderr_text.strip()[:200]
-                self.log(
-                    f"数据库恢复失败（psql 退出码={result.returncode}，"
-                    f"错误行数={len(error_lines)}）: {detail}",
-                    'ERROR',
-                )
-                for line in error_lines[1:10]:
-                    self.log(f"  {line.strip()}", 'ERROR')
-                return False, f"PostgreSQL 恢复失败：{detail}"
-
-            # 数据落地校验：psql 退出码为 0 不代表数据真的进去了（dump 本身可能是空的）
-            verify = subprocess.run([
-                'psql', '-h', config['host'], '-p', config['port'],
-                '-U', config['user'], '-d', config['database'],
-                '-tAc', "SELECT count(*) FROM information_schema.tables "
-                        "WHERE table_schema='public';",
-            ], env=env, capture_output=True, timeout=30)
-            raw_count = verify.stdout.decode('utf-8', errors='replace').strip() if verify.stdout else ''
-            table_count = int(raw_count) if raw_count.isdigit() else 0
-            if table_count == 0:
-                detail = verify.stderr.decode('utf-8', errors='replace').strip()[:200]
-                return False, f"PostgreSQL 恢复后 public schema 无任何表，疑似恢复失败: {detail}"
-
-            self.log(f"PostgreSQL 数据库恢复完成（public schema 表数={table_count}）")
-            return True, "PostgreSQL 数据库恢复完成"
-        except subprocess.TimeoutExpired:
-            return False, "数据库恢复超时（超过 600 秒）"
-        except FileNotFoundError:
-            return False, "psql 命令未找到，请确保 PostgreSQL 客户端工具已安装"
-        except Exception as e:
-            return False, f"数据库恢复失败: {e!s}"
+        恢复前备份 fail-closed、psql ON_ERROR_STOP=1、恢复后落地校验、
+        写生产库授权，全部由 restore_core 统一负责；本方法只做适配与汇报。
+        """
+        outcome = restore_core.restore_from_file(
+            Path(backup_file),
+            config=self.get_db_config(),
+            require_consent=require_consent,
+            log=self.log,
+        )
+        return outcome.ok, outcome.message
 
     def restore_mysql(self, backup_file: Path) -> tuple[bool, str]:
         config = self.get_db_config()
 
         # Pre-restore backup
+        # 失败必须中止恢复 —— 与 PostgreSQL 路径同口径（此前这里丢弃了返回值，
+        # 备份失败也照样往下恢复，等于没有回退手段）。
         self.log("正在创建恢复前备份...")
         pre_backup_dir = BACKUP_DIR / 'pre_restore'
         pre_backup_dir.mkdir(parents=True, exist_ok=True)
-        self.backup_mysql(pre_backup_dir, compress=False)
+        backup_ok, backup_msg, _ = self.backup_mysql(pre_backup_dir, compress=False)
+        if not backup_ok:
+            return False, f"恢复前备份失败，已中止恢复以避免数据丢失: {backup_msg}"
 
         self.log("恢复 MySQL 数据库中...")
         cmd = ['mysql', f'-h{config["host"]}', f'-P{config["port"]}', f'-u{config["user"]}']
@@ -463,7 +389,7 @@ class DatabaseManager:
         except Exception as e:
             return False, f"MySQL 恢复失败: {e!s}"
 
-    def restore(self, backup_file: str) -> tuple[bool, str]:
+    def restore(self, backup_file: str, *, require_consent: bool = True) -> tuple[bool, str]:
         file_path = Path(backup_file)
         if not file_path.exists():
             return False, f"备份文件不存在: {backup_file}"
@@ -474,21 +400,26 @@ class DatabaseManager:
         self.log("=" * 60)
 
         original_path = file_path
-        if str(file_path).endswith('.gz'):
-            self.log("解压备份文件...")
-            file_path = self.decompress_file(file_path)
-
-        try:
-            if str(file_path).endswith('.sql'):
-                if self.db_type == 'postgresql':
-                    success, message = self.restore_postgresql(file_path)
-                else:
+        if self.db_type == 'postgresql':
+            # 审计 F1-7：PostgreSQL 恢复收敛到 restore_core —— 备份格式解析与
+            # 恢复序列（恢复前备份 / DROP+CREATE / psql / 落地校验）同源，
+            # 与 restore_db.py 走的是同一份实现。
+            try:
+                success, message = self.restore_postgresql(file_path, require_consent=require_consent)
+            except (restore_core.UnsupportedBackupFormatError, restore_core.RestoreError) as e:
+                success, message = False, f"无法识别的备份文件类型: {e}"
+        else:
+            if str(file_path).endswith('.gz'):
+                self.log("解压备份文件...")
+                file_path = self.decompress_file(file_path)
+            try:
+                if str(file_path).endswith('.sql'):
                     success, message = self.restore_mysql(file_path)
-            else:
-                success, message = False, f"无法识别的备份文件类型: {file_path}"
-        finally:
-            if original_path != file_path and file_path.exists():
-                file_path.unlink()
+                else:
+                    success, message = False, f"无法识别的备份文件类型: {file_path}"
+            finally:
+                if original_path != file_path and file_path.exists():
+                    file_path.unlink()
 
         # Log recovery event
         self._log_recovery_event(file_path.name if file_path.exists() else original_path.name, success, message)
