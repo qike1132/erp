@@ -6,8 +6,8 @@
 生产库 `backup_schedule` 的两行（full / incremental）实测状态都是 'running'，
 `last_run_at` 却停在当天 02:00 —— 任务早已结束，状态却显示"执行中"。
 
-修法：入队时给 job 一个可解析的 id（`sched:{schedule_id}:{窗口}`），ARQ 的
-on_job_end / on_job_failed 回调据此把终态写回；任务函数签名不动。
+修法：入队时给 job 一个可解析的 id（`sched:{schedule_id}:{窗口}`），ARQ 0.28 的
+on_job_end 回调按任务边界记录的成败分流并把终态写回；任务函数签名不动。
 """
 from __future__ import annotations
 
@@ -180,16 +180,18 @@ def test_poller_enqueues_with_schedule_job_id() -> None:
 
 
 def test_callbacks_mark_terminal_status() -> None:
-    assert '_mark_schedule_outcome' in _calls_in(_CALLBACKS, 'on_job_end')
+    calls = _calls_in(_CALLBACKS, 'on_job_end')
+    assert '_mark_schedule_outcome' in calls
+    assert '_handle_job_failure' in calls, 'on_job_end 必须按失败分支调用 DLQ/告警逻辑'
 
 
-def test_failed_callback_marks_failed_status() -> None:
+def test_failed_handler_marks_failed_status() -> None:
     src = _CALLBACKS.read_text(encoding='utf-8')
     tree = _tree(_CALLBACKS)
     for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == 'on_job_failed':
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == '_handle_job_failure':
             body = ast.get_source_segment(src, node) or ''
             assert '_mark_schedule_outcome' in body
-            assert 'STATUS_FAILED' in body, '失败回调必须写 failed，而不是复用了 success'
+            assert 'STATUS_FAILED' in body, '失败处理必须写 failed，而不是复用了 success'
             return
-    raise AssertionError('on_job_failed 不存在')
+    raise AssertionError('_handle_job_failure 不存在')

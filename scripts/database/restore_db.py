@@ -1,8 +1,10 @@
 import gzip
+import json
 import os
 import subprocess
 import sys
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 DB_HOST = os.getenv('DB_HOST', 'localhost')
@@ -10,24 +12,9 @@ DB_PORT = os.getenv('DB_PORT', '5432')
 DB_USER = os.getenv('DB_USER', 'erp_app')
 DB_PASSWORD = os.getenv('DB_PASSWORD', '')
 DB_NAME = os.getenv('DB_NAME', 'erp_system')
-BACKUP_FILE = sys.argv[1] if len(sys.argv) > 1 else ''
 
-if not DB_NAME.isidentifier():
-    print(f'错误: 数据库名称无效: {DB_NAME!r}')
-    sys.exit(1)
+PRE_RESTORE_DIR = Path(__file__).resolve().parents[2] / 'backups' / 'pre_restore'
 
-if not DB_PASSWORD:
-    print('错误: 请设置环境变量 DB_PASSWORD')
-    print('用法: set DB_PASSWORD=your_password && python restore_db.py <备份文件路径>')
-    sys.exit(1)
-
-if not BACKUP_FILE or not os.path.exists(BACKUP_FILE):
-    print('错误: 请指定有效的备份文件路径')
-    print('用法: python restore_db.py <备份文件路径>')
-    print('支持格式: .sql, .sql.gz, .zip')
-    sys.exit(1)
-
-backup_path = Path(BACKUP_FILE)
 env = os.environ.copy()
 env['PGPASSWORD'] = DB_PASSWORD
 
@@ -62,6 +49,29 @@ def drop_and_recreate_db():
          '-c', f'CREATE DATABASE "{DB_NAME}" OWNER "{DB_USER}";'],
         env=env, capture_output=True, check=True, timeout=30
     )
+
+
+def create_pre_restore_backup() -> Path:
+    """DROP DATABASE 之前唯一的回退手段；失败必须中止恢复（对齐 db_manager 模式）。"""
+    PRE_RESTORE_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    out = PRE_RESTORE_DIR / f'restore_db_pre_{stamp}.dump'
+    try:
+        result = subprocess.run(
+            ['pg_dump', '-h', DB_HOST, '-p', DB_PORT, '-U', DB_USER,
+             '-d', DB_NAME, '-Fc', '-f', str(out)],
+            env=env, capture_output=True, timeout=3600,
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError('pg_dump 命令未找到，请确保 PostgreSQL 客户端工具在 PATH 中') from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError('pg_dump 执行超时（超过 3600 秒）') from e
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors='replace')[:500] if result.stderr else ''
+        raise RuntimeError(f'pg_dump 失败: {detail}')
+    if not out.exists() or out.stat().st_size == 0:
+        raise RuntimeError('pg_dump 产物为空，恢复前备份不可用')
+    return out
 
 
 # ⚠️ 三处 psql 一律 ON_ERROR_STOP=1：该选项为 0 时 **SQL 错误不会让 psql 返回非零退出码**，
@@ -105,7 +115,6 @@ def restore_from_zip(zip_file):
             print('错误: ZIP 文件中未找到数据库导出')
             sys.exit(1)
         if 'manifest.json' in names:
-            import json
             manifest = json.loads(zf.read('manifest.json'))
             print(f"备份版本: {manifest.get('version', '?')}")
             print(f"备份时间: {manifest.get('exported_at', '?')}")
@@ -120,41 +129,76 @@ def restore_from_zip(zip_file):
     return result
 
 
-print('警告: 即将恢复数据库，这将覆盖当前所有数据！')
-confirm = input('确认继续? (yes/no): ')
-if confirm.lower() not in ('yes', 'y'):
-    print('已取消恢复操作')
-    sys.exit(0)
+def main() -> None:
+    if not DB_NAME.isidentifier():
+        print(f'错误: 数据库名称无效: {DB_NAME!r}')
+        sys.exit(1)
 
-print('终止现有数据库连接...')
-terminate_connections()
+    if not DB_PASSWORD:
+        print('错误: 请设置环境变量 DB_PASSWORD')
+        print('用法: set DB_PASSWORD=your_password && python restore_db.py [--allow-missing-pre-restore-backup] <备份文件路径>')
+        sys.exit(1)
 
-print('重建数据库...')
-try:
-    drop_and_recreate_db()
-except subprocess.CalledProcessError as e:
-    print(f'数据库重建失败: {e.stderr.decode(errors="replace") if e.stderr else str(e)}')
-    sys.exit(1)
+    cli_args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    allow_missing_backup = '--allow-missing-pre-restore-backup' in sys.argv[1:]
+    backup_file = cli_args[0] if cli_args else ''
+    if not backup_file or not os.path.exists(backup_file):
+        print('错误: 请指定有效的备份文件路径')
+        print('用法: python restore_db.py [--allow-missing-pre-restore-backup] <备份文件路径>')
+        print('支持格式: .sql, .sql.gz, .zip')
+        sys.exit(1)
+    backup_path = Path(backup_file)
 
-suffix = backup_path.suffix.lower()
-if suffix == '.sql':
-    result = restore_from_sql(BACKUP_FILE)
-elif suffix == '.gz':
-    result = restore_from_sql_gz(BACKUP_FILE)
-elif suffix == '.zip':
-    result = restore_from_zip(BACKUP_FILE)
-else:
-    print(f'错误: 不支持的文件类型: {suffix}')
-    sys.exit(1)
+    print('警告: 即将恢复数据库，这将覆盖当前所有数据！')
+    confirm = input('确认继续? (yes/no): ')
+    if confirm.lower() not in ('yes', 'y'):
+        print('已取消恢复操作')
+        sys.exit(0)
 
-stderr_text = result.stderr.decode(errors='replace') if result.stderr else ''
-if result.returncode != 0:
+    print('正在创建恢复前备份...')
+    try:
+        pre_backup = create_pre_restore_backup()
+        print(f'恢复前备份完成: {pre_backup}')
+    except Exception as e:  # defensive: 备份失败必须在这里统一判生死
+        if allow_missing_backup:
+            print(f'警告: 恢复前备份失败，但 --allow-missing-pre-restore-backup 已指定，继续恢复: {e}')
+        else:
+            print(f'错误: 恢复前备份失败，已中止恢复以避免数据丢失: {e}')
+            sys.exit(1)
+
+    print('终止现有数据库连接...')
+    terminate_connections()
+
+    print('重建数据库...')
+    try:
+        drop_and_recreate_db()
+    except subprocess.CalledProcessError as e:
+        print(f'数据库重建失败: {e.stderr.decode(errors="replace") if e.stderr else str(e)}')
+        sys.exit(1)
+
+    suffix = backup_path.suffix.lower()
+    if suffix == '.sql':
+        result = restore_from_sql(backup_file)
+    elif suffix == '.gz':
+        result = restore_from_sql_gz(backup_file)
+    elif suffix == '.zip':
+        result = restore_from_zip(backup_file)
+    else:
+        print(f'错误: 不支持的文件类型: {suffix}')
+        sys.exit(1)
+
+    stderr_text = result.stderr.decode(errors='replace') if result.stderr else ''
     error_lines = [l for l in stderr_text.split('\n') if 'ERROR' in l and 'already exists' not in l.lower()]
-    if error_lines:
-        print(f'恢复完成，但有 {len(error_lines)} 个错误:')
+    if result.returncode != 0 or error_lines:
+        print(f'恢复失败（psql 退出码={result.returncode}，错误行数={len(error_lines)}），数据库可能不完整:')
         for line in error_lines[:10]:
             print(f'  {line.strip()}')
-    else:
-        print('恢复完成（有非关键警告）')
-else:
+        if not error_lines and stderr_text.strip():
+            print(f'  {stderr_text.strip()[:500]}')
+        sys.exit(1)
+
     print('数据库恢复成功!')
+
+
+if __name__ == '__main__':
+    main()

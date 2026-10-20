@@ -1,9 +1,13 @@
 """
 ARQ 任务生命周期回调
 
-- on_job_failed: 任务重试耗尽后，将失败信息写入死信队列并触发告警+指标
-- on_job_started: 记录任务开始事件
-- on_job_end: 记录任务耗时指标
+ARQ 0.28 只认 ``on_job_start`` / ``on_job_end`` 两个钩子，没有 ``on_job_failed``。
+任务成败由 ``arq_app._tracked_job`` 在任务边界写进 ``ctx['_job_outcome']``，
+本模块的 ``on_job_end`` 据此分流：
+
+- success：回写调度终态 success + 记录耗时指标
+- failed：写死信队列 + 失败指标 + 回写调度终态 failed + 严重告警
+- retrying：本次只是重放前的一跳，保持 running，不落终态
 """
 import json
 import time
@@ -30,9 +34,11 @@ async def _mark_schedule_outcome(ctx, status: str) -> None:
         logger.warning('调度状态回写异常: %s', e)
 
 
-async def on_job_started(ctx):
+async def on_job_start(ctx):
     """任务开始回调"""
-    func_name = ctx.get('function', '').__name__ if callable(ctx.get('function')) else str(ctx.get('function', ''))
+    func_name = ctx.get('_job_function') or ctx.get('function', '')
+    if callable(func_name):
+        func_name = func_name.__name__
     job_id = ctx.get('job_id', '')
     job_try = ctx.get('job_try', 1)
     logger.debug('ARQ任务开始: func=%s id=%s try=%d', func_name, job_id, job_try)
@@ -40,17 +46,28 @@ async def on_job_started(ctx):
 
 
 async def on_job_end(ctx):
-    """任务结束回调 - 回写调度终态 + 记录耗时指标"""
-    # 调度任务的 last_status 只有这里能落成终态：轮询器入队时写 'running'，
-    # 不写回就永远是 'running'，界面上的"上次执行结果"恒为"执行中"。
-    await _mark_schedule_outcome(ctx, STATUS_SUCCESS)
+    """任务结束回调：按任务边界记录的 outcome 分流（成败都要经过这里）。"""
+    outcome = ctx.get('_job_outcome')
+    if outcome == 'failed':
+        await _handle_job_failure(ctx, ctx.get('_job_exception'))
+    elif outcome == 'retrying':
+        # ARQ 的 Retry/取消重放会再次调用本回调；此刻落终态会把「还在跑」误报成败。
+        logger.debug('ARQ任务重放中: id=%s try=%s', ctx.get('job_id', ''), ctx.get('job_try', 1))
+    else:
+        # 未包 _tracked_job 的调用方保持旧语义；WorkerSettings 注册的任务全部已包。
+        await _mark_schedule_outcome(ctx, STATUS_SUCCESS)
+    _record_runtime(ctx)
 
+
+def _record_runtime(ctx) -> None:
     start = ctx.get('_start_time')
     if start is None:
         return
     runtime = time.time() - start
-    func_name = ctx.get('function', '')
-    func_name = func_name.__name__ if callable(func_name) else str(func_name)
+    func_name = ctx.get('_job_function') or ctx.get('function', '')
+    if callable(func_name):
+        func_name = func_name.__name__
+    func_name = str(func_name)
 
     try:
         from fastapi_app.core.metrics import TASK_RUNTIME_SECONDS
@@ -62,24 +79,26 @@ async def on_job_end(ctx):
         logger.info('慢任务完成: func=%s id=%s runtime=%.1fs', func_name, ctx.get('job_id', ''), runtime)
 
 
-async def on_job_failed(ctx, exc):
-    """任务失败回调 - 写入死信队列+告警+指标
+async def _handle_job_failure(ctx, exc) -> None:
+    """任务失败处理 - 写入死信队列+告警+指标（由 on_job_end 在 failed 分支调用）。"""
+    if exc is None:
+        exc = RuntimeError('任务失败（未捕获异常信息）')
 
-    ARQ在max_tries耗尽后调用此回调。
-    """
-    func = ctx.get('function', '')
-    func_name = func.__name__ if callable(func) else str(func)
+    func_name = ctx.get('_job_function') or ctx.get('function', '')
+    if callable(func_name):
+        func_name = func_name.__name__
+    func_name = str(func_name)
     job_id = ctx.get('job_id', '')
     job_try = ctx.get('job_try', 1)
-    max_tries = ctx.get('max_tries', 3)
+    max_tries = ctx.get('_max_tries', ctx.get('max_tries', 3))
 
     logger.error(
         'ARQ任务失败[DLQ]: func=%s id=%s try=%d/%d exc=%s',
         func_name, job_id, job_try, max_tries, exc,
     )
 
-    args = ctx.get('args', ())
-    kwargs = ctx.get('kwargs', {})
+    args = ctx.get('_job_args', ())
+    kwargs = ctx.get('_job_kwargs', {})
 
     dead_letter_entry = {
         'task_id': job_id,
@@ -96,7 +115,6 @@ async def on_job_failed(ctx, exc):
 
     await _push_to_dead_letter(dead_letter_entry)
     _emit_failure_metric(func_name)
-    # 调度任务重试耗尽 ⇒ 终态 failed
     await _mark_schedule_outcome(ctx, STATUS_FAILED)
     logger.critical(
         'ALERT: ARQ任务失败需人工介入 func=%s id=%s exc=%s',

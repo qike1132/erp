@@ -14,6 +14,7 @@ from sqlalchemy.orm import noload, selectinload
 
 from fastapi_app.core.exceptions import ConflictError, NotFoundError
 from fastapi_app.services.numbering import generate_customer_sampling_number
+from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import (
     CustomerSamplingFabricVersion,
     CustomerSamplingPart,
@@ -422,15 +423,15 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
         'status': project.status,
         'remark': project.remark or '',
         'created_by_name': project.creator.username if project.creator else None,
-        'created_at': project.created_at.strftime('%Y-%m-%d %H:%M:%S') if project.created_at else '',
-        'updated_at': project.updated_at.strftime('%Y-%m-%d %H:%M:%S') if project.updated_at else '',
+        'created_at': format_local_time(project.created_at),
+        'updated_at': format_local_time(project.updated_at),
         'version': project.version,
         'parts': [p.to_dict() for p in parts_sorted],
         'versions': [
             {
                 'id': vid,
                 'version_no': vno,
-                'created_at': created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else '',
+                'created_at': format_local_time(created_at),
                 'reason': reason or '',
             }
             for vid, vno, created_at, reason in version_rows

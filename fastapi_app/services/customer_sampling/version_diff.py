@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.exceptions import NotFoundError
+from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import (
     CustomerSamplingChangeLog,
     CustomerSamplingFabricVersion,
@@ -50,7 +51,7 @@ async def list_versions(db: AsyncSession, project_id: int) -> dict:
             {
                 'id': vid,
                 'version_no': vno,
-                'created_at': created_at.strftime('%Y-%m-%d %H:%M:%S') if created_at else '',
+                'created_at': format_local_time(created_at),
                 'reason': reason or '',
             }
             for vid, vno, created_at, reason in rows
@@ -178,7 +179,7 @@ async def get_version_detail(db: AsyncSession, version_id: int) -> dict:
         'id': version.id,
         'project_id': version.project_id,
         'version_no': version.version_no,
-        'created_at': version.created_at.strftime('%Y-%m-%d %H:%M:%S') if version.created_at else '',
+        'created_at': format_local_time(version.created_at),
         'is_baseline': is_baseline,
         'degraded': degraded,
         'full_snapshot': full_snapshot,

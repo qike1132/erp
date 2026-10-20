@@ -4,7 +4,7 @@
 从 order_crud.py 按职责拆出，行为与原实现完全一致。
 """
 import logging
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 from sqlalchemy import and_, desc, func, literal, or_, select, union_all, update
@@ -17,6 +17,7 @@ from fastapi_app.services import escape_like
 from fastapi_app.services.notification_service import BEILE_UNCONFIRMED_TYPE
 from fastapi_app.services.purchase_order_sku import po_sku_available
 from fastapi_app.services.purchase_utils import parse_source_order_ids
+from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import (
     Notification,
     Order,
@@ -34,24 +35,12 @@ logger = logging.getLogger(__name__)
 # 未在采购中心完成下单时拒绝确认的统一文案（与前端 NOT_ORDERED_DETAIL 逐字一致，设计 §11.4）
 BEILE_NOT_ORDERED_DETAIL = '该订单未在采购中心完成下单，请先在采购中心完成下单后再确认'
 
-# beile-list 时间展示时区：用户全部在国内（工厂内网，中国无夏令时，固定 UTC+8）。
+# beile-list 时间展示统一走 shared.time_format（UTC→北京时间）。
 # order_date / stockin_date 列为 timestamptz（DB 存储 UTC）、confirmed_at 列为 naive
-# TIMESTAMP 且写入的是 naive UTC（confirm_* 写入处 now(UTC).replace(tzinfo=None)），
-# 裸 strftime 会把 UTC 时刻当地面时间输出 → 页面「下单时间」比实际早 8 小时
-# （实证：订单号 PO-20260918-0001 显示 2026-09-17 22:20）。
-_BEILE_TZ = timezone(timedelta(hours=8))
-
-
+# TIMESTAMP 且写入的是 naive UTC（confirm_* 写入处 now(UTC).replace(tzinfo=None)）。
 def _fmt_beile_time(dt: datetime | None) -> str:
-    """UTC（aware timestamptz 或 naive UTC）→ 北京时间 'YYYY-MM-DD HH:MM'。
-
-    页面行 / 导出 XLS / 打印预览共用该输出（前端不做二次时区换算）。
-    """
-    if not dt:
-        return ''
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(_BEILE_TZ).strftime('%Y-%m-%d %H:%M')
+    """UTC（aware timestamptz 或 naive UTC）→ 北京时间 'YYYY-MM-DD HH:MM'。"""
+    return format_local_time(dt, '%Y-%m-%d %H:%M') or ''
 
 
 def _build_beile_unified_query(confirmed: bool | None, customer, factory, product_kw=None):

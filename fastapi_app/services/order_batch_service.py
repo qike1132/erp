@@ -22,6 +22,7 @@ from sqlalchemy.orm import joinedload
 from fastapi_app.core.exception_handler import safe_publish_event as _safe_publish_event_call
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.serializers.order_serializer import OrderSerializer
+from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockIn, StockOut, User
 from fastapi_app.shared_models.order import ORDER_STATUS_BATCH_COMPLETED, ORDER_STATUS_SHIPPED
 
@@ -225,7 +226,7 @@ async def _serialize_batch_stockins(db: AsyncSession, page_stockin_ids: list[int
                 'id': s.id,
                 'order_no': s.stockin_no,
                 'customer': s.customer,
-                'order_date': s.stockin_date.strftime('%Y-%m-%d %H:%M') if s.stockin_date else '',
+                'order_date': format_local_time(s.stockin_date, '%Y-%m-%d %H:%M'),
                 'product_id': s.product_id,
                 'product_name': s.product.name if s.product else None,
                 'product_barcode': s.product.barcode if s.product else None,
@@ -235,7 +236,7 @@ async def _serialize_batch_stockins(db: AsyncSession, page_stockin_ids: list[int
                 'status': '批次已完成' if s.batch_completed_at else None,
                 'computed_status': None,
                 'batch_no': s.batch_no,
-                'batch_completed_at': s.batch_completed_at.strftime('%Y-%m-%d %H:%M') if s.batch_completed_at else None,
+                'batch_completed_at': format_local_time(s.batch_completed_at, '%Y-%m-%d %H:%M', none_value=None),
                 'is_locked': None,
                 'record_type': 'stockin',
             }

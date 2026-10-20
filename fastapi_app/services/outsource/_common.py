@@ -2,28 +2,19 @@
 
 从 outsource_service.py 按职责拆出,行为与原实现完全一致。
 """
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime
 
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import OrderOutsourceProcess, OutsourceProcessType, Product
-
-# 展示时区：用户全部在国内（工厂内网，固定 UTC+8），与 beile._fmt_beile_time 同口径。
-_BEILE_TZ = timezone(timedelta(hours=8))
 
 
 def _fmt_dt(dt: datetime | None) -> str | None:
-    """timestamptz 列（asyncpg 返回 aware UTC）或 naive UTC → 北京时间 'YYYY-MM-DD HH:MM'。
-
-    外发序列化共用该输出（页面行 / 详情 / 台账），前端不做二次时区换算。
-    """
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.astimezone(_BEILE_TZ).strftime('%Y-%m-%d %H:%M')
+    """timestamptz 列（asyncpg 返回 aware UTC）或 naive UTC → 北京时间 'YYYY-MM-DD HH:MM'。"""
+    return format_local_time(dt, '%Y-%m-%d %H:%M', none_value=None)
 
 def _serialize_process_type(pt: OutsourceProcessType, product: Product | None = None) -> dict:
     product = product or pt.product

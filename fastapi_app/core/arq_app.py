@@ -11,13 +11,14 @@ import asyncio
 import contextlib
 import logging
 import os
+from functools import wraps
 from typing import ClassVar
 
-from arq import create_pool, cron
+from arq import Retry, create_pool, cron
 from arq.connections import RedisSettings
 from arq.constants import default_queue_name, health_check_key_suffix
 
-from fastapi_app.core.arq_callbacks import on_job_end, on_job_failed, on_job_started
+from fastapi_app.core.arq_callbacks import on_job_end, on_job_start
 from fastapi_app.core.config import settings
 from fastapi_app.services.inventory_reconcile import is_enabled
 
@@ -315,8 +316,45 @@ cron_schedules = [
 if is_enabled():
     cron_schedules.append(inventory_reconcile_cron_entry())
 
+# ARQ 0.28 只有 on_job_start/on_job_end，没有 on_job_failed；任务边界负责记录成败。
+MAX_TRIES = 3
+
+
+def _tracked_job(func, max_tries: int = MAX_TRIES):
+    """把任务成败写进 ctx，供 on_job_end 分流（ARQ 0.28 无失败钩子）。"""
+    @wraps(func)
+    async def tracked(ctx, *args, **kwargs):
+        ctx['_job_function'] = func.__name__
+        ctx['_max_tries'] = max_tries
+        ctx['_job_args'] = args
+        ctx['_job_kwargs'] = kwargs
+        try:
+            result = await func(ctx, *args, **kwargs)
+        except Retry as exc:
+            # Retry 是「稍后重放」的控制流；只有最后一跳才是终态失败。
+            if int(ctx.get('job_try', 1)) >= max_tries:
+                ctx['_job_outcome'] = 'failed'
+                ctx['_job_exception'] = exc
+            else:
+                ctx['_job_outcome'] = 'retrying'
+            raise
+        except asyncio.CancelledError:
+            # 取消可能是 worker 停机的重放路径，交给 ARQ 的 retry/abort 语义收尾。
+            ctx['_job_outcome'] = 'retrying'
+            raise
+        except Exception as exc:  # defensive: 任务体任意异常都要记录成败后原样抛出，交由 ARQ 收尾
+            ctx['_job_outcome'] = 'failed'
+            ctx['_job_exception'] = exc
+            raise
+        else:
+            ctx['_job_outcome'] = 'success'
+            return result
+
+    return tracked
+
+
 cron_jobs = [
-    cron(s['func'], max_tries=3, timeout=s.get('timeout'), **s['cron'])  # type: ignore[arg-type]
+    cron(_tracked_job(s['func'], MAX_TRIES), max_tries=MAX_TRIES, timeout=s.get('timeout'), **s['cron'])  # type: ignore[arg-type]
     for s in cron_schedules
 ]
 
@@ -362,24 +400,27 @@ class WorkerSettings:
             logger.error('编号水位启动对账失败（不影响启动）: %s', e, exc_info=True)
 
     functions: ClassVar[list] = [
-        batch_import_orders_task,
-        batch_import_stockins_task,
-        scheduler_poller,
-        auto_daily_backup_task,
+        _tracked_job(f, MAX_TRIES)
+        for f in (
+            batch_import_orders_task,
+            batch_import_stockins_task,
+            scheduler_poller,
+            auto_daily_backup_task,
             manual_full_backup_task,
             backup_integrity_check_task,
-        backup_cleanup_task,
-        backup_health_check_task,
-        apply_backup_policy_task,
-        disaster_recovery_test_task,
-        backup_metrics_report_task,
-        export_report_task,
-        sync_shipment_records_task,
-        batch_import_plans_task,
-        refresh_dashboard_mv_task,
-        ensure_readonly_grants_task,
-        numbering_audit_task,
-        inventory_reconcile_task,
+            backup_cleanup_task,
+            backup_health_check_task,
+            apply_backup_policy_task,
+            disaster_recovery_test_task,
+            backup_metrics_report_task,
+            export_report_task,
+            sync_shipment_records_task,
+            batch_import_plans_task,
+            refresh_dashboard_mv_task,
+            ensure_readonly_grants_task,
+            numbering_audit_task,
+            inventory_reconcile_task,
+        )
     ]
     cron_jobs = cron_jobs
     redis_settings = redis_settings
@@ -388,10 +429,9 @@ class WorkerSettings:
     health_check_interval = 60
     max_jobs = 10
     job_timeout = 1800
-    max_tries = 3
-    on_job_started = on_job_started
+    max_tries = MAX_TRIES
+    on_job_start = on_job_start
     on_job_end = on_job_end
-    on_job_failed = on_job_failed
 
 
 # ---------------------------------------------------------------------------

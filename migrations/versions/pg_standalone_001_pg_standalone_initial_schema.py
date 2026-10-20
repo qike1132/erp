@@ -1201,12 +1201,6 @@ _UPGRADE_STATEMENTS: tuple[str, ...] = (
     """CREATE INDEX idx_material_reg_item_registration ON material_registration_item (registration_id);""",
 )
 
-_DOWNGRADE_STATEMENTS: tuple[str, ...] = (
-    """DROP SCHEMA public CASCADE;""",
-    """CREATE SCHEMA public;""",
-)
-
-
 def upgrade():
     # 逐条下发完整 DDL（此前每条语句被拆成多行导致语法错误）
     for _stmt in _UPGRADE_STATEMENTS:
@@ -1214,6 +1208,9 @@ def upgrade():
 
 
 def downgrade():
-    # Drop all tables
-    for _stmt in _DOWNGRADE_STATEMENTS:
-        op.execute(_stmt)
+    # 初始迁移创建整库 schema，没有安全的自动逆操作：DROP SCHEMA public CASCADE
+    # 会连同全部业务数据一起清空（审计 P1-17）。恢复走备份还原或重建空库后 upgrade。
+    raise NotImplementedError(
+        'pg_standalone_001 是初始迁移，不支持自动 downgrade：'
+        'DROP SCHEMA public CASCADE 会清空整库。请用备份恢复，或重建空库后执行 upgrade。'
+    )

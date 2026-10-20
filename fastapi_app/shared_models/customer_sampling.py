@@ -29,6 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -169,11 +170,11 @@ class CustomerSamplingProject(Base):
             'remark': self.remark or '',
             'created_by': self.created_by,
             'created_by_name': self.creator.username if self.creator else None,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else '',
+            'created_at': format_local_time(self.created_at),
+            'updated_at': format_local_time(self.updated_at),
             'version': self.version,
             'status': self.status,
-            'completed_at': self.completed_at.strftime('%Y-%m-%d %H:%M:%S') if self.completed_at else None,
+            'completed_at': format_local_time(self.completed_at, none_value=None),
         }
         if include_parts:
             data['parts'] = [p.to_dict() for p in (self.parts or [])]
@@ -253,8 +254,8 @@ class CustomerSamplingRole(Base):
             'sort_order': self.sort_order,
             'is_default': self.is_default,
             'current_version': self.current_version,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else '',
+            'created_at': format_local_time(self.created_at),
+            'updated_at': format_local_time(self.updated_at),
             'version': self.version,
         }
 
@@ -345,8 +346,8 @@ class CustomerSamplingPart(Base):
             'unit_price': float(self.unit_price) if self.unit_price is not None else None,
             'delivery_days': self.delivery_days,
             'remark': self.remark or '',
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else '',
+            'created_at': format_local_time(self.created_at),
+            'updated_at': format_local_time(self.updated_at),
             'version': self.version,
         }
 
@@ -435,7 +436,7 @@ class CustomerSamplingFabricVersion(Base):
             'reason': self.reason or '',
             'created_by': self.created_by,
             'created_by_name': self.creator.username if self.creator else None,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
+            'created_at': format_local_time(self.created_at),
         }
 
 
@@ -493,5 +494,5 @@ class CustomerSamplingChangeLog(Base):
             'field_diffs': self.field_diffs or [],
             'operator_id': self.operator_id,
             'operator_name': self.operator_name or (self.operator.username if self.operator else ''),
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
+            'created_at': format_local_time(self.created_at),
         }

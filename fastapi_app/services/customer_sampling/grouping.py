@@ -12,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload, selectinload
 
+from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import (
     CustomerSamplingProject,
 )
@@ -177,7 +178,7 @@ async def get_grouped_list(
             'pattern_maker_id': meta['pattern_maker_id'],
             'pattern_maker_name': pattern_maker_name or ('未分类' if meta['pattern_maker_id'] is None else '未命名版师'),
             'project_count': len(proj_list),
-            'latest_update_time': latest.strftime('%Y-%m-%d %H:%M:%S') if latest else '',
+            'latest_update_time': format_local_time(latest),
             'projects': [summary_map[pid] for pid in meta['project_ids'] if pid in summary_map],
         })
 
@@ -209,9 +210,9 @@ def _project_to_summary(project: CustomerSamplingProject, image_url_map: dict[in
         'product_image_blur_url': image_info.get('blur_url') if image_info else None,
         'current_version': project.current_version,
         'status': project.status,
-        'completed_at': project.completed_at.strftime('%Y-%m-%d %H:%M:%S') if project.completed_at else None,
+        'completed_at': format_local_time(project.completed_at, none_value=None),
         # 列表查询已 noload(parts)（访问会触发 async lazy load 报错），恒为 0；
         # 详情页 parts 数量由 get_project_detail 单独统计
         'parts_count': 0,
-        'updated_at': project.updated_at.strftime('%Y-%m-%d %H:%M:%S') if project.updated_at else '',
+        'updated_at': format_local_time(project.updated_at),
     }

@@ -85,12 +85,17 @@ def _parse_deduct_flag(deduct_flag: Any, qty: int) -> tuple[bool, int]:
     if not deduct_flag:
         return False, 0
     deduct_str = str(deduct_flag).strip()
-    if deduct_str.isdigit():
-        deduct_qty = int(deduct_str)
-        return deduct_qty > 0, deduct_qty
     if deduct_str.lower() in ('是', 'yes', 'y'):
         return True, qty
-    return False, 0
+    # Polars/openpyxl 的数字列会把整数 3 读成 3.0；str(3.0) 不是纯数字，旧实现静默丢弃抵扣标志。
+    try:
+        numeric = float(deduct_str)
+    except ValueError:
+        return False, 0
+    if not numeric.is_integer():
+        return False, 0
+    deduct_qty = int(numeric)
+    return (True, deduct_qty) if deduct_qty > 0 else (False, 0)
 
 async def _generic_import_staging_from_excel(
     db: AsyncSession,

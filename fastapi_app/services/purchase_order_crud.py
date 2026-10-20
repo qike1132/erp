@@ -15,6 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
 from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
@@ -258,20 +259,33 @@ async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
     if not order:
         raise ValueError('采购订单不存在')
 
-    # 批量删除明细（单条 DELETE ... WHERE 语句），替代逐条 db.delete 的 N+1；
-    # order.items 关系为 lazy='raise'，不做集合赋空，后续 delete(order)+flush 不再访问该集合
-    await db.execute(
-        delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
-    )
-    # 逐 SKU 数量快照（方案 C）同样以单条 DELETE 显式清理：
-    # order.skus 关系为 lazy='raise'，显式删除可避免依赖 ORM 级联时对集合的惰性加载，
-    # 且在未开启外键约束的 SQLite（测试）下也能保证无残留孤儿行。
-    await db.execute(
-        delete(PurchaseOrderSku).where(PurchaseOrderSku.po_id == order_id)
-    )
+    # 来料登记 FK 为 NO ACTION 且订单号列 NOT NULL：有登记时删除必抛 IntegrityError（500）。
+    # 必须在删明细之前拦截，否则明细删除先被 MaterialRegistrationItem 的 FK 挡住。
+    has_registration = (await db.execute(
+        select(MaterialRegistration.id)
+        .where(MaterialRegistration.purchase_order_id == order_id)
+        .limit(1)
+    )).scalar_one_or_none()
+    if has_registration is not None:
+        raise ConflictError(f'采购单{order.order_no}存在来料登记，无法删除')
 
-    await db.delete(order)
-    await db.flush()
+    try:
+        # 批量删除明细（单条 DELETE ... WHERE 语句），替代逐条 db.delete 的 N+1；
+        # order.items 关系为 lazy='raise'，不做集合赋空，后续 delete(order)+flush 不再访问该集合
+        await db.execute(
+            delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
+        )
+        # 逐 SKU 数量快照（方案 C）同样以单条 DELETE 显式清理：
+        # order.skus 关系为 lazy='raise'，显式删除可避免依赖 ORM 级联时对集合的惰性加载，
+        # 且在未开启外键约束的 SQLite（测试）下也能保证无残留孤儿行。
+        await db.execute(
+            delete(PurchaseOrderSku).where(PurchaseOrderSku.po_id == order_id)
+        )
+
+        await db.delete(order)
+        await db.flush()
+    except IntegrityError as e:
+        raise ConflictError(f'采购单{order.order_no}被来料登记等记录引用，无法删除') from e
     return {'id': order_id, 'order_no': order.order_no}
 
 

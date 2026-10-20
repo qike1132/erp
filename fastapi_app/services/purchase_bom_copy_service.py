@@ -8,9 +8,11 @@ from decimal import Decimal
 from typing import Any, TypedDict
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.bom_service import (  # noqa: F401
     copy_bom as copy_bom_to_product,
@@ -19,6 +21,7 @@ from fastapi_app.services.bom_service import (
     has_bom,
 )
 from fastapi_app.shared_models import (
+    MaterialRegistration,
     Product,
     PurchaseOrder,
     PurchaseOrderItem,
@@ -44,23 +47,36 @@ async def batch_delete_purchase_orders(db: AsyncSession, order_ids: list, userna
     if not orders_to_delete:
         raise ValueError('未找到要删除的订单')
 
+    # 来料登记 FK 为 NO ACTION：有登记的单会让整批 flush 抛 IntegrityError（500）。
+    # 批删语义取「整批拒绝 + 列出具体单号」，避免用户以为部分成功。
+    blocked_rows = (await db.execute(
+        select(MaterialRegistration.purchase_order_id, MaterialRegistration.purchase_order_no)
+        .where(MaterialRegistration.purchase_order_id.in_([o.id for o in orders_to_delete]))
+    )).all()
+    if blocked_rows:
+        blocked = sorted({str(row.purchase_order_no or row.purchase_order_id) for row in blocked_rows})
+        raise ConflictError(f'以下采购单存在来料登记，无法删除: {", ".join(blocked)}')
+
     deleted_info = []
     deleted_order_nos: list[str] = []
-    for order in orders_to_delete:
-        count_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
-            select(func.count(PurchaseOrderItem.id)).where(PurchaseOrderItem.order_id == order.id)
-        )
-        item_count = count_result.scalar()
-        deleted_info.append({
-            'order_no': order.order_no,
-            'supplier_name': order.supplier_name or '',
-            'customer_name': order.customer_name or '',
-            'item_count': item_count,
-        })
-        deleted_order_nos.append(order.order_no)
-        await db.delete(order)
+    try:
+        for order in orders_to_delete:
+            count_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
+                select(func.count(PurchaseOrderItem.id)).where(PurchaseOrderItem.order_id == order.id)
+            )
+            item_count = count_result.scalar()
+            deleted_info.append({
+                'order_no': order.order_no,
+                'supplier_name': order.supplier_name or '',
+                'customer_name': order.customer_name or '',
+                'item_count': item_count,
+            })
+            deleted_order_nos.append(order.order_no)
+            await db.delete(order)
 
-    await db.flush()
+        await db.flush()
+    except IntegrityError as e:
+        raise ConflictError('部分采购单被来料登记等记录引用，无法删除，请刷新后重试') from e
 
     logger.warning(
         f'批量删除采购订单 | 操作人: {username} | '
