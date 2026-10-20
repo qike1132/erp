@@ -76,7 +76,9 @@ _QUOTED_RHS_REQUIRED_SUFFIXES = ('.py', '.ts', '.js', '.vue')
 # 继续保留前缀豁免等于"今天零收益、未来留洞"——例如 backups/ 里某份 db_dump.sql
 # 恰好含真口令时会完全不可见。（上线前审计的同一发现：backups/、static/uploads/ 是风险区。）
 _CONTENT_EXEMPT_PREFIXES = (
-    'tests/', 'fastapi_app/tests/', 'docs/',
+    # F3-4：docs/ 不再整体豁免——只豁免 .md（下方后缀）；docs 下的 .py/.sql/.json
+    # 等内容仍要扫描，避免历史泄漏目录成为盲区。
+    'tests/', 'fastapi_app/tests/',
 )
 _CONTENT_EXEMPT_SUFFIXES = ('.md',)
 
