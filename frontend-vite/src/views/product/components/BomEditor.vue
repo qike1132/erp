@@ -2,14 +2,15 @@
   <Teleport to="body">
     <!-- 遮罩层刻意不绑定点击关闭：BOM 配置是长表单，误触弹窗外空白会导致未保存的配置全部丢失。
          关闭入口仅限：① 弹窗右上角关闭按钮 ② 底部「取消」按钮 ③ 保存成功后的自动关闭。
-         请勿为「点遮罩即关」重新加回 @click.self，如需放弃编辑请走显式按钮。 -->
+         ①② 都走 requestCloseBom()：有未保存修改时先弹「放弃修改」确认，确认放弃才关闭
+         （2026-10-17 审计 F5-5）。请勿为「点遮罩即关」重新加回 @click.self，如需放弃编辑请走显式按钮。 -->
     <div v-if="bomDialogVisible" class="pd-overlay">
       <div class="bom-modal-content bom-modal-dialog">
         <div class="bom-modal-header">
           <div class="bom-modal-header-left">
             <h5 class="bom-modal-title"><FontAwesomeIcon icon="cogs" aria-hidden="true" /><span>BOM表配置 - {{ bomProductName }}</span></h5>
           </div>
-          <button class="bom-modal-close" aria-label="关闭" @click="bomDialogVisible = false"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
+          <button class="bom-modal-close" aria-label="关闭" @click="requestCloseBom()"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
         </div>
         <div class="bom-modal-body">
           <div class="bom-tabs-container">
@@ -199,7 +200,7 @@
           </div>
         </div>
         <div class="bom-modal-footer">
-          <button class="bom-btn-cancel" @click="bomDialogVisible = false">取消</button>
+          <button class="bom-btn-cancel" @click="requestCloseBom()">取消</button>
           <button class="bom-btn-save" @click="saveBom"><FontAwesomeIcon icon="save" aria-hidden="true" />保存BOM</button>
         </div>
       </div>
@@ -246,6 +247,7 @@ const {
   bomDialogVisible, bomProductName, currentBomCategory,
   bomTabs, currentBomItems, currentBomTabLabel, currentScopeLabel, currentScopeCount,
   switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
+  requestCloseBom, bomDirty,
   bomSupplierOptions,
   bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems, selectRole, addRole, renameRole, renameDefaultScope, removeRole,
   quickCopyKeyword, quickCopyLoading,
@@ -406,7 +408,7 @@ watch(addingRole, (v) => {
   if (!v) newRoleName.value = ''
 })
 
-defineExpose({ open: openBomModal })
+defineExpose({ open: openBomModal, bomDirty })
 </script>
 
 <style scoped>

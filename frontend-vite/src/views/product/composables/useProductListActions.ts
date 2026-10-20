@@ -50,6 +50,14 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
   const bomLoadFailed = ref(false)
   // 2026-10-17 审计 P2-51：保存防重复提交（双击会并发发起两次全量替换）
   const bomSaving = ref(false)
+  // ===== 未保存修改检测（2026-10-17 审计 F5-5）=====
+  // BOM 配置是长表单：改完物料/角色后误点「取消」或右上角 ✕，整份修改无声消失。
+  // 原实现两个关闭入口都直接 `bomDialogVisible = false`，全程没有 dirty 检查。
+  // 判定用「编辑基线签名」而非逐字段打标：基线 = 最近一次成功加载（或保存成功）时
+  // 可编辑状态的快照签名；当前签名与之不等即视为有未保存修改。
+  // 签名只覆盖**会被保存**的内容（角色、默认 BOM 名、各作用域物料），
+  // 不含 selectedRole / currentBomCategory 等纯视图态——切页签/切角色不算改动。
+  const bomBaselineSignature = ref<string | null>(null)
   /** 复制（快速复制/复制对话框）是否在途；在常量声明后接线，避免块级引用顺序问题 */
   let copyInFlight: () => boolean = () => false
 
@@ -118,6 +126,58 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     currentBomCategory.value = category
   }
 
+  // ===== 未保存修改检测（审计 F5-5）=====
+  /** 当前可编辑状态的签名：只含「保存时会被写库」的内容。 */
+  function bomStateSignature(): string {
+    const scopes = Object.keys(bomByScope).sort().map(key => {
+      const scope = bomByScope[key]!
+      const norm = (items: BomItem[]) => items.map(item => [
+        item.id ?? null,
+        item.name,
+        item.specification,
+        item.unit,
+        item.supplier_id ?? null,
+        item.supplier_name,
+        item.usage,
+        item.remark,
+        item.role_id ?? null,
+        item.category ?? '',
+      ])
+      return [key, norm(scope.fabric), norm(scope.filling), norm(scope.accessory)]
+    })
+    return JSON.stringify({
+      roles: bomRoles.value.map(r => [r.id ?? null, r.role_key ?? null, r.name]),
+      defaultName: defaultScopeName.value,
+      scopes,
+    })
+  }
+
+  /**
+   * 是否有未保存的 BOM 修改。
+   * 无基线（尚未成功加载）时恒为 false —— 此时弹窗里没有可保存的内容。
+   */
+  const bomDirty = computed(() => {
+    const baseline = bomBaselineSignature.value
+    if (baseline === null) return false
+    return baseline !== bomStateSignature()
+  })
+
+  /**
+   * 关闭 BOM 弹窗的唯一入口（审计 F5-5）。
+   * 有未保存修改时先确认「放弃修改」，用户选择保留则**不关闭**。
+   */
+  async function requestCloseBom() {
+    if (bomDirty.value) {
+      const ok = await confirmDialog.confirm(
+        '有未保存的 BOM 修改，确定放弃吗？',
+        '关闭后本次修改不会保存',
+        'warning',
+      )
+      if (!ok) return
+    }
+    bomDialogVisible.value = false
+  }
+
   async function openBomModal(row: ProductLike) {
     currentProductId.value = row.id
     bomProductName.value = row.name
@@ -177,6 +237,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       // 不再默认落 bomRoles[0]，避免用户误在某个角色作用域下编辑。
       selectedRole.value = null
       bomLoadFailed.value = false // 数据完整落地，解除保存禁令
+      // 审计 F5-5：加载成功即建立编辑基线——此刻屏幕内容 == 服务端内容，不算未保存修改
+      bomBaselineSignature.value = bomStateSignature()
     } catch (error) {
       if (seq !== bomLoadSeq) return
       console.error('加载BOM数据失败:', error)
@@ -400,6 +462,8 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       if (res.success) {
         showToast('保存成功', 'success')
         bomDialogVisible.value = false
+        // 审计 F5-5：保存成功即把当前状态认作新的编辑基线（此刻 == 服务端状态）
+        bomBaselineSignature.value = bomStateSignature()
         // BOM 一改，「待生成」列表的 has_bom 与后续采购单生成都变了；采购相关查询
         // 被 persistQueryClient 持久化到 sessionStorage，不失效就会命中旧快照。
         invalidateOrderDerivedQueries(queryClient)
@@ -471,6 +535,9 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     addBomItem,
     deleteBomItem,
     saveBom,
+    // 未保存修改检测（审计 F5-5）
+    bomDirty,
+    requestCloseBom,
     // 供应商下拉选项
     bomSupplierOptions,
     // 角色
