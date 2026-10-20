@@ -194,6 +194,14 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
     }
 
 
+def _non_negative_decimal(value, label: str) -> Decimal:
+    """BOM 用量/数量落库前校验非负（F6-1：负数会静默入库，下游按 >0 判无物料）。"""
+    result = Decimal(str(value if value is not None else 0))
+    if result < 0:
+        raise ValueError(f'{label}不能为负数')
+    return result
+
+
 async def _save_material_bom_items(
     db: AsyncSession,
     product_id: int,
@@ -254,7 +262,7 @@ async def _save_material_bom_items(
                 existing.role_id = role_id  # 归属可迁移（角色变更时挂到新角色）
                 existing.specification = item_data.get('specification', '')
                 existing.unit = item_data.get('unit', '')
-                existing.quantity = Decimal(str(item_data.get('quantity', 0)))
+                existing.quantity = _non_negative_decimal(item_data.get('quantity', 0), '物料数量')
                 existing.supplier_id = item_data.get('supplier_id')
                 existing.supplier_name = item_data.get('supplier_name', '')
                 existing.remark = item_data.get('remark', '')
@@ -273,7 +281,7 @@ async def _save_material_bom_items(
             **{name_field: item_data.get(name_field, '')},
             specification=item_data.get('specification', ''),
             unit=item_data.get('unit', ''),
-            quantity=Decimal(str(item_data.get('quantity', 0))),
+            quantity=_non_negative_decimal(item_data.get('quantity', 0), '物料数量'),
             supplier_id=item_data.get('supplier_id'),
             supplier_name=item_data.get('supplier_name', ''),
             remark=item_data.get('remark', ''),
@@ -390,7 +398,7 @@ async def _save_filling_items(db: AsyncSession, product_id: int, data: dict, tem
                 'supplier_name': filling_material.supplier_name,
             }
             filling_material.role_id = filling_role_id
-            filling_material.cotton_usage = Decimal(str(filling_data.get('cotton_usage', 0)))
+            filling_material.cotton_usage = _non_negative_decimal(filling_data.get('cotton_usage', 0), '充棉用量')
             filling_material.supplier_id = filling_data.get('supplier_id')
             filling_material.supplier_name = filling_data.get('supplier_name', '')
             filling_material.specification = filling_data.get('specification', '')
@@ -412,7 +420,7 @@ async def _save_filling_items(db: AsyncSession, product_id: int, data: dict, tem
             db.add(ProductMaterial(
                 product_id=product_id,
                 role_id=filling_role_id,
-                cotton_usage=Decimal(str(filling_data.get('cotton_usage', 0))),
+                cotton_usage=_non_negative_decimal(filling_data.get('cotton_usage', 0), '充棉用量'),
                 supplier_id=filling_data.get('supplier_id'),
                 supplier_name=filling_data.get('supplier_name', ''),
                 specification=filling_data.get('specification', ''),
