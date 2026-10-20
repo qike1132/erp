@@ -70,10 +70,13 @@ import MSpinner from '@/mobile/components/MSpinner.vue'
 const activeTab = ref('overview')
 const tabChips = [{ label: '概览', value: 'overview' }, { label: '记录', value: 'records' }]
 const keyword = ref('')
-const overview = ref<{ total?: number; pending?: number } | null>(null)
+// 概览/记录响应类型由 API 层签名推导，移动端不再自行声明后端 DTO（2026-10-17 审计 F1-3）
+type IncomingOverview = Awaited<ReturnType<typeof materialApi.overview>>
+type IncomingRecords = Awaited<ReturnType<typeof materialApi.registrations>>
+const overview = ref<IncomingOverview | null>(null)
 const loading = ref(false)
 const overviewError = ref('')
-const records = ref<Array<{ id: number; purchase_order_no?: string; product_name?: string; supplier_name?: string; product_quantity?: number; status?: string }>>([])
+const records = ref<IncomingRecords['registrations']>([])
 const recordsLoading = ref(false)
 const recordsError = ref('')
 // 2026-10-17 审计 P1-30：服务端分页（此前固定 page=1/per_page=50，第 51 条起不可达）

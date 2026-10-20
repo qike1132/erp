@@ -97,6 +97,16 @@ export interface OrderItem {
   order_date: string
   note: string
   status: string
+  /**
+   * 订单编号（后端 Order.order_no，列表接口 LIST_CONFIG 返回）。
+   * 2026-10-17 审计 F1-3：此前共享类型缺这三个字段，移动端只能自己抄一份内联 DTO，
+   * 于是「订单号/客户名」在移动端恒为空（10-14 order_no 事故的前端面）。
+   */
+  order_no?: string
+  /** 客户名称（后端 Order.customer） */
+  customer?: string
+  /** 产品对象（列表接口 include_product=True 时返回 { id, name, barcode, image }） */
+  product?: { id?: number; name?: string; barcode?: string; image?: string }
   is_locked?: boolean
   locked_by_name?: string
   /** 主订单下的 SKU 明细列表（多 SKU 聚合时 >1） */

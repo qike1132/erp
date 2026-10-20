@@ -61,7 +61,9 @@ const tabChips = [
 const keyword = ref('')
 // 字段与后端 OrderSerializer.LIST_CONFIG 对齐（F-FE-MOBILE-02：原先读
 // product_name/customer_name/date 等后端不返回的键，副标题恒为空）
-const orders = ref<Array<{ id: number; order_no?: string; customer?: string; order_date?: string; quantity?: number; status?: string; product?: { name?: string } }>>([])
+// 类型由 API 层签名推导，移动端不再自行声明后端 DTO（2026-10-17 审计 F1-3）
+type OrderListResponse = Awaited<ReturnType<typeof orderApi.list>>
+const orders = ref<OrderListResponse['data']>([])
 const loading = ref(false)
 const page = ref(1)
 const perPage = 20
