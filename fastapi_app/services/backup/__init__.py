@@ -195,8 +195,6 @@ __all__ = [  # noqa: RUF022
     "build_column_type_map",
     "cleanup_pre_restore_backups",
     "clear_stale_restore_lock",
-    "create_binary_log_backup",
-    "create_database_snapshot_backup",
     "create_full_backup",
     "create_full_backup_to_file",
     "create_pre_restore_backup",
@@ -212,10 +210,8 @@ __all__ = [  # noqa: RUF022
     "get_backup_status",
     "get_checksum_tables",
     "get_pg_version",
-    "get_postgres_lsn",
     # snapshot
     "get_postgres_snapshot",
-    "get_postgres_wal_info",
     "get_restore_lock_info",
     "is_restore_in_progress",
     "is_stale_restore_lock",
@@ -232,7 +228,6 @@ __all__ = [  # noqa: RUF022
     "restore_database_via_psql_from_bytes",
     # filestore
     "restore_filestore",
-    "restore_from_binary_log",
     "restore_from_zip",
     "restore_legacy_json",
     "restore_meilisearch",
@@ -243,7 +238,6 @@ __all__ = [  # noqa: RUF022
     "run_pg_dump",
     # json_backup
     "serialize_value",
-    "set_transaction_isolation_serializable",
     # crypto
     "sha256_bytes",
     "sha256_file",
