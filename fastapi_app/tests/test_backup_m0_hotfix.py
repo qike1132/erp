@@ -5,7 +5,7 @@ M0 热修回归测试（docs/ui-redesign/backup-center/TECHNICAL_PLAN.md v2 §4.
 1. legacy 导入守卫：AST 扫描 services/backup 包，禁止再出现对已删除模块
    fastapi_app.services.backup_service 的导入（fa156a3 收敛时遗漏过 7 处，
    导致 psql 还原/安全备份/组件恢复/还原后校验运行时崩溃）。
-2. 委托冒烟：strategies / adapters / orchestrator / format_strategy 中
+2. 委托冒烟：strategies / adapters / orchestrator 中
    修复后的惰性导入路径可正常解析并委托到包内子模块。
 3. 加密密码回退：_get_encryption_password 无密码时返回 None（禁止随机密码），
    _resolve_encryption 未配置密码时降级为不加密。
@@ -181,74 +181,6 @@ async def test_orchestrator_checksum_uses_crypto_sha256():
     bad = SimpleNamespace(checksums={'database/dump.sql.gz': 'deadbeef'})
     with pytest.raises(orchestrator_module.RestoreError):
         await DatabaseRestoreOrchestrator._validate_database_checksums(None, archive, bad, ctx)
-
-
-def test_format_strategy_refuses_to_generate_random_key(monkeypatch):
-    """_resolve_password 绝不生成随机密钥 —— 无密码即返回 None（不加密）。
-
-    历史：本测试原名为 test_format_strategy_generated_key_resolves_from_crypto，
-    锁定的是"回退到 crypto.generate_encryption_key() 随机密钥"的旧行为。
-    该行为已于 P0-1(2026-08-23) 有意移除：随机密钥只输出预览与摘要、无人能
-    找回完整值，等价于产出「永久不可还原」的加密备份（等于销毁数据）。
-
-    因此 format_strategy 不再定义 BACKUP_ENCRYPTION_ENABLED /
-    BACKUP_ENCRYPTION_FALLBACK_TO_GENERATED 开关，_resolve_password 收敛为：
-    仅接受显式 options.password 或环境变量，否则返回 None。
-
-    本测试锁死该安全契约，防止随机密钥回退被重新引入。
-    """
-    from fastapi_app.services.backup import crypto
-    from fastapi_app.services.backup import format_strategy as fs
-
-    # 即便环境变量为空、且 crypto 仍能生成密钥，也不得回退到随机密钥
-    monkeypatch.setattr(fs, 'BACKUP_ENCRYPTION_PASSWORD', '')
-    monkeypatch.setattr(fs, 'BACKUP_ENCRYPTION_KEY', '')
-    monkeypatch.setattr(crypto, 'generate_encryption_key', lambda: 'GEN-KEY')
-
-    resolved = fs.DefaultBackupFormatStrategy._resolve_password(None, fs.PackOptions(encrypt=True))
-
-    assert resolved is None, (
-        'encrypt=True 但无可用密钥时必须返回 None（调用方据此降级为不加密），'
-        f'不得回退到随机密钥；实际返回 {resolved!r}'
-    )
-
-
-def test_format_strategy_prefers_explicit_password(monkeypatch):
-    """显式传入的 password 优先于环境变量"""
-    from fastapi_app.services.backup import format_strategy as fs
-
-    monkeypatch.setattr(fs, 'BACKUP_ENCRYPTION_PASSWORD', 'env-secret')
-    monkeypatch.setattr(fs, 'BACKUP_ENCRYPTION_KEY', 'env-key')
-
-    resolved = fs.DefaultBackupFormatStrategy._resolve_password(
-        None, fs.PackOptions(encrypt=True, password='explicit')
-    )
-    assert resolved == 'explicit'
-
-
-def test_format_strategy_falls_back_to_env_password(monkeypatch):
-    """无显式 password 时使用环境变量密码"""
-    from fastapi_app.services.backup import format_strategy as fs
-
-    monkeypatch.setattr(fs, 'BACKUP_ENCRYPTION_PASSWORD', 'env-secret')
-    monkeypatch.setattr(fs, 'BACKUP_ENCRYPTION_KEY', '')
-
-    resolved = fs.DefaultBackupFormatStrategy._resolve_password(
-        None, fs.PackOptions(encrypt=True)
-    )
-    assert resolved == 'env-secret'
-
-
-def test_format_strategy_no_encrypt_returns_none(monkeypatch):
-    """encrypt=False 时即使配了密码也不返回（不应无谓加密）"""
-    from fastapi_app.services.backup import format_strategy as fs
-
-    monkeypatch.setattr(fs, 'BACKUP_ENCRYPTION_PASSWORD', 'env-secret')
-
-    resolved = fs.DefaultBackupFormatStrategy._resolve_password(
-        None, fs.PackOptions(encrypt=False)
-    )
-    assert resolved is None
 
 
 # ---------------------------------------------------------------------------

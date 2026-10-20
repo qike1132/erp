@@ -121,8 +121,8 @@ def decrypt_backup(
 ) -> bytes:
     """解密一份备份密文，**自动识别** ``chunked-v1`` 与 ``legacy`` 格式。
 
-    这是加密数据的唯一读取入口：所有既有调用方（orchestrator / format_strategy /
-    adapters / _deps / recovery_test_service）无需改动即可读出新一代格式。
+    这是加密数据的唯一读取入口：所有既有调用方（orchestrator / adapters /
+    _deps / recovery_test_service）无需改动即可读出新一代格式。
 
     Raises:
         BackupFileError: 密码错误、数据被截断/篡改，或格式无法识别。
@@ -402,7 +402,7 @@ def decrypt_stream(src, dst, password: str | bytearray) -> dict:
 
     ⚠️ 因此「格式 B 前缀 + chunked 内层」这一组合虽然能正确解密，但享受不到
     流式收益。要彻底去掉这层前缀，属于 ITER-1 阶段 B（切换 ``_deps`` /
-    ``format_strategy`` 的调用方）的工作。
+    旧格式策略的调用方）的工作。
     """
     with _as_reader(src) as fin, _as_writer(dst) as fout:
         first = fin.read(len(_CHUNKED_MAGIC))

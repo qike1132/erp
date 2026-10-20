@@ -2,7 +2,7 @@
 
 包含两类组件：
 1. 原有新架构：数据库恢复生命周期相关类型与编排器（ports/adapters 模式）。
-2. 从原 backup_service.py 拆分而来的 12 个子模块（加密/分块/快照/dump/JSON/文件存储/缓存恢复/验证/增量/编排/记录/异常）。
+2. 从原 backup_service.py 拆分而来的子模块（加密/快照/dump/JSON/文件存储/缓存恢复/验证/编排/记录/异常）。
 
 调用方统一从包根导入（原 backup_service.py 薄壳已在域收敛提交中删除）：
     from fastapi_app.services.backup import create_full_backup
@@ -20,22 +20,6 @@ from fastapi_app.services.backup.adapters import (
     ExistingRestoreVerifierAdapter,
     ExistingSafetyBackupAdapter,
     PostgresAdvisoryLockAdapter,
-)
-from fastapi_app.services.backup.format_storage import BackupStorage, LocalBackupStorage
-from fastapi_app.services.backup.format_strategy import (
-    BackupFormatError,
-    BackupFormatStrategy,
-    DefaultBackupFormatStrategy,
-    ZipBackupArchiveView,
-)
-from fastapi_app.services.backup.format_types import (
-    ArchiveEntry,
-    BackupArtifact,
-    BackupChunk,
-    BackupInfo,
-    PackOptions,
-    RestoredBackupArchive,
-    UnpackOptions,
 )
 from fastapi_app.services.backup.orchestrator import (
     DatabaseRestoreOrchestrator,
@@ -97,7 +81,6 @@ from ._constants import (
     UPLOADS_DIR,
 )
 from .cache_restore import *  # noqa: F403
-from .chunks import *  # noqa: F403
 from .crypto import *  # noqa: F403
 from .dump import *  # noqa: F403
 from .exceptions import *  # noqa: F403
@@ -160,21 +143,14 @@ __all__ = [  # noqa: RUF022
     # 端口
     "AdvisoryLock",
     "ArchiveDecryptor",
-    "ArchiveEntry",
     "BackupArchive",
-    "BackupArtifact",
-    "BackupChunk",
     # 异常（从原 backup_service.py 拆分）
     "BackupError",
     "BackupFileError",
-    "BackupFormatError",
     # 格式策略
-    "BackupFormatStrategy",
-    "BackupInfo",
     "BackupLockError",
     # 适配器
     "BackupProgressReporterAdapter",
-    "BackupStorage",
     "BinaryLogError",
     "CacheInvalidator",
     "ComponentRestorePort",
@@ -186,7 +162,6 @@ __all__ = [  # noqa: RUF022
     "DatabaseRestoreStrategy",
     "DatabaseSnapshotError",
     "DefaultArchiveDecryptorAdapter",
-    "DefaultBackupFormatStrategy",
     "EngineLifecycle",
     "ExistingCacheInvalidatorAdapter",
     "ExistingComponentRestoreAdapter",
@@ -194,8 +169,6 @@ __all__ = [  # noqa: RUF022
     "ExistingRestoreVerifierAdapter",
     "ExistingSafetyBackupAdapter",
     "JsonRestoreStrategy",
-    "LocalBackupStorage",
-    "PackOptions",
     "PostgresAdvisoryLockAdapter",
     "ProgressReporter",
     # 策略
@@ -207,13 +180,10 @@ __all__ = [  # noqa: RUF022
     "RestorePhase",
     "RestoreStatus",
     "RestoreVerifier",
-    "RestoredBackupArchive",
     "SafetyBackupProvider",
     "StrategySelector",
-    "UnpackOptions",
     "VerificationResult",
     "ZipBackupArchive",
-    "ZipBackupArchiveView",
     # settings_service (M1)
     "BackupSettingsError",
     "get_settings",
@@ -225,8 +195,6 @@ __all__ = [  # noqa: RUF022
     "build_column_type_map",
     "cleanup_pre_restore_backups",
     "clear_stale_restore_lock",
-    "combine_backup_chunks",
-    "create_backup_chunks",
     "create_binary_log_backup",
     "create_database_snapshot_backup",
     "create_full_backup",
@@ -265,7 +233,6 @@ __all__ = [  # noqa: RUF022
     # filestore
     "restore_filestore",
     "restore_from_binary_log",
-    "restore_from_chunks",
     "restore_from_zip",
     "restore_legacy_json",
     "restore_meilisearch",

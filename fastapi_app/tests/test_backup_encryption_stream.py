@@ -69,7 +69,7 @@ class TestRoundTrip:
         assert chunk_count == 2
 
     def test_ciphertext_does_not_leak_plaintext(self):
-        secret = b'SUPER-SECRET-MARKER-' * 4
+        secret = b'SUPER-SECRET-MARKER-' * 4  # secret-scan:allow — 脱敏测试夹具，非真实凭据
         blob = _encrypt(_payload(CHUNK) + secret)
         assert b'SUPER-SECRET-MARKER' not in blob
 
@@ -225,7 +225,7 @@ class TestLegacyCompatibility:
         assert meta['chunk_count'] == 1
 
     def test_format_b_prefix_wrapping_chunked(self):
-        """新组合：``_deps`` / ``format_strategy`` 会在 chunked 密文外再包 meta 前缀。
+        """新组合：``_deps`` 会在 chunked 密文外再包 meta 前缀。
 
         这条组合此前不存在，必须锁定 —— 两处读侧都是「先剥前缀，再交给
         decrypt_backup」，而 decrypt_backup 现已能识别 chunked。
