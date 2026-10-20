@@ -8,10 +8,16 @@ asyncpg/PG 把 naive 值按会话时区（Asia/Shanghai）解释 ⇒ 存入瞬�
 （PO-20260929-0008 于北京 09:29 创建，页面显示 2026-09-29 01:29）。
 
 本文件锁住 058 的三个要求：
-1. 只动 ``order.order_date`` 与 ``stock_out.stockout_date`` 两列（取值全部来自
-   系统时钟，整体 +8h 安全）；用户可录入墙上时间的列（stock_in 等）不得被波及；
+1. 只动 ``order.order_date`` 与 ``stock_out.stockout_date`` 两列；用户可录入墙上时间
+   的列（stock_in 等）不得被波及（清单不得再扩大）；
 2. upgrade 是 +8h、downgrade 是 -8h 且只回退带微秒（系统生成）的值；
 3. 表/列不存在（空库重放）时跳过，与 013 的守卫口径一致。
+
+⚠️ 2026-10-20 审计复核：058 原文假设「这两列取值全部来自系统时钟、必然带微秒」为假
+——批量导入会把 Excel 提供的墙上时间写进 ``stock_out.stockout_date``（微秒恒 0）。
+生产只读核验结果是受影响行数为 0，故未做数据修正迁移；但「清单不得再扩大」这条
+断言的立论前提已不成立，改由 ``test_parse_date_value_keeps_zero_microsecond_for_
+import_values`` 固化「用户录入值微秒恒 0」这一事实，防止后人再犯同一假设。
 """
 from __future__ import annotations
 
@@ -68,7 +74,13 @@ def test_revision_chain_follows_057() -> None:
 
 
 def test_pairs_cover_only_system_clock_columns() -> None:
-    """只允许动系统时钟生成的两列；用户可录入墙上时间的列不得出现在清单里。"""
+    """只动 058 选定的两列；用户可录入墙上时间的列不得出现在清单里。
+
+    注意：本用例的名字沿用 058 当时的判断（「这几列都是系统时钟生成」），
+    该判断已被 2026-10-20 审计证伪——``stock_out.stockout_date`` 也会被批量
+    导入写入 Excel 提供的墙上时间。清单本身是既成事实（迁移已上生产），
+    这里锁住的是「清单不得再扩大」，不是「清单里的列一定安全」。
+    """
     mod = _load_migration_module()
 
     assert sorted(mod._PAIRS) == _EXPECTED_PAIRS
@@ -118,3 +130,25 @@ def test_downgrade_shifts_back_only_microsecond_values(monkeypatch) -> None:
         assert "interval '8 hours'" in sql
         assert "- interval" in sql
         assert "date_part('microsecond'" in sql, sql
+
+
+def test_parse_date_value_keeps_zero_microsecond_for_import_values() -> None:
+    """用户录入的日期不带微秒 —— 058「取值全部来自系统时钟」的假设在代码层面为假。
+
+    批量导入把 Excel 里的墙上时间（日期串 / 整数序列号）经 parse_date_value
+    写进 ``stock_out.stockout_date``（timestamptz 列）：四种 strptime 格式都
+    不带 ``%f``，Excel 序列号走整数 timedelta ⇒ 微秒恒为 0。
+
+    后果：不能用「微秒非 0 ⇒ 系统时钟生成」去区分两类值，也就不能对含用户
+    录入值的列做整列 +8h（058 的原做法）。这条断言就是复发防护。
+    """
+    from fastapi_app.utils import parse_date_value
+
+    for raw in ('2026-08-08', '2026/08/08', '2026-08-08 13:45:00', '2026/08/08 13:45:00'):
+        parsed = parse_date_value(raw)
+        assert parsed is not None, raw
+        assert parsed.microsecond == 0, raw
+
+    excel_serial = parse_date_value(45000)
+    assert excel_serial is not None
+    assert excel_serial.microsecond == 0
