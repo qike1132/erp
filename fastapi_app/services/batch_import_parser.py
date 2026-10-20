@@ -11,13 +11,35 @@ import os
 import tempfile
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
+from zipfile import BadZipFile
 
 from fastapi_app.schemas.batch import BatchImportResult, ExcelUpload
 from fastapi_app.services.xlsx_cell_images import extract_cell_images
 from fastapi_app.utils import parse_date_value as _shared_parse_date_value
 from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
 
+try:  # Polars 的 Excel 引擎异常不是 ValueError/OSError，必须显式纳入解析失败口径
+    from fastexcel import CalamineError
+except ImportError:  # pragma: no cover - 生产环境随 polars 安装，仅防最小环境缺包
+    class CalamineError(Exception):
+        """fastexcel 未安装时的占位（不会命中真实异常）。"""
+
 logger = logging.getLogger(__name__)
+
+_XLSX_SUFFIXES = ('.xlsx', '.xlsm')
+
+
+def _looks_like_xlsx(file_path: str) -> bool:
+    """xlsx/xlsm 本质是 zip：先验魔数，改名/截断文件在进解析器前就转友好错误。"""
+    try:
+        with open(file_path, 'rb') as fh:
+            return fh.read(4) in (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08')
+    except OSError:
+        return False
+
+
+def _bad_xlsx_message() -> str:
+    return '文件无法解析，请确认是有效的 .xlsx 文件（可重新下载模板填写）'
 
 #: 上传文件大小上限。产品导入模板可内嵌 WPS 单元格图片，工作簿体积随图片数量增长
 #: （实测 33 张图 ≈ 2.3MB），5MB 很快就成为瓶颈；10MB 与 nginx
@@ -37,6 +59,8 @@ validate_customer_name = _shared_validate_customer_name
 
 async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) -> tuple[bool, list, str]:
     """异步解析 Excel 文件（Polars 引擎，比 pandas 快 5x）"""
+    if file_path.lower().endswith(_XLSX_SUFFIXES) and not _looks_like_xlsx(file_path):
+        return False, [], _bad_xlsx_message()
     loop = asyncio.get_running_loop()
 
     def _sync_parse():
@@ -59,7 +83,7 @@ async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) 
                     elif isinstance(value, float) and math.isnan(value):
                         row[key] = None
             return True, data_list, ""
-        except (ValueError, TypeError, OSError) as e:
+        except (ValueError, TypeError, OSError, BadZipFile, CalamineError) as e:
             return False, [], str(e)
 
     return await loop.run_in_executor(None, _sync_parse)
@@ -67,6 +91,8 @@ async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) 
 
 async def read_excel_sheets_async(file_path: str) -> tuple[bool, list, str]:
     """读取 Excel 文件的所有 Sheet 名称"""
+    if file_path.lower().endswith(_XLSX_SUFFIXES) and not _looks_like_xlsx(file_path):
+        return False, [], _bad_xlsx_message()
     loop = asyncio.get_running_loop()
 
     def _sync_read():
@@ -76,7 +102,7 @@ async def read_excel_sheets_async(file_path: str) -> tuple[bool, list, str]:
             sheets = wb.sheetnames
             wb.close()
             return True, sheets, ""
-        except (ValueError, TypeError, OSError) as e:
+        except (ValueError, TypeError, OSError, BadZipFile, CalamineError) as e:
             return False, [], str(e)
 
     return await loop.run_in_executor(None, _sync_read)

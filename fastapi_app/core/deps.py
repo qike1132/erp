@@ -207,7 +207,15 @@ async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_clos
     if cached_payload is not None and not fail_closed:
         user_id = cached_payload.get('sub')
         if user_id:
-            return int(user_id)
+            uid = int(user_id)
+            # P1-14：该 payload 可能由限流中间件的 key_func 在依赖注入之前预写入
+            # （request.state._jwt_payload 共用键）；早返回若只信 sub，会跳过撤销黑名单
+            # 与用户禁用校验，已登出/已禁用用户仍可访问全部非 strict 端点。
+            if await is_token_revoked(cached_payload.get('jti'), fail_closed=False):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Token已失效')
+            if not await _verify_user_active(uid, db):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户不存在或已被禁用')
+            return uid
 
     user_id = _resolve_user_id(request)
     if user_id is None:

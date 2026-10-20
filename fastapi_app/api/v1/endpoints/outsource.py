@@ -67,6 +67,7 @@ async def list_outsource_orders(
     page: int = Query(1, ge=1, description="页码"),
     per_page: int = Query(50, ge=1, le=500, description="每页数量"),
     customer: str | None = Query(None, description="客户名筛选"),
+    product: str | None = Query(None, max_length=100, description="产品名称/条码关键字筛选"),
     process_status: str | None = Query(
         None, description="外发工序状态筛选：pending(待开始)/in_progress(进行中)/completed(已完成)"
     ),
@@ -76,7 +77,7 @@ async def list_outsource_orders(
     """湖北工厂订单+备货合并列表（强制 factory=湖北，忽略前端传参）。"""
     result = await outsource_service.list_outsource_orders(
         db, page=page, per_page=per_page, customer=customer,
-        process_status=process_status,
+        product=product, process_status=process_status,
     )
     return OrderListResponse(data=result['items'], total=result['total'],
                              page=result['page'], per_page=result['per_page'])

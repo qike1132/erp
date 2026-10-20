@@ -204,24 +204,30 @@ class TestDeleteSupplier:
 # ============================================================================
 class TestGetSystemStats:
     @pytest.mark.asyncio
-    async def test_returns_stats_with_performance_data(self):
-        """应返回包含 cache 与 performance 统计的字典"""
-        mock_perf = MagicMock()
-        mock_perf.get_stats.return_value = {"total": 100}
-        mock_tracker = MagicMock()
-        mock_tracker.get_stats.return_value = {"queries": 50}
+    async def test_returns_real_cache_stats_and_not_instrumented_performance(self):
+        """cache 必须来自真实 redis_cache；无埋点的 performance 明确标 not_instrumented。"""
+        from utils.redis_cache import redis_cache
 
-        with patch('utils.performance_monitor.performance_monitor', mock_perf), \
-             patch('utils.performance_monitor.query_tracker', mock_tracker):
+        real_stats = {'backend': 'redis', 'connected': True, 'keyspace_hits': 5}
+
+        with patch.object(redis_cache, 'get_stats', new=AsyncMock(return_value=real_stats)):
             result = await auxiliary_service.get_system_stats()
-        assert 'cache' in result
-        assert 'performance' in result
-        assert result['performance']['total'] == 100
-        assert result['performance']['queries'] == {"queries": 50}
+
+        assert result['cache'] == real_stats
+        assert result['performance']['status'] == 'not_instrumented'
+        assert result['performance']['queries']['status'] == 'not_instrumented'
+        # 不再返回误导性的全 0 假字段
+        assert 'total_requests' not in result['performance']
+        assert 'errors' not in result['performance']
 
     @pytest.mark.asyncio
-    async def test_returns_empty_stats_on_import_error(self):
-        """ImportError 时应返回空统计字典"""
-        with patch.dict('sys.modules', {'utils.performance_monitor': None}):
+    async def test_cache_stats_failure_is_reported_not_raised(self):
+        """缓存探测失败时降级为 unavailable，端点不得 500。"""
+        from utils.redis_cache import redis_cache
+
+        with patch.object(redis_cache, 'get_stats', new=AsyncMock(side_effect=RuntimeError('redis down'))):
             result = await auxiliary_service.get_system_stats()
-        assert result == {'cache': {}, 'performance': {}}
+
+        assert result['cache']['status'] == 'unavailable'
+        assert 'redis down' in result['cache']['error']
+        assert result['performance']['status'] == 'not_instrumented'

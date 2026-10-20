@@ -248,22 +248,29 @@ async def delete_supplier(db: AsyncSession, supplier_id: int) -> None:
 
 
 async def get_system_stats() -> dict:
-    """获取系统统计信息（缓存命中率/性能数据）。
+    """获取系统统计信息。
 
-    Returns:
-        dict: 包含 cache 和 performance 统计的字典。
+    - cache：真实 Redis/内存缓存统计（redis_cache.get_stats）。
+    - performance/queries：生产路径没有埋点（PerformanceMiddleware 未注册、
+      track_db_query 零调用）——明确返回 not_instrumented，不再返回全 0 假数据
+      误导运维判断（审计 P1-15）。
     """
-    try:
-        from utils.performance_monitor import performance_monitor, query_tracker
+    from utils.redis_cache import redis_cache
 
-        return {
-            'cache': {},
-            'performance': {
-                **performance_monitor.get_stats(),
-                'queries': query_tracker.get_stats()
-            }
-        }
-    except (ImportError, AttributeError) as e:
-        # 不静默吞掉：模块本身出问题时必须留痕，否则又是「接口 500 无人知」
-        logger.warning('系统统计不可用: %s', e, exc_info=True)
-        return {'cache': {}, 'performance': {}}
+    try:
+        cache_stats = await redis_cache.get_stats()
+    except Exception as e:  # defensive: 统计端点不得因缓存探测失败而 500
+        logger.warning('系统统计-缓存数据读取失败: %s', e, exc_info=True)
+        cache_stats = {'status': 'unavailable', 'error': str(e)}
+
+    return {
+        'cache': cache_stats,
+        'performance': {
+            'status': 'not_instrumented',
+            'reason': 'PerformanceMiddleware 未注册，无真实请求性能数据；不再返回全 0 假数据',
+            'queries': {
+                'status': 'not_instrumented',
+                'reason': 'track_db_query 装饰器无生产调用点；不再返回全 0 假数据',
+            },
+        },
+    }

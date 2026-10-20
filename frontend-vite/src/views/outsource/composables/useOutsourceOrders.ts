@@ -40,7 +40,7 @@ export function useOutsourceOrders(props: { productFilter: string; customerFilte
   const appliedProduct = ref(props.productFilter)
   const appliedCustomer = ref(props.customerFilter)
 
-  watch(() => props.productFilter, (v) => { appliedProduct.value = v })
+  watch(() => props.productFilter, (v) => { appliedProduct.value = v; page.value = 1 })
   watch(() => props.customerFilter, (v) => { appliedCustomer.value = v; page.value = 1 })
 
   const {
@@ -49,10 +49,12 @@ export function useOutsourceOrders(props: { productFilter: string; customerFilte
     isFetching,
     refetch,
   } = useQuery({
-    queryKey: ['outsource-orders', appliedCustomer, () => page.value, () => perPage.value],
+    queryKey: ['outsource-orders', appliedCustomer, appliedProduct, () => page.value, () => perPage.value],
     queryFn: () =>
       outsourceApi.orders({
         customer: appliedCustomer.value || undefined,
+        // P1-22：产品筛选必须下沉到服务端，否则只过滤当前页，目标产品在其他页时误报「未匹配」
+        product: appliedProduct.value || undefined,
         page: page.value,
         per_page: perPage.value,
       }),

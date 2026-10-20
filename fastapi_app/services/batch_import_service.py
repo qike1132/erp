@@ -337,7 +337,7 @@ async def read_template_bytes() -> tuple[bytes, str]:
         if not file_content:
             raise BusinessError('模板文件为空')
         return file_content, '统一导入模板.xlsx'
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         logger.error(f'模板读取失败: {exc}', exc_info=True)
         raise BusinessError('模板读取失败，请稍后重试') from exc
 
@@ -425,7 +425,7 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
             db, data_list, _write_order_row,
             '成功导入', '没有成功导入任何订单', log_label='订单导入',
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'订单批量导入失败: {exc}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
@@ -484,7 +484,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
             db, data_list, _write_case_stockout_row,
             '成功导入皮套出库', '没有成功导入任何皮套出库', log_label='皮套出库导入',
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'皮套出库批量导入失败: {exc}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
@@ -537,7 +537,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
             db, data_list, _write_case_stockin_row,
             '成功导入皮套入库', '没有成功导入任何皮套入库', log_label='皮套入库导入',
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'皮套入库批量导入失败: {exc}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
@@ -596,7 +596,7 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
             db, data_list, _write_stockin_row,
             '成功导入备货', '没有成功导入任何备货', log_label='备货导入',
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'备货批量导入失败: {exc}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
@@ -667,7 +667,7 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
             db, data_list, _write_stockout_row,
             '成功导入出货', '没有成功导入任何出货', log_label='出库导入',
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'出库批量导入失败: {exc}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
@@ -804,7 +804,7 @@ async def preview_products_service(
         return ProductImportPreviewResult(success=False, message=file_err.message, filename=filename)
     try:
         data_list, cell_images, err = await _read_product_sheet(file)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         logger.error(f'产品导入预览失败: {exc}', exc_info=True)
         return ProductImportPreviewResult(success=False, message='解析失败，请稍后重试', filename=filename)
     if err:
@@ -941,7 +941,7 @@ async def import_products_service(
         if imported > 0:
             schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
         return _build_batch_result(imported, skipped, errors, success_msg='成功导入产品', fail_msg='没有找到需要导入的产品数据（可能都已存在）')
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'产品批量导入失败: {exc}', exc_info=True)
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
@@ -1000,7 +1000,7 @@ async def import_comprehensive_service(
         # 提交交给请求级事务（get_async_db）：全部 Sheet 在同一事务内原子落库，
         # 单 Sheet 失败已被 savepoint 隔离，无需在此手动 commit
         return results
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'综合批量导入失败: {exc}', exc_info=True)
         return ComprehensiveImportResult(success=False, message='操作失败，请稍后重试')

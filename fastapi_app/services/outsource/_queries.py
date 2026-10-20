@@ -71,7 +71,9 @@ def _detach_page_items(items: list[dict]) -> list[dict]:
     return detached
 
 
-async def _scan_beile_items_with_progress(db: AsyncSession, customer: str | None) -> list[dict]:
+async def _scan_beile_items_with_progress(
+    db: AsyncSession, customer: str | None, product: str | None = None,
+) -> list[dict]:
     """按页遍历取回全部订单+备货记录，并逐页附加外发工序进度。
 
     状态筛选是跨页统计，不能只取首页：此前固定 page=1&per_page=500，
@@ -88,6 +90,7 @@ async def _scan_beile_items_with_progress(db: AsyncSession, customer: str | None
     while True:
         page_data = await get_beile_orders_with_stockins(
             db, page=page, per_page=_SCAN_PAGE_SIZE, customer=customer, factory='湖北',
+            product_kw=product,
         )
         page_items = _detach_page_items(page_data['items'])
         await _attach_progress_to_orders(db, page_items)
@@ -101,6 +104,7 @@ async def _scan_beile_items_with_progress(db: AsyncSession, customer: str | None
 async def list_outsource_orders(
     db: AsyncSession, *, page: int = 1, per_page: int = 50,
     customer: str | None = None, process_status: str | None = None,
+    product: str | None = None,
 ) -> dict:
     """湖北工厂订单+备货合并列表（强制 factory=湖北）。
 
@@ -116,7 +120,7 @@ async def list_outsource_orders(
     """
     from fastapi_app.services.order_crud import get_beile_orders_with_stockins
     if process_status:
-        all_items = await _scan_beile_items_with_progress(db, customer)
+        all_items = await _scan_beile_items_with_progress(db, customer, product)
         filtered = [
             row for row in all_items
             if _matches_process_status(row, process_status)
@@ -132,6 +136,7 @@ async def list_outsource_orders(
 
     data = await get_beile_orders_with_stockins(
         db, page=page, per_page=per_page, customer=customer, factory='湖北',
+        product_kw=product,
     )
     items = _detach_page_items(data['items'])
     await _attach_progress_to_orders(db, items)
