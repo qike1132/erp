@@ -11,22 +11,22 @@
  * 且经 persistQueryClient 持久化到 sessionStorage —— 于是用户切过去时命中「新鲜」缓存，
  * **根本不发请求**，页面停留在删除/改数量之前的旧数据。
  *
- * 本文件锁死不变量：客户订单任一写路径成功后，三个关联页面的 query key 必须被失效。
+ * 本文件锁死不变量：**仍在使用的备货编辑/删除写路径**成功后，三个关联页面的
+ * query key 必须被失效。原订单删除/改数量用例随 2026-10-17 审计 Z11-R1 一并删除
+ * （其实现 useOrderDelete / useOrderDetailEdit 已零生产引用并移除）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
-  orderDelete: vi.fn(),
-  orderUpdate: vi.fn(),
   stockinEdit: vi.fn(),
   stockinDelete: vi.fn(),
 }))
 
 vi.mock('@/api', () => ({
   orderApi: {
-    delete: mocks.orderDelete,
-    update: mocks.orderUpdate,
+    delete: vi.fn(),
+    update: vi.fn(),
     updateDeduct: vi.fn(),
   },
   auxApi: { availableStockins: vi.fn(async () => []) },
@@ -42,8 +42,6 @@ vi.mock('@tanstack/vue-query', () => ({
   useQueryClient: () => ({ invalidateQueries: mocks.invalidateQueries }),
 }))
 
-import { useOrderDelete } from '@/views/report/composables/useOrderDelete'
-import { useOrderDetailEdit } from '@/views/report/composables/useOrderDetailEdit'
 import { useStockinEdit } from '@/views/report/composables/useStockinEdit'
 
 /** 三个关联页面实际使用的 query key 前缀 */
@@ -76,31 +74,9 @@ const confirmDialog = {
 beforeEach(() => {
   vi.clearAllMocks()
   confirmDialog.confirm.mockResolvedValue(true)
-  mocks.orderDelete.mockResolvedValue({ message: '订单删除成功' })
-  mocks.orderUpdate.mockResolvedValue({})
 })
 
 describe('客户订单写入 → 关联页面缓存失效', () => {
-  it('删除订单后，贝莱/外包/采购页面缓存必须一并失效', async () => {
-    const { handleDeleteOrder } = useOrderDelete(async () => {}, confirmDialog)
-
-    await handleDeleteOrder({ id: 1, order_no: 'CO-001' } as never)
-
-    expect(mocks.orderDelete).toHaveBeenCalledWith(1)
-    expectCrossPageInvalidated('删除订单')
-  })
-
-  it('编辑订单数量后，贝莱/外包/采购页面缓存必须一并失效', async () => {
-    const edit = useOrderDetailEdit(async () => {})
-    edit.detailData.value = { id: 2, quantity: 5, deduct_quantity: 0, note: '' } as never
-    edit.editForm.quantity = 9
-
-    await edit.saveEditOrder()
-
-    expect(mocks.orderUpdate).toHaveBeenCalled()
-    expectCrossPageInvalidated('编辑订单数量')
-  })
-
   it('编辑备货（入库记录）后，关联页面缓存必须一并失效', async () => {
     const { saveStockinEdit, stockinEditForm } = useStockinEdit(async () => {}, confirmDialog)
     stockinEditForm.value = {

@@ -2,8 +2,9 @@
  * 报表页记录操作的模块局部类型（2026-10-06 记录查询 tab 收敛至报表页时迁入）。
  *
  * OrderRecord / OrderDetailData 原在 customer-order/composables/types.ts，
- * 因消费方（EditOrderModal 与三个动作组合式）整体迁至 /report，随迁至此。
- * 录入侧仍在用的类型（StagedItem / FormState 等）留在 customer-order 原文件。
+ * 因报表记录操作迁至 /report 而随迁至此。旧 EditOrderModal / useOrderDetailEdit /
+ * useOrderDelete 已按 Z11-R1 删除；OrderRecord 现由 useReportRowActions /
+ * useStockinEdit 使用。录入侧类型（StagedItem / FormState 等）留在 customer-order。
  */
 import type { OrderItem } from '@/types'
 

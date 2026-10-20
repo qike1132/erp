@@ -10,6 +10,7 @@
 6. 趋势分析
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
@@ -45,6 +46,8 @@ class BackupMetricsService:
     def __init__(self):
         self.metrics_config = self._load_metrics_config()
         self.metrics_file = BACKUP_DIR / 'backup_metrics.json'
+        # Z05-R20：同一 worker 内并发备份任务会同时 read-modify-write 日文件，后写覆盖先写
+        self._metrics_lock = asyncio.Lock()
 
     def _load_metrics_config(self) -> dict[str, Any]:
         """加载指标配置"""
@@ -189,7 +192,12 @@ class BackupMetricsService:
             }
 
     async def _store_metrics(self, metrics: dict[str, Any]) -> None:
-        """存储指标数据"""
+        """存储指标数据（进程内串行化，避免并发 read-modify-write 丢点）。"""
+        async with self._metrics_lock:
+            await self._store_metrics_unlocked(metrics)
+
+    async def _store_metrics_unlocked(self, metrics: dict[str, Any]) -> None:
+        """实际读写日指标文件（调用方须持有 self._metrics_lock）。"""
         try:
             # 确保指标目录存在
             metrics_dir = BACKUP_DIR / 'metrics'
@@ -288,9 +296,17 @@ class BackupMetricsService:
             # 如果有问题，记录警告日志
             if issues:
                 logger.warning(f"性能阈值检查发现问题: {'; '.join(issues)}")
-
-                # 这里可以添加告警逻辑
-                # await alert_service.send_alert(...)
+                # Z05-R20：阈值问题接入告警通道（失败仅记日志，不影响指标采集）
+                try:
+                    from fastapi_app.services.backup.metrics.alert_service import alert_service
+                    await alert_service.send_alert(
+                        task_name='backup_metrics',
+                        error='; '.join(issues),
+                        task_type='backup',
+                        severity='warning',
+                    )
+                except Exception as alert_err:  # broad-except: 告警通道失败不得打断指标链路
+                    logger.warning(f"性能阈值告警发送失败: {alert_err}")
 
         except Exception as e:  # defensive: threshold check must not crash metrics collection
             logger.error(f"检查性能阈值失败: {e}")
@@ -667,8 +683,8 @@ class BackupMetricsService:
 
             # 根据格式处理
             if format == 'csv':
-                # 这里可以添加CSV格式转换逻辑
-                pass
+                # Z05-R20：CSV 导出未实现——显式失败，避免调用方拿到 JSON 却以为 CSV
+                raise NotImplementedError('指标报告 CSV 导出尚未实现（当前仅支持 json）')
 
             return report
 

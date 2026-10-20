@@ -345,7 +345,7 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
             if not export_func:
                 raise ValueError(f"不支持的报表类型: {report_type}")
 
-            output = export_func(logs, stats)
+            output = export_func(logs)
             if isinstance(output, bytes):
                 return output
             return output.getvalue()

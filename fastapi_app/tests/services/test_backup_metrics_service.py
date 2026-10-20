@@ -290,7 +290,11 @@ class TestBackupMetricsService:
             }
         }
 
-        with patch('fastapi_app.services.backup.metrics.service.logger') as mock_logger:
+        with patch('fastapi_app.services.backup.metrics.service.logger') as mock_logger, \
+             patch(
+                 'fastapi_app.services.backup.metrics.alert_service.alert_service.send_alert',
+                 new=AsyncMock(),
+             ):
             await metrics_service._check_performance_thresholds(metrics)
 
             # 应该记录警告

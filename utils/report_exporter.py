@@ -34,13 +34,12 @@ class ReportExporter:
             bottom=Side(style='thin')
         )
 
-    def export_order_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
+    def export_order_logs(self, logs: list[dict[str, Any]]) -> bytes:
         """
         导出订单流水
 
         Args:
             logs: 订单日志列表
-            stats: 统计数据
 
         Returns:
             Excel文件二进制数据
@@ -66,13 +65,12 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_stockin_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
+    def export_stockin_logs(self, logs: list[dict[str, Any]]) -> bytes:
         """
         导出备货流水
 
         Args:
             logs: 备货日志列表
-            stats: 统计数据
 
         Returns:
             Excel文件二进制数据
@@ -97,13 +95,12 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_stockout_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
+    def export_stockout_logs(self, logs: list[dict[str, Any]]) -> bytes:
         """
         导出出货流水
 
         Args:
             logs: 出货日志列表
-            stats: 统计数据
 
         Returns:
             Excel文件二进制数据
@@ -128,13 +125,12 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_deduction_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
+    def export_deduction_logs(self, logs: list[dict[str, Any]]) -> bytes:
         """
         导出备货抵扣流水
 
         Args:
             logs: 抵扣日志列表
-            stats: 统计数据
 
         Returns:
             Excel文件二进制数据
@@ -160,13 +156,12 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_return_logs(self, logs: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
+    def export_return_logs(self, logs: list[dict[str, Any]]) -> bytes:
         """
         导出退货流水
 
         Args:
             logs: 退货日志列表
-            stats: 统计数据
 
         Returns:
             Excel文件二进制数据
@@ -191,13 +186,12 @@ class ReportExporter:
 
         return self._save_workbook(wb)
 
-    def export_inventory_data(self, inventory_data: list[dict[str, Any]], stats: dict[str, Any]) -> bytes:
+    def export_inventory_data(self, inventory_data: list[dict[str, Any]]) -> bytes:
         """
         导出库存汇总数据
 
         Args:
             inventory_data: 库存数据列表
-            stats: 统计数据
 
         Returns:
             Excel文件二进制数据
@@ -248,17 +242,6 @@ class ReportExporter:
             else:
                 ws.column_dimensions[col_letter].width = 18
 
-    def _format_inventory_row(self, log: dict) -> list:
-        """格式化库存行数据"""
-        return [
-            log.get('customer', ''),
-            log.get('product_name', ''),
-            log.get('order_quantity', 0),
-            log.get('stockin_quantity', 0),
-            log.get('total_stock', 0),
-            log.get('inventory_balance', 0),
-        ]
-
     def _write_sheet(self, ws, headers: list[str], logs: list[dict], row_formatter):
         """
         写入工作表内容
@@ -286,17 +269,6 @@ class ReportExporter:
         # 设置默认行高为1cm (约28.35磅)
         for row_idx in range(1, ws.max_row + 1):
             ws.row_dimensions[row_idx].height = 28.35
-
-        # 设置列宽
-        # 1cm约等于5个字符宽度
-        for col_idx in range(1, len(headers) + 1):
-            col_letter = chr(64 + col_idx)
-            if col_idx == 2:  # B列
-                ws.column_dimensions[col_letter].width = 75  # 15cm
-            elif col_idx in [3, 4, 5]:  # C、D、E列
-                ws.column_dimensions[col_letter].width = 12.5  # 2.5cm
-            else:
-                ws.column_dimensions[col_letter].width = 18
 
     def _format_order_row(self, log: dict) -> list:
         """格式化订单行数据"""
@@ -358,44 +330,6 @@ class ReportExporter:
             log.get('quantity', 0),
             log.get('note', '')
         ]
-
-    def _write_summary(self, ws, stats: dict, title: str, col_count: int):
-        """
-        写入统计信息
-
-        Args:
-            ws: 工作表
-            stats: 统计数据
-            title: 统计标题
-            col_count: 列数
-        """
-        start_row = ws.max_row + 3
-
-        title_cell = ws.cell(row=start_row, column=1, value=title)
-        title_cell.font = Font(bold=True, size=14)
-        ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=col_count)
-
-        row_idx = start_row + 1
-        for key, value in stats.items():
-            key_cell = ws.cell(row=row_idx, column=1, value=self._format_stat_key(key))
-            key_cell.font = Font(bold=True)
-            key_cell.border = self.thin_border
-
-            value_cell = ws.cell(row=row_idx, column=2, value=value)
-            value_cell.border = self.thin_border
-            row_idx += 1
-
-    def _format_stat_key(self, key: str) -> str:
-        """格式化统计键名"""
-        key_map = {
-            'total_count': '总记录数',
-            'total_quantity': '总数量',
-            'pending_count': '待处理数',
-            'completed_count': '已完成数',
-            'total_remaining': '总剩余数量',
-            'total_orders': '涉及订单数'
-        }
-        return key_map.get(key, key)
 
     def _save_workbook(self, wb) -> bytes:
         """

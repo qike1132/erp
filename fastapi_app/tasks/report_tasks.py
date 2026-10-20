@@ -71,7 +71,7 @@ async def export_report_task(ctx, report_type: str, filters: dict, user_id: int)
                 if not method_name:
                     return {'success': False, 'error': f'不支持的报表类型: {report_type}', 'task_id': job_id}
                 export_func = getattr(exporter, method_name)
-                output_buffer = export_func(logs, stats)
+                output_buffer = export_func(logs)
                 import uuid
                 filename = f'{report_type}_report_{uuid.uuid4().hex[:8]}.xlsx'
                 file_path = os.path.join(tempfile.gettempdir(), filename)

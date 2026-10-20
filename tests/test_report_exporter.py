@@ -54,7 +54,7 @@ def _log(note: str, note_key: str = 'note') -> dict:
 
 
 def _export(method: str, logs: list[dict]):
-    data: bytes = getattr(ReportExporter(), method)(logs, {'total_count': len(logs)})
+    data: bytes = getattr(ReportExporter(), method)(logs)
     return load_workbook(io.BytesIO(data)).active
 
 
@@ -132,7 +132,7 @@ class TestExportRowKeyAlignment:
             }, 'SR-1'),
         ]
         for method, row, expected_no in cases:
-            data: bytes = getattr(exporter, method)([row], {'total_count': 1})
+            data: bytes = getattr(exporter, method)([row])
             ws = load_workbook(io.BytesIO(data)).active
             values = [c.value for c in ws[2]]
             assert expected_no in values, f'{method} 的单号列应取到 {expected_no}，实际 {values}'
@@ -148,7 +148,7 @@ class TestExportRowKeyAlignment:
             ('export_return_logs', {'record_no': 'SR-9', 'return_date': 'x', 'product_barcode': 'B9', 'quantity': 1}, 'SR-9'),
         ]
         for method, row, expected_no in cases:
-            data: bytes = getattr(exporter, method)([row], {'total_count': 1})
+            data: bytes = getattr(exporter, method)([row])
             values = [c.value for c in load_workbook(io.BytesIO(data)).active[2]]
             assert expected_no in values and 'B9' in values, f'{method} 规范键未生效：{values}'
 
@@ -183,7 +183,7 @@ class TestInventoryExport:
     """
 
     def test_headers_and_row_match_stock_page_columns(self):
-        data = ReportExporter().export_inventory_data([_inventory_row()], {'total_count': 1})
+        data = ReportExporter().export_inventory_data([_inventory_row()])
         ws = load_workbook(io.BytesIO(data)).active
 
         assert ws.title == '库存汇总'
@@ -194,8 +194,7 @@ class TestInventoryExport:
         """库存列 0 与负数原样输出（表格口径），不能变成空值"""
         data = ReportExporter().export_inventory_data(
             [_inventory_row(inventory_balance=0),
-             _inventory_row(product_name='负结余', inventory_balance=-2500)],
-            {'total_count': 2})
+             _inventory_row(product_name='负结余', inventory_balance=-2500)])
         ws = load_workbook(io.BytesIO(data)).active
 
         assert ws.cell(row=2, column=6).value == 0

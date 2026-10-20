@@ -176,12 +176,24 @@ async def delete_stockin(
 
     Returns:
         StockActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException: 入库记录不存在时抛出 404（含跨厂被闸门拦截的同码场景）。
     """
     async with db_transaction(db):
         # 厂隔离闸门（P0-2）：删除前取该备货行的产品归属做校验
         _product_id = (await db.execute(
             select(StockIn.product_id).where(StockIn.id == stockin_id)
         )).scalar_one_or_none()
+        # 404 一致化（2026-10-19 OCR-R6-M2）：行不存在直接 404，与跨厂闸门
+        # 同码——旧版放行闸门、靠 svc ValueError('入库记录不存在') → 400，
+        # 而跨厂行是 404，厂绑定用户可借自增 id 探测区分「不存在(400) vs
+        # 存在但不是我的(404)」，与 factory_scope「不匹配一律 404、不暴露
+        # 存在性」契约矛盾。与 aux 域 /aux/stockin/{id}（OCR-R5）及本域
+        # /out/delete 的 db.get 预检同口径（db_transaction 对未映射异常
+        # rollback 后 re-raise，HTTPException 正常穿透）。
+        if _product_id is None:
+            raise HTTPException(status_code=404, detail='入库记录不存在')
         await assert_product_factory_scoped(db, _product_id, _user, what='入库记录')
         await stock_service.delete_stockin(db, stockin_id, operator_id=_user.id)
     return StockActionResponse(success=True, message='入库删除成功！')
@@ -399,25 +411,18 @@ async def inventory(
     )
 
 
-def _build_inventory_excel(inventory_data: list, result: dict) -> tuple[bytes, str]:
+def _build_inventory_excel(inventory_data: list) -> tuple[bytes, str]:
     """生成库存导出 Excel 文件（在线程中调用）。
 
     Args:
         inventory_data: 库存明细数据列表。
-        result: 包含汇总统计的字典。
 
     Returns:
         tuple[bytes, str]: (Excel 文件字节流, 文件名)。
     """
     from utils.report_exporter import ReportExporter, generate_filename
-    stats = {
-        'total_count': len(inventory_data),
-        'total_order_quantity': result['total_order_qty'],
-        'total_stockin_quantity': result['total_stockin_qty'],
-        'total_stock': result['total_stock'],
-    }
     exporter = ReportExporter()
-    excel_data = exporter.export_inventory_data(inventory_data, stats)
+    excel_data = exporter.export_inventory_data(inventory_data)
     filename = generate_filename('inventory')
     return (excel_data, filename)
 
@@ -467,7 +472,7 @@ async def export_inventory(
     inventory_data = result['inventory_data']
 
     # 在线程中生成 Excel，避免阻塞事件循环
-    excel_data, filename = await asyncio.to_thread(_build_inventory_excel, inventory_data, result)
+    excel_data, filename = await asyncio.to_thread(_build_inventory_excel, inventory_data)
     buffer = io.BytesIO(excel_data)
     buffer.seek(0)
     return StreamingResponse(
