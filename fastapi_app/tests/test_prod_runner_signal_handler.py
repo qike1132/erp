@@ -44,3 +44,4 @@ def test_installed_handler_can_still_invoke_shutdown():
     pr._console_handler_ref(0)
 
     sup.shutdown.assert_called_once()
+    sup.request_stop.assert_called_once()

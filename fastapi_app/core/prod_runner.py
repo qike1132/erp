@@ -31,6 +31,7 @@ import socket
 import ssl
 import subprocess  # nosec B404
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -592,6 +593,9 @@ class Supervisor:
         self.broker_port = _broker_port()
         self.ready = False
         self._last_log_check = 0.0
+        # F4-7：Windows 控制台处理器在独立线程执行，shutdown 后主循环必须收到停止信号；
+        # 否则 SetConsoleCtrlHandler 返回 True 阻止默认终止后，监督器进程永久存活。
+        self._stop = threading.Event()
         # F-BE-CORE-04 / F-OPS-DEPLOY-11：started_at 必须是监督器启动时刻，
         # 不是每次 write_status 的落盘时刻（后者见 last_write_at）。
         self._supervisor_started_at = _iso_now()
@@ -704,7 +708,7 @@ class Supervisor:
     def run(self) -> None:
         self.start_all()
         print("[prod_runner] 进入守护循环（健康门：后端 /api/health 就绪后标记 ready）")
-        while True:
+        while not self._stop.is_set():
             try:
                 self.backend.poll()
                 if self.arq:
@@ -718,7 +722,11 @@ class Supervisor:
                 self.write_status()
             except Exception as e:  # defensive: supervisor main loop must not exit
                 print(f"[prod_runner] 主循环异常（已吞掉，不退出）: {type(e).__name__}: {e}")
-            time.sleep(3)
+            self._stop.wait(3)
+
+    def request_stop(self) -> None:
+        """请求主循环退出（控制台处理器调用；shutdown 负责回收子进程）。"""
+        self._stop.set()
 
     # -- 日志轮转 -----------------------------------------------------------
     def _rotate_logs_if_due(self) -> None:
@@ -766,6 +774,7 @@ def _install_signal_handlers(sup: Supervisor) -> None:
                 # CTRL_C_EVENT=0, CTRL_BREAK_EVENT=1, CTRL_CLOSE_EVENT=2,
                 # CTRL_LOGOFF_EVENT=5, CTRL_SHUTDOWN_EVENT=6
                 sup.shutdown()
+                sup.request_stop()  # F4-7：通知主循环退出，否则监督器进程不结束
                 return True  # 阻止默认终止，让 shutdown 完成
 
             global _console_handler_ref
