@@ -1112,6 +1112,7 @@ export interface ExportRequest {
   material_category?: string
   start_date?: string
   end_date?: string
+  scope?: "all" | "progress" | "history"
 }
 
 export interface FabricItem {

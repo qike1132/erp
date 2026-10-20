@@ -5352,6 +5352,25 @@
             "description": "客户名筛选"
           },
           {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "产品名称/条码关键字筛选",
+              "title": "Product"
+            },
+            "description": "产品名称/条码关键字筛选"
+          },
+          {
             "name": "process_status",
             "in": "query",
             "required": false,
@@ -7359,7 +7378,7 @@
           "库存管理"
         ],
         "summary": "Delete Stockin",
-        "description": "删除入库记录。\n\nArgs:\n    stockin_id: 入库记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "删除入库记录。\n\nArgs:\n    stockin_id: 入库记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    StockActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 入库记录不存在时抛出 404（含跨厂被闸门拦截的同码场景）。",
         "operationId": "delete_stockin_api_v1_stock_in_delete__stockin_id__delete",
         "parameters": [
           {
@@ -12358,7 +12377,7 @@
           "辅助接口"
         ],
         "summary": "Delete Stockout Api",
-        "description": "删除出库记录（API方式）",
+        "description": "删除出库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）。\n\nRaises:\n    HTTPException: 出库记录不存在（或跨厂被闸门拦截）时抛出 404。",
         "operationId": "delete_stockout_api_api_v1_aux_stockout__id__delete",
         "parameters": [
           {
@@ -12401,7 +12420,7 @@
           "辅助接口"
         ],
         "summary": "Delete Stockin Api",
-        "description": "删除入库记录（API方式）",
+        "description": "删除入库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）。\n\nRaises:\n    HTTPException: 入库记录不存在（或跨厂被闸门拦截）时抛出 404。",
         "operationId": "delete_stockin_api_api_v1_aux_stockin__id__delete",
         "parameters": [
           {
@@ -12572,7 +12591,7 @@
           "辅助接口"
         ],
         "summary": "Batch Submit Stockins",
-        "description": "批量提交入库",
+        "description": "批量提交入库（厂绑定用户先过逐项工厂闸门，2026-10-19 OCR 第三轮 H1）",
         "operationId": "batch_submit_stockins_api_v1_aux_batch_submit_stockins_post",
         "requestBody": {
           "content": {
@@ -12614,7 +12633,7 @@
           "辅助接口"
         ],
         "summary": "Batch Submit Stockouts",
-        "description": "批量提交出库",
+        "description": "批量提交出库（厂绑定用户先过逐项工厂闸门，2026-10-19 OCR 第三轮 H1）",
         "operationId": "batch_submit_stockouts_api_v1_aux_batch_submit_stockouts_post",
         "requestBody": {
           "content": {
@@ -23309,6 +23328,7 @@
               "$ref": "#/components/schemas/BatchStockInItem"
             },
             "type": "array",
+            "maxItems": 500,
             "title": "Stockins"
           }
         },
@@ -23380,6 +23400,7 @@
               "$ref": "#/components/schemas/BatchStockOutItem"
             },
             "type": "array",
+            "maxItems": 500,
             "title": "Stockouts"
           }
         },
@@ -26185,6 +26206,17 @@
             "type": "string",
             "title": "End Date",
             "default": ""
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "progress",
+              "history"
+            ],
+            "title": "Scope",
+            "description": "导出统计口径：all=全部 / progress=未完成 / history=已完成",
+            "default": "all"
           }
         },
         "type": "object",
