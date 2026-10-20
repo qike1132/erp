@@ -18,6 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from zipfile import BadZipFile
 
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -431,6 +432,27 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
+async def _case_movement_exists(
+    db: AsyncSession, *, case_id: int, direction: str, movement_date: datetime,
+    quantity: int, customer: str,
+) -> bool:
+    """P1-12：皮套导入的行级业务幂等（不依赖文件字节哈希）。
+
+    键 = (皮套, 方向, 日期, 数量, 客户)；Excel 重存后字节变化仍能命中原行，
+    阻止重叠行重复入/出仓。并发导入的竞态窗口由后续 DB 部分唯一索引跟进。
+    """
+    result = await db.execute(
+        select(CaseMovement.id).where(
+            CaseMovement.case_id == case_id,
+            CaseMovement.direction == direction,
+            CaseMovement.movement_date == movement_date,
+            CaseMovement.quantity == quantity,
+            CaseMovement.customer == customer,
+        ).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
     """批量导入皮套出库（骨架见 :func:`_run_sheet_rows`）。"""
     from fastapi_app.services.batch_service import find_case_locked
@@ -470,6 +492,11 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
             ):
                 return False, reason
             movement_date = parse_date_value(stockout_date_val) or datetime.now(UTC)
+            if await _case_movement_exists(
+                db, case_id=case.id, direction='out', movement_date=movement_date,
+                quantity=qty, customer=customer,
+            ):
+                return False, '重复行：同一皮套/日期/数量/客户的出库记录已存在，已跳过'
             movement_no = await generate_case_stockout_number(db)
             db.add(CaseMovement(
                 case_id=case.id, direction='out', movement_no=movement_no,
@@ -523,6 +550,11 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                 return False, case_err
             case = _require_not_none(case, '皮套查询')
             stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：movement_date 列为 timestamptz
+            if await _case_movement_exists(
+                db, case_id=case.id, direction='in', movement_date=stockin_date,
+                quantity=qty, customer=customer,
+            ):
+                return False, '重复行：同一皮套/日期/数量/客户的入库记录已存在，已跳过'
             movement_no = await generate_case_stockin_number(db)
             db.add(CaseMovement(
                 case_id=case.id, direction='in', movement_no=movement_no,
