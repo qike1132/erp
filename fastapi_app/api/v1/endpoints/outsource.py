@@ -132,7 +132,9 @@ async def batch_create_process_types(
     user: User = Depends(require_permission("outsource_manage")),
 ) -> GenerateProcessResponse:
     """为一个 SKU 批量添加多个工序预设（自由输入工序名称，幂等去重）。"""
-    async with db_transaction(db):
+    async with db_transaction(db, error_map={
+        IntegrityError: (409, '该产品已存在同名工序，请刷新后重试'),
+    }):
         result = await outsource_service.batch_create_process_types(
             db, product_id=data.product_id,
             process_types=data.process_types, username=user.username,

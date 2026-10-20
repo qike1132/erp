@@ -13,6 +13,8 @@ from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 from fastapi_app.services.outsource_service import (
     batch_create_process_types,
@@ -1459,4 +1461,83 @@ class TestSyncOrdersForProduct:
                 assert '转印' not in procs
         finally:
             await engine.dispose()
+
+
+class TestProcessTypeUniqueConflict:
+    """工序预设唯一约束冲突 → 409（审计 #6）
+
+    (product_id, process_type) 上有唯一约束 uq_outsource_pt_product_process。
+    服务层「先查后插」是 TOCTOU：并发插入时约束在 flush 处抛 IntegrityError。
+    端点若不把它映射成 409，用户看到的是 500（服务器故障），而实际只是
+    「有人同时加了同名工序」，刷新即可。
+    """
+
+    @staticmethod
+    def _conflicting_db(mock_async_db):
+        """构造 flush 时抛唯一约束冲突的会话"""
+        mock_async_db.flush = AsyncMock(side_effect=IntegrityError(
+            'INSERT INTO outsource_process_type',
+            params=None,
+            orig=Exception('uq_outsource_pt_product_process'),
+        ))
+        return mock_async_db
+
+    @staticmethod
+    def _product():
+        product = MagicMock()
+        product.id = 1
+        product.name = '测试产品'
+        return product
+
+    @pytest.mark.asyncio
+    async def test_batch_create_maps_conflict_to_409(self, mock_async_db, mock_user):
+        """批量创建：并发插入撞唯一约束 → 409，不是 500"""
+        from fastapi_app.api.v1.endpoints import outsource as outsource_ep
+
+        db = self._conflicting_db(mock_async_db)
+        db.get = AsyncMock(return_value=self._product())
+        existing = MagicMock()
+        existing.all.return_value = []
+        db.execute = AsyncMock(return_value=existing)
+
+        data = outsource_ep.ProcessTypeBatchCreate(product_id=1, process_types=['电绣'])
+        with pytest.raises(HTTPException) as exc:
+            await outsource_ep.batch_create_process_types(data, db, mock_user)
+
+        assert exc.value.status_code == 409, f'应返回 409，实际 {exc.value.status_code}'
+        assert '已存在同名工序' in str(exc.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_create_maps_conflict_to_409(self, mock_async_db, mock_user):
+        """单条创建：并发插入撞唯一约束 → 409"""
+        from fastapi_app.api.v1.endpoints import outsource as outsource_ep
+
+        db = self._conflicting_db(mock_async_db)
+        db.get = AsyncMock(return_value=self._product())
+        dup = MagicMock()
+        dup.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=dup)
+
+        data = outsource_ep.ProcessTypeCreate(product_id=1, process_type='电绣')
+        with pytest.raises(HTTPException) as exc:
+            await outsource_ep.create_process_type(data, db, mock_user)
+
+        assert exc.value.status_code == 409, f'应返回 409，实际 {exc.value.status_code}'
+
+    @pytest.mark.asyncio
+    async def test_update_maps_conflict_to_409(self, mock_async_db, mock_user):
+        """改名：撞上其他行同名约束 → 409"""
+        from fastapi_app.api.v1.endpoints import outsource as outsource_ep
+
+        db = self._conflicting_db(mock_async_db)
+        db.get = AsyncMock(return_value=make_preset(product_id=1, process_type='电绣'))
+        dup = MagicMock()
+        dup.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=dup)
+
+        data = outsource_ep.ProcessTypeUpdate(process_type='转印')
+        with pytest.raises(HTTPException) as exc:
+            await outsource_ep.update_process_type(1, data, db, mock_user)
+
+        assert exc.value.status_code == 409, f'应返回 409，实际 {exc.value.status_code}'
 
