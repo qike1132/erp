@@ -163,8 +163,29 @@ class TestMaterialForm:
 class TestBackupForm:
     @pytest.mark.asyncio
     async def test_backup_list(self, client, auth_headers):
+        """/api/v1/backup 的路由级依赖刻意是 fail-closed strict（router.py:283）：
+        Redis 客户端不可用且本地撤销缓存未命中时，**合法令牌**也一律 401。
+
+        测试进程不跑 app lifespan → ``redis_cache.init_app()`` 从未执行 →
+        ``get_client()`` 恒为 None → 必然落到 fail-closed 分支（生产 Redis 正常时
+        是 200）。两种环境下的正确结局不同，故按客户端可用性分别断言：既守住
+        「无 Redis 必须 fail-closed」，也守住「Redis 可用时合法令牌读得到」。
+        """
+        from fastapi_app.core.redis_wrapper import get_client
+
         resp = await client.get("/api/v1/backup/list", headers=auth_headers)
-        assert resp.status_code == 200
+        if get_client() is None:
+            assert resp.status_code == 401, (
+                f"Redis 客户端不可用时路由级 strict 依赖必须 fail-closed 401，实际 {resp.status_code}"
+            )
+        else:
+            assert resp.status_code == 200, f"合法令牌应可读备份列表，实际 {resp.status_code}"
+
+    @pytest.mark.asyncio
+    async def test_backup_list_requires_auth(self, client):
+        """备份列表必须鉴权：无令牌一律 401（防止路由级鉴权闸门被误删）。"""
+        resp = await client.get("/api/v1/backup/list")
+        assert resp.status_code == 401, f"无令牌应被拒绝，实际 {resp.status_code}"
 
 
 class TestReportForm:
