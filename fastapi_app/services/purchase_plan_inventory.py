@@ -28,7 +28,15 @@ INVENTORY_CACHE_PREFIX = 'inventory'
 INVENTORY_CACHE_TTL = 300
 
 
-async def _get_inventory_map(db: AsyncSession) -> dict:
+class InventoryMap(dict):
+    """库存映射；``degraded=True`` 表示查询超时/失败、值为不可信的空降级结果。"""
+
+    def __init__(self, *args, degraded: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.degraded = degraded
+
+
+async def _get_inventory_map(db: AsyncSession) -> InventoryMap:
     """
     获取库存查找字典 key=(customer_name, product_name) value=total_stock
     优先从 Redis 缓存读取，缓存未命中则查询 stock_service
@@ -36,18 +44,19 @@ async def _get_inventory_map(db: AsyncSession) -> dict:
     """
     cached = await safe_get(f'{INVENTORY_CACHE_PREFIX}:map', context='库存映射缓存')  # sql-safe: escape_like/绑定参数/常量片段
     if cached is not None:
-        return {tuple(json.loads(k)): v for k, v in cached.items()}
+        return InventoryMap({tuple(json.loads(k)): v for k, v in cached.items()})
     try:
         async with asyncio.timeout(8):
             from fastapi_app.services import stock_service
             inventory_result = await stock_service.get_inventory(db)
         mapping = build_inventory_map(inventory_result['inventory_data'])
     except TimeoutError:
+        # Z02-R6：降级结果必须可识别，响应层透出 inventory_degraded，前端据此提示
         logger.error('库存查询超时(8s)，返回空映射降级')
-        return {}
+        return InventoryMap(degraded=True)
     except (ValueError, TypeError, OSError) as e:
         logger.warning(f'获取库存数据失败: {e}')
-        return {}
+        return InventoryMap(degraded=True)
     cacheable = {json.dumps(k): v for k, v in mapping.items()}
     await safe_set(f'{INVENTORY_CACHE_PREFIX}:map', cacheable, timeout=INVENTORY_CACHE_TTL, context='库存映射缓存')  # sql-safe: escape_like/绑定参数/常量片段
-    return mapping
+    return InventoryMap(mapping)

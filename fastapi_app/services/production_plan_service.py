@@ -67,7 +67,8 @@ async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **k
     if not plan:
         raise ValueError('排产计划不存在')
     old_data = plan.to_dict()
-    for field in ('customer_name', 'product_name', 'barcode', 'quantity', 'plan_date', 'status', 'remark', 'shipped_qty'):
+    # shipped_qty 是出货派生字段，只能由出货链路 recalc 维护，更新入口不得写入
+    for field in ('customer_name', 'product_name', 'barcode', 'quantity', 'plan_date', 'status', 'remark'):
         if field in kwargs and kwargs[field] is not None:
             if field == 'plan_date':
                 plan.plan_date = normalize_plan_date(kwargs[field])

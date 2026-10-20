@@ -148,9 +148,17 @@ async def get_task_status(
     if status == "NOT_FOUND":
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或已过期")
 
+    # Z06-R4：导出任务带归属前缀，非本人一律 404（与 download 端点同口径）；
+    # 其余历史任务保持可查，但响应中剔除服务器内部路径（file_path 仅下载端点内部使用）。
+    if task_id.startswith('exp-u') and not task_id.startswith(f'exp-u{current_user.id}-'):
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或已过期")
+
     response = TaskStatusResponse(task_id=task_id, status=status)
     if result is not None:
-        response.result = result if isinstance(result, dict) else {"value": result}
+        payload = result if isinstance(result, dict) else {"value": result}
+        if isinstance(payload, dict):
+            payload = {k: v for k, v in payload.items() if k not in ('file_path', 'filepath', 'path')}
+        response.result = payload
     return response
 
 

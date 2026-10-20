@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.core.cache import CacheDomain, cache_result
-from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+from fastapi_app.core.cache_invalidation import (
+    InvalidationStrategy,
+    cache_mgr,
+    schedule_post_commit_invalidation,
+)
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.core.state_machine import can_transition
@@ -61,6 +65,14 @@ from fastapi_app.shared_models import (
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 logger = logging.getLogger(__name__)
+
+
+async def _invalidate_order_domains() -> None:
+    """失效订单/库存与报表域缓存（提交前后共用；与 commands.py 同口径）。"""
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+    )
 
 
 
@@ -311,10 +323,13 @@ async def update_deduct_quantity(
     # 更新订单状态（抵扣量已落地，状态派生与实际一致）
     order.status = await compute_order_status_from_db(db, order)
 
-    await cache_mgr.invalidate(
-        InvalidationStrategy.DOMAIN,
-        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
-    )
+    # 对齐 commands.py 标准模式（Z01-R2）：提交前失效广覆盖 + 提交后二次失效兜底，
+    # 且缓存基础设施异常只降级告警，不得打断抵扣修改事务。
+    try:
+        await _invalidate_order_domains()
+    except INFRA_EXCEPTIONS as e:
+        logger.warning('缓存清除失败: %s', e)
+    schedule_post_commit_invalidation(db, _invalidate_order_domains)
     await _safe_invalidate_purchase_cache()
 
     logger.info(f'订单抵扣修改：{order.order_no}，{current_deduct}->{actual_deduct}，操作人：{current_user.username}')

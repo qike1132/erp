@@ -351,12 +351,14 @@ def encrypt_stream(
             written += len(block)
             idx += 1
 
-    if idx != chunk_count or written != total_size:
-        raise BackupFileError(
-            f'加密时明文长度与声明不符（声明 {total_size} B，实读 {written} B，'
-            f'块数 {idx}/{chunk_count}）——源文件被并发改动？',
-            code='BACKUP_ENCRYPT_SIZE_MISMATCH',
-        )
+        # Z07-R1：完整性校验必须在 atomic_output 的 with 块内完成——放在块外时
+        # os.replace 已把坏密文落到正式文件名，抛异常也收不回上一个好备份。
+        if idx != chunk_count or written != total_size:
+            raise BackupFileError(
+                f'加密时明文长度与声明不符（声明 {total_size} B，实读 {written} B，'
+                f'块数 {idx}/{chunk_count}）——源文件被并发改动？',
+                code='BACKUP_ENCRYPT_SIZE_MISMATCH',
+            )
 
     return {
         'encryption_mode': 'chunked-v1',

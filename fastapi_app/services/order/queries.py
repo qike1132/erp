@@ -180,7 +180,8 @@ async def _fetch_orders_page(db: AsyncSession, query, conditions: list,
         return orders
     logger.debug("keyset分页返回空，fallback到OFFSET分页")
     result = await db.execute(
-        query.order_by(Order.order_date.desc())
+        # 与主路径/keyset 路径同口径：(order_date, id) 双键，避免同秒订单跨页乱序
+        query.order_by(Order.order_date.desc(), Order.id.desc())
         .offset(offset)
         .limit(per_page)
     )

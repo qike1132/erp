@@ -44,7 +44,22 @@ class TestTasksEndpoints:
                 data = response.json()
                 assert data["status"] == "SUCCESS"
                 assert data["result"] is not None
-                assert data["result"]["file_path"] == "/tmp/export.xlsx"  # noqa: S108 - mock 返回值断言，非真实文件操作
+                # Z06-R4：状态响应不得泄露服务器内部路径（下载端点内部仍可用）
+                assert "file_path" not in data["result"]
+                assert data["result"]["filename"] == "export.xlsx"
+
+    @pytest.mark.asyncio
+    async def test_task_status_rejects_other_users_export(self, client):
+        """导出任务 job_id 带 exp-u{uid}- 前缀，查他人任务一律 404。"""
+        with patch(
+            "fastapi_app.api.v1.endpoints.tasks._job_status",
+            new=AsyncMock(return_value=("SUCCESS", {"filename": "x.xlsx"})),
+        ):
+            with patch("fastapi_app.api.v1.endpoints.tasks._get_arq_job", new=AsyncMock()):
+                denied = await client.get("/api/v1/tasks/status/exp-u999-abc")
+                assert denied.status_code == 404
+                allowed = await client.get("/api/v1/tasks/status/exp-u1-abc")
+                assert allowed.status_code == 200
 
     @pytest.mark.asyncio
     async def test_task_status_failed_task(self, client):

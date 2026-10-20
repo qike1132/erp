@@ -59,9 +59,10 @@ async def test_health_check_runner_is_callable():
         assert len(result) == 2
         check_result, _issues = result
         assert 'status' in check_result
-    except (TimeoutError, OSError):
-        # 数据库不可用是允许的（开发环境无DB），验证函数能被await即可
-        pass
+    except (TimeoutError, OSError) as e:
+        # Z09-R1：不得用裸 pass 吞掉——健康检查超时/连接异常正是它应当暴露的失效场景。
+        # 本机为生产主机，DB 通常在线；仅在显式无库环境跳过并留下可见记录。
+        pytest.skip(f'数据库不可达，跳过可 await 语义验证: {e}')
 
 
 def test_no_deprecated_get_event_loop_in_backup_service():

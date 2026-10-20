@@ -221,7 +221,9 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list, operator_
         # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
         from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
         schedule_auto_generate_purchase_orders(db)
-    return {'success': True, 'results': results}
+    # Z03-R3：顶层 success 与批量出库的 all_success 对齐，部分失败不再误报成功
+    all_success = all(isinstance(r, dict) and r.get('success') for r in results)
+    return {'success': all_success, 'results': results}
 
 
 # 底部引入 stock_service 以提供命名空间解析（延迟到调用期，避免循环依赖）

@@ -13,7 +13,6 @@ from fastapi_app.services.material_registration._commands import (  # noqa: F401
     update_registration,
 )
 from fastapi_app.services.material_registration._export import (  # noqa: F401
-    _sanitize_xlsx_formula,
     export_registrations,
 )
 from fastapi_app.services.material_registration._queries import (  # noqa: F401

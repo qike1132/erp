@@ -70,7 +70,7 @@ async def _create_material_registration(
     return registration
 
 
-async def create_purchase_order(db: AsyncSession, data: dict, include_summary: bool = False, _auto_commit: bool = True) -> dict:
+async def create_purchase_order(db: AsyncSession, data: dict, include_summary: bool = False) -> dict:
     items = data.get('items', [])
     if not items:
         raise ValueError('采购订单至少需要一条明细')

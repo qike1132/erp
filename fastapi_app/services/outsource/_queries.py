@@ -290,9 +290,12 @@ async def list_shippable_processes(db: AsyncSession) -> list[dict]:
             shipped_qty.label('shipped_qty'),
         )
         .join(Order, Order.id == OrderOutsourceProcess.order_id)
+        .join(Product, Product.id == OrderOutsourceProcess.product_id)
         .outerjoin(OrderItem, OrderItem.id == OrderOutsourceProcess.order_item_id)
         .where(
             Order.is_deleted.isnot(True),
+            # Z03-R7：与 docstring / list_unshipped_processes 对齐，只聚合湖北 SKU
+            Product.factory == '湖北',
             shipped_qty < target_qty,
         )
         .order_by(

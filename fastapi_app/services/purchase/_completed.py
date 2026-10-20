@@ -141,7 +141,8 @@ async def _fetch_completed_items_and_arrived(db: AsyncSession, order_ids: list[i
 
 def _serialize_completed_item(item, arrived_map: dict) -> dict:
     required = int(item.quantity or 0)
-    key = (item.material_name, item.material_code)
+    # 与 arrived_map 构建侧同构归一（material_code 可空 → ''），否则 NULL 明细永远查不中
+    key = (item.material_name, item.material_code or '')
     arrived = arrived_map.get(key, 0)
     return {
         **_serialize_po_item(item),

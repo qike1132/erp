@@ -27,7 +27,7 @@ class ProductionPlanUpdate(BaseModel):
     plan_date: str | None = Field(None, description="计划日期 (YYYY-MM-DD)")
     status: str | None = Field(None, description="状态: pending/confirmed/completed")
     remark: str | None = Field(None, max_length=500, description="备注")
-    shipped_qty: int | None = Field(None, ge=0, description="已出货数量")
+    # shipped_qty 是出货链派生字段，不属于更新白名单（API 直改会破坏与出货流水的一致性）
 
 
 # ==================== 响应模型 ====================

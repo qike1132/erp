@@ -234,7 +234,12 @@ class TestUserService:
 
         with patch('fastapi_app.core.security.hash_password', return_value='hashed'):
             await create_user(mock_db, "newuser", "Test123!@", False)
-        assert mock_db.add.called
+        # Z09-R2：断言被 add 的用户字段（漏设 password/status 等错误会被抓住）
+        added = mock_db.add.call_args.args[0]
+        assert added.username == "newuser"
+        assert added.password == "hashed"
+        assert added.is_super is False
+        assert added.status is True
         assert mock_db.flush.called
 
     @pytest.mark.asyncio
@@ -348,7 +353,10 @@ class TestUserService:
         mock_db.scalar = AsyncMock(return_value=0)
 
         await delete_user(mock_db, 1)
-        assert mock_db.delete.called
+        # Z09-R2：校验删除目标就是查出的用户，而不是任意对象
+        from fastapi_app.shared_models import User
+        mock_db.get.assert_awaited_once_with(User, 1)
+        mock_db.delete.assert_awaited_once_with(mock_user)
         assert mock_db.flush.called
 
     @pytest.mark.asyncio

@@ -95,7 +95,7 @@ async def api_create_purchase_order(
     """
     try:
         async with db_transaction(db):
-            result = await svc.create_purchase_order(db, data.model_dump(), include_summary=False, _auto_commit=False)
+            result = await svc.create_purchase_order(db, data.model_dump(), include_summary=False)
         await _invalidate_orders_cache()
         # 手动创建的 PO 可能设置 source_order_ids，需失效未处理列表 + processed_ids 缓存
         await _invalidate_unprocessed_cache()

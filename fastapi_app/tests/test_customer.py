@@ -77,8 +77,16 @@ class TestCustomerService:
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        await create_customer(mock_db, "新客户", "张三", "138", "地址", "备注")
-        assert mock_db.add.called
+        created = await create_customer(mock_db, "新客户", "张三", "138", "地址", "备注")
+        # Z09-R2：断言被 add 的对象内容，而非只证明 add 被调用过
+        added = mock_db.add.call_args.args[0]
+        assert added is created
+        assert added.name == "新客户"
+        assert added.contact == "张三"
+        assert added.phone == "138"
+        assert added.address == "地址"
+        assert added.note == "备注"
+        assert added.status is True
 
     @pytest.mark.asyncio
     async def test_create_customer_duplicate(self, mock_db, mock_customer):

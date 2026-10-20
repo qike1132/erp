@@ -12,16 +12,9 @@ from sqlalchemy.orm import selectinload
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.material_registration._queries import _parse_filter_date
 from fastapi_app.shared_models import MaterialRegistration, MaterialRegistrationItem, PurchaseOrder
+from utils.report_exporter import _sanitize_excel_value
 
 logger = logging.getLogger(__name__)
-
-
-def _sanitize_xlsx_formula(val: str) -> str:
-    """防 xlsx 公式注入：以 =+-@ 开头的字符串前置撇号（供 merge_range 使用，
-    其内部按 write 语义会将 '=' 开头字符串当公式执行）"""
-    if val and val[0] in '=+-@':
-        return "'" + val
-    return val
 
 def _apply_export_scope(query, scope: str):
     """P1-25：按页面 tab 口径过滤导出数据（history=已完成 / progress=未完成）。"""
@@ -113,7 +106,7 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
                 text_val = str(val)
                 if span > 1:
                     ws.merge_range(row, col, row + span - 1, col,
-                                   _sanitize_xlsx_formula(text_val), cell_fmt)
+                                   _sanitize_excel_value(text_val), cell_fmt)
                 else:
                     ws.write_string(row, col, text_val, cell_fmt)
 

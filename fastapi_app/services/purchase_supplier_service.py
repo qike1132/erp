@@ -276,19 +276,20 @@ async def delete_supplier(db: AsyncSession, supplier_id: int) -> dict:
     if not supplier:
         raise ValueError('供应商不存在')
 
-    # 单次查询检查所有关联表，避免 4 次串行往返
+    # 单次查询检查所有关联表，避免 5 次串行往返（Z02-R7：补来料登记引用）
     exists_check = await db.execute(
         select(
             exists().where(ProductMaterial.supplier_id == supplier_id),
             exists().where(ProductFabric.supplier_id == supplier_id),
             exists().where(ProductAccessory.supplier_id == supplier_id),
             exists().where(PurchaseOrder.supplier_id == supplier_id),
+            exists().where(MaterialRegistration.supplier_id == supplier_id),
         )
     )
-    has_material, has_fabric, has_accessory, has_order = exists_check.one()
+    has_material, has_fabric, has_accessory, has_order, has_registration = exists_check.one()
 
-    if has_material or has_fabric or has_accessory or has_order:
-        raise ValueError('该供应商已有相关BOM或采购订单数据，无法删除')
+    if has_material or has_fabric or has_accessory or has_order or has_registration:
+        raise ValueError('该供应商已有相关BOM、采购订单或来料登记数据，无法删除')
 
     await db.delete(supplier)
     await db.flush()

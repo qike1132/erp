@@ -8,7 +8,6 @@
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
 """
 import calendar
-import os
 from collections.abc import Sequence
 from datetime import date, datetime
 
@@ -31,9 +30,6 @@ from fastapi_app.shared_models import (
 
 # 出货记录查询回溯月数（S9: 提取为常量便于统一调整）
 SHIPMENT_RECORD_LOOKBACK_MONTHS = 12
-
-# 出货记录查询条数上限（P3: 从环境变量读取，便于调优）
-_QUERY_LIMIT = int(os.getenv('PURCHASE_QUERY_LIMIT', '500'))
 
 # 产品未标工厂（product.factory IS NULL）时的归集桶名。
 # 前端「工厂」筛选与日历构成条都以它作为一个独立取值，避免这类行在按厂拆分时凭空消失。
@@ -96,7 +92,7 @@ async def get_plan_detail(db: AsyncSession, plan_id: int) -> dict:
         detail_dict['stock_status'] = _calc_stock_status(d.quantity, inv_qty)
         detail_dict['shipment_status'] = calc_shipment_status(d.quantity, shp_qty)
         detail_list.append(detail_dict)
-    return {'plan': plan.to_dict(), 'details': detail_list}
+    return {'plan': plan.to_dict(), 'details': detail_list, 'inventory_degraded': inventory_map.degraded}
 
 async def get_shipment_progress(db: AsyncSession, plan_id: int) -> dict:
     """获取指定计划的出货进度"""
@@ -179,8 +175,9 @@ async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> li
             StockOut.customer != '',
             StockOut.stockout_date >= date_limit,
         ))
+        # Z02-R5：回溯窗口（12 个月）已天然有界，原先 500 条静默截断会低估已发数量，
+        # 进而让订单余量/采购计划偏高——去掉硬上限，与 docstring「所有相关出货记录」一致。
         .order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
-        .limit(_QUERY_LIMIT)
     )
     seen = set()
     out: list[dict] = []
@@ -370,7 +367,7 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
         s['remaining_qty'] += ps['remaining_qty']
         if ps['warning']:
             s['warning_count'] += 1
-    return {'customers': list(summary.values()), 'total_plan_qty': sum(s['plan_qty'] for s in summary.values()), 'total_inventory_qty': sum(s['inventory_qty'] for s in summary.values()), 'total_shipped_qty': sum(s['shipped_qty'] for s in summary.values()), 'total_remaining_qty': sum(s['remaining_qty'] for s in summary.values()), 'warning_count': sum(s['warning_count'] for s in summary.values()), 'fifo_degraded': fifo_degraded}
+    return {'customers': list(summary.values()), 'total_plan_qty': sum(s['plan_qty'] for s in summary.values()), 'total_inventory_qty': sum(s['inventory_qty'] for s in summary.values()), 'total_shipped_qty': sum(s['shipped_qty'] for s in summary.values()), 'total_remaining_qty': sum(s['remaining_qty'] for s in summary.values()), 'warning_count': sum(s['warning_count'] for s in summary.values()), 'fifo_degraded': fifo_degraded, 'inventory_degraded': inventory_map.degraded}
 
 
 # 星期缩写（与前端 WDS 对齐，index by JS getDay(): Sunday=0..Saturday=6）
@@ -676,7 +673,8 @@ async def get_monthly_aggregated(db: AsyncSession, year: int, month: int, custom
     return {
         'year': year, 'month': month, 'days_in_month': days_in_month,
         'rows': rows_list, 'sku_summary': sku_summary, 'sku_date_index': sku_date_index,
-        'customers': customers, 'customer_totals': customer_totals, 'fifo_degraded': fifo_degraded,
+        'customers': customers, 'customer_totals': customer_totals,
+        'fifo_degraded': fifo_degraded, 'inventory_degraded': inventory_map.degraded,
     }
 
 
@@ -695,4 +693,4 @@ async def get_inventory_compare(db: AsyncSession, year: int, month: int, custome
             key = (plan.customer_name, d.product_name)
             inv_qty = inventory_map.get(key, 0)
             compare_list.append({'detail_id': d.id, 'product_id': d.product_id, 'product_name': d.product_name, 'barcode': d.barcode, 'customer_name': plan.customer_name, 'plan_qty': d.quantity, 'inventory_qty': inv_qty, 'diff': d.quantity - inv_qty, 'stock_status': _calc_stock_status(d.quantity, inv_qty)})
-    return {'details': compare_list}
+    return {'details': compare_list, 'inventory_degraded': inventory_map.degraded}

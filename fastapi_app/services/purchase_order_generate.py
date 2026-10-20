@@ -499,7 +499,7 @@ async def one_click_generate_order(
         'source_order_ids': source_ids_json,
         'product_name': product_name,
         'product_quantity': product_quantity,
-    }, include_summary=False, _auto_commit=False)
+    }, include_summary=False)
 
     return {'orders': [order], 'count': 1}
 

@@ -20,7 +20,8 @@ Web Vitals 监控端点 - 接收并持久化前端真实用户体验指标
 **未认证端点的防护**
 --------------------
 sendBeacon 无法携带 auth header，故本端点按设计不认证。写入侧因此自带三层
-防护，**不依赖全局限流**（`core/limiter.py` 中 `enabled=False`，内网环境全站关闭）：
+防护，**不依赖全局限流**（限流由 `RATE_LIMIT_ENABLED` 控制，默认开启；本端点
+的 30/minute 限制实际生效）：
 
 1. 单请求批次上限 `_MAX_BATCH`；
 2. 保留期清理 `_RETENTION_DAYS`，进程内节流至 `_CLEANUP_INTERVAL_SECONDS` 一次；

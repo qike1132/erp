@@ -359,7 +359,6 @@ def cache_result(
     ttl: int = 60,
     local_ttl: int = 30,
     key_builder: Callable | None = None,
-    serialize: bool = True,
 ):
     """
     缓存装饰器 - 支持 L1(内存) + L2(Redis) 两级缓存
