@@ -43,9 +43,9 @@ def taskkill_many(pids, force=True, tree=True):
         for pid in pids[i:i + 40]:
             cmd += ['/PID', pid]
         cmd = [c for c in cmd if c]
-        try:
+        try:  # noqa: SIM105 — 清理失败不应阻断后续清理
             subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW, capture_output=True, timeout=30)
-        except Exception:
+        except Exception:  # noqa: S110 — 同上，逐项清理 best-effort
             pass
 
 def is_prod_runner_cmdline(cmdline):
@@ -96,7 +96,7 @@ def collect_process_tree(root_pid):
             if line.isdigit() and int(line) != root_pid:
                 pids.extend(collect_process_tree(int(line)))
                 pids.append(int(line))
-    except Exception:
+    except Exception:  # noqa: S110 — 进程枚举失败按空结果处理
         pass
     return pids
 
@@ -113,7 +113,7 @@ def find_port_pids(port, exclude=None):
             if len(parts) >= 5 and ':' in parts[1] and parts[1].rsplit(':', 1)[-1] == str(port) and parts[-1].isdigit() and int(parts[-1]) > 0:
                 if parts[-1] not in exclude:
                     pids.add(parts[-1])
-    except Exception:
+    except Exception:  # noqa: S110 — netstat 不可用时按空结果处理
         pass
     return list(pids)
 
@@ -190,7 +190,7 @@ def kill_process_tree(pid):
             except Exception:
                 with contextlib.suppress(Exception):
                     os.kill(pid, signal.SIGTERM)
-    except Exception:
+    except Exception:  # noqa: S110 — kill 失败由上层汇总
         pass
 
 
@@ -214,9 +214,17 @@ def find_loose_prod_runner_pids(exclude=()):
                 continue
             if is_prod_runner_cmdline(' '.join(proc.info.get('cmdline') or [])):
                 pids.append(pid)
-        except Exception:
+        except Exception:  # noqa: S112 — 单进程读取失败继续扫描
             continue
     return pids
+
+
+# F3-10：只有「运行时」进程才可能是本项目的残留；编辑器/终端/explorer 的命令行
+# 里出现项目路径是常态，按路径裸匹配会误杀它们。
+_RESIDUAL_PROCESS_NAMES = {
+    'python', 'python.exe', 'pythonw', 'pythonw.exe',
+    'py', 'py.exe', 'node', 'node.exe', 'uvicorn', 'uvicorn.exe',
+}
 
 
 def find_project_residual_pids(project_dir, exclude=()):
@@ -241,6 +249,9 @@ def find_project_residual_pids(project_dir, exclude=()):
             pid = proc.info.get('pid')
             if not pid or pid in exclude:
                 continue
+            proc_name = str(proc.info.get('name') or '').lower()
+            if proc_name not in _RESIDUAL_PROCESS_NAMES:
+                continue
             cmdline = ' '.join(proc.info.get('cmdline') or []).lower().replace('/', '\\')
             matched = project in cmdline
             if not matched:
@@ -248,7 +259,7 @@ def find_project_residual_pids(project_dir, exclude=()):
                     matched = project in str(proc.cwd()).lower().replace('/', '\\')
             if matched:
                 pids.append(pid)
-        except Exception:
+        except Exception:  # noqa: S112 — 单进程读取失败继续扫描
             continue
     return pids
 
