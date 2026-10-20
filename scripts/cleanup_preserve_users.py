@@ -1,8 +1,14 @@
 """
-数据清理脚本 - 保留用户管理数据，清除其他所有数据
+数据清理脚本 - 保留用户管理数据，清除其他所有数据（已弃用）
 
 保留: user, permission, user_permission
 清除: 所有其他数据库表、Redis缓存、日志文件、临时文件、文件缓存
+
+⚠️ 2026-10-17 审计 P1-35：CLEAR_TABLES_ORDERED 与 ORM metadata 漂移（漏板房 7 张、
+湖北外发 5 张、notification / numbering_counter 等），而 verify() 只校验自己的清单，
+仍会打印「其他数据已彻底清除」。上线清库请改用 ``scripts/purge_simulated_data.py``
+（pg_dump 备份 + 保留表指纹复核 + 真 dry-run + 写护栏）。确需运行本脚本须显式加
+``--allow-deprecated-clear``。
 
 （`device_token` / `product_packaging` 是 ORM 已删除的历史表，已由迁移
  pg_standalone_054 删除，本脚本不再引用。）
@@ -275,6 +281,12 @@ def verify(db: Session):
 
 
 def main():
+    if '--allow-deprecated-clear' not in sys.argv:
+        print('本脚本已弃用：表清单已与 ORM 漂移，verify() 只校验自身清单。')
+        print('请改用 scripts/purge_simulated_data.py（备份+保留表复核+真 dry-run）。')
+        print('确需运行请显式加 --allow-deprecated-clear。')
+        sys.exit(2)
+
     print('=' * 70)
     print('  ERP 数据清理工具 - 保留用户管理数据')
     print('=' * 70)
@@ -293,7 +305,8 @@ def main():
 
         print('\n' + '=' * 70)
         if all_ok:
-            print('  验证通过: 用户管理数据已保留，其他数据已彻底清除')
+            print('  验证通过: 用户管理数据已保留，本脚本清单内数据已清除')
+            print('  注意: 该清单已与 ORM 漂移，不能据此断定「其他数据已彻底清除」')
         else:
             print('  验证异常: 部分清理未达预期，请检查上方输出')
         print('=' * 70)

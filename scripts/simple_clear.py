@@ -1,4 +1,10 @@
-"""简单的数据清空脚本"""
+"""简单的数据清空脚本（已弃用）。
+
+⚠️ 2026-10-17 审计 P1-35：本脚本硬编码的表清单已与 ORM metadata 漂移（漏板房 7 张、
+湖北外发 5 张、notification / numbering_counter 等），且没有写护栏与保留表校验。
+上线清库请使用 ``scripts/purge_simulated_data.py``（pg_dump 备份 + 保留表指纹复核 +
+真 dry-run + 写护栏）。确需运行本脚本须显式加 ``--allow-deprecated-clear``。
+"""
 import sys
 from pathlib import Path
 
@@ -11,6 +17,12 @@ from fastapi_app.core.config import settings
 
 
 def main():
+    if '--allow-deprecated-clear' not in sys.argv:
+        print("本脚本已弃用：表清单已与 ORM 漂移，且无写护栏/保留表校验。")
+        print("请改用 scripts/purge_simulated_data.py（备份+复核+真 dry-run）。")
+        print("确需运行请显式加 --allow-deprecated-clear。")
+        sys.exit(2)
+
     print("=" * 80)
     print("开始清空数据...")
     print("=" * 80)
