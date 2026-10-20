@@ -72,6 +72,14 @@ async def update_backup_settings(
     except BackupSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     result['success'] = True
+    # Z05-R24：这些字段仅落库展示，清理/加密实际读环境变量；保存成功必须明确提示，
+    # 否则用户会误以为 retention_days=1 已生效。
+    if any(v is not None for v in (payload.retention_days, payload.max_count, payload.encryption_mode)):
+        result['warning'] = (
+            'retention_days / max_count / encryption_mode 当前仅记录，不驱动实际行为；'
+            '清理与加密读取环境变量（BACKUP_RETENTION_DAYS / BACKUP_RETENTION_COUNT / '
+            'BACKUP_ENCRYPTION_ENABLED），修改后需重启服务生效'
+        )
     logger.info('备份设置已更新 operator=%s dir=%s', operator, result.get('backup_dir'))
     return result
 

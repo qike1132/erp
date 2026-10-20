@@ -247,31 +247,14 @@ def _decrypt_backup_data(encrypted_bytes: bytes, password: str) -> bytes:  # log
 
 
 def _is_encrypted_data(data: bytes) -> bool:
-    """
-    检查数据是否已加密
+    """检查数据是否已加密（Z05-R6：委托 core.backup_encryption 统一探测）。
 
-    2026-10-17 审计 P2-10：此前只认 meta 前缀（格式 B），而 chunked-v1 是
-    新建备份的默认格式——探针对主力格式恒返回 False。
+    覆盖 chunked-v1 魔数与 legacy 格式 B（meta 前缀）；无前缀 legacy 裸信封
+    由调用方按 ``.enc`` 扩展名提示，探测层不猜测。
     """
     try:
-        from fastapi_app.core.backup_encryption import detect_encryption_format
+        from fastapi_app.core.backup_encryption import is_encrypted_backup
 
-        if detect_encryption_format(data[:8]) == 'chunked-v1':
-            return True
+        return is_encrypted_backup(data)
     except ImportError:
-        pass
-    try:
-        # 检查是否有元数据长度前缀
-        if len(data) < 4:
-            return False
-
-        meta_len = int.from_bytes(data[:4], 'big')
-        if len(data) < 4 + meta_len:
-            return False
-
-        # 尝试解析元数据
-        meta_json = data[4:4 + meta_len]
-        meta = json.loads(meta_json.decode('utf-8'))
-        return meta.get('encrypted', False)
-    except (ValueError, TypeError, OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError, IndexError):
         return False

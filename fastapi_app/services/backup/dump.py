@@ -463,12 +463,13 @@ def _psql_import_worker(psql_args: list[str], env: dict, gz_stream, first_chunk:
         with contextlib.suppress(BrokenPipeError):
             stdin_pipe.close()
         try:
-            proc_.wait(timeout=600)
+            proc_.wait(timeout=BACKUP_OPERATION_TIMEOUT)
             result['rc'] = proc_.returncode
         except subprocess.TimeoutExpired:
             proc_.kill()
             proc_.wait()
             result['timeout'] = True
+            result['timeout_seconds'] = BACKUP_OPERATION_TIMEOUT
     finally:
         t_out.join(timeout=30)
         t_err.join(timeout=30)
@@ -508,7 +509,13 @@ async def _interpret_psql_result(result: dict, _report) -> dict:
     if 'stream_error' in result:
         return {'status': 'error', 'error': result['stream_error']}
     if result.get('timeout'):
-        return {'status': 'error', 'error': '数据库恢复超时（超过 600 秒），进程已终止'}
+        timeout_seconds = result.get('timeout_seconds', BACKUP_OPERATION_TIMEOUT)
+        return {
+            'status': 'error',
+            'message': f'数据库恢复超时（超过 {timeout_seconds} 秒），进程已终止',
+            'recovery_hint': '可使用还原前安全备份（backups/server/pre_restore/pre_restore_*.zip）恢复原数据',
+            'timeout_seconds': timeout_seconds,
+        }
 
     stderr_text = (result.get('stderr') or b'').decode(errors='replace')
     error_count = stderr_text.lower().count('error:')

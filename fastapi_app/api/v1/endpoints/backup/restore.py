@@ -726,7 +726,9 @@ async def restore_plan(
     环境变量 BACKUP_ENCRYPTION_PASSWORD —— 服务端自加密的包无需用户输密即可预览。
     """
     try:
-        manifest = restore_plan_service.read_manifest_from_backup(
+        # Z05-R10：manifest 读取（含整包解密）是同步阻塞 IO，下沉线程池
+        manifest = await asyncio.to_thread(
+            restore_plan_service.read_manifest_from_backup,
             payload.filename,
             password=_get_encryption_password(payload.password, x_backup_password),
         )

@@ -291,6 +291,7 @@ class BackupIntegrityCheckResponse(BaseModel):
     total_files: int
     valid_files: int
     invalid_files: int
+    unverified_files: int = 0
     corrupted_files: list[str] = []
     missing_files: list[str] = []
     details: list[dict[str, Any]] = []
@@ -347,6 +348,7 @@ class BackupSettingsOut(BaseModel):
     # 显式返回来源，避免调用方把表内值当成生效值。
     effective_source: str = Field(default="env", description="实际生效配置来源: env（表值仅记录，不生效）")
     effective_backup_dir: str = Field(default="", description="实际生效的备份目录(环境变量 BACKUP_DIR)")
+    warning: str | None = Field(default=None, description="保存成功但存在不生效字段时的明确提示")
 
 
 class BackupSettingsUpdate(BaseModel):

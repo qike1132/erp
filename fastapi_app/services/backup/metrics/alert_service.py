@@ -94,9 +94,9 @@ class BackupAlertService:
             # 准备告警数据
             alert_data = self._prepare_alert_data(task_name, error, task_type, severity, additional_info)
 
-            # 记录到数据库
-            await self._log_alert_to_db(alert_data)
-
+            # Z05-R21：不再把告警按任务名 LIKE 关联到 BackupRecord —— 任务名不是
+            # 文件名子串，常态 no-op；碰巧命中时还会误改最近一条无关记录的状态。
+            # 专用告警表落地前只走日志/通知通道。
             # 发送告警
             success = True
 
@@ -198,33 +198,6 @@ class BackupAlertService:
             alert_data.update(additional_info)
 
         return alert_data
-
-    async def _log_alert_to_db(self, alert_data: dict[str, Any]) -> None:
-        """记录告警到数据库"""
-        from fastapi_app.core.sanitizer import escape_like
-
-        try:
-            async with get_async_db_context() as db:
-                # 更新备份记录状态（对 task_name 做 LIKE 转义，防止 SQL 注入）
-                safe_task_name = escape_like(str(alert_data.get('task_name', '')))
-                stmt = (
-                    select(BackupRecord)
-                    .where(BackupRecord.filename.like(f"%{safe_task_name}%"))
-                    .order_by(BackupRecord.created_at.desc())
-                    .limit(1)
-                )
-                result = await db.execute(stmt)
-                record = result.scalar_one_or_none()
-
-                if record:
-                    record.status = 'failed'
-                    record.error_message = f"{alert_data['severity'].upper()}: {alert_data['error']}"
-                    await db.commit()  # manual-tx: 告警落库须独立提交，避免主事务回滚丢失 failed 标记
-
-                # 这里可以添加专门的告警记录表，暂时先记录到备份记录
-
-        except SQLAlchemyError as e:
-            logger.error(f"记录告警到数据库失败: {e}")
 
     def _log_alert(self, alert_data: dict[str, Any]) -> None:
         """记录日志告警"""

@@ -560,9 +560,9 @@ def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper �
 
     ``created_at`` 的来源是 manifest 的 ``exported_at``（见本模块 :83），两种备份口径不同：
 
-      · **全量** —— ``orchestration/core.py:365`` 的 ``datetime.now()``，**本地 naive**；
-      · **增量** —— ``incremental.py:90`` 的 ``datetime.now(UTC)``，**UTC**。
-        （原注释引用的 ``incremental.py:52`` 是**文件名**时间戳，不是这里的值。）
+      · **全量** —— ``orchestration/core.py`` 的 ``datetime.now()``，**本地 naive**；
+      · **历史增量** —— 增量模块已删除，不再产出；历史增量包曾用 ``datetime.now(UTC)``。
+        现行备份只有全量口径，下面的 UTC 偏差说明仅用于解释存量文件。
 
     本函数按 naive 本地时间解析，于是：
 

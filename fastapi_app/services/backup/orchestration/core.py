@@ -589,7 +589,8 @@ async def _do_create_full_backup(
             include_sensitive_config, progress_cb,
         )
 
-        zip_bytes = zip_path.read_bytes()
+        # Z05-R10：GB 级备份同步读取会阻塞事件循环，下沉线程池
+        zip_bytes = await asyncio.to_thread(zip_path.read_bytes)
         manifest['zip_size'] = len(zip_bytes)
         if progress_cb:
             await progress_cb('generate_checksum', 1.0, '校验和已生成')

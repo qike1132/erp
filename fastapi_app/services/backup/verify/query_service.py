@@ -182,7 +182,7 @@ async def get_merged_backup_records(
     排序：按 created_at 倒序；分页：page 从1开始。
     """
     # 1) 扫描文件系统所有备份文件（list_backup_files 已按文件名倒序排序）
-    # 延迟导入避免循环依赖：backup.__init__ → incremental → json_backup → verify → query_service
+    # 延迟导入避免循环依赖：backup.__init__ → json_backup → verify → query_service
     from fastapi_app.services.backup import list_backup_files
 
     fs_entries = list_backup_files()
@@ -227,7 +227,9 @@ async def get_merged_backup_records(
                 'encrypted': db_rec.encrypted if db_rec.encrypted is not None else fs_entry.get('encrypted'),
             })
         else:
-            # 数据库无匹配记录：从文件系统信息构建（文件存在即视为成功）
+            # 数据库无匹配记录：从文件系统信息构建。
+            # Z05-R19：文件存在 ≠ 备份完整；DB 记录缺失/滞后时无法判定，标 unknown
+            # 而不是恒 success（真实完整性由 sync_backup_records 的 evaluate 口径负责）。
             created_at = _resolve_created_at(fs_entry, filename)
             merged.append({
                 'id': None,
@@ -239,7 +241,7 @@ async def get_merged_backup_records(
                 'total_rows': fs_entry.get('total_rows'),
                 'operator': fs_entry.get('exported_by'),
                 'remark': fs_entry.get('remark'),
-                'status': 'success',
+                'status': 'unknown',
                 'error_message': fs_entry.get('error'),
                 'duration_seconds': None,
                 'ip_address': None,

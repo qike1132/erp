@@ -182,8 +182,8 @@ _RESTORE_LOCK_TTL = 3600  # 1 hour
 # 也让测试可用 monkeypatch.setenv 直接覆盖；模块级常量仅作向后兼容的启动快照
 # （from ._constants import BACKUP_RETENTION_DAYS / BACKUP_MAX_COUNT 的既有调用方不受影响）。
 # 注意：备份文件的「年龄」取自伴随 .meta 的 created_at，其来源是 manifest 的 exported_at，
-# 且两种备份口径**不同**：全量是 datetime.now()（本地 naive，orchestration/core.py:365），
-# 增量是 datetime.now(UTC)（incremental.py:90）。差异与影响详见
+# 全量是 datetime.now()（本地 naive，orchestration/core.py:365）；历史增量包曾用
+# datetime.now(UTC)，但增量模块已删除、不再产出。差异与影响详见
 # services/backup/records.py 的 _backup_created_time 文档字符串。
 RETENTION_DAYS_ENV = 'BACKUP_RETENTION_DAYS'
 RETENTION_COUNT_ENV = 'BACKUP_RETENTION_COUNT'

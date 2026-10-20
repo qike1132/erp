@@ -366,7 +366,9 @@ class DrillValidator:
             pass_percentage = (passed_tables / total_tables * 100) if total_tables > 0 else 0
 
             return {
-                'passed': pass_percentage >= 80,  # 80%的表通过即认为通过
+                # Z05-R23：灾备就绪不允许「最多 1/5 表数据不符仍通过」，与单表口径
+                # （全量一致）对齐，仅 100% 通过才算通过。
+                'passed': total_tables > 0 and passed_tables == total_tables,
                 'pass_percentage': round(pass_percentage, 2),
                 'total_tables': total_tables,
                 'passed_tables': passed_tables,
@@ -462,13 +464,14 @@ class DrillValidator:
                     }
 
             # 检查所有查询是否在合理时间内完成
-            max_duration = max(
+            durations = [
                 metric.get('duration_ms', 0)
                 for metric in performance_metrics.values()
                 if metric.get('status') == 'success'
-            )
-
-            passed = max_duration < 5000  # 所有查询应在5秒内完成
+            ]
+            max_duration = max(durations, default=0)
+            # 全部查询失败时 durations 为空——不能因 max(default=0) 误判为通过
+            passed = bool(durations) and max_duration < 5000
 
             return {
                 'passed': passed,

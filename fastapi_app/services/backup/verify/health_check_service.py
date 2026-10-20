@@ -739,7 +739,7 @@ class BackupHealthCheckService:
 
             # 确定要测试的备份文件
             if backup_file:
-                test_file = BACKUP_DIR / backup_file
+                test_file = BACKUP_DIR / Path(backup_file).name
                 if not test_file.exists():
                     return {
                         'success': False,

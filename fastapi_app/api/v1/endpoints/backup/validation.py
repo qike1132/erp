@@ -39,6 +39,7 @@ from fastapi_app.schemas.backup import (
 )
 from fastapi_app.services import backup as backup_service
 from fastapi_app.services.backup import BackupFileError
+from fastapi_app.services.backup.verify.query_service import _infer_type_from_filename
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -56,20 +57,35 @@ async def validate_backup(
     """验证备份文件，不执行恢复，仅返回摘要信息"""
     filename = file.filename or ''
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in ('.zip', '.json', '.gz'):
-        raise HTTPException(status_code=400, detail=f'不支持的文件类型: {ext}，仅支持 .zip / .json / .gz')
+    # Z05-R8：.enc 与恢复链路对齐（加密包可恢复，也应可预检）
+    if ext not in ('.zip', '.json', '.gz', '.enc'):
+        raise HTTPException(
+            status_code=400,
+            detail=f'不支持的文件类型: {ext}，仅支持 .zip / .json / .gz / .enc',
+        )
+    max_size = backup_service.MAX_BACKUP_FILE_SIZE
+    # Z05-R7：先看 UploadFile 已知大小再读入内存，避免超大文件先撑爆工作进程
+    declared_size = getattr(file, 'size', None)
+    if declared_size is not None and declared_size > max_size:
+        raise HTTPException(status_code=400, detail=f'备份文件超过大小限制({max_size // 1024 // 1024}MB)')
     try:
         content = await file.read()
-        if len(content) > backup_service.MAX_BACKUP_FILE_SIZE:
-            raise HTTPException(status_code=400, detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)')
+        if len(content) > max_size:
+            raise HTTPException(status_code=400, detail=f'备份文件超过大小限制({max_size // 1024 // 1024}MB)')
     except HTTPException:
         raise
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=_sanitize_error(f'读取文件失败: {e}')) from e
     # P0-12：扩展名之外校验文件头；加密备份是「4 字节元数据长度 + JSON 元数据 + 密文」
     # 的自定义容器（非 PK/{/1f8b 开头），必须先放行，否则会拒掉合法加密备份。
-    if not _is_encrypted_data(content):
+    # .enc 还可能是无前缀的 legacy 裸信封（无魔数可探），按扩展名放行。
+    if ext != '.enc' and not _is_encrypted_data(content):
         require_upload_magic(content, ext, filename=filename)
+    if ext == '.enc' and not _is_encrypted_data(content):
+        raise HTTPException(
+            status_code=400,
+            detail='该 .enc 备份无法在没有密码的情况下预检（legacy 裸信封），请直接执行恢复或先解密',
+        )
     try:
         summary = backup_service.validate_backup_file(content, file.filename or '')
     except BackupFileError as e:
@@ -692,7 +708,7 @@ async def validate_backup_integrity(
 
                 # 尝试读取文件
                 try:
-                    content = filepath.read_bytes()
+                    content = await asyncio.to_thread(filepath.read_bytes)
 
                     # 检查是否为加密文件
                     encrypted = _is_encrypted_data(content)
@@ -761,14 +777,21 @@ async def validate_backup_integrity(
                     'error': str(e)
                 })
 
-        valid_files = len(backup_files) - len(corrupted_files) - len(missing_files)
+        # Z05-R9：只把 status=valid 计入有效；加密文件未做深度验证，单列为 unverified，
+        # 不再用「总数 - 损坏 - 缺失」把 encrypted/error 混进 valid。
+        valid_files = sum(1 for d in details if d.get('status') == 'valid')
+        unverified_files = sum(1 for d in details if d.get('status') == 'encrypted')
+        invalid_files = sum(
+            1 for d in details if d.get('status') in ('invalid', 'corrupted', 'missing', 'error')
+        )
 
         result = {
             'success': True,
             'checked_at': datetime.now().isoformat(),
             'total_files': len(backup_files),
             'valid_files': valid_files,
-            'invalid_files': len(corrupted_files) + len(missing_files),
+            'invalid_files': invalid_files,
+            'unverified_files': unverified_files,
             'corrupted_files': corrupted_files,
             'missing_files': missing_files,
             'details': details,
@@ -853,7 +876,8 @@ async def get_backup_statistics(
                     'filename': backup.get('filename', ''),
                     'size_bytes': backup.get('size', 0),
                     'modified_time': datetime.fromtimestamp(backup.get('mtime', 0)).isoformat(),
-                    'type': 'full' if 'full' in backup.get('filename', '').lower() else 'incremental' if 'inc' in backup.get('filename', '').lower() else 'unknown',
+                    # Z05-R9：与 /records 共用 query_service 的前缀推断（erp_backup_/erp_auto_ → full）
+                    'type': _infer_type_from_filename(backup.get('filename', '')),
                     'encrypted': backup.get('filename', '').endswith('.enc'),
                 })
 

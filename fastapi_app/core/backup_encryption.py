@@ -240,6 +240,27 @@ def detect_encryption_format(head: bytes) -> str:
     return 'legacy'
 
 
+def is_encrypted_backup(data: bytes) -> bool:
+    """统一加密探测：chunked-v1 魔数或 legacy 格式 B（meta 前缀 encrypted=true）。
+
+    无前缀的 legacy 裸信封（格式 A）没有可识别魔数，只能由调用方按 ``.enc``
+    扩展名提示判定；本函数对这类数据返回 False（与 ``decrypt_backup_auto``
+    的「格式 A 需密码才能确认」一致）。
+    """
+    if data[:len(_CHUNKED_MAGIC)] == _CHUNKED_MAGIC:
+        return True
+    if len(data) < 4:
+        return False
+    meta_len = int.from_bytes(data[:4], 'big')
+    if meta_len <= 0 or len(data) < 4 + meta_len:
+        return False
+    try:
+        meta = json.loads(data[4:4 + meta_len].decode('utf-8'))
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return isinstance(meta, dict) and meta.get('encrypted') is True
+
+
 def _derive_keys(password: bytearray, salt: bytes) -> tuple[bytearray, bytearray]:
     """PBKDF2 一次性派生出「加密密钥」与「头部 MAC 密钥」两把 256-bit 密钥。"""
     dk = hashlib.pbkdf2_hmac(

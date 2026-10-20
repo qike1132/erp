@@ -136,7 +136,7 @@ async def create_binary_log_backup(
     此前实现会写出一份元数据 JSON，并把 `backup_file` 填成
     `wal_backup_<ts>.tar.gz` 这一路径返回 success=True，但**该文件从未被创建** ——
     全程没有任何 pg_basebackup / pg_receivewal 调用。
-    而调用方 `incremental.create_wal_incremental_backup` 又不校验文件是否存在，
+    而历史调用方（incremental 模块，已删除）又不校验文件是否存在，
     于是会落库一条「看起来是备份、实际不含 WAL 数据」的记录，
     在灾备场景下误导运维认为已具备 PITR 能力。假成功比失败更危险，故改为显式抛错。
 

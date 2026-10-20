@@ -131,6 +131,7 @@ class DisasterRecoveryTestService:
         lock = self._acquire_recovery_test_lock()
         test_env: dict[str, Any] | None = None
         cleanup_result: dict[str, Any] | None = None
+        cleaned = False
         try:
             # 1. 准备测试环境
             test_env = await self._prepare_test_environment(test_id)
@@ -157,10 +158,15 @@ class DisasterRecoveryTestService:
                 test_id, test_env, selected_backup
             )
 
+            # 5. 先清理测试环境，让报告携带真实 cleanup 结果（Z05-R13：原占位值恒为
+            # 「清理在 finally 中执行」，清理失败永远进不了报告）。
+            cleanup_result = await self._cleanup_test_environment(test_env)
+            cleaned = bool(cleanup_result.get('cleaned'))
+
             # 6. 生成测试报告
             test_report = await self._generate_test_report(
                 test_id, test_start_time, selected_backup,
-                recovery_result, validation_result, cleanup_result or {'cleaned': False, 'message': '清理在 finally 中执行'}
+                recovery_result, validation_result, cleanup_result,
             )
 
             # 7. 保存测试结果
@@ -198,9 +204,9 @@ class DisasterRecoveryTestService:
         finally:
             # B5 修复：无论成功/失败/异常都必须清理测试环境，否则每次演练
             # 都会在 PostgreSQL 泄漏一个 erp_backup_test_* 数据库及目录
-            if test_env is not None:
+            if test_env is not None and not cleaned:
                 try:
-                    cleanup_result = await self._cleanup_test_environment(test_env)
+                    await self._cleanup_test_environment(test_env)
                 except Exception as cleanup_err:  # broad-except: 清理失败不能掩盖主流程结果
                     logger.error(f"清理测试环境异常（{test_id}）: {cleanup_err}")
             # 释放演练互斥锁（第十四轮）
@@ -212,20 +218,15 @@ class DisasterRecoveryTestService:
             # 创建测试数据库
             test_db_name = f"{self.test_config['test_db_name']}_{test_id}"
 
-            # 使用主数据库连接创建测试数据库
-            import os
-
+            # 使用 test_config 的同一套凭据建库（Z05-R14：此前硬编码读 DB_HOST，
+            # 显式配置 BACKUP_TEST_DB_HOST≠DB_HOST 时测试库建在主库实例、连接打向
+            # 演练实例 → 必失败并泄漏孤儿库；锁/建库/连接三处口径必须一致）。
             from sqlalchemy import create_engine
 
-            # 获取主数据库连接信息
-            db_host = os.environ.get('DB_HOST', 'localhost')
-            db_port = os.environ.get('DB_PORT', '5432')
-            db_user = os.environ.get('DB_USER', 'postgres')
-            db_password = os.environ.get('DB_PASSWORD', '')
-
-            # 创建同步引擎用于管理数据库
+            cfg = self.test_config
             sync_engine = create_engine(
-                f"postgresql+psycopg://{db_user}:{db_password}@{db_host}:{db_port}/postgres",  # sql-safe: escape_like/绑定参数/常量片段
+                f"postgresql+psycopg://{cfg['test_db_user']}:{cfg['test_db_password']}"
+                f"@{cfg['test_db_host']}:{cfg['test_db_port']}/postgres",  # sql-safe: 常量片段
                 poolclass=NullPool
             )
 
@@ -277,8 +278,8 @@ class DisasterRecoveryTestService:
             ensure_backup_dir()
 
             if backup_file:
-                # 使用指定的备份文件
-                backup_path = BACKUP_DIR / backup_file
+                # 使用指定的备份文件；服务层统一消毒，防止路径穿越（Z05-R15）
+                backup_path = BACKUP_DIR / Path(backup_file).name
                 if not backup_path.exists():
                     logger.warning(f"指定的备份文件不存在: {backup_file}")
                     return None

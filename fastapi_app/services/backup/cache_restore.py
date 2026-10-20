@@ -125,6 +125,15 @@ async def restore_meilisearch(zf) -> dict:
                         headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'},
                         json=meili_data[settings_key], timeout=10
                     )
+                # Z05-R16：恢复是整体替换语义——先清空索引内文档，避免备份点之后
+                # 已删除的文档作为「幽灵」残留（Redis RDB 恢复同样是整体替换）。
+                clear_resp = await meili_client.delete(
+                    f'{MEILI_HOST}/indexes/{idx_name}/documents',
+                    headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'}, timeout=30
+                )
+                if clear_resp.status_code not in (200, 202, 204, 404):
+                    errors.append(f'{idx_name}: 清空旧文档失败 ({clear_resp.status_code})')
+                    continue
                 if data:
                     docs_resp = await meili_client.post(
                         f'{MEILI_HOST}/indexes/{idx_name}/documents',
