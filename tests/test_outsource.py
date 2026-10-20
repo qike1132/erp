@@ -634,11 +634,36 @@ class TestProcessStatusFlow:
 
     @pytest.mark.asyncio
     async def test_delete_process(self, mock_async_db):
-        """删除工序"""
+        """删除工序（无发货/收货流水）"""
         p = make_order_process(pid=1)
         mock_async_db.get = AsyncMock(return_value=p)
+        mock_async_db.scalar = AsyncMock(return_value=0)
         await delete_order_process(mock_async_db, 1)
         mock_async_db.delete.assert_called_once_with(p)
+
+    @pytest.mark.asyncio
+    async def test_delete_process_with_flow_is_rejected(self, mock_async_db):
+        """工序已有发货/收货流水 → 拒绝删除（否则外键 CASCADE 会删掉审计流水）"""
+        p = make_order_process(pid=1, status='shipped')
+        mock_async_db.get = AsyncMock(return_value=p)
+        mock_async_db.scalar = AsyncMock(return_value=0)
+
+        with pytest.raises(ValueError, match='不能删除'):
+            await delete_order_process(mock_async_db, 1)
+
+        mock_async_db.delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_process_with_flow_row_is_rejected(self, mock_async_db):
+        """数量为 0 但仍有流水行（数量与流水不一致的脏数据）→ 同样拒绝删除"""
+        p = make_order_process(pid=1)
+        mock_async_db.get = AsyncMock(return_value=p)
+        mock_async_db.scalar = AsyncMock(return_value=1)
+
+        with pytest.raises(ValueError, match='不能删除'):
+            await delete_order_process(mock_async_db, 1)
+
+        mock_async_db.delete.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_list_order_processes(self, mock_async_db):

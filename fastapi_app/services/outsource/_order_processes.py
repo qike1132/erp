@@ -5,7 +5,7 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -376,9 +376,27 @@ async def receive_order_processes_batch(
 
 
 async def delete_order_process(db: AsyncSession, process_id: int) -> None:
-    """删除订单外发工序。"""
+    """删除订单外发工序。
+
+    已发货/已收货的工序带发货/收货流水（order_outsource_process_flow）。
+    工序行一删，外键 ondelete=CASCADE 会把流水**物理删除** → 审计台账丢失，
+    且删除操作本身不留任何痕迹。故这类工序禁止删除，与 sync_orders_for_product
+    的「已发货/已收货的保留」同规则。
+
+    不把外键改成 SET NULL：流水表只有 process_id，没有订单/产品冗余列，
+    置空后只剩「某时刻有人发了 50 件」的无上下文残行，比删掉更糟。
+    """
     p = await db.get(OrderOutsourceProcess, process_id)
     if not p:
         raise ValueError('外发工序不存在')
+    if (p.shipped_quantity or 0) > 0 or (p.received_quantity or 0) > 0:
+        raise ValueError('该工序已有发货/收货流水，不能删除')
+    flow_count = await db.scalar(
+        select(func.count())
+        .select_from(OrderOutsourceProcessFlow)
+        .where(OrderOutsourceProcessFlow.process_id == process_id)
+    )
+    if flow_count:
+        raise ValueError('该工序已有发货/收货流水，不能删除')
     await db.delete(p)
     await db.flush()
