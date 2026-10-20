@@ -4,6 +4,7 @@
 包含 HTML 打印模板生成和 Excel 工作簿创建逻辑。
 """
 
+import html
 import os
 from datetime import datetime
 from typing import Any
@@ -17,6 +18,12 @@ from openpyxl.styles import Side as Sd
 
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.core.logger import logger
+from utils.report_exporter import _sanitize_excel_value
+
+
+def _h(value) -> str:
+    """HTML 转义：打印模板里的数据库字段一律经此插值（Z06-R3）。"""
+    return html.escape('' if value is None else str(value))
 
 # 模板文件路径
 _PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..'))
@@ -98,11 +105,11 @@ th{background:#f5f5f5;font-weight:bold}
         if idx > 0:
             body_parts.append('<div class="page-break"></div>')
         items = order_items_map.get(order.id, [])
-        body_parts.append(f'<div class="order-section"><div class="order-title">订单编号: {order.order_no}</div>')
-        body_parts.append(f'<div class="order-meta"><strong>供应商:</strong> {order.supplier_name or "-"} | <strong>客户:</strong> {order.customer_name or "-"} | <strong>日期:</strong> {order.order_date or "-"}</div>')
+        body_parts.append(f'<div class="order-section"><div class="order-title">订单编号: {_h(order.order_no)}</div>')
+        body_parts.append(f'<div class="order-meta"><strong>供应商:</strong> {_h(order.supplier_name or "-")} | <strong>客户:</strong> {_h(order.customer_name or "-")} | <strong>日期:</strong> {_h(order.order_date or "-")}</div>')
         body_parts.append('<table><thead><tr><th>物料名称</th><th>规格</th><th>数量</th><th>单位</th><th>分类</th></tr></thead><tbody>')
         for item in items:
-            body_parts.append(f'<tr><td>{item.material_name}</td><td>{item.specification or "-"}</td><td>{item.quantity}</td><td>{item.unit or "-"}</td><td>{item.material_category or "-"}</td></tr>')
+            body_parts.append(f'<tr><td>{_h(item.material_name)}</td><td>{_h(item.specification or "-")}</td><td>{_h(item.quantity)}</td><td>{_h(item.unit or "-")}</td><td>{_h(item.material_category or "-")}</td></tr>')
         body_parts.append('</tbody></table></div>')
     return build_print_html("采购订单汇总", ''.join(body_parts), extra_css)
 
@@ -186,14 +193,14 @@ th{background:#E6E6E6;font-weight:bold}
             for idx, fabric in enumerate(supplier['fabrics']):
                 body_parts.append('<tr>')
                 if global_fabric_idx == 0:
-                    body_parts.append(f'<td rowspan="{total_fabric_rows}" style="font-weight:bold">{customer_name}</td>')
-                    body_parts.append(f'<td rowspan="{total_fabric_rows}">{product_name}</td>')
+                    body_parts.append(f'<td rowspan="{total_fabric_rows}" style="font-weight:bold">{_h(customer_name)}</td>')
+                    body_parts.append(f'<td rowspan="{total_fabric_rows}">{_h(product_name)}</td>')
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{float(order_info["product_quantity"]) if order_info["product_quantity"] else 0:g}</td>')
                 if idx == 0:
-                    body_parts.append(f'<td rowspan="{len(supplier["fabrics"])}">{supplier["supplier_name"]}</td>')
-                body_parts.append(f'<td style="text-align:left">{fabric["fabric_name"]}</td>')
-                body_parts.append(f'<td style="text-align:left">{fabric.get("specification", "")}</td>')
-                body_parts.append(f'<td style="text-align:right">{fabric["quantity"]} {fabric["unit"]}</td>')
+                    body_parts.append(f'<td rowspan="{len(supplier["fabrics"])}">{_h(supplier["supplier_name"])}</td>')
+                body_parts.append(f'<td style="text-align:left">{_h(fabric["fabric_name"])}</td>')
+                body_parts.append(f'<td style="text-align:left">{_h(fabric.get("specification", ""))}</td>')
+                body_parts.append(f'<td style="text-align:right">{_h(fabric["quantity"])} {_h(fabric["unit"])}</td>')
                 body_parts.append('</tr>')
                 grand_total += float(fabric["quantity"]) if fabric["quantity"] else 0
                 global_fabric_idx += 1
@@ -222,11 +229,11 @@ th{background:#e8e8e8;font-weight:bold;text-align:center}
         if idx > 0:
             body_parts.append('<div class="page-break"></div>')
         total_qty = sum(float(item['quantity']) for item in supplier['items'])
-        body_parts.append(f'<div class="supplier-section"><div class="supplier-header">供应商：{supplier["supplier_name"]}</div>')
-        body_parts.append(f'<div class="supplier-info"><strong>关联订单：</strong>{", ".join(supplier["orders"])} | <strong>物料种类：</strong>{len(supplier["items"])} 种</div>')
+        body_parts.append(f'<div class="supplier-section"><div class="supplier-header">供应商：{_h(supplier["supplier_name"])}</div>')
+        body_parts.append(f'<div class="supplier-info"><strong>关联订单：</strong>{_h(", ".join(supplier["orders"]))} | <strong>物料种类：</strong>{len(supplier["items"])} 种</div>')
         body_parts.append('<table><thead><tr><th>序号</th><th>商品名称</th><th>规格型号</th><th>单位</th><th>数量</th><th>物料分类</th><th>关联订单</th></tr></thead><tbody>')
         for item_idx, item in enumerate(supplier['items'], 1):
-            body_parts.append(f'<tr><td style="text-align:center">{item_idx}</td><td>{item["material_name"]}</td><td>{item["specification"] or "-"}</td><td style="text-align:center">{item["unit"] or "-"}</td><td style="text-align:right">{float(item["quantity"]):,.2f}</td><td style="text-align:center">{item["material_category"] or "-"}</td><td>共{item["order_count"]}单</td></tr>')
+            body_parts.append(f'<tr><td style="text-align:center">{item_idx}</td><td>{_h(item["material_name"])}</td><td>{_h(item["specification"] or "-")}</td><td style="text-align:center">{_h(item["unit"] or "-")}</td><td style="text-align:right">{float(item["quantity"]):,.2f}</td><td style="text-align:center">{_h(item["material_category"] or "-")}</td><td>共{item["order_count"]}单</td></tr>')
         body_parts.append(f'<tfoot><tr class="total-row"><td colspan="4" style="text-align:right">合计：</td><td style="text-align:right">{total_qty:,.2f}</td><td colspan="2"></td></tr></tfoot></table></div>')
     return build_print_html("供应商采购订单汇总", ''.join(body_parts), extra_css)
 
@@ -330,7 +337,7 @@ def _insert_supplier_data_rows(ws, extra_rows: int) -> None:
 
 def create_supplier_workbook(supplier: dict) -> Workbook:
     """基于模板文件为单个供应商创建采购订单 Excel 工作簿"""
-    template_path = os.path.normpath(_TEMPLATE_PATH)
+    template_path = _validate_template_path(os.path.normpath(_TEMPLATE_PATH))
     wb = openpyxl.load_workbook(template_path)
     ws = wb.active
 
@@ -340,12 +347,13 @@ def create_supplier_workbook(supplier: dict) -> Workbook:
     supplier_phone = supplier.get('phone', '') or ''
     supplier_contact = supplier.get('contact_person', '') or ''
 
-    _fill_cell(ws, 4, 1, f'供应商名称:{supplier_name}')
+    # Z06-R3：Excel 文本统一走权威公式清洗（=+-@\t\r 六字符），防 DDE 注入
+    _fill_cell(ws, 4, 1, _sanitize_excel_value(f'供应商名称:{supplier_name}'))
     if not supplier_address and not supplier_phone and not supplier_contact:
         logger.warning(f"供应商'{supplier_name}'的地址/电话/联系人信息均缺失")
-    _fill_cell(ws, 5, 1, f'供应商地址:{supplier_address}' if supplier_address else '供应商地址:')
-    _fill_cell(ws, 6, 1, f'电话:{supplier_phone}' if supplier_phone else '电话:')
-    _fill_cell(ws, 7, 1, f'联系人:{supplier_contact}' if supplier_contact else '联系人:')
+    _fill_cell(ws, 5, 1, _sanitize_excel_value(f'供应商地址:{supplier_address}' if supplier_address else '供应商地址:'))
+    _fill_cell(ws, 6, 1, _sanitize_excel_value(f'电话:{supplier_phone}' if supplier_phone else '电话:'))
+    _fill_cell(ws, 7, 1, _sanitize_excel_value(f'联系人:{supplier_contact}' if supplier_contact else '联系人:'))
 
     today = datetime.now()
     _fill_cell(ws, 2, 36, today, number_format='YYYY-M-D')
@@ -373,12 +381,13 @@ def create_supplier_workbook(supplier: dict) -> Workbook:
             name_val = item['material_name']
             if item.get('specification'):
                 name_val = f"{item['material_name']}（{item['specification']}）"
+            name_val = _sanitize_excel_value(name_val)
             qty = _qty_display_text(item['quantity'])
 
             _fill_cell(ws, row, 1, idx + 1)
             _fill_cell(ws, row, 3, name_val)
             _fill_cell(ws, row, 14, qty, number_format='@')
-            _fill_cell(ws, row, 19, item.get('unit') or '')
+            _fill_cell(ws, row, 19, _sanitize_excel_value(item.get('unit') or ''))
             _fill_cell(ws, row, 22, None)
             _fill_cell(ws, row, 26, '含')
             _fill_cell(ws, row, 30, f'=N{row}*V{row}', number_format='#,##0.00')

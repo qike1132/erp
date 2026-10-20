@@ -23,7 +23,15 @@ def test_all_modules_imported():
     assert supplier is not None
     assert backup is not None
     assert app is not None
-    assert len(app.routes) > 0
+    # Z09-R3：app.routes 顶层恒有健康检查/静态路由（业务路由在 _IncludedRouter 内），
+    # len>0 是恒真断言。改为从 OpenAPI 断言具体业务路由确实挂载。
+    paths = app.openapi()['paths']
+    for business_path in (
+        '/api/v1/suppliers/list',
+        '/api/v1/backup/list',
+        '/api/v1/purchase-center/customers',
+    ):
+        assert business_path in paths, f'业务路由未挂载: {business_path}'
 
 
 def test_error_response_structure():

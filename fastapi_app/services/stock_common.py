@@ -43,13 +43,23 @@ def business_now() -> datetime:
 
 
 def _parse_date_preserve_time(date_str: str, old_time: datetime | None = None) -> datetime:
-    """解析入库日期（保留原始时间部分）"""
+    """解析入库日期（保留原始时间部分），返回 **aware 北京时间**。
+
+    Z03-R2：StockIn/StockOut/StockReturn 的日期列均为 timestamptz；旧实现返回
+    naive 北京墙钟，asyncpg 按机器本地时区解释——生产机（Asia/Shanghai）碰巧正确，
+    换机器/改时区即偏 8 小时。统一挂 _BUSINESS_TZ，调用方零改动收敛。
+    """
     try:
         base = datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
         raise ValueError('日期格式不正确！') from None
     now = business_now()
     if old_time and (old_time.hour != 0 or old_time.minute != 0 or old_time.second != 0):
-        return datetime(base.year, base.month, base.day, old_time.hour, old_time.minute, old_time.second)
-    else:
-        return datetime(base.year, base.month, base.day, now.hour, now.minute, now.second)
+        return datetime(
+            base.year, base.month, base.day,
+            old_time.hour, old_time.minute, old_time.second, tzinfo=_BUSINESS_TZ,
+        )
+    return datetime(
+        base.year, base.month, base.day,
+        now.hour, now.minute, now.second, tzinfo=_BUSINESS_TZ,
+    )

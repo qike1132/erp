@@ -375,6 +375,44 @@ async def _rotation_grace_jti(old_jti: str | None) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+async def _resolve_grace_jti(jti: str | None, user_id: str) -> str | None:
+    """旧 refresh token 已在 grace 窗口被轮换时，返回可复用的新 jti；否则 None。
+
+    旧 token 未吊销 → None（走正常轮换）；已吊销且 grace 不可用/新 jti 也已被吊销
+    → 401（防止登出后仍能换到有效 access token）。
+    """
+    from fastapi_app.core.deps import is_token_revoked
+
+    if not await is_token_revoked(jti):
+        return None
+    grace_jti = await _rotation_grace_jti(jti)
+    if grace_jti is None or await is_token_revoked(grace_jti):
+        raise HTTPException(status_code=401, detail="刷新令牌已失效")
+    logger.warning(
+        "[Refresh] grace 窗口内重放旧 refresh token: user_id=%s old_jti=%s", user_id, jti,
+    )
+    return grace_jti
+
+
+def _set_auth_cookies(
+    request: Request, response: Response, access_token: str, refresh_token: str,
+) -> int:
+    """写入 access/refresh httpOnly cookie，返回 access token 的 max_age（秒）。"""
+    token_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    samesite: Literal['lax', 'strict', 'none'] = "none" if is_https else "lax"
+    response.set_cookie(
+        key="access_token", value=access_token, max_age=token_max_age,
+        httponly=True, samesite=samesite, secure=is_https, path="/",
+    )
+    response.set_cookie(
+        key="refresh_token", value=refresh_token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
+        httponly=True, samesite=samesite, secure=is_https, path="/",
+    )
+    return token_max_age
+
+
 @router.post("/refresh")
 async def api_refresh_token(
     request: Request,
@@ -388,7 +426,7 @@ async def api_refresh_token(
     1. 请求体中的 refresh_token（移动端/Capacitor）
     2. httpOnly cookie 中的 refresh_token（浏览器Web端）
     """
-    from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
+    from fastapi_app.core.deps import _decode_jwt_token
 
     refresh_token = None
     if data and data.refresh_token:
@@ -412,20 +450,7 @@ async def api_refresh_token(
 
     # 并发重放（多标签页各自单飞）→ grace 窗口内用同一个新 jti 重新签发，
     # 各标签页拿到等价凭据，而不是被后到者踢成 401。窗口外一律 401。
-    grace_jti = None
-    if await is_token_revoked(jti):
-        grace_jti = await _rotation_grace_jti(jti)
-        # ⚠️ 必须**复查新 jti 是否已被吊销**：它可能在这 30 秒内被吊销（最典型的是
-        # 用户已登出）。漏掉这一句，持有旧 refresh token 的人就能在登出后再换到
-        # 一枚仍然有效的 access token —— 登出后最长 ACCESS_TOKEN_EXPIRE_MINUTES
-        # 的未授权访问窗口（安全复审 2026-09-28 指出）。
-        if grace_jti is None or await is_token_revoked(grace_jti):
-            raise HTTPException(status_code=401, detail="刷新令牌已失效")
-        # grace 命中即记录：这既是"多标签页并发"的正常信号，也可能是攻击者
-        # 在窗口内抢用旧 token —— 两种情况都需要可见，便于事后判读。
-        logger.warning(
-            "[Refresh] grace 窗口内重放旧 refresh token: user_id=%s old_jti=%s", user_id, jti,
-        )
+    grace_jti = await _resolve_grace_jti(jti, user_id)
 
     from fastapi_app.services import user_service
 
@@ -452,27 +477,7 @@ async def api_refresh_token(
         if jti and exp:
             await revoke_token(jti, exp)
 
-    _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-    _samesite: Literal['lax', 'strict', 'none'] = "none" if _is_https else "lax"
-    _secure = _is_https
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        max_age=token_max_age,
-        httponly=True,
-        samesite=_samesite,
-        secure=_secure,
-        path="/",
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=new_refresh_token,
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600,
-        httponly=True,
-        samesite=_samesite,
-        secure=_secure,
-        path="/",
-    )
+    _set_auth_cookies(request, response, access_token, new_refresh_token)
 
     logger.info("[Refresh] 令牌刷新成功（refresh 已轮换）: user_id=%s", user_id)
     if data and data.refresh_token:

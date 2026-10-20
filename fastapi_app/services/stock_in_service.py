@@ -205,7 +205,9 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list, operator_
             quantity = int(item.get('quantity', 0))
             note = item.get('note', '')
             stockin_date_str = item.get('stockin_date') or ''
-            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz，naive 值会被按本地时区解释致早 8h
+            # 日期路径返回 aware 北京时间（Z03-R2）；无日期取 aware UTC。列类型 timestamptz，
+            # 两者都是 aware，不再依赖机器本地时区解释。
+            stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC)
             try:
                 async with db.begin_nested():
                     stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note, operator_id=operator_id)

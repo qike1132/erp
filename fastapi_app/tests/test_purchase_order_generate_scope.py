@@ -11,6 +11,7 @@
 - `source_role` 落成明细备注
 """
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -19,6 +20,7 @@ from fastapi_app.services.purchase_order_generate import (
     DEFAULT_SCOPE_LABEL,
     _bom_rows_by_scope,
     _iter_source_skus,
+    _load_bom_context,
     _scope_label,
     _scope_order,
 )
@@ -64,6 +66,36 @@ class TestScopeOrder:
 
     def test_empty(self):
         assert _scope_order(set()) == []
+
+
+class TestLoadBomContext:
+    """Z02-R1：作用域装配要收集「物料行 role_id」，而不是拿 pid 去查 role_id 桶。"""
+
+    @pytest.mark.asyncio
+    async def test_material_role_ids_and_product_roles_both_in_scope(self):
+        class _Result:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def scalars(self):
+                return self
+
+            def all(self):
+                return self._rows
+
+        # 三条 BOM 查询 + 一条 ProductRole 查询
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            _Result([SimpleNamespace(role_id=7, product_id=1)]),   # filling
+            _Result([]),                                           # fabric
+            _Result([]),                                           # accessory
+            _Result([(99, 1, '角色A')]),                           # ProductRole
+        ]))
+
+        ctx = await _load_bom_context(db, [1])
+
+        # 物料行 role_id=7 必须进入作用域（旧实现 m.get(pid) 恒空，只剩 99/None）
+        assert ctx.scopes_by_pid[1] == [None, 7, 99]
+        assert ctx.role_names[(1, 99)] == '角色A'
 
 
 class TestBomRowsByScope:

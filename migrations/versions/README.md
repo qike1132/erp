@@ -5,11 +5,25 @@
 
 ## 一句话现状
 
-99 个 revision、**单 head**、**4 个 root**、6 个 merge revision。迁移文件零业务代码
+142 个 revision、**单 head**、**4 个 root**、6 个 merge revision。迁移文件零业务代码
 泄漏（`migrations/` 导入 `fastapi_app` 的次数为 0）。
 
-- head：`pg_standalone_060_fix_updated_at_varchar_columns`（与生产库 `alembic current` 一致）
+- head：`pg_standalone_102_purchase_order_status_check`（仓库链头；生产库实际版本以
+  `alembic current` 为准，本迁移尚未应用到生产）
 - root（base）：`add_pp_composite_idx`、`add_product_factory`、`add_product_price`、`pg_standalone_001`
+
+> 数字由 `scripts/check_alembic_heads.py` 的输出维护（revisions=142 heads=1 bases=4）；
+> 新增迁移后同步更新本节，避免 README 再次成为过期第二真相源（Z08-R6）。
+
+## 删表迁移的行数守卫缺口（Z08-R3，重建库时人工复核）
+
+以下历史迁移使用 `op.drop_table` 但未调用 `_legacy_base_guard.drop_table_if_empty`；
+当前生产已被版本表拦截，重建库/回滚重放前请人工确认旧表数据可弃：
+
+- `9b7b1ead6c4a_add_phone_column_to_user.py`（bom_file / process_file / staging_* 5 表）
+- `pg_standalone_017_pattern_room_v2.py`（pattern_room 旧 4 表）
+- `pg_standalone_027_drop_pattern_room_tables.py`（8 张遗留表）
+- `pg_standalone_062_case_management_rebuild.py`（case_stock_in / case_stock_out / case_inventory_log）
 
 ## 为什么会有 4 个 root
 

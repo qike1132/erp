@@ -5,6 +5,7 @@
 从 Flask test_client 迁移至 httpx AsyncClient。
 """
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -12,6 +13,10 @@ from sqlalchemy import select
 from fastapi_app.shared_models import InventoryLog, Order, StockIn, StockOut
 
 MARK = pytest.mark.integration
+
+# Z09-R5：性能夹具单号加进程唯一后缀，避免两个 pytest 实例共用测试库时
+# SI-PERF/SO-PERF 撞唯一键（pitfalls §7 假红事故根因之一）
+_PERF_RUN_TAG = uuid4().hex[:8]
 
 
 # ============================================================
@@ -590,7 +595,7 @@ class TestStockPerformance:
         """测试大量入库记录列表查询"""
         for i in range(100):
             stockin = StockIn(
-                stockin_no=f"SI-PERF-{i:04d}",
+                stockin_no=f"SI-PERF-{_PERF_RUN_TAG}-{i:04d}",
                 product_id=test_product.id,
                 customer=test_customer.name,
                 quantity=10,
@@ -610,7 +615,7 @@ class TestStockPerformance:
 
         for i in range(100):
             stockout = StockOut(
-                stockout_no=f"SO-PERF-{i:04d}",
+                stockout_no=f"SO-PERF-{_PERF_RUN_TAG}-{i:04d}",
                 product_id=test_product.id,
                 quantity=5,
                 stockout_date=datetime.now(UTC),

@@ -81,10 +81,6 @@ class TestPurchaseCenterSchemas:
 # ============================================================
 
 class TestPurchaseCenterService:
-    def test_get_products_statistics(self):
-        """通过 endpoint 测试产品统计（直接 service 测试无法 mock SA 类属性）"""
-        pass  # 已由 test_get_products_statistics endpoint 测试覆盖
-
     @pytest.mark.asyncio
     async def test_get_search_suggestions_empty(self):
         from fastapi_app.services.purchase_center_service import get_search_suggestions
@@ -136,10 +132,6 @@ class TestPurchaseCenterService:
         with pytest.raises(ValueError, match='供应商已存在'):
             await create_supplier(db, {'name': '已存在供应商'})
 
-    def test_get_modification_logs(self):
-        """通过 endpoint 测试修改日志"""
-        pass  # 已由 test_get_modification_logs endpoint 测试覆盖
-
     @pytest.mark.asyncio
     async def test_get_saved_queries(self):
         from fastapi_app.services.purchase_center_service import get_saved_queries
@@ -153,10 +145,6 @@ class TestPurchaseCenterService:
         result = await get_saved_queries(db, user_id=1)
         assert len(result) == 1
         assert result[0]['name'] == '测试查询'
-
-    def test_get_status_logs(self):
-        """通过 endpoint 测试状态日志"""
-        pass  # 已由 test_get_status_logs endpoint 测试覆盖
 
     @pytest.mark.asyncio
     async def test_get_completed_order_quick_filters(self):

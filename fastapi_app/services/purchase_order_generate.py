@@ -296,10 +296,13 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
         #   与物料计算器 aggregate_materials_by_scope 的 ordered = ([None] if None in ...) 口径一致。
         # 用并集而非「物料 role_id 集合」，是为了让「配了角色但该角色暂无物料」也能被
         # 纳入作用域枚举（该作用域最终不产出任何明细，等价于被跳过）。
+        # Z02-R1：三个桶按 role_id 分桶（_bom_rows_by_scope），旧代码拿 pid 当键去取
+        # 恒为空集；这里遍历全部桶的行，与计算器「物料 role_id 集合 ∪ {None}」同口径。
         material_roles = {
             row.role_id
-            for m in (ctx.filling, ctx.fabric, ctx.accessory)
-            for row in m.get(pid, [])
+            for bucket in (ctx.filling, ctx.fabric, ctx.accessory)
+            for rows in bucket.values()
+            for row in rows
             if row.product_id == pid
         } | set(role_ids_by_pid.get(pid, ())) | {None}
         ctx.scopes_by_pid[pid] = _scope_order(

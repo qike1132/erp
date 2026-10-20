@@ -36,7 +36,9 @@ def test_parse_date_preserve_time_uses_beijing_time_of_day(monkeypatch):
     """北京 2026-10-01 00:30（UTC 2026-09-30 16:30）→ 业务日仍是 2026-10-01。"""
     monkeypatch.setattr(stock_common, "datetime", _FrozenDatetime)
     result = stock_common._parse_date_preserve_time("2026-10-01")
-    assert result == datetime(2026, 10, 1, 0, 30, 0)
+    # Z03-R2：返回 aware 北京时间，避免依赖机器本地时区解释
+    assert result == datetime(2026, 10, 1, 0, 30, 0, tzinfo=timezone(timedelta(hours=8)))
+    assert str(result.tzinfo) == "Asia/Shanghai"
     assert result.date() == datetime(2026, 10, 1).date()
     # 旧实现取 datetime.now(UTC) 的时分秒 → 16:30（差 8 小时，夜间入库会跨日）
     assert (result.hour, result.minute) == (0, 30)
@@ -45,7 +47,9 @@ def test_parse_date_preserve_time_uses_beijing_time_of_day(monkeypatch):
 def test_parse_date_preserve_time_keeps_explicit_old_time(monkeypatch):
     monkeypatch.setattr(stock_common, "datetime", _FrozenDatetime)
     old_time = datetime(2026, 10, 1, 8, 5, 0)
-    assert stock_common._parse_date_preserve_time("2026-10-01", old_time) == old_time
+    result = stock_common._parse_date_preserve_time("2026-10-01", old_time)
+    assert result == old_time.replace(tzinfo=timezone(timedelta(hours=8)))
+    assert str(result.tzinfo) == "Asia/Shanghai"
 
 
 def test_invalid_date_still_raises(monkeypatch):
