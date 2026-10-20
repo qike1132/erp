@@ -205,6 +205,32 @@ class TestQueryFifoStockoutRows:
         assert db.execute.await_count == 1
 
     @pytest.mark.asyncio
+    async def test_mixed_batch_queries_dirty_names_and_dedupes_rows(self):
+        """Z03-R6：混合批次要对 product_id=0 的产品名补查，并按 id 去重。"""
+        main_row = MagicMock(id=1, product_id=1)
+        dirty_row = MagicMock(id=2, product_id=0, product_name='脏产品')
+        stockout_mock = MagicMock()
+        stockout_mock.all.return_value = [main_row]
+        product_row = MagicMock(id=1, name='P1')
+        product_mock = MagicMock()
+        product_mock.all.return_value = [product_row]
+        extra_mock = MagicMock()
+        # 主查询已命中的行也出现在 JOIN 结果里 → 必须按 id 去重
+        extra_mock.all.return_value = [main_row, dirty_row]
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[stockout_mock, product_mock, extra_mock])
+
+        result, _ = await fifo_allocation._query_fifo_stockout_rows(
+            db, keys_needed={("客户A", "P1"), ("客户A", "脏产品")},
+            customers=["客户A"], product_ids=[1],
+            stockout_date_limit=date(2026, 1, 1),
+            dirty_product_names={'脏产品'},
+        )
+        assert result.all() == [main_row, dirty_row]
+        assert db.execute.await_count == 3
+
+    @pytest.mark.asyncio
     async def test_product_id_path_builds_pid_to_name_map(self):
         """product_id 路径应正确构建 pid_to_name 映射"""
         stockout_mock = MagicMock()

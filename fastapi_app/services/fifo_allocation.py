@@ -231,7 +231,20 @@ def _group_fifo_details_by_key(all_details: Sequence, plan_id_to_customer: Mappi
     return details_by_key
 
 
-async def _query_fifo_stockout_rows(db: AsyncSession, keys_needed: set, customers: list, product_ids: list, stockout_date_limit) -> tuple:
+class _RowsResult:
+    """最小 Result 替身：仅暴露 .all()，用于合并主查询与脏数据补查的行。"""
+
+    def __init__(self, rows: list):
+        self._rows = rows
+
+    def all(self) -> list:
+        return self._rows
+
+
+async def _query_fifo_stockout_rows(
+    db: AsyncSession, keys_needed: set, customers: list, product_ids: list,
+    stockout_date_limit, dirty_product_names: set[str] | None = None,
+) -> tuple:
     # 查出这些客户+产品的出货记录
     # 双分支是有意识的性能优化，非冗余：
     #   - product_id 路径：用 product_id IN(...) 避免 JOIN Product，命中
@@ -244,7 +257,7 @@ async def _query_fifo_stockout_rows(db: AsyncSession, keys_needed: set, customer
         # 降级：无 product_id 时 JOIN Product 按 name 匹配
         product_names = list({k[1] for k in keys_needed})
         stockout_result = await db.execute(
-            select(StockOut.customer, Product.name.label('product_name'), StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
+            select(StockOut.id, StockOut.customer, StockOut.product_id, Product.name.label('product_name'), StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
             .join(Product, StockOut.product_id == Product.id)
             .where(
                 and_(
@@ -261,7 +274,7 @@ async def _query_fifo_stockout_rows(db: AsyncSession, keys_needed: set, customer
         # 优先用 product_id 查询，避免 JOIN Product 表的额外开销
         # 先查 stock_out，再在内存中用 product_id → product_name 映射关联
         stockout_result = await db.execute(
-            select(StockOut.customer, StockOut.product_id, StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
+            select(StockOut.id, StockOut.customer, StockOut.product_id, StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date)
             .where(
                 and_(
                     StockOut.customer.in_(customers),
@@ -276,6 +289,32 @@ async def _query_fifo_stockout_rows(db: AsyncSession, keys_needed: set, customer
         # 构建 product_id → product_name 映射
         pid_result = await db.execute(select(Product.id, Product.name).where(Product.id.in_(product_ids)))
         pid_to_name = {r.id: r.name for r in pid_result.all()}
+        # Z03-R6：混合批次（部分明细 product_id=0 的脏行 + 正常行）不能用单一
+        # product_id 路径——脏行的出货记录不在 IN(...) 里，shipped_by_key 缺键
+        # 会被 FIFO 当成 0 已发。对脏行涉及的产品名补一次 JOIN 查询，按 id 去重。
+        if dirty_product_names:
+            extra_result = await db.execute(
+                select(
+                    StockOut.id, StockOut.customer, StockOut.product_id,
+                    Product.name.label('product_name'),
+                    StockOut.quantity, StockOut.returned_quantity, StockOut.stockout_date,
+                )
+                .join(Product, StockOut.product_id == Product.id)
+                .where(
+                    and_(
+                        StockOut.customer.in_(customers),
+                        Product.name.in_(list(dirty_product_names)),
+                        StockOut.customer.isnot(None),
+                        StockOut.customer != '',
+                        StockOut.stockout_date >= stockout_date_limit,
+                    )
+                )
+                .order_by(StockOut.stockout_date, StockOut.id)
+            )
+            rows = list(stockout_result.all())
+            seen = {row.id for row in rows}
+            rows.extend(row for row in extra_result.all() if row.id not in seen)
+            stockout_result = _RowsResult(rows)
     return stockout_result, pid_to_name
 
 
@@ -340,7 +379,14 @@ async def _fifo_query_with_timeout(db: AsyncSession, plan_details: list, custome
         # 按 (customer_name, product_name) 分组，保持 plan_date ASC 顺序
         details_by_key = _group_fifo_details_by_key(all_details, plan_id_to_customer, keys_needed)
 
-        stockout_result, pid_to_name = await _query_fifo_stockout_rows(db, keys_needed, customers, product_ids, stockout_date_limit)
+        dirty_names = {
+            d.product_name for d in plan_details
+            if d.product_name and not d.product_id
+        }
+        stockout_result, pid_to_name = await _query_fifo_stockout_rows(
+            db, keys_needed, customers, product_ids, stockout_date_limit,
+            dirty_product_names=dirty_names,
+        )
 
         stockout_rows = stockout_result.all()
 
@@ -377,10 +423,8 @@ def _aggregate_shipped_by_key(stockout_rows: list, product_ids: list, pid_to_nam
     """
     shipped_by_key: dict[tuple, int] = {}
     for row in stockout_rows:
-        if product_ids:
-            pname = pid_to_name.get(row.product_id, '')
-        else:
-            pname = row.product_name
+        # 优先行上自带的 product_name（JOIN 分支/脏数据补查），否则经 product_id 映射
+        pname = getattr(row, 'product_name', None) or pid_to_name.get(row.product_id, '')
         key = (row.customer, pname)
         shipped_by_key[key] = shipped_by_key.get(key, 0) + (row.quantity - row.returned_quantity)
     return shipped_by_key
