@@ -3,6 +3,12 @@
 # 一行一个 glob（shell case 语法），`#` 开头为注释，空行忽略。
 # ⚠️ 只放"确定是脱敏夹具/文档示例"的路径。每一条都应能被复核。
 # 新增豁免请在提交信息中说明理由。
+#
+# 2026-10-20 F3-3 复核：逐条在「忽略本清单」的条件下重扫，删除了 9 条
+# 已 0 命中的冗余豁免（restore.py / e2e auth / 备份弹窗 / user 表单 /
+# 备份计划文档 / scan_secrets.py / *.sample）。测试
+# scripts/prod_audit/tests/test_allowlist_effectiveness.py 会断言每条
+# 非通配符豁免仍对应真实命中，防止清单只增不减。
 
 # 脱敏扫描器自身的测试夹具：内含一段 PEM 私钥头格式的**字符串字面**，
 # 用于验证 prod_audit 的密钥脱敏能力，非真实私钥（2026-09-17 审计已核实）。
@@ -13,68 +19,14 @@ scripts/prod_audit/tests/test_self_audit.py
 # 属自指豁免（定义而非凭据），在此显式声明以便复核。
 .githooks/pre-commit
 
-# 文档/示例中出现的密钥格式说明
+# 文档/示例模板（通配符，面向未来新增文件；当前命中的模板已由后缀规则覆盖）
 *.example
-*.sample
 *.template
 
-# 测试 / CI 用途的明文，与代码层误报（2026-09-19 复核）。
-# 三处命中经 `git show HEAD:<path>` 核实**均为历史既存**（本轮 diff 未增删），
-# 且**非生产凭据**；因本轮这些文件另有改动需重新提交，故在此显式豁免：
-#   1) CI service container 的测试库口令 —— 仅存在于 GitHub Actions 内部网络，
-#      与生产库无关，且已在版本库中。2026-10-17 审计 AUD-27 起改为**行内标记**
-#      （# secret-scan:allow），不再整文件豁免——整文件豁免会让该文件任何位置
-#      写入真实凭据都不报警；
-#   2) 备份恢复端点的 kwarg 传参 —— 右侧是**函数引用**（形参即实参同名），
-#      属第 2 层口令规则的误报，非字面凭据；
-#   3) E2E 认证流程测试使用的临时口令 —— 仅在 e2e_api 测试内创建/销毁的账号。
-fastapi_app/api/v1/endpoints/backup/restore.py
-tests/e2e_api/test_auth_flow.py
-
-# 2026-09-24 复核：守卫第 2 层的自测夹具。该脚本把本 hook 的密钥特征写成
-# 正则字面量并配合成样例（令牌前缀拼接字符串），用于验证扫描器确实能命中——
-# 属"定义而非凭据"的自指场景，与上方 .githooks/pre-commit 同类。
-# 核实方式：逐条比对文件内正则与 hook 第 2 层规则一致，且不含真实凭据值。
-# 注：本条注释刻意不复述任何字面，避免本文件自身命中第 2 层规则。
+# 守卫第 2 层的自测夹具：把本 hook 的密钥特征写成正则字面量并配合成样例，
+# 属"定义而非凭据"的自指场景（同 .githooks/pre-commit）。
 scripts/_selftest_hook.py
 
-# 2026-09-20 外发迭代提交复核：审计报告行文**自引用**密钥头样式字符串
-# （转述 scripts/prod_audit 测试夹具的查处结论，非真钥），属文档自指豁免
-# （同 .githooks/pre-commit 自指豁免先例）。
-deliverables/engineering-assurance/_member-cody.md
-
-# 2026-09-24 复核：用户管理表单的字段透传（Vue reactive 字段 → 提交载荷），
-# 命中片段右侧均为**变量引用**，不含任何字面凭据。
-# 第 2 层「右侧是表达式而非字面量」的收窄（④）在本 hook 里**只对 .py 生效**，
-# 故 .vue 会落进误报，按文件豁免。
-# 注：CI 侧 scripts/scan_secrets.py 已把 ④ 扩展到 .ts/.js/.vue，因此这些文件
-#     能通过 CI 扫描；本组条目是给**本地 hook** 用的，待 ④ 也移植进 hook 后
-#     方可移除。
-# 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
-frontend-vite/src/views/user/components/UserCreateForm.vue
-frontend-vite/src/views/user/components/UserEditDialog.vue
-
-# 2026-09-24 复核：备份还原弹窗与其配套 HOTL 计划文档。
-# 两处命中片段的右值均为**变量引用/属性读取**，不含任何字面凭据；
-# 与上方 user 表单同属第 2 层「右侧是表达式而非字面量」收窄（④）
-# 在本 hook 中尚未覆盖 .vue/.md 所致的误报（④ 仅对 .py 生效；
-# CI 侧扫描器已覆盖 .ts/.js/.vue，但 .md 仍按后缀豁免）。
-# 注：刻意不复述命中片段，避免本文件自身命中第 2 层规则。
-frontend-vite/src/components/backup/RestoreConfirmDialog.vue
-docs/plans/2026-09-24-backup-restore-direct-workflow.md
-
-# 2026-09-28 注：`frontend-vite/src/views/login/LoginFormPc.vue` 曾有本清单条目，
-# 后已移除 —— 该文件已改用源码内的 `secret-scan:allow-next-line` 标记做**逐行**
-# 豁免（本地 hook 自 2026-09-28 起识别该标记，与 CI 侧 scan_secrets.py 一致）。
-# 逐行豁免比整文件路径豁免更精确：文件其余部分仍照常扫描。
-
-# 2026-09-28 复核：密钥扫描器自身及其测试。
-#   1) scripts/scan_secrets.py —— 把抑制标记（allow / allow-next-line）写成
-#      字符串常量，属第 2 层口令规则的自指场景（同上方 .githooks/pre-commit）。
-#   2) scripts/prod_audit/tests/test_scan_secrets.py —— 断言用例内使用 PEM
-#      私钥头格式串与云厂商**公开文档示例**密钥，用于验证扫描器确实能命中；
-#      与上方 test_self_audit.py 同类，非真实凭据。
-# 核实：逐条比对命中处均为字面样例/常量定义，无真实凭据值。
-# 注：刻意不复述任何字面，避免本文件自身命中第 2 层规则。
-scripts/scan_secrets.py
+# 扫描器测试：断言用例内使用 PEM 私钥头格式串与云厂商公开文档示例密钥，
+# 用于验证扫描器确实能命中；非真实凭据。
 scripts/prod_audit/tests/test_scan_secrets.py
