@@ -45,6 +45,7 @@ P0-11（2026-10-01）加固：违规数只来自机器可读来源
     python scripts/quality_gate.py --update-baseline  # 重建基线（收紧时用）
     python scripts/quality_gate.py --verbose          # 打印失败门禁的机器可读输出
     python scripts/quality_gate.py --only n_plus_one  # 只跑某个门禁
+    python scripts/quality_gate.py --baseline-check   # 只判基线「只降不升」（不扫描）
     python scripts/quality_gate.py --self-test        # 恒失败自检（全部门禁）
     python scripts/quality_gate.py --self-test --only bare_except
     python scripts/quality_gate.py --only pip_audit --audit-report dependency-audit.json
@@ -59,6 +60,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -653,6 +655,184 @@ def load_baseline() -> dict[str, int] | None:
         return None
 
 
+# --------------------------------------------------------------------------
+# 基线棘轮「只降不升」守卫（2026-10-17 审计 F3-7）
+# --------------------------------------------------------------------------
+# 缺口：gate_baseline.json 可以被手工上调。上调后门禁拿新基线判定 → 新增违规
+# 被「洗」进基线，CI 恒绿；且纯基线提交不含 .py/.vue，连本地降级门禁都不触发。
+#
+# 守卫语义：**基线只允许下调**。每个键的上限取各参考基线中**最严**的那个：
+#   · 分叉点 —— base 分支与本分支头的 merge-base：判定「本分支是否放松了门禁」；
+#   · 上次提交（HEAD）—— 判定「本次提交/工作区是否上调」。
+# 只与「参考侧也存在」的键比较：分叉之后新增的门禁键没有可比基线，不据此判违规。
+#
+# 显式放行口（都要求在提交信息里写明理由）：
+#   · `--allow-baseline-raise` / `GATE_ALLOW_BASELINE_RAISE=1`：本次运行放行；
+#   · `--update-baseline --force`：用实测计数重建基线时放行。
+
+BASELINE_REF_ENV = "GATE_BASELINE_REF"
+ALLOW_BASELINE_RAISE_ENV = "GATE_ALLOW_BASELINE_RAISE"
+
+
+def _git(*args: str) -> str | None:
+    """执行 git 命令；失败返回 None（不抛——门禁不能因 git 异常整体崩）。
+
+    ⚠️ 必须显式 `encoding="utf-8"`：本机 locale 是 GBK，而基线 JSON 的注释是中文，
+    用 locale 解码会在 subprocess 的读取线程里抛 UnicodeDecodeError → 输出变空串
+    → 参考基线被误判成「不可用」→ 只降不升检查整条静默跳过（2026-10-20 实测）。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+            cwd=str(PROJECT_ROOT),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def load_baseline_at_ref(ref: str) -> dict[str, int] | None:
+    """读取参考基线计数。
+
+    `ref` 可以是 git ref（`git show <ref>:scripts/gate_baseline.json`），也可以是
+    基线 JSON 文件的路径（测试与离线排查用）。取不到 / 形状损坏一律返回 None
+    （调用方据此跳过检查，不因缺信息误杀）。
+    """
+    path = Path(ref)
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+    else:
+        raw = _git("show", f"{ref}:scripts/gate_baseline.json")
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            return None
+    counts = data.get("counts") if isinstance(data, dict) else None
+    if not isinstance(counts, dict):
+        return None
+    try:
+        return {k: int(v) for k, v in counts.items()}
+    except (TypeError, ValueError):
+        return None
+
+
+def _head_for_merge_base() -> str:
+    """取「本分支头」——CI 的 PR checkout 是 merge commit，其第二父才是 PR 头。"""
+    if os.environ.get("CI"):
+        parents = (_git("rev-list", "--parents", "-n", "1", "HEAD") or "").split()
+        if len(parents) >= 3:
+            return parents[2]
+    return "HEAD"
+
+
+def _fork_point() -> str | None:
+    """本分支相对 base 分支的分叉点（merge-base）；不可用时返回 None。"""
+    bases = ["origin/main"] if os.environ.get("CI") else ["origin/main", "main"]
+    head = _head_for_merge_base()
+    for base in bases:
+        if _git("rev-parse", "--verify", base) is None:
+            continue
+        merged = _git("merge-base", base, head)
+        if merged:
+            return merged.strip()
+    return None
+
+
+def resolve_baseline_refs() -> list[tuple[str, dict[str, int]]]:
+    """列出参考基线：(说明, 计数)。
+
+    - `GATE_BASELINE_REF` 显式指定时**只**用它（可为 git ref 或基线文件路径）；
+      本地 pre-commit 用 HEAD = 本次提交的父提交 → 逐次提交把关；
+    - 否则用「分叉点」+「上次提交 HEAD」。
+
+    取不到的参考一律略过（不因缺信息误杀），但调用方必须把「参考不可用」显式打印。
+    """
+    override = os.environ.get(BASELINE_REF_ENV)
+    if override:
+        counts = load_baseline_at_ref(override)
+        return [(override, counts)] if counts is not None else []
+
+    refs: list[tuple[str, dict[str, int]]] = []
+    fork = _fork_point()
+    if fork:
+        counts = load_baseline_at_ref(fork)
+        if counts is not None:
+            refs.append((f"分叉点 {fork[:8]}", counts))
+    counts = load_baseline_at_ref("HEAD")
+    if counts is not None:
+        refs.append(("上次提交 HEAD", counts))
+    return refs
+
+
+def detect_baseline_raises(
+    working: dict[str, int],
+    references: list[tuple[str, dict[str, int]]],
+) -> list[tuple[str, int, int, str]]:
+    """列出被上调的基线项，返回 (键, 上限, 工作区值, 约束来源)。
+
+    上限逐键取各参考基线中**最严**的那个（min）——基线不得高于本分支分叉点与
+    上次提交中的任一取值，否则收紧会在下一次提交里被悄悄放松。
+    参考侧没有的键（该门禁是分叉之后新增的）没有可比基线，不据此判违规。
+    """
+    violations: list[tuple[str, int, int, str]] = []
+    for key in sorted(working):
+        limits = [(label, counts[key]) for label, counts in references if key in counts]
+        if not limits:
+            continue
+        label, ceiling = min(limits, key=lambda item: item[1])
+        if working[key] > ceiling:
+            violations.append((key, ceiling, working[key], label))
+    return violations
+
+
+def check_baseline_ratchet(args, working: dict[str, int]) -> int:
+    """基线「只降不升」守卫。返回 0 = 放行；1 = 基线被上调（应拒绝提交）。"""
+    refs = resolve_baseline_refs()
+    if not refs:
+        print("[BASELINE] 参考基线不可用，跳过只降不升检查。")
+        return 0
+    violations = detect_baseline_raises(working, refs)
+    if not violations:
+        return 0
+
+    print("[BASELINE] 参考基线：")
+    for label, _counts in refs:
+        print(f"  · {label}")
+    for key, ceiling, new, label in violations:
+        print(f"  {key}: {ceiling} → {new}（上限来自 {label}，基线被上调）")
+
+    if (
+        getattr(args, "allow_baseline_raise", False)
+        or os.environ.get(ALLOW_BASELINE_RAISE_ENV) == "1"
+        or (getattr(args, "update_baseline", False) and getattr(args, "force", False))
+    ):
+        print("[FORCE] 基线上调已显式放行。")
+        return 0
+    if getattr(args, "report", False):
+        print("[BASELINE] 基线被上调（REPORT 模式不判定失败）。")
+        return 0
+
+    print("[FAIL] 门禁基线只允许下调（棘轮）。")
+    print("       上调会把新增违规洗进基线，门禁随之恒绿。")
+    print("       处置：先修掉新增违规；确需上调用 `--update-baseline --force`"
+          " 并在提交信息写明理由，")
+    print("             或本次提交临时设 GATE_ALLOW_BASELINE_RAISE=1。")
+    return 1
+
+
 def save_baseline(counts: dict[str, int]) -> None:
     payload = {
         "_comment": (
@@ -908,6 +1088,16 @@ def main() -> int:
         action="store_true",
         help="配合 --update-baseline：允许在存在新增违规时上调基线（会打印 old→new）",
     )
+    parser.add_argument(
+        "--allow-baseline-raise",
+        action="store_true",
+        help="允许基线相对参考基线被上调（棘轮只降不升；显式放行需说明理由）",
+    )
+    parser.add_argument(
+        "--baseline-check",
+        action="store_true",
+        help="只做基线「只降不升」检查（不跑全仓扫描），供 pre-commit 快速校验",
+    )
     parser.add_argument("--verbose", action="store_true", help="打印失败门禁的机器可读输出")
     parser.add_argument("--only", help="只运行指定门禁（key）")
     parser.add_argument(
@@ -938,6 +1128,10 @@ def main() -> int:
     if args.self_test:
         return run_selftest(selected, thresholds, args.audit_report)
 
+    if args.baseline_check:
+        # 纯基线提交用：不跑全仓扫描，只判「只降不升」。
+        return check_baseline_ratchet(args, baseline)
+
     probe_dir: Path | None = None
     if args.probe_dir:
         probe_dir = Path(args.probe_dir).resolve()
@@ -950,6 +1144,11 @@ def main() -> int:
         if not selected[0].accepts_paths:
             print(f"[ERROR] 门禁 {selected[0].key} 不接受路径覆盖，无法用 --probe-dir")
             return 2
+
+    if probe_dir is None and not args.update_baseline:
+        # 先判基线（快速失败）：基线被上调时不必再跑全仓扫描。
+        if check_baseline_ratchet(args, baseline) != 0:
+            return 1
 
     results: list[tuple[Gate, GateOutcome, Judgement]] = []
     for gate in selected:
@@ -1019,6 +1218,10 @@ def main() -> int:
         print("[REPORT 模式] 不判定失败。")
         return 0
     if args.update_baseline:
+        # 重建基线时比的是**实测计数**（即将写入的新基线），不是旧基线。
+        if check_baseline_ratchet(args, counts_now) != 0:
+            print("[ERROR] 新基线高于参考基线，拒绝写回（棘轮只降不升）。")
+            return 2
         return apply_update_baseline(args, hard_failure, regressions, counts_now)
     if hard_failure or regressions:
         print("[FAIL] 存在新增质量问题，请修复后重试。")

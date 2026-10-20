@@ -286,8 +286,12 @@ fi
 # ⚡ 性能门：质量门禁是**全仓扫描**（AST + 前端组件），实测在 Windows/git-bash 下
 #    会让一次提交多花数十秒。而它只检查 .py / .vue，因此仅当暂存里确实有这两类文件时
 #    才运行——纯文档/配置提交直接跳过，避免把提交变成慢操作而诱发 --no-verify 滥用。
+#    例外：暂存了 scripts/gate_baseline.json 时**必须**跑（2026-10-17 审计 F3-7：
+#    基线可被手工上调 → 新增违规被洗进基线 → CI 恒绿；纯基线提交不含 .py/.vue，
+#    原先连降级门禁都不触发）。基线提交只跑**基线检查**（不扫描全仓），保持提交够快。
 run_degraded_gate() {
     need_gate=0
+    need_baseline=0
     py_files=""
     old_ifs2=$IFS
     IFS='
@@ -295,6 +299,7 @@ run_degraded_gate() {
     for f in $staged; do
         case "$f" in
             *.py|*.vue) need_gate=1 ;;
+            scripts/gate_baseline.json) need_baseline=1 ;;
         esac
         case "$f" in
             *.py) py_files="$py_files $f" ;;
@@ -302,8 +307,8 @@ run_degraded_gate() {
     done
     IFS=$old_ifs2
 
-    if [ "$need_gate" -eq 0 ]; then
-        echo "pre-commit: 暂存内容不含 .py/.vue，跳过代码质量门禁（第 3 层）" >&2
+    if [ "$need_gate" -eq 0 ] && [ "$need_baseline" -eq 0 ]; then
+        echo "pre-commit: 暂存内容不含 .py/.vue 与 scripts/gate_baseline.json，跳过代码质量门禁（第 3 层）" >&2
         return 0
     fi
 
@@ -354,6 +359,26 @@ run_degraded_gate() {
         echo "pre-commit: 建议 pip install pre-commit 以恢复完整门禁" >&2
         return 0
     fi
+
+    # ---- 基线棘轮守卫（2026-10-17 审计 F3-7）----
+    # 参考基线取 HEAD（= 本次提交的父提交）：本次提交把基线往上调会被拦下。
+    # 只跑基线检查（不扫全仓），纯基线提交也够快。
+    if [ "$need_baseline" -eq 1 ]; then
+        if ! GATE_BASELINE_REF=HEAD "$py" scripts/quality_gate.py --baseline-check >/dev/null 2>&1; then
+            echo "" >&2
+            echo "━━━ 提交被拒绝：门禁基线被上调（第 3 层） ━━━" >&2
+            echo "基线棘轮只允许下调：上调会把新增违规洗进基线，门禁随之恒绿。" >&2
+            echo "诊断：GATE_BASELINE_REF=HEAD $py scripts/quality_gate.py --baseline-check" >&2
+            echo "处置：先修掉新增违规；确需上调用 --update-baseline --force 并在提交信息写明理由，" >&2
+            echo "      或本次提交临时设 GATE_ALLOW_BASELINE_RAISE=1。" >&2
+            fail=1
+        fi
+    fi
+
+    if [ "$need_gate" -eq 0 ]; then
+        return 0
+    fi
+
     if ! "$py" scripts/quality_gate.py >/dev/null 2>&1; then
         echo "" >&2
         echo "━━━ 提交被拒绝：代码质量门禁未通过（第 3 层降级模式） ━━━" >&2
