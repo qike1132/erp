@@ -102,6 +102,40 @@ class TestScoreAllGreen:
 # ---------------------------------------------------------------------------
 
 
+class TestSkippedLayerBlocks:
+    """F3-6：禁用/跳过的层不得等价满分，且必须阻断发布。"""
+
+    def test_skipped_layer_is_blocking(
+        self,
+        audit_config: AuditConfig,
+        archiver: EvidenceArchiver,
+    ) -> None:
+        rules = RulesRegistry(schema_version="1.0", rules=[])
+        orchestrator = AuditOrchestrator(audit_config, rules, archiver)
+        results = _make_results_with_issues(audit_config, {})
+        results[LAYER_ORDER[0]].status = LayerStatus.SKIPPED
+
+        score = orchestrator._calculate_score(results, datetime.now(UTC))
+
+        assert score.is_ready is False
+        entry = next(s for s in score.layer_scores if s.layer_id == LAYER_ORDER[0])
+        assert entry.score == 0.0
+
+    def test_failed_layer_is_blocking(
+        self,
+        audit_config: AuditConfig,
+        archiver: EvidenceArchiver,
+    ) -> None:
+        rules = RulesRegistry(schema_version="1.0", rules=[])
+        orchestrator = AuditOrchestrator(audit_config, rules, archiver)
+        results = _make_results_with_issues(audit_config, {})
+        results[LAYER_ORDER[0]].status = LayerStatus.FAILED
+
+        score = orchestrator._calculate_score(results, datetime.now(UTC))
+
+        assert score.is_ready is False
+
+
 class TestPenaltyValues:
     """各严重度惩罚值。"""
 

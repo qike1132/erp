@@ -575,14 +575,17 @@ class AuditOrchestrator:
     ) -> tuple[float, bool]:
         """计算单层得分，返回 (总分增量, 是否含阻断问题)。"""
         if result is None or result.status == LayerStatus.SKIPPED:
+            # F3-6：禁用一层不应等价于该层满分——否则改一行 config 即可绕过上线判定。
+            # SKIPPED 不再给分且计为阻断，迫使发布方显式处理。
             layer_scores.append(
                 LayerScoreEntry(
                     layer_id=layer_id,
-                    score=100.0,
-                    basis="Layer skipped (disabled), no penalty.",
+                    score=0.0,
+                    basis="Layer skipped (disabled) — treated as blocking, no score.",
                 )
             )
-            return 100.0 * weight, False
+            basis_parts.append(f"{layer_id}: SKIPPED (blocking)")
+            return 0.0, True
 
         if result.status == LayerStatus.FAILED:
             layer_scores.append(
@@ -593,7 +596,7 @@ class AuditOrchestrator:
                 )
             )
             basis_parts.append(f"{layer_id}: FAILED (0)")
-            return 0.0, False
+            return 0.0, True
 
         # 计算扣分
         deduction = 0
