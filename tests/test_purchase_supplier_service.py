@@ -232,9 +232,26 @@ class TestDeleteSupplier:
         supplier = _make_supplier_mock(1, "X")
         db.get = AsyncMock(return_value=supplier)
 
-        # 单次 execute 返回 4 个 EXISTS 结果（has_material=True）
+        # 单次 execute 返回 5 个 EXISTS 结果（has_material=True）
         exists_result = MagicMock()
-        exists_result.one.return_value = (True, False, False, False)
+        exists_result.one.return_value = (True, False, False, False, False)
+        db.execute = AsyncMock(return_value=exists_result)
+
+        with pytest.raises(ValueError, match="无法删除"):
+            await delete_supplier(db, 1)
+
+    @pytest.mark.asyncio
+    async def test_delete_supplier_has_material_registration(self):
+        """关联来料登记（MaterialRegistration）时应被拒
+
+        来料登记引用是后加的关联检查，漏测会让"有来料登记的供应商可被删"回归。
+        """
+        db = MagicMock()
+        supplier = _make_supplier_mock(1, "X")
+        db.get = AsyncMock(return_value=supplier)
+
+        exists_result = MagicMock()
+        exists_result.one.return_value = (False, False, False, False, True)
         db.execute = AsyncMock(return_value=exists_result)
 
         with pytest.raises(ValueError, match="无法删除"):
@@ -248,7 +265,7 @@ class TestDeleteSupplier:
         db.get = AsyncMock(return_value=supplier)
 
         exists_result = MagicMock()
-        exists_result.one.return_value = (False, False, False, False)
+        exists_result.one.return_value = (False, False, False, False, False)
         db.execute = AsyncMock(return_value=exists_result)
         db.delete = AsyncMock()
         db.flush = AsyncMock()
