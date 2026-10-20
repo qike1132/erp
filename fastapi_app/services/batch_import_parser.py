@@ -21,7 +21,7 @@ from fastapi_app.utils import validate_customer_name as _shared_validate_custome
 try:  # Polars 的 Excel 引擎异常不是 ValueError/OSError，必须显式纳入解析失败口径
     from fastexcel import CalamineError
 except ImportError:  # pragma: no cover - 生产环境随 polars 安装，仅防最小环境缺包
-    class CalamineError(Exception):
+    class CalamineError(Exception):  # type: ignore[no-redef]
         """fastexcel 未安装时的占位（不会命中真实异常）。"""
 
 logger = logging.getLogger(__name__)

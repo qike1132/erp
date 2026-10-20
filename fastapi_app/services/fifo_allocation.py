@@ -314,7 +314,7 @@ async def _query_fifo_stockout_rows(
             rows = list(stockout_result.all())
             seen = {row.id for row in rows}
             rows.extend(row for row in extra_result.all() if row.id not in seen)
-            stockout_result = _RowsResult(rows)
+            return _RowsResult(rows), pid_to_name
     return stockout_result, pid_to_name
 
 
