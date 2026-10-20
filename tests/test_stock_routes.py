@@ -16,7 +16,9 @@ MARK = pytest.mark.integration
 
 # Z09-R5：性能夹具单号加进程唯一后缀，避免两个 pytest 实例共用测试库时
 # SI-PERF/SO-PERF 撞唯一键（pitfalls §7 假红事故根因之一）
-_PERF_RUN_TAG = uuid4().hex[:8]
+# ⚠️ 单号列 stockin_no/stockout_no 是 varchar(20)："SI-PERF-" + tag + "-" + 4 位序号
+# 已占 13 字符，tag 至多 7 字符。审计建议的 8 位 hex 会超列（StringDataRightTruncationError）。
+_PERF_RUN_TAG = uuid4().hex[:6]
 
 
 # ============================================================
