@@ -23,9 +23,19 @@ def _sanitize_xlsx_formula(val: str) -> str:
         return "'" + val
     return val
 
+def _apply_export_scope(query, scope: str):
+    """P1-25：按页面 tab 口径过滤导出数据（history=已完成 / progress=未完成）。"""
+    if scope == 'history':
+        return query.where(MaterialRegistration.status == 'completed')
+    if scope == 'progress':
+        return query.where(MaterialRegistration.status != 'completed')
+    return query
+
+
 async def export_registrations(db, order_no: str = '', supplier: str = '',
                                customer_name: str = '', material_category: str = '',
-                               start_date: str = '', end_date: str = '') -> io.BytesIO:
+                               start_date: str = '', end_date: str = '',
+                               scope: str = 'all') -> io.BytesIO:
     """导出来料登记数据（真 xlsx 格式，替代旧 HTML 伪装 Excel 方案）
 
     Returns:
@@ -53,6 +63,7 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
         query = query.where(
             MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
         )
+    query = _apply_export_scope(query, scope)
 
     query = query.order_by(MaterialRegistration.create_time.desc()).limit(5000)
 
@@ -63,8 +74,9 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
     if total_count > 5000:
         logger.warning(
             '来料登记导出被截断：符合条件的记录共 %d 条，仅导出前 5000 条 '
-            '（order_no=%r, supplier=%r, customer_name=%r, category=%r, %s~%s）',
-            total_count, order_no, supplier, customer_name, material_category, start_date, end_date,
+            '（order_no=%r, supplier=%r, customer_name=%r, category=%r, %s~%s, scope=%s）',
+            total_count, order_no, supplier, customer_name, material_category,
+            start_date, end_date, scope,
         )
 
     result = await db.execute(query)

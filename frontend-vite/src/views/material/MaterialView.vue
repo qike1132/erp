@@ -202,11 +202,13 @@ async function submitReceive(payload: { qty: number | null; remark: string }) {
 const { runExport } = useExport()
 
 function exportData() {
-  runExport(() => materialApi.export({}, '来料进度汇总.xlsx'))
+  // P1-25：进度 tab 只导出未完成登记，与页面所见一致
+  runExport(() => materialApi.export({ scope: 'progress' }, '来料进度汇总.xlsx'))
 }
 
 function exportHistory() {
-  runExport(() => materialApi.export({}, '来料历史汇总.xlsx'))
+  // P1-25：历史 tab 只导出已完成登记，与页面所见一致
+  runExport(() => materialApi.export({ scope: 'history' }, '来料历史汇总.xlsx'))
 }
 
 onMounted(() => {

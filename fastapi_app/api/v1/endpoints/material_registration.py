@@ -413,7 +413,7 @@ async def export_registrations(
     try:
         buffer = await mr_service.export_registrations(
             db, data.order_no, data.supplier, data.customer_name,
-            data.material_category, data.start_date, data.end_date,
+            data.material_category, data.start_date, data.end_date, data.scope,
         )
     except (ValueError, OSError) as e:
         logger.warning('导出来料登记失败: %s', e)

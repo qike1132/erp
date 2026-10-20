@@ -1,5 +1,5 @@
 """来料登记相关 Schema"""
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -79,6 +79,10 @@ class ExportRequest(BaseModel):
     material_category: str = ''
     start_date: str = ''
     end_date: str = ''
+    # P1-25：导出统计口径必须与页面 tab 所见一致（all=全部/progress=未完成/history=已完成）
+    scope: Literal['all', 'progress', 'history'] = Field(
+        'all', description='导出统计口径：all=全部 / progress=未完成 / history=已完成',
+    )
 
 
 class RegistrationHistoryResponse(BaseModel):
