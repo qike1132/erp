@@ -106,6 +106,11 @@ def affected_rows(db, sql: str, *, dry_run: bool) -> int:
     """
     from sqlalchemy import text
 
+    # F3-8：只支持单条语句；多语句时 dry-run 只统计首条、execute 的 rowcount 也只反映
+    # 末条驱动行为，影响行数会被低估。入口显式拒绝，避免未来调用方踩坑。
+    if len([part for part in sql.split(';') if part.strip()]) != 1:
+        raise ValueError(f'affected_rows 只接受单条 DELETE 语句，收到: {sql[:120]!r}')
+
     if dry_run:
         _, _, tail = sql.partition('DELETE FROM ')
         if not tail:

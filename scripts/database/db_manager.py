@@ -30,6 +30,8 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+# scripts/ 下的 _prod_write_guard（本文件位于 scripts/database/）
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 BACKUP_DIR = PROJECT_ROOT / 'backups'
 DAILY_DIR = BACKUP_DIR / 'daily'
@@ -640,6 +642,12 @@ def main():
         sys.exit(0 if success else 1)
 
     elif args.command == 'restore':
+        # F3-9：恢复会覆盖生产库，--force 只跳交互、不跳写护栏
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent(
+            f'数据库恢复（{args.file}）',
+            hint='不可逆；请先确认已备份当前库',
+        )
         if not args.force:
             confirm = input("\n警告: 这将覆盖当前数据库！确认继续? (yes/no): ")
             if confirm.lower() not in ('yes', 'y'):

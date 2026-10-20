@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
+from _prod_write_guard import require_prod_write_consent
 from sqlalchemy import text
 
 from fastapi_app.core.database import SyncSessionLocal
@@ -143,6 +144,11 @@ def init_permissions(assume_yes: bool = False):
             if response.lower() != 'y':
                 print("操作已取消")
                 return
+            # F3-9：重新初始化会清空全部 user_permission，必须显式生产写授权
+            require_prod_write_consent(
+                '重新初始化权限（清空 user_permission 并重建权限字典）',
+                hint='会影响所有用户的权限关联；请先备份',
+            )
             session.execute(text("DELETE FROM user_permission"))
             session.commit()
             print("已清除用户权限关联")

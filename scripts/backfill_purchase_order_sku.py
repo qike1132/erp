@@ -37,6 +37,10 @@ import sys
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+# scripts/_prod_write_guard（本文件位于 scripts/）
+_SCRIPTS_DIR = os.path.join(_REPO_ROOT, 'scripts')
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -119,6 +123,13 @@ async def _plan_for_po(db: AsyncSession, po) -> tuple[list[dict], float, str, li
 
 
 async def _run(apply: bool) -> int:
+    # F3-9：--apply 写生产数据前必须显式授权（dry-run 不拦）
+    if apply:
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent(
+            '回填 completed 采购单的逐 SKU 数量快照（--apply）',
+            hint='会先删除再重写 purchase_order_sku 行；请先备份',
+        )
     engine = create_async_engine(settings.ASYNC_DATABASE_URL, echo=False)
     maker = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     exit_code = 0
