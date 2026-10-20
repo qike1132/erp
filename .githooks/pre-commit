@@ -281,6 +281,33 @@ elif command -v pre-commit >/dev/null 2>&1; then
     pc_bin="pre-commit"
 fi
 
+# 判「将要提交的那份内容」（索引里的 blob）是否 ruff 干净。
+# 为什么不用工作区文件：并发会话会在提交期间写工作区（AGENTS §6.1-5），
+# 工作区内容既可能不是将要提交的内容，也可能已被 pre-commit 的 ruff 钩子改过
+# —— 只有索引里的 blob 才是真正会进这次提交的东西。
+check_staged_ruff_clean() {
+    ruff_bin="$(pwd)/.venv/Scripts/ruff.exe"
+    [ -x "$ruff_bin" ] || ruff_bin="$(pwd)/.venv/Scripts/ruff"
+    [ -x "$ruff_bin" ] || return 0
+    old_ifs4=$IFS
+    IFS='
+'
+    for f in $staged; do
+        case "$f" in
+            *.py)
+                if ! git show ":$f" 2>/dev/null \
+                    | "$ruff_bin" check --stdin-filename "$f" - >/dev/null 2>&1; then
+                    echo "" >&2
+                    echo "━━━ 提交被拒绝：暂存内容有 ruff 违规（ruff --fix 后请重新 git add）━━━" >&2
+                    "$ruff_bin" check "$f" 1>&2 2>/dev/null || true
+                    fail=1
+                fi
+                ;;
+        esac
+    done
+    IFS=$old_ifs4
+}
+
 # 退而求其次：把 .pre-commit-config.yaml 的两项检查在本地直接跑掉
 # （ruff --fix + 质量门禁），不依赖 pre-commit 的环境 bootstrap。
 # ⚡ 性能门：质量门禁是**全仓扫描**（AST + 前端组件），实测在 Windows/git-bash 下
@@ -289,7 +316,9 @@ fi
 #    例外：暂存了 scripts/gate_baseline.json 时**必须**跑（2026-10-17 审计 F3-7：
 #    基线可被手工上调 → 新增违规被洗进基线 → CI 恒绿；纯基线提交不含 .py/.vue，
 #    原先连降级门禁都不触发）。基线提交只跑**基线检查**（不扫描全仓），保持提交够快。
+#    force_gate=1：调用方明确知道「本次没有门禁结论」（pre-commit 崩了）→ 无条件跑全量门禁。
 run_degraded_gate() {
+    force_gate="${1:-0}"
     need_gate=0
     need_baseline=0
     py_files=""
@@ -306,6 +335,7 @@ run_degraded_gate() {
         esac
     done
     IFS=$old_ifs2
+    [ "$force_gate" = "1" ] && need_gate=1
 
     if [ "$need_gate" -eq 0 ] && [ "$need_baseline" -eq 0 ]; then
         echo "pre-commit: 暂存内容不含 .py/.vue 与 scripts/gate_baseline.json，跳过代码质量门禁（第 3 层）" >&2
@@ -336,6 +366,10 @@ run_degraded_gate() {
             fail=1
         fi
     fi
+
+    # 暂存内容（索引 blob）必须自身 ruff 干净 —— 判的是「真正会进这次提交的东西」。
+    # 与并发会话写工作区无关，也不会因 pre-commit 的 ruff 钩子已把工作区改干净而漏判。
+    check_staged_ruff_clean
 
     [ -f "scripts/quality_gate.py" ] || return 0
 
@@ -411,6 +445,20 @@ if [ -n "$pc_bin" ]; then
 
     if [ "$pc_rc" -eq 0 ]; then
         :
+    elif [ "$pc_rc" -eq 1 ] \
+         && printf '%s' "$pc_out" | grep -q 'files were modified by this hook' \
+         && ! printf '%s' "$pc_out" | grep -q -- '- exit code:'; then
+        # 「hook 运行期间工作区被改写」，且**没有任何 hook 以非零码退出**
+        # （pre-commit 的输出里有 "- exit code: N" 才代表 hook 自身失败；
+        #   缺这一行 ⇒ 跑完的 hook 全部退出码为 0）。
+        # pre-commit 这条判定是「跑 hook 前后的**全仓 diff**比对」——本机有并发
+        # 会话在写工作区（AGENTS §6.1-5），第三方写入会被误记成「hook 改动了文件」
+        # → 提交被永久挡死（2026-10-20 实测连续两次，第二次同批 6 个文件被写）。
+        # 门禁结论本身是有效的：always_run 的 quality-gate hook 已跑完全量扫描并
+        # 退出 0（跑 hook 期间工作区被 pre-commit stash 成"仅暂存内容"，扫的就是
+        # 这次要提交的东西）。此处只复核「将要提交的 blob」ruff 干净。
+        echo "pre-commit: 检出「hook 运行期间工作区被改写」（并发会话写入），按暂存内容复核" >&2
+        check_staged_ruff_clean
     elif [ "$pc_rc" -eq 1 ] && printf '%s' "$pc_out" | grep -q 'hook id:'; then
         # 真失败：pre-commit 会逐个列出失败的 hook（"- hook id: ruff"）。
         echo "" >&2
@@ -425,9 +473,11 @@ if [ -n "$pc_bin" ]; then
         #     ~/.cache/pre-commit 对沙箱身份只读时，PermissionError 在错误处理阶段再抛，
         #     Python 以 1 退出，与「hook 失败」撞码）。
         # 三种都回退到降级门禁；若一并拦截，沙箱/离线环境会把所有提交挡死。
+        # force_gate=1：这条路径**没有任何门禁结论**（pre-commit 没跑成），
+        #   故无条件跑全量门禁，不能按「暂存无 .py/.vue」跳过。
         echo "pre-commit: 未能运行 hook（退出码 $pc_rc），回退到降级门禁" >&2
         echo "pre-commit: hook 环境未就绪；本仓 hook 均为本地、无需联网，可试：$pc_bin run --all-files" >&2
-        run_degraded_gate
+        run_degraded_gate 1
     fi
 else
     echo "pre-commit: 未安装 pre-commit，跳过第 3 层门禁（ruff/质量门禁/分层门禁）" >&2
