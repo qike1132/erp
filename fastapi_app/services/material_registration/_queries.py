@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -33,16 +33,32 @@ def _parse_filter_date(date_str: str, field_name: str) -> date:
     except ValueError:
         raise BusinessError(f'{field_name}格式错误，应为 YYYY-MM-DD') from None
 
+def _build_registration_keyword_condition(keyword: str):
+    """keyword 跨字段模糊匹配（采购订单号 / 供应商 / 物料名称）。
+
+    通配符经 escape_like 转义，避免用户输入的 %/_ 扩大匹配范围。
+    抽成独立函数便于 compile 级单测断言 SQL 条件（不连 DB）。
+    """
+    pattern = f'%{escape_like(keyword)}%'
+    return or_(
+        MaterialRegistration.purchase_order_no.ilike(pattern),
+        MaterialRegistration.supplier_name.ilike(pattern),
+        MaterialRegistration.items.any(MaterialRegistrationItem.material_name.ilike(pattern)),
+    )
+
+
 @cache_result(key_prefix="material:registrations", ttl=30, local_ttl=10,
-             key_builder=lambda **kw: f"{kw.get('page',1)}:{kw.get('per_page',20)}:{kw.get('status','')}:{kw.get('order_no','')}:{kw.get('supplier','')}:{kw.get('customer_name','')}:{kw.get('material_category','')}:{kw.get('start_date','')}:{kw.get('end_date','')}:{kw.get('exclude_completed',False)}")
+             key_builder=lambda **kw: f"{kw.get('page',1)}:{kw.get('per_page',20)}:{kw.get('status','')}:{kw.get('order_no','')}:{kw.get('supplier','')}:{kw.get('customer_name','')}:{kw.get('material_category','')}:{kw.get('start_date','')}:{kw.get('end_date','')}:{kw.get('exclude_completed',False)}:{kw.get('keyword') or ''}")
 async def get_registrations(db, page: int = 1, per_page: int = 20,
                            status: str = '', order_no: str = '', supplier: str = '',
                            customer_name: str = '', material_category: str = '',
                            start_date: str = '', end_date: str = '',
-                           exclude_completed: bool = False) -> dict:
+                           exclude_completed: bool = False,
+                           keyword: str | None = None) -> dict:
     """获取来料登记列表
 
     支持多维度筛选；当 exclude_completed=True 时排除已完成的登记（用于来料进度 tab）。
+    keyword 跨字段模糊匹配采购订单号 / 供应商 / 物料名称（移动端搜索框）。
     L1 10s + L2 30s 缓存，写操作时通过 MATERIAL 域失效。
     """
     # Build filter conditions once, apply to both data query and count query
@@ -65,6 +81,8 @@ async def get_registrations(db, page: int = 1, per_page: int = 20,
         conditions.append(
             MaterialRegistration.items.any(MaterialRegistrationItem.material_category == material_category)
         )
+    if keyword:
+        conditions.append(_build_registration_keyword_condition(keyword))
 
     needs_po_join = bool(customer_name)
     base_query = select(MaterialRegistration)

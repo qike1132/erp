@@ -10,7 +10,7 @@
         <div class="m-form-card">
           <div class="m-form-group">
             <label class="m-form-label">皮套 / 产品</label>
-            <MSearchBar v-model="productQuery" placeholder="搜索皮套名称 / 69码" @update:model-value="onSearch" />
+            <MSearchBar v-model="productQuery" placeholder="搜索皮套名称 / 69码" @search="onSearch" />
             <div v-if="results.length" class="m-results">
               <MListItem
                 v-for="r in results"
@@ -42,7 +42,7 @@
       <!-- 库存 -->
       <template v-if="activeTab === 'inventory'">
         <div style="margin-top: 12px">
-          <MSearchBar v-model="invKeyword" placeholder="搜索库存..." @update:model-value="onInvSearch" />
+          <MSearchBar v-model="invKeyword" placeholder="搜索库存..." @search="onInvSearch" />
         </div>
         <div v-if="invLoading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="!inventory.length" title="暂无库存数据" />
@@ -142,12 +142,20 @@ const quantity = ref(1)
 const note = ref('')
 const submitting = ref(false)
 
+// 2026-10-17 审计 P1-27：搜索框改为显式提交（@search），并加请求序号——
+// 旧请求后到不得覆盖新关键词的结果。
+let searchSeq = 0
+
 async function onSearch() {
+  const seq = ++searchSeq
   const q = productQuery.value.trim()
   if (!q) { results.value = []; return }
   try {
-    results.value = await caseApi.search(q)
+    const res = await caseApi.search(q)
+    if (seq !== searchSeq) return
+    results.value = res
   } catch {
+    if (seq !== searchSeq) return
     results.value = []
   }
 }
@@ -156,6 +164,7 @@ function selectItem(item: CaseSearchItem) {
   selected.value = item
   productQuery.value = item.name
   results.value = []
+  searchSeq++ // 选中后作废仍在途的搜索响应
 }
 
 async function submit() {

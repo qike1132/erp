@@ -11,6 +11,11 @@
       </div>
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
+      <MEmpty v-else-if="loadError" :title="loadError">
+        <template #action>
+          <button class="m-retry-btn" @click="retryLoad">重试</button>
+        </template>
+      </MEmpty>
       <template v-else-if="hasSummary">
         <div class="m-kpi-row">
           <MStatCard :value="totalQuantity ?? 0" label="总产量" icon-bg="rgba(0,113,227,0.1)" />
@@ -24,6 +29,7 @@
           </MCard>
         </div>
       </template>
+      <MEmpty v-else title="暂无生产数据" />
     </div>
   </div>
 </template>
@@ -39,6 +45,7 @@ import MStatCard from '@/mobile/components/MStatCard.vue'
 import MCard from '@/mobile/components/MCard.vue'
 import MProgress from '@/mobile/components/MProgress.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
+import MEmpty from '@/mobile/components/MEmpty.vue'
 
 const viewTab = ref('daily')
 const viewChips = [{ label: '日报', value: 'daily' }, { label: '月报', value: 'monthly' }]
@@ -51,6 +58,10 @@ const monthlyMonth = ref(new Date().getMonth() + 1)
 const dailySummary = ref<DailySummary | null>(null)
 const monthlySummary = ref<MonthlySummary | null>(null)
 const loading = ref(false)
+// 2026-10-17 审计 P1-29：接口失败此前静默空白；快速切日期/月份旧响应也会覆盖新数据
+const loadError = ref('')
+let dailySeq = 0
+let monthlySeq = 0
 
 const hasSummary = computed(() =>
   viewTab.value === 'monthly' ? !!monthlySummary.value : !!dailySummary.value,
@@ -110,19 +121,59 @@ function nextDate() {
   }
 }
 
-async function loadDaily() {
-  loading.value = true
-  try { dailySummary.value = await dailyProductionApi.dailySummary(selectedDate.value) } finally { loading.value = false }
-}
-async function loadMonthly() {
-  loading.value = true
-  try { monthlySummary.value = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value }) } finally { loading.value = false }
+function errorText(e: unknown, fallback: string) {
+  // 403 已由全局拦截器 toast；页面仍要有可理解状态与重试入口
+  return (e as { response?: { status?: number } })?.response?.status === 403 ? '无查看权限' : fallback
 }
 
-watch(viewTab, (v) => { if (v === 'daily') loadDaily(); else loadMonthly() })
-watch(selectedDate, loadDaily)
-watch([monthlyYear, monthlyMonth], loadMonthly)
-onMounted(loadDaily)
+async function loadDaily() {
+  const seq = ++dailySeq
+  loading.value = true
+  loadError.value = ''
+  try {
+    const res = await dailyProductionApi.dailySummary(selectedDate.value)
+    if (seq !== dailySeq) return // 旧日期响应后到，丢弃
+    dailySummary.value = res
+  } catch (e) {
+    if (seq !== dailySeq) return
+    dailySummary.value = null
+    loadError.value = errorText(e, '日报加载失败，请点击重试')
+  } finally {
+    if (seq === dailySeq) loading.value = false
+  }
+}
+
+async function loadMonthly() {
+  const seq = ++monthlySeq
+  loading.value = true
+  loadError.value = ''
+  try {
+    const res = await dailyProductionApi.monthlySummary({ year: monthlyYear.value, month: monthlyMonth.value })
+    if (seq !== monthlySeq) return // 旧月份响应后到，丢弃
+    monthlySummary.value = res
+  } catch (e) {
+    if (seq !== monthlySeq) return
+    monthlySummary.value = null
+    loadError.value = errorText(e, '月报加载失败，请点击重试')
+  } finally {
+    if (seq === monthlySeq) loading.value = false
+  }
+}
+
+/** 错误态重试：重发当前 tab 的请求 */
+function retryLoad() {
+  if (viewTab.value === 'monthly') void loadMonthly()
+  else void loadDaily()
+}
+
+watch(viewTab, (v) => {
+  // 切 tab 时作废另一侧在途请求，避免其 finally/catch 影响当前 tab 的 loading/错误态
+  if (v === 'daily') { monthlySeq++; void loadDaily() }
+  else { dailySeq++; void loadMonthly() }
+})
+watch(selectedDate, () => { void loadDaily() })
+watch([monthlyYear, monthlyMonth], () => { void loadMonthly() })
+onMounted(() => { void loadDaily() })
 </script>
 
 <style scoped>
@@ -136,4 +187,5 @@ onMounted(loadDaily)
 .m-dept-grid { display: flex; flex-direction: column; gap: 10px; }
 .m-dept-name { font-size: 14px; font-weight: 600; color: var(--m-text-primary); margin-bottom: 4px; }
 .m-dept-val { font-size: 20px; font-weight: 700; color: var(--m-text-primary); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.m-retry-btn { margin-top: 12px; height: 36px; padding: 0 20px; border: none; border-radius: 10px; background: var(--m-accent); color: white; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
 </style>

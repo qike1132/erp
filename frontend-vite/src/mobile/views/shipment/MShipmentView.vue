@@ -105,6 +105,8 @@ const loadError = ref('')
 
 const loading = ref(false)
 const dateScrollRef = ref<HTMLElement>()
+// 2026-10-17 审计 P1-28：切月会连发请求，旧响应后到不得覆盖新月数据
+let loadSeq = 0
 
 // F-FE-MOBILE-06：toISOString 按 UTC 切日（东八区 00–08 点取到昨天）
 function todayStr() { return toISODate() }
@@ -192,9 +194,11 @@ watch(selectedDate, async () => {
 
 /** 加载月度数据（复用于 PurchasePlanView 的 /plans/monthly 接口） */
 async function loadData() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const res = await planApi.monthly({ year: year.value, month: month.value })
+    if (seq !== loadSeq) return // 过期月份的响应直接丢弃
     plansByDate.value = (res?.plans_by_date ?? {}) as Record<string, Plan[]>
     loadError.value = ''
     // 若当前选中日期不在返回数据中且该月有数据，则选中第一个有数据的日期
@@ -205,14 +209,16 @@ async function loadData() {
       }
     }
   } catch (e) {
+    if (seq !== loadSeq) return
     plansByDate.value = {}
     // F-FE-MOBILE-10：403 等错误原先吞成空 plans → 页面显示「暂无计划」，
     // 与「真没数据」不可区分。置错误态让空态文案如实（403 详情拦截器已 toast）。
+    // P2-7：本页无下拉刷新，文案不能说「下拉重试」。
     loadError.value = (e as { response?: { status?: number } })?.response?.status === 403
       ? '无查看权限'
-      : '加载失败，请下拉重试'
+      : '加载失败，请稍后重试'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

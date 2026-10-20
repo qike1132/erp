@@ -58,6 +58,7 @@ async def list_registrations(
     start_date: str = Query(''),
     end_date: str = Query(''),
     exclude_completed: bool = Query(False),
+    keyword: str | None = Query(None, max_length=100),
     user: User = Depends(require_any_permission('product_manage', 'material_registration')),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> RegistrationListResponse:
@@ -74,6 +75,7 @@ async def list_registrations(
         start_date: 开始日期（YYYY-MM-DD）。
         end_date: 结束日期（YYYY-MM-DD）。
         exclude_completed: 排除已完成的登记（用于来料进度 tab）。
+        keyword: 跨字段模糊搜索（采购订单号 / 供应商 / 物料名称）。
         user: 当前登录用户（仅需通过权限校验）。
         db: 异步数据库会话（只读副本）。
 
@@ -83,7 +85,7 @@ async def list_registrations(
     return await mr_service.get_registrations(
         db, page, per_page, status, order_no, supplier,
         customer_name, material_category, start_date, end_date,
-        exclude_completed,
+        exclude_completed, keyword=keyword,
     )
 
 

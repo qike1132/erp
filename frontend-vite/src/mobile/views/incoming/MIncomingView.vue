@@ -6,6 +6,11 @@
 
       <template v-if="activeTab === 'overview'">
         <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
+        <MEmpty v-else-if="overviewError" :title="overviewError">
+          <template #action>
+            <button class="m-retry-btn" @click="loadOverview">重试</button>
+          </template>
+        </MEmpty>
         <template v-else-if="overview">
           <div class="m-stats-row">
             <MStatCard :value="overview.total ?? 0" label="总登记数" icon-bg="rgba(0,113,227,0.1)">
@@ -19,8 +24,13 @@
       </template>
 
       <template v-if="activeTab === 'records'">
-        <MSearchBar v-model="keyword" placeholder="搜索物料/供应商..." />
+        <MSearchBar v-model="keyword" placeholder="搜索订单号/供应商/物料..." @search="onRecordsSearch" />
         <div v-if="recordsLoading" class="m-center"><MSpinner size="lg" /></div>
+        <MEmpty v-else-if="recordsError" :title="recordsError">
+          <template #action>
+            <button class="m-retry-btn" @click="loadRecords">重试</button>
+          </template>
+        </MEmpty>
         <MEmpty v-else-if="!records.length" title="暂无登记记录" />
         <MList v-else>
           <MListItem v-for="r in records" :key="r.id" :title="r.purchase_order_no || r.product_name || '—'" :subtitle="`${r.supplier_name || '—'} · ${r.product_quantity || 0}`">
@@ -32,6 +42,13 @@
             <template #value><span :class="['m-badge', r.status === 'completed' ? 'done' : 'pending']">{{ r.status === 'completed' ? '已收货' : (r.status === 'partial' ? '部分收货' : '待收货') }}</span></template>
           </MListItem>
         </MList>
+        <UiPagination
+          v-if="!recordsLoading && !recordsError && recordsTotal > recordsPerPage"
+          :current-page="recordsPage"
+          :total-pages="Math.ceil(recordsTotal / recordsPerPage)"
+          :total-items="recordsTotal"
+          @update:current-page="(p: number) => { recordsPage = p; loadRecords() }"
+        />
       </template>
     </div>
   </div>
@@ -40,6 +57,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { materialApi } from '@/api'
+import { MOBILE_PAGE_SIZE } from '@/mobile/constants'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
 import MFilterChips from '@/mobile/components/MFilterChips.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
@@ -54,17 +72,60 @@ const tabChips = [{ label: '概览', value: 'overview' }, { label: '记录', val
 const keyword = ref('')
 const overview = ref<{ total?: number; pending?: number } | null>(null)
 const loading = ref(false)
+const overviewError = ref('')
 const records = ref<Array<{ id: number; purchase_order_no?: string; product_name?: string; supplier_name?: string; product_quantity?: number; status?: string }>>([])
 const recordsLoading = ref(false)
+const recordsError = ref('')
+// 2026-10-17 审计 P1-30：服务端分页（此前固定 page=1/per_page=50，第 51 条起不可达）
+const recordsPage = ref(1)
+const recordsTotal = ref(0)
+const recordsPerPage = MOBILE_PAGE_SIZE
+let recordsSeq = 0
+
+function errorText(e: unknown, fallback: string) {
+  // 403 已由全局拦截器 toast；页面仍需可理解状态，不能只留空白
+  return (e as { response?: { status?: number } })?.response?.status === 403 ? '无查看权限' : fallback
+}
 
 async function loadOverview() {
   loading.value = true
-  try { overview.value = await materialApi.overview() } finally { loading.value = false }
+  overviewError.value = ''
+  try {
+    overview.value = await materialApi.overview()
+  } catch (e) {
+    overview.value = null
+    overviewError.value = errorText(e, '概览加载失败，请点击重试')
+  } finally {
+    loading.value = false
+  }
 }
 
 async function loadRecords() {
+  const seq = ++recordsSeq
   recordsLoading.value = true
-  try { records.value = (await materialApi.registrations({ page: 1, per_page: 50 }))?.registrations || [] } finally { recordsLoading.value = false }
+  recordsError.value = ''
+  try {
+    const res = await materialApi.registrations({
+      page: recordsPage.value,
+      per_page: recordsPerPage,
+      keyword: keyword.value.trim() || undefined,
+    })
+    if (seq !== recordsSeq) return // 丢弃过期响应，旧响应不得覆盖新页/新关键词
+    records.value = res?.registrations || []
+    recordsTotal.value = res?.total ?? 0
+  } catch (e) {
+    if (seq !== recordsSeq) return
+    records.value = []
+    recordsError.value = errorText(e, '记录加载失败，请点击重试')
+  } finally {
+    if (seq === recordsSeq) recordsLoading.value = false
+  }
+}
+
+/** 搜索框显式提交（回车）：回到第 1 页，不逐字符请求 */
+function onRecordsSearch() {
+  recordsPage.value = 1
+  void loadRecords()
 }
 
 onMounted(() => { loadOverview(); loadRecords() })
@@ -79,4 +140,5 @@ onMounted(() => { loadOverview(); loadRecords() })
 .m-badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
 .m-badge.done { color: var(--m-accent-emerald); background: rgba(48,209,88,0.1); }
 .m-badge.pending { color: var(--m-accent-amber); background: rgba(255,149,0,0.1); }
+.m-retry-btn { margin-top: 12px; height: 36px; padding: 0 20px; border: none; border-radius: 10px; background: var(--m-accent); color: white; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
 </style>
