@@ -103,32 +103,6 @@ const openModel = computed({
 })
 </script>
 
-<style scoped>
-.co-form-group { margin-bottom: 14px; }
-.co-label {
-  display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: var(--color-text-secondary);
-}
-.co-textarea {
-  width: 100%; border: 1px solid var(--color-border, #cbd5e1); border-radius: 10px;
-  padding: 8px 12px; font-size: 14px; resize: vertical; outline: none;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease; font-family: inherit;
-}
-.co-textarea:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
-.co-textarea:focus {
-  border-color: var(--color-primary-400); background: white;
-  box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1);
-}
-.co-textarea::placeholder { color: var(--color-text-muted); font-size: 14px; font-weight: 400; opacity: 1; }
-.form-number-input {
-  width: 100%; padding: 8px 12px; border: 1px solid var(--color-border, #cbd5e1);
-  border-radius: 10px; font-size: 14px; color: var(--color-text); font-family: inherit;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease; outline: none;
-  -moz-appearance: textfield;
-}
-.form-number-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
-.form-number-input::-webkit-inner-spin-button, .form-number-input::-webkit-outer-spin-button { opacity: 1; }
-.form-number-input:focus {
-  border-color: var(--color-primary-400); background: white;
-  box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1);
-}
+<style scoped lang="scss">
+@use './edit-modals.scss' as *;
 </style>
