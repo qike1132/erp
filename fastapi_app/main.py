@@ -160,6 +160,16 @@ async def _perform_shutdown(background_tasks: list[asyncio.Task]) -> None:
         except Exception as e:  # defensive: 单步失败不阻塞其余关停步骤
             logger.warning("关停步骤 %s 失败: %s", name, e, exc_info=True)
 
+    # P1-10 短期兜底：异步恢复任务跑在 API 进程内（asyncio.create_task），停机时先取消
+    # 并等待其写失败终态 + 释放还原锁；必须在 redis/引擎关闭之前执行。
+    async def _cancel_restore_tasks():
+        from fastapi_app.api.v1.endpoints.backup._deps import cancel_background_restore_tasks
+        cancelled = await cancel_background_restore_tasks(timeout=10.0)
+        if cancelled:
+            logger.warning("停机：已取消 %d 个在跑的异步恢复任务", cancelled)
+
+    await _step("cancel_restore_tasks", _cancel_restore_tasks)
+
     # 再取消后台任务
     for task in background_tasks:
         task.cancel()

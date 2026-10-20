@@ -238,6 +238,18 @@ GATES: tuple[Gate, ...] = (
         "过期/僵尸(匹配不到现存漏洞)/重复 id 一律失败 —— "
         "修复方式是升级依赖后删掉豁免，而不是续期",
     ),
+    # 2026-10-20 审计 P1-32：检查器造了却从未接线；git 跟踪口径实测 83，
+    # 预算先重置为实测值（先还债再棘轮），新增压制即被本地钩子/CI 拦下。
+    Gate(
+        key="nosec_budget",
+        title="nosec 压制预算（git 跟踪口径，先还债再棘轮）",
+        mode=MODE_JSON,
+        script="scripts/check_nosec_budget.py",
+        extra_args=("--json",),
+        count_key="total",
+        fix_hint="每个 nosec 压制都是人工核验过的例外：不得新增；确需新增须先核验"
+        "并在 scripts/check_nosec_budget.py 调增 DEFAULT_BUDGET（附理由），长期压回 70",
+    ),
 )
 
 

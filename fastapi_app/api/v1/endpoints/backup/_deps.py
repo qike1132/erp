@@ -19,6 +19,21 @@ from fastapi_app.services import backup as backup_service
 _background_tasks: set[asyncio.Task] = set()
 
 
+async def cancel_background_restore_tasks(timeout: float = 10.0) -> int:
+    """停机时取消在跑的异步恢复任务（P1-10 短期兜底）。
+
+    被取消的任务在 `_run_async_file_restore` 的 CancelledError 分支写失败终态、
+    在 finally 释放还原锁，让 `is_stale_restore_lock` 能判定并自愈。
+    返回触发取消的任务数。
+    """
+    tasks = [t for t in _background_tasks if not t.done()]
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        await asyncio.wait(tasks, timeout=timeout)
+    return len(tasks)
+
+
 # ===========================================================================
 # 细粒度权限控制
 # ===========================================================================

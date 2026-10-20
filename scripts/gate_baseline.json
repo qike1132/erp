@@ -12,6 +12,7 @@
     "ruff": 32,
     "complexity": 4,
     "loop_shadow": 13,
-    "pip_audit": 0
+    "pip_audit": 0,
+    "nosec_budget": 83
   }
 }

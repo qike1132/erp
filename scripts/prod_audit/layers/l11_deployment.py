@@ -67,8 +67,20 @@ _HARDCODED_SECRET_RE = re.compile(
     r"(?!['\"]?\$\{)['\"]?[A-Za-z0-9+/=]{8,}['\"]?"
 )
 
-# 浮动版本依赖正则(>= / > / < / <= / ~= / * 无精确锁定)
-_FLOATING_VERSION_RE = re.compile(r"^[A-Za-z0-9_.-]+\s*(>=|>|<|<=|~=|\*)")
+# 依赖声明行：<name>[extras] <op> <version>（注释/环境标记在版本 token 处截断）
+_DECL_RE = re.compile(
+    r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]+\])?\s*(==|>=|<=|~=|>|<|!=)\s*([^\s#;]+)"
+)
+# 锁文件钉死行：<name>==<version>（与 scripts/check_requirements_lock.py 同口径）
+_PIN_RE = re.compile(r"^([A-Za-z0-9_.\-\[\]]+)==([^\s;]+)", re.MULTILINE)
+
+
+def _normalize_dist_name(name: str) -> str:
+    return name.strip().lower().replace("_", "-")
+
+
+def _parse_lock_pins(text: str) -> dict[str, str]:
+    return {_normalize_dist_name(n): v for n, v in _PIN_RE.findall(text)}
 
 # 健康检查端点路径
 _HEALTH_ENDPOINT_PATHS: tuple[str, ...] = ("/health", "/ready", "/healthz", "/readyz")
@@ -434,79 +446,140 @@ class L11Deployment(LayerBase):
     async def _check_dependency_lock(
         self, builder: IssueBuilder
     ) -> tuple[list[AuditIssue], str]:
-        """审查 requirements.txt 与 package-lock.json 锁定全部依赖版本。"""
+        """审查 requirements/*.txt 七档：锁文件存在 + 锁覆盖全部声明依赖。
+
+        2026-10-20 审计 P1-33：旧实现只读根 requirements.txt（分档重构后仅三行
+        ``-r`` 引用的兼容壳，且 :493 显式跳过 ``-r`` 行）→ 恒 0 issue。现按
+        ``requirements/<tier>.txt`` ↔ ``<tier>.lock`` 逐档核对（浮动声明由锁钉死，
+        只要求被锁覆盖 + ``==`` 声明版本一致）。
+        """
         issues: list[AuditIssue] = []
         raw_parts: list[str] = []
 
-        # 1. requirements.txt 锁定版本
-        req_file = PROJECT_ROOT / "requirements.txt"
-        if not req_file.exists():
+        req_dir = PROJECT_ROOT / "requirements"
+        txt_files = sorted(req_dir.glob("*.txt")) if req_dir.is_dir() else []
+        if not txt_files:
             issues.append(
                 builder.build(
                     layer_id=self.layer_id,
                     severity=Severity.HIGH,
-                    file="requirements.txt",
+                    file="requirements",
                     line=1,
-                    description="requirements.txt 不存在",
-                    suggestion="创建 requirements.txt 并锁定所有依赖版本",
+                    description="requirements/ 分档目录不存在或没有 .txt 声明文件",
+                    suggestion="建立 requirements/<tier>.txt 与对应 .lock（uv pip compile）",
                     rule_id="L11-DEP-UNLOCKED-001",
                     owner=DEFAULT_OWNER,
                     due_date=DEFAULT_DUE_DATE,
                 )
             )
-        else:
+
+        for txt in txt_files:
+            rel = f"requirements/{txt.name}"
             try:
-                req_lines = req_file.read_text(encoding="utf-8").splitlines()
+                txt_text = txt.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
                 issues.append(
                     builder.build(
                         layer_id=self.layer_id,
                         severity=Severity.HIGH,
-                        file="requirements.txt",
+                        file=rel,
                         line=1,
-                        description=f"读取 requirements.txt 失败: {exc}",
+                        description=f"读取 {rel} 失败: {exc}",
                         suggestion="检查文件权限",
                         rule_id="L11-DEP-UNLOCKED-001",
                         owner=DEFAULT_OWNER,
                         due_date=DEFAULT_DUE_DATE,
                     )
                 )
-                return issues, "\n".join(raw_parts)
+                continue
 
-            issues.extend(self._scan_floating_requirements(builder, req_lines))
-            raw_parts.append(f"requirements_lines: {len(req_lines)}")
+            lock = txt.with_suffix(".lock")
+            if not lock.exists():
+                issues.append(
+                    builder.build(
+                        layer_id=self.layer_id,
+                        severity=Severity.HIGH,
+                        file=rel,
+                        line=1,
+                        description=f"{rel} 缺少对应锁文件 {lock.name}",
+                        suggestion=f"uv pip compile {rel} -o requirements/{lock.name}",
+                        rule_id="L11-DEP-UNLOCKED-001",
+                        owner=DEFAULT_OWNER,
+                        due_date=DEFAULT_DUE_DATE,
+                    )
+                )
+                continue
 
-        # 2. package-lock.json 存在
+            try:
+                lock_pins = _parse_lock_pins(lock.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError) as exc:
+                issues.append(
+                    builder.build(
+                        layer_id=self.layer_id,
+                        severity=Severity.HIGH,
+                        file=f"requirements/{lock.name}",
+                        line=1,
+                        description=f"读取 requirements/{lock.name} 失败: {exc}",
+                        suggestion="检查文件权限",
+                        rule_id="L11-DEP-UNLOCKED-001",
+                        owner=DEFAULT_OWNER,
+                        due_date=DEFAULT_DUE_DATE,
+                    )
+                )
+                continue
+
+            declared = 0
+            for idx, line in enumerate(txt_text.splitlines(), start=1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+                    continue
+                match = _DECL_RE.match(stripped)
+                if not match:
+                    continue
+                declared += 1
+                name = _normalize_dist_name(match.group(1))
+                op = match.group(2)
+                version = match.group(3)
+                locked = lock_pins.get(name)
+                if locked is None:
+                    issues.append(
+                        builder.build(
+                            layer_id=self.layer_id,
+                            severity=Severity.HIGH,
+                            file=rel,
+                            line=idx,
+                            description=f"锁未覆盖声明依赖: {match.group(1)} ({op}{version})",
+                            suggestion=f"重跑 uv pip compile {rel} -o requirements/{lock.name}",
+                            rule_id="L11-DEP-UNLOCKED-001",
+                            owner=DEFAULT_OWNER,
+                            due_date=DEFAULT_DUE_DATE,
+                        )
+                    )
+                elif op == "==" and locked != version:
+                    issues.append(
+                        builder.build(
+                            layer_id=self.layer_id,
+                            severity=Severity.HIGH,
+                            file=rel,
+                            line=idx,
+                            description=(
+                                f"锁版本与声明漂移: {match.group(1)} "
+                                f"txt=={version} lock=={locked}"
+                            ),
+                            suggestion=f"重跑 uv pip compile {rel} -o requirements/{lock.name}",
+                            rule_id="L11-DEP-UNLOCKED-001",
+                            owner=DEFAULT_OWNER,
+                            due_date=DEFAULT_DUE_DATE,
+                        )
+                    )
+            raw_parts.append(f"{rel}: 声明 {declared} 条, lock 钉死 {len(lock_pins)} 包")
+
         lock_issues, lock_raw = self._check_package_lock(builder)
         issues.extend(lock_issues)
         raw_parts.extend(lock_raw)
 
         return issues, "\n".join(raw_parts)
 
-    def _scan_floating_requirements(
-        self, builder: IssueBuilder, req_lines: list[str]
-    ) -> list[AuditIssue]:
-        """扫描 requirements.txt 中浮动版本(>= / > / < / <= / ~= / *)依赖行。"""
-        issues: list[AuditIssue] = []
-        for idx, line in enumerate(req_lines, start=1):
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or stripped.startswith("-"):
-                continue
-            if _FLOATING_VERSION_RE.match(stripped):
-                issues.append(
-                    builder.build(
-                        layer_id=self.layer_id,
-                        severity=Severity.HIGH,
-                        file="requirements.txt",
-                        line=idx,
-                        description=f"浮动版本依赖: {stripped}",
-                        suggestion="使用 == 锁定精确版本",
-                        rule_id="L11-DEP-UNLOCKED-001",
-                        owner=DEFAULT_OWNER,
-                        due_date=DEFAULT_DUE_DATE,
-                    )
-                )
-        return issues
 
     def _check_package_lock(
         self, builder: IssueBuilder

@@ -274,7 +274,7 @@ class L6Security(LayerBase):
     async def _blue_team_dependency_vuln(
         self, builder: IssueBuilder
     ) -> tuple[list[AuditIssue], str]:
-        """执行 pip-audit 与 npm audit,解析 CVSS ≥ 7.0 高危漏洞。"""
+        """执行 pip-audit（requirements/*.lock 七档）与 npm audit；pip-audit 无 CVSS，存在漏洞即 MEDIUM。"""
         issues: list[AuditIssue] = []
         raw_parts: list[str] = []
 
@@ -293,96 +293,131 @@ class L6Security(LayerBase):
     async def _run_pip_audit(
         self, builder: IssueBuilder
     ) -> tuple[list[AuditIssue], str]:
-        """执行 ``pip-audit -r requirements.txt``。"""
-        req_file = PROJECT_ROOT / "requirements.txt"
-        if not req_file.exists():
-            return [], "requirements.txt 不存在,跳过 pip-audit"
+        """审计 ``requirements/*.lock`` 七档的 Python 依赖漏洞。
 
-        cmd = [sys.executable, "-m", "pip_audit", "-r", str(req_file)]
-        try:
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                cmd,
-                capture_output=True,
-                encoding="utf-8",
-                cwd=str(PROJECT_ROOT),
-                timeout=_TOOL_TIMEOUT,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return [
-                builder.build(
-                    layer_id=self.layer_id,
-                    severity=Severity.MEDIUM,
-                    file="requirements.txt",
-                    line=1,
-                    description=f"pip-audit 执行超时(>{_TOOL_TIMEOUT}s)",
-                    suggestion="检查 pip-audit 安装或增大超时阈值",
-                    rule_id="L6-PIP-VULN-001",
-                    owner=DEFAULT_OWNER,
-                    due_date=DEFAULT_DUE_DATE,
+        2026-10-20 审计 P1-31：旧实现只扫根 ``requirements.txt`` 兼容壳（三行
+        ``-r`` 引用），且未传 ``--format json``、解析器取不存在的 cvss 键 →
+        对 Python 依赖漏洞恒报 0。现逐档锁文件 JSON 审计并按漏洞 id 去重。
+        """
+        lock_files = sorted((PROJECT_ROOT / "requirements").glob("*.lock"))
+        if not lock_files:
+            return [], "requirements/*.lock 不存在,跳过 pip-audit"
+
+        issues: list[AuditIssue] = []
+        raw_parts: list[str] = []
+        seen: set[str] = set()
+        for lock in lock_files:
+            source = f"requirements/{lock.name}"
+            cmd = [
+                sys.executable, "-m", "pip_audit",
+                "-r", str(lock),
+                "--format", "json",
+                "--progress-spinner", "off",
+            ]
+            try:
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    cmd,
+                    capture_output=True,
+                    encoding="utf-8",
+                    cwd=str(PROJECT_ROOT),
+                    timeout=_TOOL_TIMEOUT,
+                    check=False,
                 )
-            ], "TIMEOUT"
-        except FileNotFoundError:
-            return [], "pip-audit 未安装,跳过"
+            except subprocess.TimeoutExpired:
+                issues.append(
+                    builder.build(
+                        layer_id=self.layer_id,
+                        severity=Severity.MEDIUM,
+                        file=source,
+                        line=1,
+                        description=f"pip-audit 执行超时(>{_TOOL_TIMEOUT}s)",
+                        suggestion="检查 pip-audit 安装或增大超时阈值",
+                        rule_id="L6-PIP-VULN-001",
+                        owner=DEFAULT_OWNER,
+                        due_date=DEFAULT_DUE_DATE,
+                    )
+                )
+                raw_parts.append(f"=== {source} ===\nTIMEOUT")
+                continue
+            except FileNotFoundError:
+                return issues, "pip-audit 未安装,跳过"
 
-        raw = proc.stdout + proc.stderr
-        issues = self._parse_pip_audit_output(proc.stdout, builder)
-        return issues, raw
+            raw_parts.append(f"=== {source} ===\n{proc.stdout + proc.stderr}")
+            for issue in self._parse_pip_audit_output(proc.stdout, builder, source=source):
+                if issue.description in seen:
+                    continue
+                seen.add(issue.description)
+                issues.append(issue)
+        return issues, "\n\n".join(raw_parts)
 
     def _parse_pip_audit_output(
-        self, stdout: str, builder: IssueBuilder
+        self, stdout: str, builder: IssueBuilder, *, source: str = "requirements.txt"
     ) -> list[AuditIssue]:
-        """解析 pip-audit 输出(JSON 或文本)。"""
+        """解析 pip-audit JSON。
+
+        pip-audit 2.10.1 的 ``dependencies[].vulns[]`` 只有
+        ``id/fix_versions/aliases/description``，**没有 cvss 键**；旧解析取
+        ``vuln["cvss"]["score"]`` 恒 0 → 恒不达标 → 恒报 0。现按「存在漏洞即
+        MEDIUM」上报，并在描述里给出修复版本（有无修复版本是可执行性判据）。
+        """
         issues: list[AuditIssue] = []
-        # 优先尝试 JSON 解析
         try:
             data = json.loads(stdout)
-            deps = data.get("dependencies", [])
-            for dep in deps:
-                vulns = dep.get("vulns", [])
-                for vuln in vulns:
-                    cvss = float(vuln.get("cvss", {}).get("score", 0) or 0)
-                    if cvss >= _CVSS_HIGH_THRESHOLD:
-                        issues.append(
-                            builder.build(
-                                layer_id=self.layer_id,
-                                severity=Severity.CRITICAL,
-                                file="requirements.txt",
-                                line=1,
-                                description=(
-                                    f"pip 依赖漏洞: {dep.get('name')} "
-                                    f"{dep.get('version')} — {vuln.get('id')} "
-                                    f"(CVSS {cvss})"
-                                ),
-                                suggestion=f"升级 {dep.get('name')} 至修复版本",
-                                rule_id="L6-PIP-VULN-001",
-                                owner=DEFAULT_OWNER,
-                                due_date=DEFAULT_DUE_DATE,
-                            )
-                        )
-            return issues
         except json.JSONDecodeError:
-            pass
-        # 文本回退: 含 "vuln" 行视为漏洞
-        for line in stdout.splitlines():
-            if re.search(r"(?i)\bvuln\b", line) and re.search(r"\bCVSS[:\s]+(\d+(?:\.\d+)?)", line):
-                m = re.search(r"\bCVSS[:\s]+(\d+(?:\.\d+)?)", line)
-                cvss = float(m.group(1)) if m else 0.0
-                if cvss >= _CVSS_HIGH_THRESHOLD:
+            data = None
+        if isinstance(data, dict):
+            for dep in data.get("dependencies") or []:
+                name = dep.get("name", "?")
+                version = dep.get("version", "?")
+                for vuln in dep.get("vulns") or []:
+                    if not isinstance(vuln, dict):
+                        continue
+                    vuln_id = vuln.get("id", "UNKNOWN")
+                    fixes = [f for f in (vuln.get("fix_versions") or []) if f]
+                    aliases = [
+                        a.get("id") for a in (vuln.get("aliases") or [])
+                        if isinstance(a, dict) and a.get("id")
+                    ]
+                    alias_text = f" ({', '.join(aliases)})" if aliases else ""
                     issues.append(
                         builder.build(
                             layer_id=self.layer_id,
-                            severity=Severity.CRITICAL,
-                            file="requirements.txt",
+                            severity=Severity.MEDIUM,
+                            file=source,
                             line=1,
-                            description=f"pip 依赖漏洞(CVSS {cvss}): {line.strip()}",
-                            suggestion="升级依赖至修复版本",
+                            description=(
+                                f"pip 依赖漏洞: {name} {version} — {vuln_id}{alias_text}"
+                                f"；修复版本: {', '.join(fixes) if fixes else '无'}"
+                            ),
+                            suggestion=(
+                                f"升级 {name} 至 {fixes[0]}"
+                                if fixes else f"{name} 暂无修复版本，评估替代或缓解措施"
+                            ),
                             rule_id="L6-PIP-VULN-001",
                             owner=DEFAULT_OWNER,
                             due_date=DEFAULT_DUE_DATE,
                         )
                     )
+            return issues
+        # 文本回退：JSON 解析失败时按漏洞 ID 特征兜底（旧正则要求 "vuln"/"CVSS"，
+        # 而 pip-audit columns 输出两者都没有 → 恒不命中）。
+        for line in stdout.splitlines():
+            if not re.search(r"\b(PYSEC|GHSA|CVE)-\S+", line):
+                continue
+            issues.append(
+                builder.build(
+                    layer_id=self.layer_id,
+                    severity=Severity.MEDIUM,
+                    file=source,
+                    line=1,
+                    description=f"pip 依赖漏洞(文本输出): {line.strip()[:200]}",
+                    suggestion="升级依赖至修复版本",
+                    rule_id="L6-PIP-VULN-001",
+                    owner=DEFAULT_OWNER,
+                    due_date=DEFAULT_DUE_DATE,
+                )
+            )
         return issues
 
     async def _run_npm_audit(

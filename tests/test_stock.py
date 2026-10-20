@@ -492,7 +492,8 @@ class TestUpdateStockOut:
             'available_quantity': 100,
             'order_quantity': 200,
             'shipped_quantity': 100,
-            'orders': []
+            # P1-5：改客户必须有单个订单能容纳本行净额，用于 order_id 迁移
+            'orders': [{'order_id': 999, 'available': 100}]
         }
 
         stockout = make_mock_stockout(quantity=50)
@@ -507,6 +508,7 @@ class TestUpdateStockOut:
         )
 
         assert result.quantity == 30
+        assert stockout.order_id == 999  # P1-5：净额迁移到新客户订单
         _assert_optimistic_lock_write(state)
         assert product.current_stock == 220  # 200 + (50 - 30)
 
@@ -533,7 +535,8 @@ class TestUpdateStockOut:
             'available_quantity': 100,
             'order_quantity': 200,
             'shipped_quantity': 100,
-            'orders': []
+            # P1-5：改客户必须有单个订单能容纳本行净额，用于 order_id 迁移
+            'orders': [{'order_id': 999, 'available': 100}]
         }
 
         stockout = make_mock_stockout(quantity=100)

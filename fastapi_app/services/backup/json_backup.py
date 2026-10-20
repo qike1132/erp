@@ -457,6 +457,42 @@ async def _verify_restored_json(db: AsyncSession, backup_data: dict) -> dict[str
     return verification
 
 
+async def _reset_sequences_after_json_restore(db, tables) -> tuple[list[str], list[str]]:
+    """P1-11：JSON 导入走显式主键，不消耗也不重置序列——收尾按 MAX(id) 对齐。
+
+    返回 (已重置的表名, 错误列表)。单表失败只记错误、不中止：数据已恢复，
+    序列问题应进 errors 让 database.status 报 partial，而不是静默或推翻整次恢复。
+    """
+    reset: list[str] = []
+    errors: list[str] = []
+    for t in tables:
+        if 'id' not in t.c:
+            continue
+        table_name = str(t.name)
+        try:
+            seq = (await db.execute(
+                text("SELECT pg_get_serial_sequence(:tbl, 'id')"), {'tbl': table_name},
+            )).scalar()
+            if not seq:
+                continue
+            quoted = quote_table(table_name)
+            await db.execute(
+                text(
+                    f'SELECT setval(:seq::regclass, '
+                    f'COALESCE((SELECT MAX(id) FROM {quoted}), 1), '
+                    f'(SELECT MAX(id) FROM {quoted}) IS NOT NULL)'
+                ),
+                {'seq': seq},
+            )
+        except (SQLAlchemyError, OSError, ValueError) as exc:
+            # defensive: 单表序列失败不得推翻已恢复的数据，但必须可见（status=partial）
+            errors.append(f'{table_name}: 主键序列重置失败（{exc}）')
+            logger.warning('JSON 恢复后重置 %s 主键序列失败: %s', table_name, exc)
+            continue
+        reset.append(table_name)
+    return reset, errors
+
+
 async def _restore_tables_from_json(db, tables_to_restore, backup_data, _report, total_tables) -> tuple[dict, int, list]:
     """逐表从 JSON 恢复数据，返回 (results, total_inserted, errors)。"""
     results = {}
@@ -567,6 +603,9 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         )
 
         await db.flush()
+        # P1-11：显式主键导入后序列与表内 MAX(id) 脱钩，跨环境恢复首次自然插入必 23505。
+        sequences_reset, seq_errors = await _reset_sequences_after_json_restore(db, tables_to_restore)
+        errors.extend(seq_errors)
         await _invalidate_caches_after_restore()
         verification = await _verify_restored_json(db, backup_data)
     except (SQLAlchemyError, ValueError, OSError) as e:
@@ -588,7 +627,11 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         errors.append(f'{t}: 清空失败，本表为合并恢复（备份点之后的旧行可能残留）')
 
     result_dict = {
-        'database': {'status': 'ok' if not errors else 'partial', 'total_inserted': total_inserted},
+        'database': {
+            'status': 'ok' if not errors else 'partial',
+            'total_inserted': total_inserted,
+            'sequences_reset': len(sequences_reset),
+        },
         'total_inserted': total_inserted, 'results': results, 'errors': errors,
         'verification': verification,
     }

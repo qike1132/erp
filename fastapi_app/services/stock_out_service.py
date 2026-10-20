@@ -152,6 +152,15 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
         available_with_current = shipment_info['available_quantity'] + old_net
         if new_quantity - stockout.returned_quantity > available_with_current:
             raise ValueError(f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，可出货（含当前记录）：{available_with_current}")
+        # P1-5：改客户必须同步迁移 order_id——已出货量按 order_id 聚合，只换 customer
+        # 会让新客户额度不扣本行净额（可超订单总量出货）、旧订单余量仍被占用。
+        # 单行不能跨订单拆分：新客户需有单个订单能容纳本行净额，否则明确拒绝。
+        if customer.strip() != (stockout.customer or '').strip():
+            new_net = new_quantity - stockout.returned_quantity
+            candidates = [o for o in shipment_info['orders'] if o['available'] >= new_net]
+            if not candidates:
+                raise ValueError('新客户没有单个订单可容纳本次净出货量，请删除该出货后按新客户重新出货')
+            stockout.order_id = candidates[0]['order_id']
     # 批次级闸门：该行带批次时，数量净增不得超过该批次可用（可用量已扣掉本行自身净额，
     # 故用「本次净增」比：new_net − old_net ≤ 当前批次可用）。删除路径不需校验（会释放批次量）。
     # 仅对真实非空批次串生效（batch_no 为 None/空 时不查，保持既有行为）。
@@ -245,18 +254,25 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
     stockout_date = _parse_date_preserve_time(stockout_date_str)
     old_quantity = stockout_obj.quantity
     old_stockout_no = stockout_obj.stockout_no
+    old_order_id = stockout_obj.order_id  # P1-5：改客户会迁移 order_id，旧订单也要重算状态
     await update_stockout_core(db, stockout_obj, new_quantity, customer, stockout_date, note, operator_id=operator_id)
     await db.flush()
     # 订单状态派生重算：出货量（含抵扣行的抵扣量）变化会影响订单状态；函数名虽为
     # return，逻辑是通用的「按出入库派生重算」（锁序 Product→StockOut→Order，与退货路径一致）
-    shipment_completed = await recalc_order_status_after_return(db, stockout_obj.order_id) if stockout_obj.order_id else None
+    completed_shipments = []
+    for order_id in dict.fromkeys([old_order_id, stockout_obj.order_id]):
+        if not order_id:
+            continue
+        shipment_completed = await recalc_order_status_after_return(db, order_id)
+        if shipment_completed:
+            completed_shipments.append(shipment_completed)
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockout_obj.product_id)
     if product is not None:
         await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库编辑', 'quantity': new_quantity, 'current_stock': product.current_stock}, context="出库编辑事件发布")
-    if shipment_completed:
-        await _publish_shipment_completed_events([shipment_completed])
+    if completed_shipments:
+        await _publish_shipment_completed_events(completed_shipments)
 
     # 领域事件总线：出库单更新 → 发布 STOCK_OUT_UPDATED 事件，触发采购计划缓存失效（异步）
     # 提交后发布（同 create_stockout：订阅者用独立 session 读库）

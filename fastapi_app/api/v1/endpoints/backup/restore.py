@@ -298,11 +298,13 @@ async def import_backup(
     content, is_zip, _ = await _read_backup_file(file, _get_encryption_password(None, x_backup_password))
     decrypt_password = _get_encryption_password(None, x_backup_password)
 
-    pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
-
-    # P0-5: 同步路径统一 Redis 还原锁（fail-closed），与异步任务共用
+    # P0-5: 同步路径统一 Redis 还原锁（fail-closed），与异步任务共用。
+    # P1-9：安全备份必须放在**取锁成功之后**——并发恢复时先 409，避免
+    # create_pre_restore_backup 的 BackupLockError 被吞成「无回滚点」428
+    # 诱导用户带 allow_missing 跳过回滚点。
     lock_owner = await _acquire_sync_restore_lock('sync_import')
     try:
+        pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
         if is_zip:
             # zip 路径的提交点在策略层（strategies.py `await db.commit()`，已按
             # TRANSACTION_BOUNDARY_GUIDE §2.2 标注豁免）；端点层不重复提交。
@@ -400,13 +402,12 @@ async def restore_server_backup(
     # 继续走 json.loads 会把解密出的 ZIP 当 JSON 解析而 400。
     content, is_zip = await _sniff_server_backup_format(content, safe_name, decrypt_password)
 
-    # P0-5: 两条路径都要先落安全备份（旧实现仅 zip 分支有，JSON 分支连回滚点都没有）
-    pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
-
     if is_zip:
         # P0-5: Redis 还原锁（旧实现此路径没有）
         zip_lock_owner = await _acquire_sync_restore_lock('sync_restore_by_name')
         try:
+            # P0-5 + P1-9：两条路径都落安全备份，且移到取锁之后（并发时先 409）
+            pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
             # 同 /import 的 zip 分支：提交点在策略层，此处只统一异常→HTTP 的映射
             try:
                 result = await backup_service.restore_from_zip(
@@ -439,6 +440,7 @@ async def restore_server_backup(
 
     json_lock_owner = await _acquire_sync_restore_lock('sync_restore_by_name_json')
     try:
+        pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
         # 同 /import：提交点归 db_transaction，异常回滚由它统一负责
         async with db_transaction(db, error_map={
             BackupError: _restore_error_to_http,
@@ -687,6 +689,17 @@ async def _run_async_file_restore(
             except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                 # fail_progress 内部经 _sanitize_error 清洗（去除路径并截断），可安全写入 str(e)
                 await fail_progress(task_id, str(e))
+    except asyncio.CancelledError:
+        # P1-10：停机/重启取消在跑任务，必须落失败终态——否则进度键停在中间态，
+        # is_stale_restore_lock 判不了陈旧锁，还原锁要占满 TTL 才释放。
+        logger.warning(f'异步恢复任务被取消（服务停止/重启）: {task_id}')
+        try:
+            await asyncio.shield(
+                fail_progress(task_id, '恢复任务被中断（服务停止或重启），请检查数据后重试')
+            )
+        except Exception as e:  # defensive: 取消态写进度失败不得掩盖取消语义
+            logger.error(f'取消态进度写入失败: {e}')
+        raise
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error(f'异步恢复任务异常: {e}')
         await fail_progress(task_id, str(e))
