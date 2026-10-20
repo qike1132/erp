@@ -156,6 +156,13 @@ export const purchaseApi = {
   deleteOrder: (id: number) => del(`/purchase-center/orders/${id}`),
   batchDelete: (ids: number[]) => post('/purchase-center/orders/batch-delete', { ids }),
   updateOrder: (id: number, data: Partial<PurchaseOrder>) => put(`/purchase-center/orders/${id}`, data),
+  /**
+   * 补录采购明细单价（按明细 id）。
+   * 一键生成路径没有价格来源（BOM 行无价字段），单价恒 0；这是唯一的补录入口。
+   * 只改单价：不动数量/物料，也不删行。
+   */
+  updateItemPrices: (id: number, itemPrices: { id: number; unit_price: number }[]) =>
+    put(`/purchase-center/orders/${id}`, { item_prices: itemPrices }),
   oneClickGenerate: (data: { composite_ids: string[] }) => post<{ success: boolean; message?: string; created_count?: number; orders?: { id: number; order_no: string }[]; idempotent?: boolean }>('/purchase-center/orders/one-click-generate', data),
   orderDetail: (id: number) => get<{ success: boolean; order?: PurchaseOrder; message?: string }>(`/purchase-center/orders/${id}`),
   completed: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number; total_pages?: number }>('/purchase-center/orders/completed', params),

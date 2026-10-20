@@ -120,7 +120,12 @@
     />
 
     <!-- Order Detail Modal -->
-    <OrderDetailModal :open="detailVisible" :order="detailOrder" @close="detailVisible = false" />
+    <OrderDetailModal
+      :open="detailVisible"
+      :order="detailOrder"
+      @close="detailVisible = false"
+      @saved="handleDetailSaved"
+    />
 
     <!-- Summary Modal -->
     <SummaryModal
@@ -198,6 +203,11 @@ const activeOrderCount = computed(() => unprocessed.total + purchaseOrders.total
 function handleOrdersRetry() {
   purchaseOrders.retry()
   unprocessed.retry()
+}
+
+/** 采购单详情里补录完单价 → 重新拉详情，让弹窗与列表都显示最新金额 */
+function handleDetailSaved(orderId: number) {
+  void handleViewDetail(orderId)
 }
 </script>
 

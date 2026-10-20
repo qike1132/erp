@@ -115,6 +115,12 @@ class PurchaseOrderCreateRequest(BaseModel):
     remark: str = ''
     unprocessed_order_id: int | None = None
 
+class PurchaseOrderItemPriceUpdate(BaseModel):
+    """采购明细单价补录（按明细 id 定位）"""
+    id: int = Field(..., gt=0, description="采购明细ID")
+    unit_price: float = Field(..., ge=0, description="单价，不能为负数")
+
+
 class PurchaseOrderUpdateRequest(BaseModel):
     """更新采购订单请求"""
     status: str | None = None
@@ -122,6 +128,9 @@ class PurchaseOrderUpdateRequest(BaseModel):
     supplier_name: str | None = None
     customer_name: str | None = None
     modify_reason: str = ''
+    item_prices: list[PurchaseOrderItemPriceUpdate] | None = Field(
+        None, description="按明细ID补录单价（只改单价，不动数量/物料，也不删行）"
+    )
 
     @field_validator('status')
     @classmethod

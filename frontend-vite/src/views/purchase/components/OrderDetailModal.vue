@@ -16,6 +16,8 @@
                 <th class="odm-w-spec">规格</th>
                 <th class="odm-th-num">数量</th>
                 <th class="odm-w-unit">单位</th>
+                <th class="odm-w-price odm-th-price">单价</th>
+                <th class="odm-w-amount odm-th-amount">金额</th>
                 <th class="odm-w-source">来源</th>
               </tr>
             </thead>
@@ -25,10 +27,22 @@
                 <td class="odm-td-muted">{{ item.specification || '—' }}</td>
                 <td class="odm-td-num">{{ formatNumber(displayQty(item)) }}</td>
                 <td class="odm-td-muted">{{ item.unit || '—' }}</td>
+                <td class="odm-td-price">
+                  <input
+                    class="odm-price-input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    :value="priceDraft(item)"
+                    :aria-label="`${item.material_name || '物料'} 单价`"
+                    @input="onPriceInput(item, $event)"
+                  />
+                </td>
+                <td class="odm-td-amount">{{ formatNumber(lineAmount(item)) }}</td>
                 <td class="odm-td-muted">{{ scopeOf(item) }}</td>
               </tr>
               <tr v-if="(order.items || []).length === 0">
-                <td colspan="5" class="odm-td-empty">暂无物料数据</td>
+                <td colspan="7" class="odm-td-empty">暂无物料数据</td>
               </tr>
             </tbody>
           </table>
@@ -37,9 +51,19 @@
     </div>
 
     <template #footer>
-      <button class="odm-close" aria-label="关闭" @click="$emit('close')">
-        关闭
-      </button>
+      <div class="odm-footer">
+        <span class="odm-total">合计：{{ formatNumber(props.order?.total_amount ?? 0) }}</span>
+        <button
+          class="odm-save"
+          :disabled="!canSavePrices || saving"
+          @click="handleSavePrices"
+        >
+          {{ saving ? '保存中…' : '保存单价' }}
+        </button>
+        <button class="odm-close" aria-label="关闭" @click="$emit('close')">
+          关闭
+        </button>
+      </div>
     </template>
   </UiDialog>
 </template>
@@ -48,12 +72,15 @@
 import UiDialog from '@/components/ui/UiDialog.vue'
 import type { PurchaseOrder, PurchaseOrderItem } from '@/types'
 import { formatNumber } from '@/utils/format'
+import { useOrderItemPrices } from '../composables/useOrderItemPrices'
 import { factoryQtyDisplayValue } from '../composables/useSummaryModal'
 
 const props = defineProps<{
   open: boolean
   order: PurchaseOrder | null
 }>()
+
+const emit = defineEmits<{ close: []; saved: [orderId: number] }>()
 
 /**
  * 物料清单「数量」列的展示值：与「汇总下单 → 工厂内部采购订单汇总」的数量列**同源**。
@@ -77,7 +104,15 @@ function displayQty(item: PurchaseOrderItem): number {
   return factoryQtyDisplayValue(baseQty, rate, false)
 }
 
-defineEmits<{ close: [] }>()
+/* ============ 单价补录 ============ */
+/**
+ * 一键生成路径没有价格来源（BOM 行无价字段），采购单价生成后恒为 0，
+ * 而系统里没有任何录入入口 → 采购单金额恒为 0，供应商金额汇总也恒为 0。
+ * 这里补上唯一的补录入口：逐行填单价 → 保存 → 后端重算行金额与订单总金额。
+ */
+const {
+  priceDraft, onPriceInput, lineAmount, canSavePrices, saving, handleSavePrices,
+} = useOrderItemPrices(() => props.order, (orderId) => emit('saved', orderId))
 
 /** 明细的来源 BOM 作用域：一键生成会写 '来源BOM：<默认BOM|角色名>' 到 remark。
  *  无该前缀时回退到备注原文（手工备注），都没有则显示 '—'。 */
@@ -182,13 +217,24 @@ function scopeOf(item: { remark?: string | null }): string {
   background: var(--color-primary-50, #eff5ff);
 }
 
-/* 列宽分配：物料名称主导，规格次之，数量/单位紧凑，来源兜底（总和 100%）
-   fixed 布局下列宽由 th 决定，表头与数据严格对齐 */
-.odm-w-name { width: 38%; }
-.odm-w-spec { width: 24%; }
-.odm-th-num { width: 14%; }
-.odm-w-unit { width: 8%; }
-.odm-w-source { width: 16%; }
+/* 列宽分配：物料名称主导，规格次之，数量/单位紧凑，单价/金额可编辑，来源兜底
+   （总和 100%）fixed 布局下列宽由 th 决定，表头与数据严格对齐 */
+.odm-w-name { width: 28%; }
+.odm-w-spec { width: 16%; }
+.odm-th-num { width: 10%; }
+.odm-w-unit { width: 7%; }
+.odm-w-price { width: 15%; }
+.odm-w-amount { width: 12%; }
+.odm-w-source { width: 12%; }
+
+/* 单价/金额列：表头与单元格统一居中（同数量列，需压过 thead th 的 text-align:left）。
+   不复用 odm-th-num/odm-td-num —— 数量列有独立回归测试按该类名取单元格。 */
+.odm-table thead th.odm-th-price,
+.odm-table tbody td.odm-td-price,
+.odm-table thead th.odm-th-amount,
+.odm-table tbody td.odm-td-amount {
+  text-align: center;
+}
 
 .odm-td-name {
   font-weight: 500;
@@ -216,6 +262,70 @@ function scopeOf(item: { remark?: string | null }): string {
   color: #94a3b8;
   padding: 32px 12px !important;
   font-size: 13px;
+}
+
+/* ============ 单价输入 ============ */
+.odm-price-input {
+  width: 88px;
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: #0f172a;
+  background: #fff;
+}
+
+.odm-price-input:focus {
+  outline: none;
+  border-color: var(--color-primary-500, #5b8def);
+  box-shadow: 0 0 0 2px var(--color-primary-50, #eff5ff);
+}
+
+.odm-price-input::-webkit-outer-spin-button,
+.odm-price-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ============ 底部操作条 ============ */
+.odm-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.odm-total {
+  margin-right: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary-700, #2d5ab8);
+  font-variant-numeric: tabular-nums;
+}
+
+.odm-save {
+  padding: 7px 16px;
+  border: 1px solid var(--color-primary-500, #5b8def);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: var(--color-primary-500, #5b8def);
+  color: #fff;
+  font-family: inherit;
+}
+
+.odm-save:hover:not(:disabled) {
+  background: var(--color-primary-600, #4478d4);
+  border-color: var(--color-primary-600, #4478d4);
+}
+
+.odm-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ============ 关闭按钮 ============ */

@@ -233,6 +233,47 @@ async def _upsert_order_items(
     order.total_amount = total_amount
 
 
+async def _update_item_prices(
+    db: AsyncSession, order: PurchaseOrder, order_id: int, price_entries: list,
+) -> None:
+    """按明细 id 补录单价，并重算行金额与订单总金额。
+
+    一键生成路径把 unit_price 写死 0（BOM 里没有价格来源），而更新请求原本
+    不带 items 字段 → 采购单价生成后**没有任何入口**可改，采购单金额恒为 0，
+    供应商金额汇总（``SUM(purchase_order.total_amount)``）因此恒为 0。
+
+    只改单价：不动数量/物料，也不删行——与 ``_upsert_order_items`` 的
+    「未提交的明细视为删除」语义区分开，避免只补录价格时误删其它行。
+    """
+    # 先落库：同一次请求里若还带了 items（upsert 新增的明细尚未 flush），
+    # 不 flush 就查不到那些新行，订单总金额会漏算。
+    await db.flush()
+
+    items_result = await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
+    )
+    items = {item.id: item for item in items_result.scalars().all()}
+
+    seen: set[int] = set()
+    for entry in price_entries:
+        item_id = entry['id']
+        price = Decimal(str(entry['unit_price'])).quantize(Decimal('0.01'))
+        if item_id in seen:
+            raise ValueError(f'采购明细 {item_id} 重复提交单价')
+        seen.add(item_id)
+        if price < 0:
+            raise ValueError('单价不能为负数')
+        item = items.get(item_id)
+        if item is None:
+            raise ValueError(f'采购明细 {item_id} 不存在或不属于该采购单')
+        item.unit_price = price
+        item.total_price = price * (item.quantity or Decimal('0'))
+
+    order.total_amount = sum(
+        (item.total_price or Decimal('0')) for item in items.values()
+    )
+
+
 async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
     order = await db.get(PurchaseOrder, order_id)
     if not order:
@@ -243,6 +284,10 @@ async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, use
     items_data = data.get('items')
     if items_data is not None:
         await _upsert_order_items(db, order, order_id, items_data)
+
+    price_entries = data.get('item_prices')
+    if price_entries:
+        await _update_item_prices(db, order, order_id, price_entries)
 
     await db.flush()
 
