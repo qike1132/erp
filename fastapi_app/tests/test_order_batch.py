@@ -167,21 +167,34 @@ class TestCompleteBatch:
         assert result['failed_orders'][0]['order_no'] == "PO-001"
 
 
+def _result(**kwargs):
+    result = MagicMock()
+    for name, value in kwargs.items():
+        setattr(result, name, value)
+    return result
+
+
+def _lock_result(orders):
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = orders
+    return result
+
+
 class TestUpdateBatchNo:
     @pytest.mark.asyncio
     async def test_raises_on_nonexistent_order(self, mock_db, mock_user):
-        mock_scalar = MagicMock()
-        mock_scalar.scalar_one_or_none.return_value = None
-        mock_db.execute.return_value = mock_scalar
+        snapshot = MagicMock()
+        snapshot.first.return_value = None
+        mock_db.execute.return_value = snapshot
 
         with pytest.raises(ValueError, match="订单不存在"):
             await order_batch_service.update_batch_no(mock_db, order_id=999, batch_no="X", sync_same_batch=False, user=mock_user)
 
     @pytest.mark.asyncio
     async def test_updates_single_order(self, mock_db, mock_user, mock_order):
-        mock_scalar = MagicMock()
-        mock_scalar.scalar_one_or_none.return_value = mock_order
-        mock_db.execute.return_value = mock_scalar
+        snapshot = MagicMock()
+        snapshot.first.return_value = MagicMock(id=1, batch_no="BATCH-001")
+        mock_db.execute.side_effect = [snapshot, _lock_result([mock_order])]
 
         with patch.object(order_batch_service, 'is_whitelisted', return_value=True):
             with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock):
@@ -189,3 +202,55 @@ class TestUpdateBatchNo:
 
         assert result['updated_count'] == 1
         assert mock_order.batch_no == "NEW-BATCH"
+
+    @pytest.mark.asyncio
+    async def test_sync_locks_target_and_mates_in_one_ascending_statement(self, mock_db, mock_user):
+        """P1-3：目标与同批订单必须在同一条 FOR UPDATE 且按 id 升序锁定。"""
+        target = MagicMock(spec=Order)
+        target.id = 5
+        target.batch_no = "B1"
+        mate = MagicMock(spec=Order)
+        mate.id = 3
+        mate.batch_no = "B1"
+
+        snapshot = MagicMock()
+        snapshot.first.return_value = MagicMock(id=5, batch_no="B1")
+        sync_result = MagicMock(rowcount=2)
+        mock_db.execute.side_effect = [snapshot, _lock_result([mate, target]), sync_result]
+
+        with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock):
+            result = await order_batch_service.update_batch_no(
+                mock_db, order_id=5, batch_no="B2", sync_same_batch=True, user=mock_user,
+            )
+
+        assert result['updated_count'] == 2
+        assert target.batch_no == "B2"
+
+        lock_stmt = mock_db.execute.await_args_list[1].args[0]
+        sql = str(lock_stmt.compile(compile_kwargs={'literal_binds': True}))
+        assert 'FOR UPDATE' in sql
+        assert 'ORDER BY "order".id' in sql
+        # 目标行与同批过滤条件在同一条语句里（旧实现是「先锁目标，再锁同批」两条）
+        assert '"order".id = 5' in sql
+        assert "batch_no = 'B1'" in sql
+
+        sync_stmt = mock_db.execute.await_args_list[2].args[0]
+        sync_params = sync_stmt.compile().params.values()
+        assert [3] in sync_params  # 只批量更新同批订单（目标行走实例赋值）
+        assert "B2" in sync_params
+
+    @pytest.mark.asyncio
+    async def test_sync_aborts_when_batch_changed_before_lock(self, mock_db, mock_user):
+        """并发改过批次号时不得按过期集合同步，返回 409 让用户重试。"""
+        target = MagicMock(spec=Order)
+        target.id = 5
+        target.batch_no = "B2"  # 拿到锁时已不是快照里的 B1
+
+        snapshot = MagicMock()
+        snapshot.first.return_value = MagicMock(id=5, batch_no="B1")
+        mock_db.execute.side_effect = [snapshot, _lock_result([target])]
+
+        with pytest.raises(order_batch_service.ConflictError, match="并发修改"):
+            await order_batch_service.update_batch_no(
+                mock_db, order_id=5, batch_no="B3", sync_same_batch=True, user=mock_user,
+            )

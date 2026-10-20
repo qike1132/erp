@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, datetime
 from typing import cast
 
-from sqlalchemy import false, func, literal, or_, select, update
+from sqlalchemy import and_, false, func, literal, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -20,6 +20,7 @@ from sqlalchemy.orm import joinedload
 # core.exception_handler.safe_publish_event 发布——失败仅记日志、不中断主流程。
 # 原 core/event_bus.py 的同名 safe_publish_event 已删除（双签名撞名，详见其迁移说明）。
 from fastapi_app.core.exception_handler import safe_publish_event as _safe_publish_event_call
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.serializers.order_serializer import OrderSerializer
 from fastapi_app.shared.time_format import format_local_time
@@ -406,29 +407,49 @@ async def update_batch_no(
     sync_same_batch: bool,
     user: User,
 ) -> dict:
-    result = await db.execute(select(Order).where(Order.id == order_id).with_for_update())
-    order = result.scalar_one_or_none()
-    if not order:
+    """改订单批次号；sync_same_batch 时同步同批其他订单。
+
+    锁序（P1-3）：目标订单与同批待同步订单必须在**同一条** FOR UPDATE 语句里
+    按 id 升序锁定。旧实现先锁目标行、再按 id 升序锁同批行——当目标 id 不是该批
+    最小 id 时，与 complete_batch / batch_assign 的「整集合升序」锁序构成 AB-BA
+    死锁窗口（PG 检测后中断一方，用户见 500）。
+
+    先无锁读取旧批次号仅用于拼锁定集合；若此时该订单批次号已被并发改掉，
+    锁语句会拿到新值——直接 409 让用户重试，避免按过期集合同步（也避免
+    为纠正集合而乱序补锁）。
+    """
+    snapshot = (await db.execute(
+        select(Order.id, Order.batch_no).where(Order.id == order_id)
+    )).first()
+    if snapshot is None:
         raise ValueError(f"订单不存在: {order_id}")
+    old_batch_no = snapshot.batch_no
 
-    old_batch_no = order.batch_no
-    updated_ids = [order_id]
-    order.batch_no = batch_no
-
-    if sync_same_batch and old_batch_no and old_batch_no != batch_no:
-        # 先锁定待同步订单，避免并发竞态（行级锁）
-        # F-BE-SVC-STOCK-07：多行 FOR UPDATE 必须按 id 升序（与
-        # order_batch_create._lock_products 同款），否则两条并发的批次操作
-        # 以相反顺序锁同一批行 → 死锁环（PG 直接 500，本仓无死锁映射）。
-        lock_result = await db.execute(
-            select(Order.id).where(
+    should_sync = bool(sync_same_batch and old_batch_no and old_batch_no != batch_no)
+    lock_stmt = select(Order).where(Order.id == order_id)
+    if should_sync:
+        lock_stmt = select(Order).where(or_(
+            Order.id == order_id,
+            and_(
                 Order.batch_no == old_batch_no,
                 Order.id != order_id,
                 Order.status != ORDER_STATUS_BATCH_COMPLETED,
                 Order.is_deleted.isnot(True),
-            ).order_by(Order.id).with_for_update()
-        )
-        sync_ids = list(lock_result.scalars().all())
+            ),
+        ))
+    lock_stmt = lock_stmt.order_by(Order.id).with_for_update(of=Order)
+    locked = (await db.execute(lock_stmt)).scalars().all()
+    order = next((o for o in locked if o.id == order_id), None)
+    if order is None:
+        raise ValueError(f"订单不存在: {order_id}")
+    if should_sync and order.batch_no != old_batch_no:
+        raise ConflictError('订单批次信息已被并发修改，请刷新后重试')
+
+    updated_ids = [order_id]
+    order.batch_no = batch_no
+
+    if should_sync:
+        sync_ids = [o.id for o in locked if o.id != order_id]
         if sync_ids:
             sync_stmt = update(Order).where(
                 Order.id.in_(sync_ids),
