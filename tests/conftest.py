@@ -210,8 +210,71 @@ def mock_user():
 # 集成测试 fixtures（需要数据库）
 # ============================================================
 
+# PostgreSQL 咨询锁（advisory lock）键：双参数版本的作用域是**当前数据库**，
+# 同一测试库互斥、不同测试库互不影响。0x7079/0x7465 = 'py'/'te'。
+_TEST_DB_LOCK_KEY = (0x7079, 0x7465)
+
+
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def test_engine():
+async def _exclusive_test_db_lock():
+    """独占测试库：同一测试库不允许两个 pytest 进程并跑（审计 Z09-R5）。
+
+    本目录的会话夹具会对测试库执行 ``DROP SCHEMA public CASCADE`` 整库重置。
+    两个 pytest 进程并跑同一测试库时，一方在 DROP SCHEMA、另一方正在查数据，
+    于是稳定复现"唯一键冲突 / 表不存在"这类**假红**（pitfalls §7 记过两次真实
+    事故）。AGENTS.md §4 的"全量 pytest 必须独占单实例"此前只是文档约束。
+
+    护栏用 PostgreSQL 咨询锁而不是锁文件：咨询锁按**数据库**加锁，同一测试库
+    即便从不同工作目录/工作树启动也互斥（锁文件做不到这点——不同 checkout 各有
+    自己的 logs/），且连接断开/进程退出即自动释放，不会留下要人工清理的死锁。
+
+    拿不到锁就终止整个会话：此时继续跑只会产出假红，掩盖真红。
+    """
+    from sqlalchemy.pool import NullPool
+
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
+    conn = await engine.connect()
+    try:
+        acquired = await conn.scalar(
+            text("SELECT pg_try_advisory_lock(:k1, :k2)"),
+            {"k1": _TEST_DB_LOCK_KEY[0], "k2": _TEST_DB_LOCK_KEY[1]},
+        )
+        if not acquired:
+            holder = await conn.execute(
+                text(
+                    "SELECT a.pid, a.application_name, a.state, a.backend_start "
+                    "FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+                    "WHERE l.locktype = 'advisory' AND l.classid = :k1 AND l.objid = :k2"
+                ),
+                {"k1": _TEST_DB_LOCK_KEY[0], "k2": _TEST_DB_LOCK_KEY[1]},
+            )
+            owners = "; ".join(
+                f"pid={r.pid} app={r.application_name!r} state={r.state} since={r.backend_start}"
+                for r in holder
+            )
+            pytest.exit(
+                "拒绝运行：测试库已被另一个 pytest 实例占用"
+                f"（{TEST_DATABASE_URL.rsplit('/', 1)[-1]}）。\n"
+                "本会话的夹具会执行 DROP SCHEMA public CASCADE，并跑必然互撞出假红。\n"
+                f"占用者：{owners or '未知（可能刚退出的实例）'}\n"
+                "请先结束另一个实例，或用 TEST_DATABASE_URL 指向另一个 *_test 库。",
+                returncode=2,
+            )
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            await conn.execute(
+                text("SELECT pg_advisory_unlock(:k1, :k2)"),
+                {"k1": _TEST_DB_LOCK_KEY[0], "k2": _TEST_DB_LOCK_KEY[1]},
+            )
+        with contextlib.suppress(Exception):
+            await conn.close()
+        with contextlib.suppress(Exception):
+            await engine.dispose()
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def test_engine(_exclusive_test_db_lock):
     """会话级数据库引擎 — 整次测试运行只创建一次。
 
     引擎创建（含连接池初始化）开销 ~300ms，
