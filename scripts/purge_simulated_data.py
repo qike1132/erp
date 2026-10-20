@@ -1,4 +1,4 @@
-"""上线前模拟数据选择性清除脚本
+"""上线前模拟数据选择性清除脚本（上线清库唯一入口，审计 F1-6）
 
 清除范围（业务模拟数据）:
   板房管理 / 湖北订单(含湖北外发) / 采购中心 / 核心业务 / 订单查询派生数据 /
@@ -8,6 +8,9 @@
   用户管理: user / user_permission / permission
   客户管理: customer / customer_access_log          # country 表已由迁移 pg_standalone_055 删除
   运行配置: backup_settings / backup_schedule / order_sync_config / alembic_version
+
+表清单来自 `scripts/purge_scope.py`（清库范围的唯一真相源）：本文件不硬编码表名，
+启动时对照 ORM metadata 做 fail-closed 覆盖校验 —— 新增 ORM 表而未分类即中止。
 
 执行流程:
   [1/6] pg_dump 全库备份（custom 格式）+ 归档完整性校验 + sha256
@@ -21,6 +24,8 @@
     python scripts/purge_simulated_data.py --dry-run     # 只预览范围，不写任何数据
     python scripts/purge_simulated_data.py --execute     # 备份 -> 清除 -> 复核（需输入 CONFIRM）
     python scripts/purge_simulated_data.py --execute --yes
+    python scripts/purge_simulated_data.py --scope DEV_KEEP_USERS --dry-run
+        # 开发期清业务数据但保留用户（避免把自己锁在门外）
 """
 from __future__ import annotations
 
@@ -36,7 +41,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+# scripts/ 下的 purge_scope（审计 F1-6：清库范围的唯一真相源）
+sys.path.insert(0, str(ROOT / 'scripts'))
 
+from purge_scope import PRODUCTION_SCOPE, SCOPES, assert_scope_sound, ordered_keep
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -46,95 +54,16 @@ from fastapi_app.core.config import settings
 # ---------------------------------------------------------------------------
 # 保留表：用户管理 + 客户管理 + 运行配置，脚本绝不触碰
 # ---------------------------------------------------------------------------
-KEEP_TABLES = [
-    'user',
-    'user_permission',
-    'permission',
-    'customer',
-    'customer_access_log',
-    # country 表已由迁移 pg_standalone_055 删除（原先在此保留会导致 _snapshot 报表不存在）
-    'backup_settings',
-    'backup_schedule',
-    'order_sync_config',
-    'alembic_version',
-]
+# 表清单不在本文件硬编码 —— 统一取自 scripts/purge_scope.py（审计 F1-6）。
+# 本文件曾是第四份独立真相源，漏 4 张 ORM 表（product_customer /
+# finished_stock_remark / import_file_registry / numbering_audit），
+# 上线清库会把这些模拟数据原样带进生产。
+KEEP_TABLES: list[str] = ordered_keep(PRODUCTION_SCOPE)
 
 # ---------------------------------------------------------------------------
 # 待清除表：严格按外键依赖排序（子表在前、父表在后），保证单事务内不会触发约束冲突
 # ---------------------------------------------------------------------------
-CLEAR_TABLES = [
-    # 板房管理
-    'customer_sampling_change_log',
-    'customer_sampling_fabric_version',
-    'customer_sampling_part',
-    'customer_sampling_role',
-    'customer_sampling_project',
-    'pattern_maker',
-    'file_records',
-    # 核心业务 - 库存与出库
-    'stock_return',
-    'stock_out',
-    'stock_in',
-    'inventory_log',
-    # 核心业务 - 皮套管理
-    'case_movement',
-    'case',
-    # 核心业务 - 订单附属
-    'notification',
-    'approval_log',
-    'approval_request',
-    # 湖北订单 - 湖北外发
-    'outsource_shipment_item',
-    'outsource_shipment',
-    'order_outsource_process_flow',
-    'order_outsource_process',
-    'outsource_process_type',
-    # 核心业务 - 订单
-    'order_item',
-    'order_status_log',
-    'order_batch_audit_log',
-    'order_sync_record',
-    'sync_retry_queue',
-    'order',
-    # 核心业务 - 批量导入暂存
-    'staging_stock_out',
-    'staging_stock_in',
-    'staging_order',
-    'staging_purchase_plan',
-    # 核心业务 - 生产
-    'production_plan_log',
-    'production_plan',
-    'daily_production_record',
-    'craft_work',
-    'packaging_record',
-    # 采购中心 - 采购计划（引用 product，须在 product 之前删除）
-    'purchase_plan_details',
-    'purchase_plans',
-    # 核心业务 - 产品与 BOM（product_packaging 已删，见迁移 pg_standalone_054）
-    'product_accessory',
-    'product_fabric',
-    'product_material',
-    'product_role',
-    'product',
-    # 采购中心
-    'material_registration_item',
-    'material_registration',
-    'purchase_order_sku',
-    'purchase_order_item',
-    'purchase_order',
-    'shipment_records',
-    'supplier',
-    'role',
-    'modification_log',
-    'saved_query',
-    # 系统管理（用户管理/客户管理/备份配置除外）
-    'app_version',
-    'audit_log',
-    'web_vital',
-    'backup_record',
-    # 编号计数器（重置，上线后单号从 001 重新开始）
-    'numbering_counter',
-]
+CLEAR_TABLES: list[str] = list(PRODUCTION_SCOPE.clear)
 
 MATERIALIZED_VIEWS = [
     'mv_daily_order_quantity',
@@ -153,6 +82,17 @@ REDIS_KEY_PATTERNS = [
 def _q(name: str) -> str:
     """标识符引用（表名均为脚本内硬编码常量）"""
     return '"' + name.replace('"', '""') + '"'
+
+
+def _activate_scope(scope_name: str) -> None:
+    """切换到指定清除范围（先 fail-closed 校验，再改模块级清单）。
+
+    脚本是单进程串行 CLI，没有并发调用方，故表清单用模块级变量即可。
+    """
+    global KEEP_TABLES, CLEAR_TABLES
+    scope = assert_scope_sound(scope_name)
+    KEEP_TABLES = ordered_keep(scope)
+    CLEAR_TABLES = list(scope.clear)
 
 
 def _engine():
@@ -377,6 +317,9 @@ def main() -> int:
     parser.add_argument('--dry-run', action='store_true', help='只预览清除范围')
     parser.add_argument('--execute', action='store_true', help='执行备份+清除+复核')
     parser.add_argument('--yes', action='store_true', help='跳过二次确认')
+    parser.add_argument('--scope', choices=sorted(SCOPES), default='PRODUCTION',
+                        help='清除范围：PRODUCTION=上线清库（保留用户/客户/运行配置）；'
+                             'DEV_KEEP_USERS=开发期清业务数据但保留用户')
     parser.add_argument('--allow-prod-write', action='store_true',
                         help='显式授权写生产库（与 ERP_ALLOW_PROD_WRITE=1 等价）')
     parser.add_argument('--backup-dir', default=str(ROOT / 'backups' / 'pre-launch-purge'),
@@ -392,6 +335,18 @@ def main() -> int:
     print('  ERP 上线前模拟数据清除工具')
     print('=' * 78)
     print(f'  数据库: {settings.DATABASE_URL.split("@")[-1]}')
+
+    # 范围与 ORM 不一致 → 直接拒绝（dry-run 也拒：预览漏表等于没预览）。
+    # 审计 F1-6 的核心诉求：新增 ORM 表而未分类时，漏表必须**当场暴露**，
+    # 而不是等上线后靠人工比对清单才发现。
+    try:
+        _activate_scope(args.scope)
+    except Exception as exc:
+        print(f'\n范围校验未通过，已中止：\n{exc}')
+        return 2
+
+    scope = SCOPES[args.scope]
+    print(f'  范围  : {scope.name} —— {scope.description}')
     print(f'  待清除: {len(CLEAR_TABLES)} 张表')
     print(f'  保留  : {"、".join(KEEP_TABLES)}')
 
@@ -428,6 +383,7 @@ def main() -> int:
     report = {
         'executed_at': datetime.now().isoformat(),
         'database': settings.DATABASE_URL.split('@')[-1],
+        'scope': args.scope,
         'backup': backup_info,
         'keep_snapshot': before,
         'deleted_rows': deleted,

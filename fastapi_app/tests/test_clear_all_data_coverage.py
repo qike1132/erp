@@ -16,12 +16,12 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = ROOT / 'scripts' / 'clear_all_data.py'
 
 
-def _load_named(filename: str):
+def _load_named(filename: str, subdir: str = ''):
     import sys
     for path in (ROOT, ROOT / 'scripts'):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
-    path = ROOT / 'scripts' / f'{filename}.py'
+    path = ROOT / 'scripts' / subdir / f'{filename}.py'
     spec = importlib.util.spec_from_file_location(f'{filename}_p135', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -119,12 +119,45 @@ def test_dry_run_previews_newly_added_tables_without_delete(script, capsys):
 
 @pytest.mark.parametrize('filename', ['simple_clear', 'cleanup_preserve_users'])
 def test_drifted_clear_scripts_refuse_by_default(filename, monkeypatch, capsys):
-    """P1-35：清单已漂移的旧脚本默认拒绝运行，避免「自称彻底清除」的静默残留。"""
+    """P1-35：清单已漂移的旧脚本默认拒绝运行，避免「自称彻底清除」的静默残留。
+
+    审计 F1-6 追加：这两个脚本已移入 scripts/archive/，且**无条件**拒绝执行 ——
+    连原来的 --allow-deprecated-clear 逃生口也不再有（那份清单漏 28 张表，
+    却会打印「其他数据已彻底清除」）。
+    """
     import sys
 
     monkeypatch.setattr(sys, 'argv', [f'{filename}.py'])
-    module = _load_named(filename)
+    module = _load_named(filename, 'archive')
     with pytest.raises(SystemExit) as exc:
         module.main()
     assert exc.value.code == 2
     assert 'purge_simulated_data.py' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('filename', ['simple_clear', 'cleanup_preserve_users'])
+def test_archived_clear_scripts_refuse_even_with_legacy_escape_hatch(filename, monkeypatch, capsys):
+    """归档脚本的旧逃生口（--allow-deprecated-clear）必须已失效。"""
+    import sys
+
+    monkeypatch.setattr(sys, 'argv', [f'{filename}.py', '--allow-deprecated-clear'])
+    module = _load_named(filename, 'archive')
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+    assert 'purge_simulated_data.py' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('filename', ['simple_clear', 'cleanup_preserve_users'])
+def test_drifted_clear_scripts_not_in_active_scripts_dir(filename):
+    """漂移脚本不得留在 scripts/ 根目录（唯一入口收敛的前提）。"""
+    assert not (ROOT / 'scripts' / f'{filename}.py').exists()
+    assert (ROOT / 'scripts' / 'archive' / f'{filename}.py').exists()
+
+
+@pytest.mark.parametrize('filename', ['simple_clear', 'cleanup_preserve_users'])
+def test_archived_clear_scripts_have_no_delete_statements(filename):
+    """归档脚本里不得再残留任何 DELETE / TRUNCATE 语句。"""
+    source = (ROOT / 'scripts' / 'archive' / f'{filename}.py').read_text(encoding='utf-8')
+    for token in ('DELETE FROM', 'TRUNCATE', 'drop_table', 'unlink('):
+        assert token not in source, f'归档脚本 {filename} 仍残留破坏性语句: {token}'

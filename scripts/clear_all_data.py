@@ -9,10 +9,11 @@
 
 ⚠️ P1-35（2026-10-17 审计）：本脚本曾按模块硬编码表清单，新模块入库后长期漏清
 （板房 7 张、湖北外发 5 张、notification/numbering_counter 等）。修复后：
-  - CLEARED_TABLES 列出本脚本会清空的全部表；KEEP_TABLES 显式声明故意保留的表；
   - 启动时 verify_table_coverage() 对照 ORM metadata，任何既未清空也未保留的表
     都会直接拒绝执行 —— 漏表不再静默；
-  - 新增 ORM 表时必须同步更新 CLEARED_TABLES（或 KEEP_TABLES）+ 对应 DELETE 语句，
+  - 表清单来自 scripts/purge_scope.py（审计 F1-6：清库范围的唯一真相源），
+    本脚本用 DEV_FULL 范围（连用户 / 客户一起清）；
+  - 新增 ORM 表时必须同步更新 purge_scope.py 的范围定义 + 本脚本对应 DELETE 语句，
     测试 fastapi_app/tests/test_clear_all_data_coverage.py 会钉住三者一致。
 上线前清库推荐 scripts/purge_simulated_data.py（pg_dump 备份 + 保留表指纹复核 +
 真 dry-run + 写护栏）；本脚本不含备份/复核，仅适合开发/测试环境。
@@ -36,58 +37,24 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from _prod_write_guard import affected_rows
+from purge_scope import DEV_FULL_SCOPE
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from fastapi_app.core.config import settings
 
 # ---------------------------------------------------------------------------
-# 保留表：本脚本刻意不清空的表（其余 ORM 表必须在 CLEARED_TABLES 中）
+# 表清单：来自 scripts/purge_scope.py（审计 F1-6 —— 清库范围的唯一真相源）。
+# 本脚本用 DEV_FULL 范围：连用户 / 客户一起清，只保留权限字典与运行配置。
+# 维护方式：新增 ORM 表 → 在 purge_scope.py 的 CORE_CLEAR_TABLES 里登记 + 在本脚本
+# 补对应 DELETE；二者不一致时覆盖测试会失败。
 # ---------------------------------------------------------------------------
-KEEP_TABLES = {
-    'permission',        # 权限字典；用户-权限关系由 user_permission 清除
-    'backup_settings',   # 备份配置（运行配置，非模拟数据）
-    'backup_schedule',   # 备份计划（运行配置）
-}
-# 注：alembic_version 不在 ORM metadata 中，也绝不清空（删除会导致重复迁移）。
+#: 保留表：本脚本刻意不清空的表（其余 ORM 表必须在 CLEARED_TABLES 中）。
+#: 含 alembic_version —— 它不在 ORM metadata 里，但删掉会导致重复迁移。
+KEEP_TABLES = set(DEV_FULL_SCOPE.keep)
 
-# 本脚本会清空的表全集（与各 clear_* 函数中的 DELETE 语句一一对应）。
-# 维护方式：新增 ORM 表 → 在此登记并补 DELETE；二者不一致时覆盖测试会失败。
-CLEARED_TABLES = {
-    # 板房管理 / 文件
-    'customer_sampling_change_log', 'customer_sampling_fabric_version',
-    'customer_sampling_part', 'customer_sampling_role', 'customer_sampling_project',
-    'pattern_maker', 'file_records',
-    # 库存 / 出库
-    'stock_return', 'stock_out', 'stock_in', 'inventory_log',
-    # 皮套
-    'case_movement', 'case',
-    # 订单附属
-    'notification', 'approval_log', 'approval_request',
-    'order_status_log', 'order_batch_audit_log', 'order_sync_record', 'sync_retry_queue',
-    'order_item', 'order',
-    # 湖北外发
-    'outsource_shipment_item', 'outsource_shipment',
-    'order_outsource_process_flow', 'order_outsource_process', 'outsource_process_type',
-    # 暂存
-    'staging_stock_out', 'staging_stock_in', 'staging_order', 'staging_purchase_plan',
-    # 生产
-    'production_plan_log', 'production_plan', 'daily_production_record',
-    'craft_work', 'packaging_record',
-    # 采购
-    'purchase_plan_details', 'purchase_plans',
-    'material_registration_item', 'material_registration',
-    'purchase_order_sku', 'purchase_order_item', 'purchase_order',
-    'shipment_records', 'supplier', 'modification_log', 'saved_query',
-    # 产品与 BOM
-    'product_accessory', 'product_fabric', 'product_material',
-    'product_role', 'product_customer', 'finished_stock_remark', 'role', 'product',
-    # 系统管理
-    'customer', 'customer_access_log', 'order_sync_config',
-    'user_permission', 'user',
-    'app_version', 'audit_log', 'web_vital', 'backup_record',
-    'import_file_registry', 'numbering_counter', 'numbering_audit',
-}
+#: 本脚本会清空的表全集（与各 clear_* 函数中的 DELETE 语句一一对应）。
+CLEARED_TABLES = set(DEV_FULL_SCOPE.clear)
 
 
 def verify_table_coverage() -> list[str]:
@@ -503,7 +470,7 @@ def main():
             print(f"  未分类（既未清空也未保留）: {', '.join(uncovered)}")
         if stale:
             print(f"  CLEARED_TABLES 中已不存在的表: {', '.join(stale)}")
-        print("  请更新 scripts/clear_all_data.py 的 CLEARED_TABLES/KEEP_TABLES 与对应 DELETE 语句。")
+        print("  请更新 scripts/purge_scope.py 的范围定义与本脚本的对应 DELETE 语句。")
         sys.exit(2)
 
     # 统一生产写护栏：只拦真正执行的路径（--dry-run 不写库，不拦）

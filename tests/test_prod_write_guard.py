@@ -67,7 +67,7 @@ def test_target_db_description_masks_password(guard):
 def test_guarded_scripts_actually_call_the_guard():
     """防"护栏没插进脚本"：盘点应当受保护的脚本确实调用了它。"""
     must_guard = [
-        'simple_clear.py', 'cleanup_preserve_users.py', 'create_test_orders.py',
+        'create_test_orders.py',
         'create_beile_test_data.py', 'create_multi_sku_test.py', 'seed_pattern_room.py',
         'insert_1_3_version.py', 'insert_test_app_versions.py',
         'insert_test_app_versions_simple.py', 'simulate_stockout.py',
@@ -84,3 +84,18 @@ def test_guarded_scripts_actually_call_the_guard():
         not in (ROOT / 'scripts' / name).read_text(encoding='utf-8')
     ]
     assert not missing, f'这些脚本没有接入生产写护栏: {missing}'
+
+
+def test_archived_clear_scripts_need_no_guard_because_they_never_write():
+    """审计 F1-6：simple_clear / cleanup_preserve_users 已归档为「无条件拒绝」的占位脚本。
+
+    它们不再有任何写操作，所以不需要（也无法）再接写护栏 —— 但必须仍在
+    scripts/archive/ 下、且不含破坏性语句。
+    """
+    for name in ('simple_clear.py', 'cleanup_preserve_users.py'):
+        assert not (ROOT / 'scripts' / name).exists(), f'{name} 不得留在 scripts/ 根目录'
+        archived = ROOT / 'scripts' / 'archive' / name
+        assert archived.exists(), f'{name} 应归档到 scripts/archive/'
+        source = archived.read_text(encoding='utf-8')
+        for token in ('DELETE FROM', 'TRUNCATE', 'unlink(', 'require_prod_write_consent'):
+            assert token not in source, f'归档脚本 {name} 仍残留: {token}'
