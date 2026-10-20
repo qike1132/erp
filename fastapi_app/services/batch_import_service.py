@@ -900,6 +900,10 @@ async def import_products_service(
         seen_names: set[str] = set()
         # 行号从 2 起：Excel 第 1 行是表头，与用户看到的行号一致（与 core 那条实现同口径）
         for idx, row_data in enumerate(data_list, start=2):
+            # Z04-R2：savepoint 回滚时按 key 补偿删除本行已落盘的图片
+            image_keys: list[str] = []
+            if isinstance(getattr(db, 'info', None), dict):
+                db.info['import_image_keys'] = image_keys
             try:
                 # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
                 async with db.begin_nested():
@@ -965,10 +969,16 @@ async def import_products_service(
                 imported += 1
             except (ValueError, TypeError, SQLAlchemyError) as exc:
                 # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
+                if image_keys:
+                    from fastapi_app.services.storage_service import delete_storage_keys
+                    await delete_storage_keys(image_keys)
                 logger.error(f'产品导入 - 行处理失败: {exc}', exc_info=True)
                 errors.append(_row_failure_message(exc, idx))
                 skipped += 1
                 continue
+            finally:
+                if isinstance(getattr(db, 'info', None), dict):
+                    db.info.pop('import_image_keys', None)
         # 提交交给请求级事务（get_async_db），服务层不再手动 commit
         if imported > 0:
             schedule_post_commit_invalidation(db, invalidate_batch_import_caches)

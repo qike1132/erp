@@ -326,6 +326,10 @@ async def _import_data_generic(
         rows_to_process = list(enumerate(data_list, start=2))
 
     for idx, row_data in rows_to_process:
+        # Z04-R2：每行单独登记已落盘图片 key；savepoint 回滚时补偿删除，避免孤儿文件
+        image_keys: list[str] = []
+        if isinstance(getattr(db, 'info', None), dict):
+            db.info['import_image_keys'] = image_keys
         try:
             if use_savepoint:
                 # 计数必须在 savepoint 成功退出之后：InventoryLog 的 INSERT 要到
@@ -340,10 +344,16 @@ async def _import_data_generic(
                 if await row_handler(db, row_data, idx, context, debug_messages):
                     count += 1
         except (ValueError, TypeError, SQLAlchemyError) as e:
+            if image_keys:
+                from fastapi_app.services.storage_service import delete_storage_keys
+                await delete_storage_keys(image_keys)
             if debug_messages is not None:
                 debug_messages.append(_row_failure_message(e, idx))
             logger.error(f"{label} - 行{idx}: 异常 - {e!s}", exc_info=True)
             continue
+        finally:
+            if isinstance(getattr(db, 'info', None), dict):
+                db.info.pop('import_image_keys', None)
 
     await db.flush()
 
@@ -431,7 +441,14 @@ async def _save_imported_image(
     except Exception as exc:  # defensive: 图片是可选附加项，任何失败都不应阻断整批导入
         logger.warning('产品导入：图片保存失败，跳过该图片 (name=%s): %s', name, exc)
         return None
-    return strip_upload_signature(saved['url'])
+    key = strip_upload_signature(saved['url'])
+    # Z04-R2：登记本行已落盘 key，供 savepoint 回滚时补偿删除
+    info = getattr(db, 'info', None)
+    if isinstance(info, dict):
+        keys = info.get('import_image_keys')
+        if isinstance(keys, list):
+            keys.append(key)
+    return key
 
 
 async def _resolve_import_customer_id(

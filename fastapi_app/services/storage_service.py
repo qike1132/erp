@@ -489,6 +489,23 @@ async def save_upload(
     }
 
 
+async def delete_storage_keys(storage_keys: list[str]) -> None:
+    """按 storage key 直接删除主图及缩略图/模糊变体（不回查 DB）。
+
+    Z04-R2：导入行在 savepoint 回滚后 FileRecord 已不存在，只能凭 key 补偿删除；
+    删除失败仅告警，绝不阻断导入主流程。
+    """
+    if not storage_keys:
+        return
+    storage = get_storage()
+    for key in storage_keys:
+        for variant in (key, get_thumbnail_key(key), get_blur_key(key)):
+            try:
+                await storage.delete(variant)
+            except (CircuitBreakerOpenError, OSError) as e:
+                logger.warning('补偿删除上传文件失败 key=%s: %s', variant, e)
+
+
 async def delete_upload(record_id: int, db) -> bool:
     """删除文件（对象存储 + 元数据，含缩略图变体）"""
     from fastapi_app.shared_models.file_record import FileRecord
