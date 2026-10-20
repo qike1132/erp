@@ -13,6 +13,7 @@
     "complexity": 4,
     "loop_shadow": 12,
     "pip_audit": 0,
-    "nosec_budget": 80
+    "nosec_budget": 80,
+    "bandit": 23
   }
 }

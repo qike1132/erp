@@ -256,8 +256,11 @@ def test_update_baseline_refuses_to_write_raised_baseline(tmp_path, monkeypatch,
     ref.write_text(json.dumps({'counts': {'ruff': 0}}), encoding='utf-8')
 
     monkeypatch.setattr(q, 'BASELINE_PATH', target)
-    monkeypatch.setattr(q, 'run_gate',
-                        lambda gate, thresholds, probe_dir, audit_report: q.GateOutcome(0, 5, ''))
+    monkeypatch.setattr(
+        q, 'run_gate',
+        lambda gate, thresholds, probe_dir, audit_report, security_report=None:
+            q.GateOutcome(0, 5, ''),
+    )
     monkeypatch.setenv(q.BASELINE_REF_ENV, str(ref))
     monkeypatch.setattr(sys, 'argv', ['quality_gate.py', '--update-baseline'])
 

@@ -84,6 +84,7 @@ MODE_JSON = "json"          # 子脚本 --json，stdout 起始处是 JSON 对象
 MODE_EXIT = "exit"          # 只用退出码（0 = 0 违规；非 0 = 有违规，计数未知）
 MODE_RUFF = "ruff"          # ruff --output-format json，计数 = 诊断数组长度
 MODE_PIP_AUDIT = "pip-audit"  # 进程内校验 pyproject.toml 的豁免策略
+MODE_BANDIT = "bandit"  # 解析 bandit JSON 报告（CI 产出 / 本地现场跑）
 
 SELFTEST_PREFIX = "[SELFTEST]"
 RUFF_TARGETS = ("scripts", "server_manager")
@@ -251,6 +252,16 @@ GATES: tuple[Gate, ...] = (
         count_key="total",
         fix_hint="每个 nosec 压制都是人工核验过的例外：不得新增；确需新增须先核验"
         "并在 scripts/check_nosec_budget.py 调增 DEFAULT_BUDGET（附理由），长期压回 70",
+    ),
+    # 2026-10-17 审计 F3-2：bandit 此前只产出报告（-ii --exit-zero），**没有任何判定
+    # 步骤**——注释里承诺的「判定」从未落地，扫描与判定之间是断的。这里补上门禁：
+    # 报告里的发现数进入基线棘轮，新增发现即失败（ruff 的 S 规则只兜一部分）。
+    Gate(
+        key="bandit",
+        title="bandit 安全发现（fastapi_app/ + utils/，同 CI 扫描口径）",
+        mode=MODE_BANDIT,
+        fix_hint="修掉新增的安全发现（SQL 拼接 / 子进程 / 弱哈希 / 随机数等）；"
+        "确属误报请在该行加 nosec 抑制注解（规则号 + 理由），受 nosec 预算门禁约束",
     ),
 )
 
@@ -531,15 +542,118 @@ def run_pip_audit_gate(thresholds: dict[str, int], audit_report: str | None) -> 
     )
 
 
+def _bandit_payload(text: str) -> dict | None:
+    """从 bandit 输出里取出 JSON 对象。
+
+    bandit 会在 JSON **之前**打印进度行（"Working... 100%"），所以不能沿用
+    「JSON 必须在起始处」的解析器；这里从第一个 "{" 起解。
+    """
+    index = text.find("{")
+    if index < 0:
+        return None
+    try:
+        payload, _end = json.JSONDecoder().raw_decode(text[index:])
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _bandit_summary(payload: object) -> tuple[int | None, str | None, list[str]]:
+    """解析 bandit JSON 报告。返回 (发现数 | None, 硬错误 | None, 明细行列表)。
+
+    「有扫描错误」按硬错误处理：bandit 没能扫到的文件等于**没被检查**，
+    把它当 0 处发现会静默放过风险（与「拿不到计数即保守失败」同一口径）。
+    """
+    if not isinstance(payload, dict):
+        return None, "bandit 报告顶层不是 JSON object", []
+    errors = payload.get("errors") or []
+    if not isinstance(errors, list):
+        return None, "bandit 报告的 errors 字段不是数组", []
+    if errors:
+        return None, f"bandit 报告含 {len(errors)} 条扫描错误（部分文件未被扫描）", []
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return None, "bandit 报告缺 results 数组", []
+    details: list[str] = []
+    for item in results:
+        if not isinstance(item, dict):
+            return None, "bandit 报告 results 里出现非 object 条目", []
+        details.append(
+            f"{item.get('filename', '?')}:{item.get('line_number', '?')} "
+            f"{item.get('test_id', '?')} {item.get('issue_text', '')}".rstrip()
+        )
+    return len(results), None, details
+
+
+def run_bandit_gate(thresholds: dict[str, int], security_report: str | None) -> GateOutcome:
+    """判定 bandit 安全发现数（CI 传 --security-report，本地现场跑 bandit）。
+
+    2026-10-17 审计 F3-2：此前 bandit 只 `-ii --exit-zero` 产出报告，没有任何判定
+    步骤，扫描与判定断层。本门禁把发现数接进基线棘轮——新增发现即失败。
+    """
+    if security_report:
+        path = Path(security_report)
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        if not path.exists():
+            return GateOutcome(None, None, "", f"--security-report 指定的 bandit 报告不存在：{path}")
+        try:
+            payload = _bandit_payload(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            return GateOutcome(None, None, "", f"--security-report 无法读取：{exc}")
+        if payload is None:
+            return GateOutcome(None, None, "", "--security-report 里没有可解析的 JSON 对象")
+        source = str(path)
+    else:
+        argv = [
+            sys.executable, "-m", "bandit", "-c", "bandit.yaml",
+            "-r", "fastapi_app", "utils", "-f", "json", "-ii", "-q",
+        ]
+        try:
+            proc = subprocess.run(
+                argv,
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=600,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return GateOutcome(None, None, "", f"bandit 执行失败（{exc}）")
+        payload = _bandit_payload(proc.stdout or "")
+        if payload is None:
+            return GateOutcome(None, None, "", "bandit 输出里没有可解析的 JSON 对象")
+        source = "现场 `python -m bandit -c bandit.yaml -r fastapi_app utils -f json -ii`"
+
+    count, hard_error, details = _bandit_summary(payload)
+    if hard_error is not None:
+        return GateOutcome(None, None, "", hard_error)
+
+    by_rule: dict[str, int] = {}
+    for line in details:
+        parts = line.split()
+        rule = parts[1] if len(parts) > 1 else "?"
+        by_rule[rule] = by_rule.get(rule, 0) + 1
+    breakdown = "、".join(f"{rule}×{n}" for rule, n in sorted(by_rule.items())) or "无"
+    notes = (f"数据来源：{source}", f"发现 {count} 处；按规则：{breakdown}")
+    output = "\n".join(details) if details else "[PASS] bandit 未发现安全问题"
+    return GateOutcome(rc=0, count=count, output=output, notes=notes)
+
+
 def run_gate(
     gate: Gate,
     thresholds: dict[str, int],
     probe_dir: Path | None = None,
     audit_report: str | None = None,
+    security_report: str | None = None,
 ) -> GateOutcome:
     """执行单个门禁，返回机器可读结果。"""
     if gate.mode == MODE_PIP_AUDIT:
         return run_pip_audit_gate(thresholds, audit_report)
+
+    if gate.mode == MODE_BANDIT:
+        return run_bandit_gate(thresholds, security_report)
 
     if gate.mode == MODE_RUFF and shutil.which(ruff_bin()) is None and not Path(ruff_bin()).exists():
         return GateOutcome(None, None, "", "找不到 ruff 可执行文件（pip install ruff）")
@@ -934,6 +1048,22 @@ def _pip_audit_fixtures(max_days: int, today: date) -> list[tuple[str, bool, str
 
 
 
+def _bandit_fixtures() -> list[tuple[str, bool, object]]:
+    """返回 [(说明, 期望判为硬错误, bandit JSON 载荷)]，用于报告解析层合成自检。"""
+    finding = {
+        "filename": "fastapi_app/probe.py", "line_number": 7, "test_id": "B608",
+        "issue_text": "hardcoded_sql_expressions", "issue_severity": "MEDIUM",
+    }
+    return [
+        ("干净报告", False, {"errors": [], "results": []}),
+        ("有发现（不是硬错误，交给棘轮判）", False, {"errors": [], "results": [finding, finding]}),
+        ("含扫描错误", True, {"errors": ["syntax error in probe.py"], "results": []}),
+        ("缺 results 数组", True, {"errors": []}),
+        ("顶层不是 object", True, ["not", "a", "dict"]),
+    ]
+
+
+
 def run_selftest(gates: tuple[Gate, ...], thresholds: dict[str, int], audit_report: str | None) -> int:
     """恒失败自检：人为违规 → 退出码非 0；移除违规 → 退出码 0。"""
     import tomllib
@@ -1004,6 +1134,18 @@ def run_selftest(gates: tuple[Gate, ...], thresholds: dict[str, int], audit_repo
                 report(
                     evaluate(gate, GateOutcome(1, 1, ""), 0).status == "REGRESS",
                     "pip-audit: 1 个策略问题 > 基线 0 → REGRESS",
+                )
+            elif gate.mode == MODE_BANDIT:
+                for label, expect_problem, payload in _bandit_fixtures():
+                    _count, hard_error, _details = _bandit_summary(payload)
+                    report(
+                        (hard_error is not None) is expect_problem,
+                        f"bandit: {label} → 硬错误={hard_error is not None}"
+                        f"（期望 {expect_problem}）",
+                    )
+                report(
+                    evaluate(gate, GateOutcome(0, 1, ""), 0).status == "REGRESS",
+                    "bandit: 1 处发现 > 基线 0 → REGRESS",
                 )
 
             # 端到端：真子脚本 + 真 runner（--probe-dir），双向验证退出码
@@ -1112,6 +1254,10 @@ def main() -> int:
     parser.add_argument(
         "--audit-report", help="pip-audit --format json 的输出文件（僵尸豁免判定用）"
     )
+    parser.add_argument(
+        "--security-report",
+        help="bandit -f json 的输出文件（CI 的 security-report.json）；不给则现场跑 bandit",
+    )
     args = parser.parse_args()
 
     thresholds = load_thresholds()
@@ -1152,7 +1298,7 @@ def main() -> int:
 
     results: list[tuple[Gate, GateOutcome, Judgement]] = []
     for gate in selected:
-        outcome = run_gate(gate, thresholds, probe_dir, args.audit_report)
+        outcome = run_gate(gate, thresholds, probe_dir, args.audit_report, args.security_report)
         base: int | None = 0 if probe_dir is not None else baseline.get(gate.key)
         results.append((gate, outcome, evaluate(gate, outcome, base)))
 
