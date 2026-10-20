@@ -150,7 +150,14 @@ def _apply_order_field_updates(order: PurchaseOrder, data: dict) -> None:
     if 'note' in data:
         order.remark = data['note']
     if 'status' in data:
-        order.status = data['status']
+        status_value = data['status']
+        # P1-16：schema 层已校验，这里兜内部调用方（服务层直通曾让任意字符串入库）。
+        if status_value is not None and status_value not in PurchaseOrderStatus.ALL:
+            raise ValueError(
+                f'非法采购订单状态: {status_value!r}（允许: {", ".join(PurchaseOrderStatus.ALL)}）'
+            )
+        if status_value is not None:
+            order.status = status_value
 
 
 def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: PurchaseOrder) -> Decimal:
@@ -329,7 +336,7 @@ async def complete_purchase_order(
     order = await db.get(PurchaseOrder, order_id)
     if not order:
         raise ValueError('采购订单不存在')
-    if order.status not in ('pending', 'confirmed'):
+    if order.status not in (PurchaseOrderStatus.PENDING, PurchaseOrderStatus.CONFIRMED):
         raise ValueError(f'订单{order.order_no}状态不允许完成')
 
     items_result = await db.execute(
@@ -400,7 +407,7 @@ async def batch_complete_purchase_orders(
             if not order:
                 errors.append(f'订单{oid}不存在')
                 continue
-            if order.status not in ('pending', 'confirmed'):
+            if order.status not in (PurchaseOrderStatus.PENDING, PurchaseOrderStatus.CONFIRMED):
                 errors.append(f'订单{order.order_no}状态不允许完成')
                 continue
 

@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -37,6 +38,9 @@ class PurchaseOrderStatus:
     """
     PENDING = 'pending'
     COMPLETED = 'completed'
+    # 历史状态：仅存量数据兼容（见 uq_po_pending_dedup 注释）；现行写路径不产生
+    CONFIRMED = 'confirmed'
+    ALL = (PENDING, COMPLETED, CONFIRMED)
 
 
 class PurchaseOrder(Base):
@@ -108,6 +112,11 @@ class PurchaseOrder(Base):
             func.coalesce(customer_id, 0), func.coalesce(supplier_name, ''), 'source_order_ids',
             unique=True,
             postgresql_where=(status == 'pending'),
+        ),
+        # P1-16：状态白名单（含历史 confirmed），禁止任意字符串静默入库。
+        CheckConstraint(
+            "status IN ('pending', 'completed', 'confirmed')",
+            name='purchase_order_status_check',
         ),
     )
 

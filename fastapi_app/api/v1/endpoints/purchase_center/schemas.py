@@ -3,7 +3,7 @@
 """
 
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # BOM 保存 DTO 已收口到 canonical 位置 fastapi_app/schemas/purchase_center.py（见架构 §9.3）；
 # 此处 re-export 以保持既有导入路径 `...endpoints.purchase_center.schemas` 可用。
@@ -15,6 +15,7 @@ from fastapi_app.schemas.purchase_center import (  # noqa: F401
     PackagingItem,
     RoleItem,
 )
+from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 
 
 class OrderIdsRequest(BaseModel):
@@ -121,6 +122,16 @@ class PurchaseOrderUpdateRequest(BaseModel):
     supplier_name: str | None = None
     customer_name: str | None = None
     modify_reason: str = ''
+
+    @field_validator('status')
+    @classmethod
+    def _validate_status(cls, value: str | None) -> str | None:
+        """P1-16：状态白名单，禁止任意字符串静默入库。"""
+        if value is not None and value not in PurchaseOrderStatus.ALL:
+            raise ValueError(
+                f'非法采购订单状态: {value!r}（允许: {", ".join(PurchaseOrderStatus.ALL)}）'
+            )
+        return value
 
 class BatchCompleteRequest(BaseModel):
     """批量完成订单请求
