@@ -17,7 +17,6 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.services.stock_inventory_service import (
-    _fetch_inventory,
     get_inventory_paginated,
     get_stock_overview_stats,
 )
@@ -141,32 +140,6 @@ async def test_overview_stats_legacy_fallback(
     """无明细订单回退订单级字段：5(明细) + 5(兼容) = 10"""
     stats = await get_stock_overview_stats(db)
     assert stats['order_quantity'] - committed_stats['order_quantity'] == 10
-
-
-async def test_fetch_inventory_per_sku(db, products_ab, mixed_order, legacy_order):
-    """库存聚合按 SKU 拆分：A 得 8（明细3+兼容5），B 得 2
-
-    注：_merge_inventory_rows 中由订单聚合创建的行不带 product_id 键（既有行为），
-    故按 product_barcode 匹配。
-    """
-    rows = await _fetch_inventory(db, None, cust=CUSTOMER)
-    by_barcode = {r['product_barcode']: r for r in rows}
-    assert by_barcode['MSKU-A']['order_qty'] == 8
-    # 旧实现按 o.product_id 分组，B 产品完全不出现在库存视图
-    assert by_barcode['MSKU-B']['order_qty'] == 2
-
-
-async def test_deleted_order_excluded_from_inventory_legacy(
-        db, products_ab, mixed_order, deleted_order):
-    """软删除订单不计入库存聚合（回归：删除订单后 /stock 仍显示其数量）。
-
-    旧实现的订单/国家聚合 SQL 只有 WHERE 1=1，没有 is_deleted 过滤，
-    已删订单（10000 件）会永久留在库存视图里。
-    """
-    rows = await _fetch_inventory(db, None, cust=CUSTOMER)
-    by_barcode = {r['product_barcode']: r for r in rows}
-    assert by_barcode['MSKU-A']['order_qty'] == 3
-    assert by_barcode['MSKU-B']['order_qty'] == 2
 
 
 async def test_deleted_order_excluded_from_inventory_paginated(

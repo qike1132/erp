@@ -374,44 +374,22 @@ async def get_stockreturn_records(db: AsyncSession, nos: str = '') -> list[dict]
 
 @cache_result(key_prefix='inventory', ttl=60, local_ttl=30, key_builder=lambda *args, **kwargs: f"c{kwargs.get('search_customer', '')}:p{kwargs.get('search_product', '')}")
 async def get_inventory(db: AsyncSession, search_customer: str='', search_product: str='') -> dict:
+    """全量库存视图（兼容入口）。
+
+    Z03-R1：旧版 `_fetch_inventory` 三表 Python 合并实现已删除——它与
+    `get_inventory_paginated` 的 CTE 口径已分叉（软删订单过滤/结余列）。本函数
+    现在只是分页版的“取全量”薄包装，两处调用方共用同一查询内核。
     """
-    获取库存数据（按产品+客户维度汇总）- SQL聚合优化版
-    目标：O(P*C*S) 内存聚合 → SQL GROUP BY，响应时间降低 50-80%
-    """
-    product_ids = await _resolve_products(db, search_product)
-    if product_ids is not None and not product_ids:
-        return {'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0, 'total_stock': 0}
-    rows = await _fetch_inventory(db, product_ids, search_customer)
-    if not rows:
-        return {'inventory_data': [], 'total_order_qty': 0, 'total_stockin_qty': 0, 'total_stock': 0}
-    total_stockin_qty = 0
-    total_order_qty = 0
-    total_stock = 0
-    inventory_data = []
-    for row in rows:
-        si_qty = int(row.get('stockin_qty') or 0)
-        so_dir = int(row.get('direct_stockout_qty') or 0)
-        so_order = int(row.get('order_stockout_qty') or 0)
-        o_qty = int(row.get('order_qty') or 0)
-        has_si = bool(row.get('has_stockin'))
-        has_o = bool(row.get('has_order'))
-        so_total = so_dir + so_order
-        remaining = max(0, o_qty - so_dir - so_order)
-        total_qty = si_qty + remaining
-        if (has_si or has_o) and total_qty > 0:
-            inventory_data.append({
-                'customer': row['customer'],
-                'product_name': row.get('product_name', ''),
-                'product_barcode': row.get('product_barcode') or '',
-                'order_quantity': remaining if remaining > 0 else '',
-                'stockin_quantity': si_qty if si_qty > 0 else '',
-                'stockout_quantity': so_total if so_total > 0 else '',
-                'total_stock': total_qty if total_qty > 0 else '',
-            })
-            total_stockin_qty += si_qty
-            total_order_qty += remaining
-            total_stock += total_qty
-    return {'inventory_data': inventory_data, 'total_order_qty': total_order_qty, 'total_stockin_qty': total_stockin_qty, 'total_stock': total_stock}
+    result = await get_inventory_paginated(
+        db, search_customer=search_customer, search_product=search_product,
+        page=1, per_page=100_000,
+    )
+    return {
+        'inventory_data': result['inventory_data'],
+        'total_order_qty': result['total_order_qty'],
+        'total_stockin_qty': result['total_stockin_qty'],
+        'total_stock': result['total_stock'],
+    }
 
 
 @cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=60,
@@ -797,89 +775,6 @@ async def _resolve_products(db: AsyncSession, search: str) -> list[int] | None:
     # 查询（如 m01 搜 M01）会假阴性。与 /products/list 的 ilike 口径一致。
     result = await db.execute(select(Product.id).where(or_(Product.name.ilike(f'%{escaped}%', escape='\\'), Product.barcode.ilike(f'%{escaped}%', escape='\\'))))  # sql-safe: escape_like/绑定参数/常量片段
     return [row[0] for row in result.all()]
-
-
-def _build_inventory_query_clauses(pids: list[int] | None, cust: str) -> tuple[dict, str, str, str, str, str, str, str]:
-    """构建库存查询的参数和条件片段（无产品筛选时跳过 ANY(:pids) 避免全表扫描）"""
-    params: dict = {}
-    si_pid = so_pid = o_pid = oi_or_o_pid = ''
-    si_cust = so_cust = o_cust = ''
-    if pids:
-        params['pids'] = tuple(pids)
-        si_pid = _SI_PID
-        so_pid = _SO_PID
-        o_pid = _O_PID
-        oi_or_o_pid = _OI_OR_O_PID
-    if cust:
-        params['sc'] = cust
-        si_cust = _SI_CUST
-        so_cust = _SO_CUST
-        o_cust = _O_CUST
-    return params, si_pid, so_pid, o_pid, oi_or_o_pid, si_cust, so_cust, o_cust
-
-
-def _merge_inventory_rows(stockin_rows: list[dict], stockout_rows: list[dict],
-                          order_rows: list[dict],
-                          pnames: dict) -> list[dict]:
-    """合并三张聚合查询结果为统一库存记录列表"""
-    merged = {}
-    for row in stockin_rows:
-        key = (row['product_id'], row['customer'])
-        merged[key] = dict(row)
-        for fld in ('direct_stockout_qty', 'order_stockout_qty', 'order_qty'):
-            merged[key].setdefault(fld, 0)
-        merged[key].setdefault('has_order', 0)
-    for row in stockout_rows:
-        key = (row['product_id'], row['customer'])
-        if key not in merged:
-            merged[key] = {'stockin_qty': 0, 'has_stockin': 0, 'order_qty': 0, 'has_order': 0}
-        merged[key]['direct_stockout_qty'] = row['direct_stockout_qty']
-        merged[key]['order_stockout_qty'] = row['order_stockout_qty']
-    for row in order_rows:
-        key = (row['product_id'], row['customer'])
-        if key not in merged:
-            merged[key] = {'stockin_qty': 0, 'has_stockin': 0, 'direct_stockout_qty': 0, 'order_stockout_qty': 0}
-        merged[key]['order_qty'] = row['order_qty']
-        merged[key]['has_order'] = row['has_order']
-    result = []
-    for key, data in merged.items():
-        product_id = key[0]
-        data['customer'] = key[1]
-        data['product_name'] = pnames.get(product_id, {}).get('name', '')
-        data['product_barcode'] = pnames.get(product_id, {}).get('barcode', '')
-        result.append(data)
-    return result
-
-
-async def _fetch_inventory(db: AsyncSession, pids: list[int] | None, cust: str='') -> list[dict]:
-    """库存聚合查询 - 优化版：无产品筛选时跳过 ANY(:pids) 避免全表扫描"""
-    params, si_pid, so_pid, _o_pid, oi_or_o_pid, si_cust, so_cust, o_cust = _build_inventory_query_clauses(pids, cust)
-    # 安全说明：以上条件片段均为模块级常量，不含用户输入；
-    # 筛选值通过 :pids/:sc 绑定参数传递。
-    stockin_sql = text(f'SELECT si.product_id, si.customer, SUM(si.quantity - COALESCE(sub.consumed, 0)) AS stockin_qty, 1 AS has_stockin FROM stock_in si LEFT JOIN (  SELECT stockin_id, SUM(quantity - returned_quantity) AS consumed   FROM stock_out WHERE stockin_id IS NOT NULL{si_pid}   GROUP BY stockin_id) sub ON sub.stockin_id = si.id WHERE 1=1{si_pid}{si_cust} GROUP BY si.product_id, si.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
-    # 多 SKU：订单维度聚合改按 OrderItem；无明细订单回退订单级兼容字段（COALESCE）
-    stockout_sql = text(f'SELECT so.product_id, so.customer, SUM(CASE WHEN so.order_id IS NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS direct_stockout_qty, SUM(CASE WHEN so.order_id IS NOT NULL THEN so.quantity - so.returned_quantity ELSE 0 END) AS order_stockout_qty FROM stock_out so WHERE so.stockin_id IS NULL{so_pid}{so_cust} GROUP BY so.product_id, so.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
-    order_sql = text(f'SELECT COALESCE(oi.product_id, o.product_id) AS product_id, o.customer, SUM(COALESCE(oi.quantity, o.quantity)) AS order_qty, 1 AS has_order FROM "order" o LEFT JOIN order_item oi ON oi.order_id = o.id WHERE 1=1{oi_or_o_pid}{o_cust}{_O_NOT_DELETED} GROUP BY COALESCE(oi.product_id, o.product_id), o.customer')  # nosec B608 — 条件片段为模块级常量，值通过绑定参数传递
-    stockin_rows = await _run_sql(db, stockin_sql, params)
-    stockout_rows = await _run_sql(db, stockout_sql, params)
-    order_rows = await _run_sql(db, order_sql, params)
-    # 收集实际出现的产品ID再查询名称，避免全量加载
-    all_pids = set()
-    for row in (*stockin_rows, *stockout_rows, *order_rows):
-        all_pids.add(row['product_id'])
-    pnames = await _get_prod_names(db, list(all_pids)) if all_pids else {}
-    return _merge_inventory_rows(stockin_rows, stockout_rows, order_rows, pnames)
-
-
-async def _run_sql(db: AsyncSession, sql, params: dict) -> list[dict]:
-    result = await db.execute(sql, params)
-    cols = list(result.keys())
-    return [dict(zip(cols, row, strict=False)) for row in result.all()]
-
-
-async def _get_prod_names(db: AsyncSession, pids: list[int]) -> dict:
-    result = await db.execute(select(Product.id, Product.name, Product.barcode).where(Product.id.in_(pids)))
-    return {row[0]: {'name': row[1], 'barcode': row[2] or ''} for row in result.all()}
 
 
 async def get_stock_overview_stats(db: AsyncSession) -> dict:
