@@ -138,7 +138,7 @@ class TestContentScanScope:
 
     @pytest.mark.parametrize(
         'rel',
-        ['tests/x.py', 'fastapi_app/tests/x.py', 'docs/a.md', 'docs/plan.py'],
+        ['tests/x.py', 'fastapi_app/tests/x.py', 'docs/a.md'],
     )
     def test_content_scan_skipped_for_tests_and_docs(self, rel: str) -> None:
         assert content_scan_applies(rel) is False
@@ -154,6 +154,9 @@ class TestContentScanScope:
             'backups/db_dump.sql',
             '.archive/old/a.py',
             'deliverables/x.txt',
+            # docs/ 整目录豁免已于 F3-4 收窄：只有 .md 走后缀豁免，docs 下的
+            # .py/.sql/.json 照常扫描（70 个受控文件曾是盲区）。
+            'docs/plan.py',
         ],
     )
     def test_content_scan_applies_outside_tests_and_docs(self, rel: str) -> None:
