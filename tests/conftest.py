@@ -420,6 +420,10 @@ async def auth_headers(async_client, admin_user):
 # Factory fixtures — 异步创建测试数据
 # ============================================================
 
+# 测试产品的基准库存：test_product 夹具进入用例时归位到这里、退出用例时写回
+# （审计 Z09-R6：跨用例的库存漂移会让聚焦跑与全量跑的初值不一致）。
+TEST_PRODUCT_BASELINE_STOCK = 100
+
 @pytest_asyncio.fixture
 async def admin_user(async_db_session):
     """创建或查询管理员用户"""
@@ -468,7 +472,14 @@ async def normal_user(async_db_session):
 
 @pytest_asyncio.fixture
 async def test_product(async_db_session):
-    """创建或查询测试产品（幂等，重复调用不抛唯一约束异常）"""
+    """创建或查询测试产品（幂等，重复调用不抛唯一约束异常）
+
+    用例级库存恢复（审计 Z09-R6）：夹具按 barcode 幂等查回**同一行**，而
+    ``async_db_session`` 在用例结束会把挂起变更提交进共享测试库——用例之间因此
+    通过 DB 隐式传递库存状态，依赖库存数值的断言在聚焦跑（``pytest -k``）与全量
+    跑下可能因初值不同而结论不同（聚焦绿 ≠ 全量绿）。这里进入用例时把库存归位
+    到基准值、退出用例时再写回，两个端口都断掉跨用例的状态传递。
+    """
     from fastapi_app.shared_models.product import Product
 
     result = await async_db_session.execute(
@@ -479,10 +490,14 @@ async def test_product(async_db_session):
         product = Product(
             name="测试产品",
             barcode="TEST001",
-            current_stock=100,
-            initial_stock=100,
+            current_stock=TEST_PRODUCT_BASELINE_STOCK,
+            initial_stock=TEST_PRODUCT_BASELINE_STOCK,
         )
         async_db_session.add(product)
+        await async_db_session.flush()
+    elif product.current_stock != TEST_PRODUCT_BASELINE_STOCK:
+        # 上一用例（或历史脏数据）留下的库存漂移：归位到基准值
+        product.current_stock = TEST_PRODUCT_BASELINE_STOCK
         await async_db_session.flush()
     # 库存结余闸门（2026-10-07）要求「包装部入库 − 已出货」≥ 出货量；
     # 测试产品无生产数据时闸门恒拒，故补一条包装部入库记录（幂等、足量）。
@@ -500,7 +515,10 @@ async def test_product(async_db_session):
             quantity=100000, production_date=datetime.now(UTC).date(),
         ))
         await async_db_session.flush()
-    return product
+    yield product
+    # 用例级恢复：库存写回基准值并提交，不把漂移留给下一个用例
+    product.current_stock = TEST_PRODUCT_BASELINE_STOCK
+    await async_db_session.commit()
 
 
 @pytest_asyncio.fixture
