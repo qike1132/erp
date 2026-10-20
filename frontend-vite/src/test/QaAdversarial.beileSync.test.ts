@@ -68,7 +68,11 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/utils/xls', () => ({ downloadXls: mocks.downloadXlsMock }))
-vi.mock('@/utils/print', () => ({ printHtml: mocks.printHtmlMock }))
+// 仅 mock printHtml（操作 DOM/iframe），保留真实 escapeHtml 供导出/打印转义
+vi.mock('@/utils/print', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...(actual as object), printHtml: mocks.printHtmlMock }
+})
 
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import HubeiView from '@/views/hubei/HubeiView.vue'
