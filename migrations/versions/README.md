@@ -25,6 +25,30 @@
 - `pg_standalone_027_drop_pattern_room_tables.py`（8 张遗留表）
 - `pg_standalone_062_case_management_rebuild.py`（case_stock_in / case_stock_out / case_inventory_log）
 
+## 大表回填模板（Z08-R2，后续迁移必读）
+
+`pg_standalone_058` / `073` 的全表 UPDATE 在 alembic 单事务内持锁到提交；两者已应用，
+不必返工，但**新迁移不要复制该模式**。大表回填必须：
+
+1. 按主键游标分批（`WHERE id > :last ORDER BY id LIMIT N`），每批独立提交
+   （`run_concurrently` / autocommit block），避免长时间行锁与 WAL 膨胀；
+2. 若无法分批，迁移 docstring 必须显式标注「须在停机窗口执行」及预计耗时；
+3. 回填前后各跑一次 `COUNT(*)` 复核，差异写日志。
+
+## po_dedup 唯一索引链（Z08-R4，结构性风险提示）
+
+`uq_po_pending_dedup` 在链上被三个迁移重建过（`add_po_dedup_unique_index` →
+`rebuild_po_dedup_index`（supplier_id 版）→ `rebuild_po_dedup_use_supplier_name`
+（supplier_name 版，经 019 merge 汇合）。当前空库 `upgrade head` + `alembic check`
+验证终态与 ORM（supplier_name 版）一致；但终态依赖拓扑执行序，新增/调整分支时
+必须重新跑空库校验，禁止再新增同名 DROP+CREATE 迁移。
+
+## product_name 快照双实现（Z08-R5，维护约定）
+
+`pg_standalone_087` 的 BEFORE INSERT 触发器是 product_name 快照的**权威口径**；
+`product_service.delete_product` 的 coalesce 回填只用于兜底存量行。修改任一处必须
+同步评估另一处，并在 PR 描述中说明两处口径是否仍然一致。
+
 ## 为什么会有 4 个 root
 
 仓库早期有多条并行开发线（物料/产品域、采购域、PostgreSQL 独立部署线），
