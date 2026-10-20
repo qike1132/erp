@@ -71,23 +71,11 @@ async def manual_full_backup_task(
             dummy_user.username = operator
             dummy_user.id = 0
 
-            # 加密 fail-safe:与端点 _resolve_encryption 一致——
-            # 请求加密但未配置任何密码(参数/头/环境变量)时,降级为不加密,禁止随机密钥回退
-            # 总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时忽略 encrypt 意图，一律明文。
-            if not backup_service.is_encryption_enabled():
-                if encrypt:
-                    logger.warning(
-                        'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次全量备份不加密'
-                    )
-                effective_password = None
-            elif not encrypt:
-                effective_password = None
-            else:
-                effective_password = password or backup_service.BACKUP_ENCRYPTION_PASSWORD or None
-                if not effective_password:
-                    logger.warning(
-                        '请求加密全量备份但未配置密码（参数/环境变量均无），本次备份将以未加密形式保存'
-                    )
+            # Z05-R5：与端点/服务层共用同一加密决策函数；手动任务允许降级明文。
+            from fastapi_app.services.backup.crypto import resolve_encryption_decision
+            _, effective_password = resolve_encryption_decision(
+                encrypt, password, degrade_when_missing=True,
+            )
             await update_progress(task_id, 'export_db', 0.1, '导出数据库')
 
             async def _svc_progress(phase: str, sub: float, detail: str):
@@ -514,12 +502,10 @@ async def _do_auto_backup(backup_type: str) -> dict:
             # P0-1: 自动备份加密决策显式化——仅环境变量配置了密码才加密，
             # 绝不随机回退（旧路径在无密码时会用一次性随机密钥，产出不可还原备份）
             # 总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时一律明文。
-            if not backup_service.is_encryption_enabled():
-                auto_password = None
-            else:
-                auto_password = backup_service.BACKUP_ENCRYPTION_PASSWORD or None
-                if not auto_password:
-                    logger.info('自动全量备份未配置 BACKUP_ENCRYPTION_PASSWORD，本次备份不加密')
+            from fastapi_app.services.backup.crypto import resolve_encryption_decision
+            _, auto_password = resolve_encryption_decision(
+                backup_service.is_encryption_enabled(), None, degrade_when_missing=True,
+            )
             zip_bytes, manifest = await backup_service.create_full_backup(
                 db, dummy_user, '每日自动全量备份',
                 encrypt_password=auto_password,

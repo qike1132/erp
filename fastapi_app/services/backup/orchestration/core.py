@@ -27,7 +27,7 @@ from .._constants import (
     _backup_in_progress,
     config_files_to_package,
 )
-from ..crypto import get_backup_encryption_password, is_encryption_enabled, sha256_file
+from ..crypto import sha256_file
 from ..dump import run_pg_dump
 from ..exceptions import (
     BackupError,
@@ -385,27 +385,13 @@ def _resolve_encryption_password(encrypt, encrypt_password):
     总开关优先：BACKUP_ENCRYPTION_ENABLED=false 时忽略调用方的 encrypt 意图，一律明文。
     前端手动备份硬编码 encrypt=true，若不让开关短路，运维改环境变量将完全无效。
     """
-    if not is_encryption_enabled():
-        if encrypt:
-            logger.warning(
-                'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次全量备份不加密'
-            )
-        return None
-    if encrypt is True and not (encrypt_password or get_backup_encryption_password()):
-        raise BackupError('请求加密全量备份但未配置密码（encrypt_password 参数 / BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）')
-    if encrypt is False:
-        return None
-    effective = encrypt_password or get_backup_encryption_password()
-    if encrypt is None and not effective:
-        # 红线#4（第八轮审计）：加密已启用却拿不到密码 → fail-closed，绝不静默
-        # 产出不加密备份（此前仅告警+明文）。启动期 _validate_production_backup_config
-        # 已拒绝该配置启动，此处是 STRICT_CONFIG_CHECK 关闭时的纵深防线。
-        if is_encryption_enabled():
-            raise BackupError(
-                '备份加密已启用（BACKUP_ENCRYPTION_ENABLED=true）但未配置可用的 '
-                'BACKUP_ENCRYPTION_PASSWORD / BACKUP_ENCRYPTION_KEY，拒绝产出不加密备份'
-            )
-        logger.warning("create_full_backup 未显式指定 encrypt，且无可用密码，本次备份不加密")
+    from ..crypto import resolve_encryption_decision
+
+    # Z05-R5：决策收敛到 crypto.resolve_encryption_decision；服务层不容忍
+    # 「encrypt=True 却无密码」的降级（宁可失败不可产出打不开的备份）。
+    _, effective = resolve_encryption_decision(
+        encrypt, encrypt_password, degrade_when_missing=False,
+    )
     return effective
 
 

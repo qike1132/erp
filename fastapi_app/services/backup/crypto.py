@@ -36,6 +36,57 @@ def generate_encryption_key() -> str:
     return secrets.token_urlsafe(32)
 
 
+def resolve_encryption_decision(
+    encrypt: bool | None,
+    explicit_password: str | None = None,
+    *,
+    degrade_when_missing: bool,
+) -> tuple[bool, str | None]:
+    """备份加密唯一决策点（Z05-R5）。
+
+    总开关 ``BACKUP_ENCRYPTION_ENABLED=false`` 时一律不加密（忽略调用方 encrypt）。
+
+    - ``encrypt=False`` → 不加密；
+    - ``encrypt=True`` 且有密码 → 加密；
+    - ``encrypt=True`` 但无密码：
+        - ``degrade_when_missing=True``（手动端点/任务）→ 降级明文并告警；
+        - ``False``（服务层全量备份）→ 抛 BackupError（宁可失败不可产出打不开的包）；
+    - ``encrypt=None``（服务层默认）且加密已启用但无密码 → fail-closed 抛错；
+    - ``encrypt=None`` 且开关关闭 → 明文。
+
+    Returns:
+        ``(是否实际加密, 使用的密码)``。
+    """
+    if not is_encryption_enabled():
+        if encrypt:
+            logger.warning(
+                'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次不加密'
+            )
+        return False, None
+    if encrypt is False:
+        return False, None
+
+    effective = explicit_password or get_backup_encryption_password()
+    if effective:
+        return True, effective
+    if encrypt is None:
+        from .exceptions import BackupError
+        raise BackupError(
+            '备份加密已启用（BACKUP_ENCRYPTION_ENABLED=true）但未配置可用的 '
+            'BACKUP_ENCRYPTION_PASSWORD / BACKUP_ENCRYPTION_KEY，拒绝产出不加密备份'
+        )
+    if degrade_when_missing:
+        logger.warning(
+            '请求加密备份但未配置密码（参数/请求头/环境变量均无），本次降级为不加密'
+        )
+        return False, None
+    from .exceptions import BackupError
+    raise BackupError(
+        '请求加密全量备份但未配置密码（encrypt_password 参数 / '
+        'BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供）'
+    )
+
+
 def is_encryption_enabled() -> bool:
     """备份加密是否已启用。
 

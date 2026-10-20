@@ -179,24 +179,13 @@ def _resolve_encryption(
     请求加密但未配置任何密码时，明确降级为不加密并记录告警，
     绝不退化为随机密码加密（fail-safe：宁可明文可还原，不可密文打不开）。
     """
-    from fastapi_app.services.backup.crypto import is_encryption_enabled
+    from fastapi_app.services.backup.crypto import resolve_encryption_decision
 
-    if not is_encryption_enabled():
-        if encrypt:
-            logger.warning(
-                'BACKUP_ENCRYPTION_ENABLED=false，已忽略 encrypt=True 请求，本次导出不加密'
-            )
-        return False, None
-    if not encrypt:
-        return False, None
-    resolved = _get_encryption_password(password, x_backup_password)
-    if not resolved:
-        logger.warning(
-            '请求加密备份但未配置密码（password 参数 / X-Backup-Password 头 / '
-            'BACKUP_ENCRYPTION_PASSWORD 环境变量均未提供），本次备份将以未加密形式保存'
-        )
-        return False, None
-    return True, resolved
+    return resolve_encryption_decision(
+        encrypt,
+        _get_encryption_password(password, x_backup_password),
+        degrade_when_missing=True,
+    )
 
 
 def _encrypt_backup_data(zip_bytes: bytes, password: str) -> bytes:  # log-context: internal helper 无请求上下文
