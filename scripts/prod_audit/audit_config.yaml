@@ -76,6 +76,66 @@ whitelist_explanations:
     rule_id: "L1-BROAD-EXCEPT-001"
     count: 39
     reason: "桌面壳（PyInstaller 打包的 server_manager.exe）入口模块，需捕获所有异常以防止 GUI 崩溃；39 处宽泛 except 已逐一审查并附说明，不纳入后端服务审核范围。"
+  - file: "server_manager.py"
+    layer: "L3"
+    rule_id: "L3-LOOP-QUERY-001"
+    count: 1
+    reason: "桌面壳入口的循环查询用于服务状态轮询（非业务数据层），已人工确认无 N+1 风险。"
+  - file: "fastapi_app/main.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "应用组合根：lifespan 启动清理/健康探测为独立短事务；无跨请求大事务。"
+  - file: "fastapi_app/core/audit_middleware.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "审计中间件按请求批写入，单事务行数受请求体上限约束，不持有长事务。"
+  - file: "fastapi_app/shared/stock_concurrency.py"
+    layer: "L4"
+    rule_id: "L4-LOCK-001"
+    count: 1
+    reason: "库存并发原语：SELECT ... FOR UPDATE 是设计意图（行锁），扫描器按大事务误报。"
+  - file: "fastapi_app/services/purchase_plan_crud.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "采购计划批量保存需在同一事务内保持台账一致性；行数受单次导入上限约束。"
+  - file: "fastapi_app/services/bom_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "BOM 整体替换（删旧+插新）必须原子；单产品物料行数量有界。"
+  - file: "fastapi_app/services/purchase_supplier_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "供应商改名级联更新需与引用表同事务，避免半改状态；批大小受供应商维度约束。"
+  - file: "fastapi_app/services/staging_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "暂存批量写入按导入批次控制行数，事务边界与导入批次一致。"
+  - file: "fastapi_app/services/purchase_order_crud.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "采购单生成/删除含 savepoint 与来源状态回写，需原子；单次来源记录数有界。"
+  - file: "fastapi_app/services/order_batch_create.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "批量建单按客户分组、单事务保证整批成功/失败；批大小受导入上限约束。"
+  - file: "fastapi_app/services/purchase_bom_copy_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "BOM 跨产品复制需在同一事务内完成，避免半复制；目标产品物料数有界。"
+  - file: "fastapi_app/services/notification_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "通知 fan-out 批量 INSERT 与业务提交同事务，收件人数受权限用户规模约束。"
 
 # ---------------------------------------------------------------------------
 # 12 层配置
