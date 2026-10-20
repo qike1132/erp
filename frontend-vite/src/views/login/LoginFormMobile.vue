@@ -1,8 +1,8 @@
 <template>
   <div class="m-login-page">
     <div class="m-login-logo-area">
-      <img loading="lazy" class="m-login-logo" src="/logo_plush.png" alt="滨发协同系统" />
-      <div class="m-login-title">滨发协同系统</div>
+      <img loading="lazy" class="m-login-logo" src="/logo_plush.png" :alt="APP_NAME_FULL" />
+      <div class="m-login-title">{{ APP_NAME_FULL }}</div>
       <div class="m-login-sub">Binfa Collaboration System</div>
     </div>
 
@@ -33,7 +33,7 @@
               class="m-login-pwd-toggle"
               type="button"
               aria-label="切换密码可见性"
-              @click="showPassword = !showPassword"
+              @click="togglePasswordVisibility"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -69,8 +69,13 @@
 
 <script setup lang="ts">
 import { useLogin } from './useLogin'
+import { APP_NAME_FULL } from '@/constants/brand'
 
 const { loading, showPassword, errorMsg, form, handleLogin } = useLogin()
+
+function togglePasswordVisibility() {
+  showPassword.value = !showPassword.value
+}
 </script>
 
 <style scoped>

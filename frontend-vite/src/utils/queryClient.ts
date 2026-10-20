@@ -23,7 +23,10 @@ export const NON_PERSISTED_QUERY_PREFIXES = new Set([
   'ocr-progress',
   'users-list',
   'permissions-tree',
-  'case-inventory-logs',
+  // 皮套移动/抽屉流水（原键名 case-inventory-logs 已不存在，实际 queryKey 见
+  // useCaseStockRecords/useCaseInventory；漏排除会让审计流水落 sessionStorage 24h）
+  'case-movements',
+  'case-movements-drawer',
 ])
 
 export function shouldPersistQuery(queryKey: readonly unknown[]): boolean {

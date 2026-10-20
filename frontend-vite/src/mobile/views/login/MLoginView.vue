@@ -6,9 +6,9 @@
     <!-- 品牌区 -->
     <header class="m-login-brand">
       <div class="m-login-logo">
-        <img loading="lazy" src="/logo_plush.png" alt="滨发协同" width="96" height="96" />
+        <img loading="lazy" src="/logo_plush.png" :alt="APP_NAME" width="96" height="96" />
       </div>
-      <h1 class="m-login-title">滨发协同</h1>
+      <h1 class="m-login-title">{{ APP_NAME }}</h1>
       <p class="m-login-sub">Binfa Collaboration System</p>
       <p class="m-login-tagline">专业的毛绒玩具供应链协同平台</p>
     </header>
@@ -46,7 +46,7 @@
             type="button"
             class="m-eye"
             :aria-label="showPassword ? '隐藏密码' : '显示密码'"
-            @click="showPassword = !showPassword"
+            @click="togglePasswordVisibility"
           >
             <svg v-if="showPassword" viewBox="0 0 24 24" width="20" height="20" fill="none">
               <path d="M3 3l18 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
@@ -103,8 +103,13 @@
 
 <script setup lang="ts">
 import { useLogin } from '@/views/login/useLogin'
+import { APP_NAME } from '@/constants/brand'
 
 const { loading, showPassword, errorMsg, form, handleLogin } = useLogin()
+
+function togglePasswordVisibility() {
+  showPassword.value = !showPassword.value
+}
 </script>
 
 <style scoped>

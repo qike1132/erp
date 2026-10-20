@@ -11,21 +11,16 @@ export function useDashboardMobileData() {
   const lastRefreshTime = ref<number>(0)
   const visibleCards = ref([false, false, false, false])
 
-  let timeTimer: ReturnType<typeof setInterval> | null = null
-  let animTimer: ReturnType<typeof setTimeout> | null = null
+  // Z04-R3：动画定时器逐次覆盖旧句柄会泄漏卸载后的回调；统一收集、统一清理。
+  // 原 currentTime + 10s setInterval 无任何消费方（模板未使用），是空转死代码，一并删除。
+  let animTimers: ReturnType<typeof setTimeout>[] = []
 
-  const currentTime = ref('')
-  function updateTime() {
-    const now = new Date()
-    currentTime.value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0')
+  function clearAnimTimers() {
+    animTimers.forEach((t) => clearTimeout(t))
+    animTimers = []
   }
-  updateTime()
-  timeTimer = setInterval(updateTime, 10000)
 
-  onUnmounted(() => {
-    if (timeTimer) clearInterval(timeTimer)
-    if (animTimer) clearTimeout(animTimer)
-  })
+  onUnmounted(clearAnimTimers)
 
   const lastUpdateText = computed(() => {
     if (loading.value) return '加载中...'
@@ -58,10 +53,11 @@ export function useDashboardMobileData() {
   }
 
   function triggerReveal() {
+    clearAnimTimers()
     visibleCards.value.forEach((_, i) => {
-      animTimer = setTimeout(() => {
+      animTimers.push(setTimeout(() => {
         visibleCards.value = visibleCards.value.map((v, j) => j <= i ? true : v)
-      }, 60 * (i + 1))
+      }, 60 * (i + 1)))
     })
   }
 
@@ -113,7 +109,6 @@ export function useDashboardMobileData() {
     error,
     data,
     visibleCards,
-    currentTime,
     lastUpdateText,
     sortedDepartments,
     rankLabel,

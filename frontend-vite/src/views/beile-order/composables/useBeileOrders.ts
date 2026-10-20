@@ -19,7 +19,7 @@ import { toast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useExport } from '@/composables/useExport'
 import { downloadXls } from '@/utils/xls'
-import { printHtml } from '@/utils/print'
+import { escapeHtml, printHtml } from '@/utils/print'
 
 /** 每页条数选项（分页组件下拉可选） */
 export const PAGE_SIZE_OPTIONS = [18, 30, 50, 100]
@@ -308,11 +308,6 @@ export function useBeileOrderBlock(opts: BeileOrderBlockOptions) {
 }
 
 // ==================== 汇总表（导出 XLS = 打印预览，与页面同一真源） ====================
-
-/** HTML 特殊字符转义（导出 / 打印共用） */
-export function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
 
 /**
  * 汇总表「小义开单」列口径（订单级事实，与 /beile-order 页面同源）：

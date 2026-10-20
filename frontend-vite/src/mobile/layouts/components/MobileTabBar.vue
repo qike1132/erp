@@ -44,7 +44,8 @@ const activeTab = computed(() => {
   for (const tab of props.tabs) {
     if (tab.to && route.path.startsWith(tab.to)) return tab.name
   }
-  return props.tabs[0]?.name
+  // F5-2：无匹配 tab（快捷面板六页等）不得兜底高亮第一个 tab，否则「概览」误亮
+  return ''
 })
 
 function handleTab(tab: TabItem) {

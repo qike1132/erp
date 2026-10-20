@@ -31,7 +31,7 @@
       </MList>
 
       <div class="m-app-info">
-        <span>东莞ERP v2.0</span>
+        <span>{{ APP_NAME }} {{ APP_VERSION }}</span>
       </div>
     </div>
   </div>
@@ -40,6 +40,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { APP_NAME, APP_VERSION } from '@/constants/brand'
 import { authApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'

@@ -85,11 +85,21 @@ describe('persistQueryClient sessionStorage 持久化', () => {
   })
 
   it('实时任务、用户权限和审计流水不写入持久化缓存', () => {
-    for (const key of ['ocr-progress', 'users-list', 'permissions-tree', 'case-inventory-logs']) {
+    for (const key of ['ocr-progress', 'users-list', 'permissions-tree',
+                       'case-movements', 'case-movements-drawer']) {
       expect(shouldPersistQuery([key, 'any-params'])).toBe(false)
     }
     expect(shouldPersistQuery(['report-data', 'summary'])).toBe(true)
     expect(shouldPersistQuery(['batch-query', 1])).toBe(true)
+  })
+
+  it('皮套模块所有 case-movements* queryKey 都被排除', async () => {
+    const { CASE_QUERY_KEYS } = await import('@/views/case/composables/useCaseStockWorkbench')
+    const movementKeys = CASE_QUERY_KEYS.filter((k) => k.startsWith('case-movements'))
+    expect(movementKeys.length).toBeGreaterThan(0)
+    for (const key of movementKeys) {
+      expect(shouldPersistQuery([key, 1])).toBe(false)
+    }
   })
 
   it('removeClient 清空持久化缓存（对齐 logout 行为）', async () => {

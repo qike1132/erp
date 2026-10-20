@@ -93,6 +93,27 @@ def _is_scanned(path: str) -> bool:
     )
 
 
+def _parse_name_status(lines: list[str]) -> list[str]:
+    """解析 --name-status：A/M 取路径；R<score> 纯改名（R100）豁免、改动型改名取新路径。"""
+    out: list[str] = []
+    for line in lines:
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        status = parts[0]
+        if status.startswith("R"):
+            try:
+                score = int(status[1:] or "100")
+            except ValueError:
+                score = 100
+            if score >= 100:
+                continue  # 纯改名不改变文件规模；门禁只拦「新增/修改后超限」
+            out.append(parts[2] if len(parts) > 2 else parts[1])
+        elif status[:1] in ("A", "M"):
+            out.append(parts[1])
+    return out
+
+
 def _git_changed_py_files(base: str = "HEAD") -> list[Path]:
     """返回 git 变更的 .py 文件。
 
@@ -121,13 +142,21 @@ def _git_changed_py_files(base: str = "HEAD") -> list[Path]:
             return []
 
     if base != "HEAD":
-        changed = _run_git(["diff", "--name-only", "--diff-filter=AM", f"{base}...HEAD"])
+        # F3-1：--diff-filter=AM 漏掉 R（改名），rename+扩容可绕过门禁；改 AMR 后
+        # 纯改名 R100 豁免（规模未变），R0xx（改名同时修改）按新路径扫描。
+        changed = _parse_name_status(
+            _run_git(["diff", "--name-status", "--diff-filter=AMR", f"{base}...HEAD"])
+        )
         return [Path(p) for p in dict.fromkeys(changed) if _is_scanned(p)]
 
     # 已跟踪文件的改动
-    tracked = _run_git(["diff", "--name-only", "--diff-filter=AM", "HEAD"])
+    tracked = _parse_name_status(
+        _run_git(["diff", "--name-status", "--diff-filter=AMR", "HEAD"])
+    )
     # 暂存区的改动（含未提交新文件）
-    staged = _run_git(["diff", "--cached", "--name-only", "--diff-filter=AM"])
+    staged = _parse_name_status(
+        _run_git(["diff", "--cached", "--name-status", "--diff-filter=AMR"])
+    )
     # 未跟踪的新文件
     untracked = _run_git(["ls-files", "--others", "--exclude-standard"])
     return [Path(p) for p in dict.fromkeys(tracked + staged + untracked) if _is_scanned(p)]

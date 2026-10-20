@@ -3,7 +3,7 @@
     <router-link to="/dashboard" class="sb-logo">
       <img loading="lazy" src="/logo_plush.png" alt="东莞玩具" width="70" height="70" />
       <div v-if="!collapsed" class="sb-logo-text">
-        <div class="sb-logo-title">滨发协同系统</div>
+        <div class="sb-logo-title">{{ APP_NAME_FULL }}</div>
         <div class="sb-logo-subtitle">供应链管理平台 v2.0</div>
       </div>
     </router-link>
@@ -11,6 +11,8 @@
 </template>
 
 <script setup lang="ts">
+import { APP_NAME_FULL } from '@/constants/brand'
+
 defineProps<{ collapsed: boolean }>()
 </script>
 
