@@ -88,8 +88,14 @@ export type RoleUpdateRequest = GenRoleUpdateRequest
 /** 批量新增部位单项 */
 export type BatchPartItem = WithRequired<GenBatchPartItem, 'supplier_id' | 'fabric_name' | 'fabric_color_no'>
 
-/** 批量新增部位请求 */
-export type BatchPartCreateRequest = GenBatchPartCreateRequest
+/** 批量新增部位请求
+ *
+ * 容器必须显式换回本地强类型元素：`= GenBatchPartCreateRequest` 看起来「零重复」，
+ * 但它的 items 元素是生成层的**全可选镜像**（supplier_id / fabric_name /
+ * fabric_color_no 都带 ?），而本文件上面刚把这三项 WithRequired 成必填 ——
+ * 直接别名生成层会让请求口径退回宽松，正是本仓派生迁移刻意避开的陷阱。
+ */
+export type BatchPartCreateRequest = WithItems<GenBatchPartCreateRequest, 'items', BatchPartItem>
 
 // ==================== 版本 ====================
 
