@@ -30,6 +30,12 @@ def test_affected_rows_rejects_multi_statement():
     'scripts/database/restore_db.py',
     'scripts/init_permissions.py',
     'scripts/backfill_purchase_order_sku.py',
+    # 审查 H13 补齐的 5 个直写生产库脚本
+    'scripts/reset_admin_password.py',
+    'scripts/migrate_password_hashes.py',
+    'scripts/perf_add_indexes.py',
+    'scripts/cleanup_duplicate_purchase_orders.py',
+    'scripts/backfill_production_stock_20261006.py',
 ])
 def test_dangerous_write_scripts_wire_the_guard(rel):
     """F3-9：危险写入口必须出现 require_prod_write_consent。"""

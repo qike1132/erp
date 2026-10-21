@@ -53,6 +53,12 @@ INDEXES = [
 
 
 async def main():
+    # 危险写护栏（审查 H13）：CREATE INDEX CONCURRENTLY 是直接落生产库的 DDL。
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent(
+        '创建性能索引（CREATE INDEX CONCURRENTLY ×7）',
+        hint='DDL 写生产库；CONCURRENTLY 不锁写但仍占 IO，建议低峰执行。',
+    )
     _init_async_engine()
     async with _AsyncSessionLocal() as session:
         for _table, idx_name, ddl in INDEXES:

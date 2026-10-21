@@ -22,6 +22,10 @@ from fastapi_app.schemas.finished_stock import (
 from fastapi_app.services import finished_stock_service
 from fastapi_app.shared_models import User
 
+# Excel 公式注入清洗（审查 H12）：customer_name/product_name/batch_no 等是
+# 用户可控文本，复用权威清洗器（与 purchase_center/export_utils.py 同口径）。
+from utils.report_exporter import _sanitize_excel_value
+
 router = APIRouter()
 
 # 导出最大行数（仿 stock.py 的 MAX_EXPORT_INVENTORY_ROWS），防 openpyxl 全量内存构建 OOM
@@ -77,13 +81,13 @@ def _build_finished_stock_excel(rows: list[dict]) -> bytes:
     ws.append(['客户', '产品名称', '69码', '批次号', '库存', '定制', '定制国家'])
     for r in rows:
         ws.append([
-            r['customer_name'] or '',
-            r['product_name'] or '',
-            r['barcode'] or '',
-            r['batch_no'] or '',
+            _sanitize_excel_value(r['customer_name'] or ''),
+            _sanitize_excel_value(r['product_name'] or ''),
+            _sanitize_excel_value(r['barcode'] or ''),
+            _sanitize_excel_value(r['batch_no'] or ''),
             r['batch_available'],
             '是' if r['is_custom'] else '',
-            r['custom_country'] or '',
+            _sanitize_excel_value(r['custom_country'] or ''),
         ])
     out = io.BytesIO()
     wb.save(out)

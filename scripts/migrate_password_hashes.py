@@ -566,6 +566,14 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # 危险写护栏（审查 H13）：批量 UPDATE "user" 直写生产库；--dry-run 预览不放拦截。
+    if not args.dry_run:
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent(
+            '密码哈希迁移（批量 UPDATE "user"）',
+            hint='脚本会先自动备份到 backups/ 再改写；预览请加 --dry-run。',
+        )
+
     # 初始化数据库管理器
     db = DatabaseManager()
 

@@ -33,6 +33,10 @@ from fastapi_app.shared.stock_concurrency import (
 from fastapi_app.shared_models import Customer, DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
 
+# Excel 公式注入清洗（审查 H12）：product_name/barcode/remark/created_by 是
+# 用户可控文本，复用权威清洗器（与 purchase_center/export_utils.py 同口径）。
+from utils.report_exporter import _sanitize_excel_value
+
 logger = logging.getLogger(__name__)
 
 DEPARTMENT_LABELS = {
@@ -943,13 +947,13 @@ async def export_records(
         ws.append([
             r.production_date.isoformat() if r.production_date else '',
             DEPARTMENT_LABELS.get(r.department, r.department),
-            r.product_name,
-            r.barcode or '',
+            _sanitize_excel_value(r.product_name),
+            _sanitize_excel_value(r.barcode or ''),
             up,
             r.quantity,
             val,
-            r.remark or '',
-            r.created_by or '',
+            _sanitize_excel_value(r.remark or ''),
+            _sanitize_excel_value(r.created_by or ''),
             r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else '',
         ])
 

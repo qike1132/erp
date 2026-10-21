@@ -179,6 +179,12 @@ def main() -> int:
     args = parser.parse_args()
     if args.apply:
         args.dry_run = False
+        # 危险写护栏（审查 H13）：--apply 删生产库采购单主单+明细；默认 dry-run 只读。
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent(
+            f'删除重复采购订单（扫描窗口 {args.days} 天）',
+            hint='不可逆：主单与明细一并删除；先跑默认 dry-run 看清单。',
+        )
     try:
         return asyncio.run(main_async(args))
     except KeyboardInterrupt:
