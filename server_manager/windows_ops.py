@@ -238,7 +238,11 @@ def find_project_residual_pids(project_dir, exclude=()):
     exclude.add(os.getpid())
     with contextlib.suppress(Exception):
         exclude.add(os.getppid())  # PyInstaller onefile 的 bootloader 父进程
-    project = str(project_dir).lower()
+    # 分隔符归一化必须**两侧同做**：下面把 cmdline/cwd 的 '/' 换成 '\\' 再比对，
+    # 若 project 仍留着 POSIX 分隔符，Linux 上就永远匹配不上（CI 里
+    # test_editor_with_project_path_is_not_killed 因此拿到空列表 —— 真实残留
+    # 进程会被漏杀，属于只在非 Windows 侧静默失效的判据缺陷）。
+    project = str(project_dir).lower().replace('/', '\\')
     pids = []
     try:
         import psutil
