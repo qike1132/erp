@@ -3,17 +3,12 @@
  * 主件与配件同为 SKU；出入库统一为一张流水（direction 区分方向）。
  */
 import { get, post, put, del, upload, download } from './request'
+import type { CaseActionResponse as GenCaseActionResponse, CaseBatchFailedItem as GenCaseBatchFailedItem, CaseInventoryStats as GenCaseInventoryStats, CaseMovementCreateResponse as GenCaseMovementCreateResponse, CaseSearchItem as GenCaseSearchItem } from '@/types/api'
 
 // ===== 共享类型 =====
 
 /** 皮套 SKU 搜索项（GET /cases/search） */
-export interface CaseSearchItem {
-  id: number
-  name: string
-  barcode: string
-  current_stock: number
-  parent_id: number | null
-}
+export type CaseSearchItem = Required<GenCaseSearchItem>
 
 /** 产品列表项（GET /cases/products）：附配件数，供「有配件/无配件」筛选 */
 export interface CaseProduct {
@@ -94,16 +89,9 @@ export interface CaseMovementPayload {
   note?: string
 }
 
-export interface CaseMovementCreateResponse {
-  success: boolean
-  movement_no: string
-  id: number
-}
+export type CaseMovementCreateResponse = Required<GenCaseMovementCreateResponse>
 
-export interface CaseBatchFailedItem {
-  index: number
-  error: string
-}
+export type CaseBatchFailedItem = Required<GenCaseBatchFailedItem>
 
 export interface CaseBatchMovementResponse {
   success: boolean
@@ -116,12 +104,7 @@ export interface CaseInventoryNode extends CaseItem {
   children: CaseItem[]
 }
 
-export interface CaseInventoryStats {
-  total_items: number
-  total_stock: number
-  total_in: number
-  total_out: number
-}
+export type CaseInventoryStats = Required<GenCaseInventoryStats>
 
 export interface CaseInventoryResponse {
   inventory: CaseInventoryNode[]
@@ -132,10 +115,7 @@ export interface CaseInventoryResponse {
   stats: CaseInventoryStats | null
 }
 
-export interface CaseActionResponse {
-  success: boolean
-  message: string
-}
+export type CaseActionResponse = Required<GenCaseActionResponse>
 
 /** 某产品的皮套树：主件 + 配件 */
 export interface CaseTree {

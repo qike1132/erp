@@ -1,35 +1,22 @@
 import { get } from './request'
 import type { NavSection } from '@/types'
+import type { MobileDeptData as GenMobileDeptData, MobileShippingData as GenMobileShippingData, MobileStockData as GenMobileStockData, MobileWarehouseData as GenMobileWarehouseData } from '@/types/api'
 
 interface DashboardResponse<T = unknown> {
   success: boolean
   data: T
 }
 
-export interface MobileDeptData {
-  name: string
-  daily_output: number
-  output_value: number
-}
+export type MobileDeptData = Required<GenMobileDeptData>
 
-export interface MobileStockData {
-  today_quantity: number
-  today_amount: number
-  month_quantity: number
-  month_amount: number
-  total_quantity: number
-  total_amount: number
-}
+export type MobileStockData = Required<GenMobileStockData>
 
 export interface MobileProductionData {
   total_value: number
   departments: MobileDeptData[]
 }
 
-export interface MobileShippingData {
-  daily_qty: number
-  total_amount: number
-}
+export type MobileShippingData = Required<GenMobileShippingData>
 
 export interface MobileOrderData {
   daily_qty: number
@@ -38,12 +25,7 @@ export interface MobileOrderData {
   total_qty: number
 }
 
-export interface MobileWarehouseData {
-  in_qty: number
-  in_amount: number
-  out_qty: number
-  out_amount: number
-}
+export type MobileWarehouseData = Required<GenMobileWarehouseData>
 
 export interface MobileDashboardData {
   stock: MobileStockData

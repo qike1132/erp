@@ -133,6 +133,48 @@ describe('check:dto 门禁：R2 src/api 重复声明生成层同名类型', () =
   })
 })
 
+describe('check:dto 门禁：派生别名不算第二真相源', () => {
+  it('export type X = Required<GenX>（不重复字段清单）→ 放行，且不需要豁免条目', () => {
+    buildFixture({
+      apiTypes:
+        "import type { Widget as GenWidget } from '@/types/api'\nexport type Widget = Required<GenWidget>\n",
+      generatedTypes: 'export interface Widget {\n  id?: number\n}\n',
+    })
+    const { code, output } = runGate()
+    expect(code, output).toBe(0)
+  })
+
+  it('export type { X } from 生成层（纯再导出）→ 放行', () => {
+    buildFixture({
+      apiTypes: "export type { Widget } from '@/types/api'\n",
+      generatedTypes: 'export interface Widget {\n  id?: number\n}\n',
+    })
+    const { code, output } = runGate()
+    expect(code, output).toBe(0)
+  })
+
+  it('export type X = { … }（字段清单仍被抄了一遍）→ 照旧判红', () => {
+    buildFixture({
+      apiTypes: 'export type Widget = {\n  id: number\n}\n',
+      generatedTypes: 'export interface Widget {\n  id: number\n}\n',
+    })
+    const { code, output } = runGate()
+    expect(code).toBe(1)
+    expect(output).toContain('Widget')
+  })
+
+  it('迁移后残留的豁免条目会被判失效（豁免表不能只增不减）', () => {
+    buildFixture({
+      apiTypes: "export type { Widget } from '@/types/api'\n",
+      generatedTypes: 'export interface Widget {\n  id: number\n}\n',
+      exemptions: ['src/api/foo.ts:Widget'],
+    })
+    const { code, output } = runGate()
+    expect(code).toBe(1)
+    expect(output).toContain('失效')
+  })
+})
+
 describe('check:dto 门禁：R3 src/types/index.ts 重复声明生成层同名类型', () => {
   it('未登记的同名类型 → 判红', () => {
     buildFixture({

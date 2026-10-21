@@ -1,6 +1,7 @@
 import { get, post, del } from './request'
 import type { QueryParams } from '@/types'
 import type { OrderListApiResponse } from './order'
+import type { GenerateProcessResponse as GenGenerateProcessResponse, ShipmentReceiveResponse as GenShipmentReceiveResponse, HubeiProductSearchItem as GenHubeiProductSearchItem } from '@/types/api'
 
 /** SKU 外发工序预设 */
 export interface OutsourceProcessType {
@@ -52,12 +53,7 @@ export interface OrderProcessListResponse {
   total: number
 }
 
-export interface GenerateProcessResponse {
-  success: boolean
-  message: string
-  created: number
-  skipped: number
-}
+export type GenerateProcessResponse = Required<GenGenerateProcessResponse>
 
 /** 外发工序发货/收货流水记录（台账） */
 export interface OutsourceProcessFlow {
@@ -77,12 +73,7 @@ export interface ProcessFlowListResponse {
 }
 
 /** 湖北工厂 SKU 搜索建议项（工序预设页搜索框数据源） */
-export interface HubeiProductSearchItem {
-  id: number
-  name: string
-  barcode?: string | null
-  factory?: string | null
-}
+export type HubeiProductSearchItem = GenHubeiProductSearchItem
 
 /** 未到货（未发完）工序明细：未到数量 = 订单数量 - 已发数量 */
 export interface UnshippedProcessItem {
@@ -152,11 +143,7 @@ export interface ShipmentListResponse {
   received_count: number
 }
 
-export interface ShipmentReceiveResponse {
-  success: boolean
-  message: string
-  already_received: boolean
-}
+export type ShipmentReceiveResponse = Required<GenShipmentReceiveResponse>
 
 /** 批量发货：单个订单的发货明细 */
 export interface ShipmentBatchOrder {

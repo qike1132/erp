@@ -1,4 +1,5 @@
 import { get, post, put, del } from './request'
+import type { ShipmentOption as GenShipmentOption } from '@/types/api'
 
 /** 退货列表行（对应后端 get_stockreturns 的 data 元素） */
 export interface StockReturnRecord {
@@ -20,18 +21,7 @@ export interface StockReturnRecord {
 }
 
 /** 可退出货明细候选（/stock-returns/shipment-options，按产品名搜索） */
-export interface ShipmentOption {
-  stockout_id: number
-  stockout_no: string
-  stockout_date: string
-  product_id: number
-  product_name: string
-  customer: string | null
-  quantity: number
-  returned_quantity: number
-  batch_no: string
-  available: number
-}
+export type ShipmentOption = Required<GenShipmentOption>
 
 /** 创建退货请求体（后端 schemas/stock_return.py::StockReturnCreate） */
 export interface StockReturnCreatePayload {

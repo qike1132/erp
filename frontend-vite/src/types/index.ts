@@ -1,3 +1,4 @@
+import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate } from '@/types/api'
 // ===== 基础 API 响应类型 =====
 
 /** 通用 API 响应（精简版，仅保留通用字段） */
@@ -166,23 +167,9 @@ export interface InventoryResponse {
   per_page: number
 }
 
-export interface FinishedStockItem {
-  customer_name: string
-  product_id: number
-  product_name: string
-  barcode: string
-  batch_no: string
-  /** 原图 URL（已出站签名）；点击缩略图预览用它 */
-  image: string
-  /** 列表缩略图 URL（确定性后缀派生，已签名）；列表 img 用它 */
-  image_thumb: string | null
-  batch_in_qty: number
-  batch_available: number
-  is_custom: boolean
-  custom_country: string
-  /** 本页备注（按 客户+产品+批次 一行一条，页面自己维护） */
-  remark: string
-}
+export type FinishedStockItem = Required<GenFinishedStockItem>
+// image 是原图 URL（已出站签名），点击缩略图预览用它；image_thumb 是确定性后缀派生的列表缩略图，列表 img 用它；
+// remark 是本页备注，按「客户+产品+批次」一行一条，由页面自己维护
 
 export interface FinishedStockSummary {
   success: boolean
@@ -341,15 +328,8 @@ export interface User {
   department?: string | null
 }
 
-export interface UserCreate {
-  username: string
-  password: string
-  is_super?: boolean
-  /** 所属工厂：东莞/湖北/NULL（空字符串表示清除） */
-  factory?: string | null
-  /** 所属部门：生产部/仓库/业务部/采购部/NULL（空字符串表示清除） */
-  department?: string | null
-}
+export type UserCreate = GenUserCreate
+// factory（东莞/湖北）与 department（生产部/仓库/业务部/采购部）：空字符串表示清除
 
 export interface UserUpdate {
   /** 新密码（不修改则不传） */
@@ -624,12 +604,7 @@ export interface StagingImportResult {
  * 用于 `/batch/batch-import`、`/batch/import-orders`、`/batch/import-stockins` 等 Excel 导入端点。
  * 注意与 `StagingImportResult` 区分：本类型**不含** `errors` 明细，而多出 `skipped`。
  */
-export interface BatchImportResult {
-  success: boolean
-  message: string
-  imported: number
-  skipped: number
-}
+export type BatchImportResult = Required<GenBatchImportResult>
 
 export interface ShipmentRecord {
   id: number

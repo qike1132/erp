@@ -1,14 +1,9 @@
 import { get } from './request'
 import type { ApiResponse } from '@/types'
+import type { ProductSearchItem as GenProductSearchItem } from '@/types/api'
 
 /** 产品搜索建议项（后端 `auxiliary.py::ProductSearchItem`，裸数组响应） */
-export interface ProductSearchItem {
-  id: number
-  name: string
-  barcode: string
-  price?: number
-  current_stock?: number
-}
+export type ProductSearchItem = GenProductSearchItem
 
 /** 可用备货单项（后端 `auxiliary.py::AvailableStockinItem`，裸数组响应） */
 export interface AvailableStockinItem {

@@ -19,6 +19,12 @@
  * （每条「相对路径:类型名」）。门禁只拦**新增**重复；登记项一旦失效（对应重复声明
  * 已不存在）同样判红 —— 逼着把豁免条目跟着迁移一起删掉，豁免表不能只增不减。
  *
+ * 派生别名放行（2026-10-21，配合豁免表迁移）：`export type X = Required<GenX>`、
+ * `export type X = GenX`、`export type { X } from '@/types/api'` 这类等号右侧不含
+ * `{` 的声明**不再算重复**——字段清单只有一份（生成层），需要的只是必填口径的断言。
+ * 于是迁移一处重复就能删掉一条豁免，不必为了「保留必填」而把整份字段清单再抄一遍。
+ * `export type X = { … }` 仍判重：花括号一出现，第二真相源就回来了。
+ *
  * 用法: node scripts/check-mobile-dto.mjs [--root <目录>]
  *   --root 用于在测试夹具上跑同一套规则（默认 = 本脚本所在仓库的前端目录）。
  * 退出码: 0 = 无重复声明, 1 = 发现重复声明 / 豁免条目失效
@@ -36,12 +42,25 @@ const apiDir = resolve(root, 'src', 'api')
 const mobileDir = resolve(root, 'src', 'mobile')
 const exemptionFile = resolve(root, 'scripts', 'dto-duplicate-exemptions.json')
 
-/** 取文件里声明的类型名（export interface X / export type X / interface X / type X） */
+/**
+ * 取文件里声明的类型名（export interface X / export type X / interface X / type X）。
+ *
+ * derivation=true 表示「纯别名」：`export type X = Required<GenX>` 这种等号右侧不含 `{`
+ * 的声明。它不重复字段清单，字段真相仍只有一份（生成层），因此 R2/R3 不该把它算作重复。
+ * 反例 `export type X = {` —— 右侧起花括号，字段清单被抄了一遍，照旧判重。
+ */
 function declaredTypes(src) {
   const out = []
   src.split(/\r?\n/).forEach((line, i) => {
     const match = /^\s*(?:export\s+)?(?:interface|type)\s+(\w+)/.exec(line)
-    if (match) out.push({ name: match[1], line: i + 1 })
+    if (!match) return
+    const isAlias = /^\s*(?:export\s+)?type\s+\w+/.test(line)
+    const rest = line.slice(match.index + match[0].length)
+    out.push({
+      name: match[1],
+      line: i + 1,
+      derivation: isAlias && !rest.includes('{') && rest.includes('='),
+    })
   })
   return out
 }
@@ -100,7 +119,10 @@ const scanTargets = [
 const duplicates = []
 for (const file of scanTargets) {
   const relPath = relative(root, file).replaceAll('\\', '/')
-  for (const { name, line } of declaredTypes(readFileSync(file, 'utf-8'))) {
+  for (const { name, line, derivation } of declaredTypes(readFileSync(file, 'utf-8'))) {
+    // 纯别名/再导出不是第二真相源：迁移后写成 `export type X = Required<GenX>` 或
+    // `export type { X } from '@/types/api'` 都不该再占用豁免条目。
+    if (derivation) continue
     if (generatedNames.has(name)) duplicates.push({ key: keyOf(relPath, name), file: relPath, line, name })
   }
 }

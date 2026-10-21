@@ -1,17 +1,10 @@
 import { get, post, put, del, upload, download } from './request'
 import type { StagingOrder, ShipmentRecord, QueryParams } from '@/types'
+import type { StagingErrorItem as GenStagingErrorItem } from '@/types/api'
 
 /** 暂存校验失败明细（与后端 schemas.StagingErrorItem 对齐） */
-export interface StagingErrorItem {
-  /** 导入批次内行序号（1 起），非 Excel 物理行号 */
-  seq: number
-  customer_name: string
-  product_name: string
-  barcode: string
-  quantity: number
-  plan_date: string
-  message: string
-}
+export type StagingErrorItem = Required<GenStagingErrorItem>
+// seq 是导入批次内行序号（1 起），不是 Excel 物理行号
 
 /** POST /plans/upload：解析 Excel 并写入暂存区（尚未进入正式表） */
 export interface PlanUploadResult {

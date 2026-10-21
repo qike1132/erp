@@ -1,5 +1,6 @@
 import { get, post, put, del, upload, download } from './request'
 import type { ApiResponse } from '@/types'
+import type { BackupRestorePlanItem as GenBackupRestorePlanItem } from '@/types/api'
 
 /** 备份保存到服务器的响应（顶层字段，与后端 /backup/save 对齐） */
 export interface BackupSaveResult {
@@ -58,12 +59,7 @@ export interface BackupPathValidate {
 }
 
 /** 还原差异预览（第 2 步数据源） */
-export interface BackupRestorePlanItem {
-  table: string
-  backup_rows: number | null
-  current_rows: number | null
-  diff: number | null
-}
+export type BackupRestorePlanItem = Required<GenBackupRestorePlanItem>
 export interface BackupRestorePlan {
   success: boolean
   filename?: string

@@ -9,6 +9,7 @@
  * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 23 个 API 方法。
  */
 import { get, post, put, del, upload } from './request'
+import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest } from '@/types/api'
 
 // ==================== 类型别名 ====================
 
@@ -101,18 +102,8 @@ export interface PartsByVersionResponse {
 // ==================== 角色 ====================
 
 /** 角色简要信息 */
-export interface RoleBrief {
-  id: number
-  project_id: number
-  role_name: string
-  sort_order: number
-  is_default: boolean
-  current_version: string
-  created_at: string
-  updated_at: string
-  /** 乐观锁版本号 */
-  version: number
-}
+export type RoleBrief = Required<GenRoleBrief>
+// version 是乐观锁版本号
 
 /** 角色列表响应 */
 export interface RoleListResponse {
@@ -121,16 +112,10 @@ export interface RoleListResponse {
 }
 
 /** 新增角色请求 */
-export interface RoleCreateRequest {
-  role_name: string
-}
+export type RoleCreateRequest = GenRoleCreateRequest
 
 /** 编辑角色请求（乐观锁 version 必填） */
-export interface RoleUpdateRequest {
-  role_name?: string | null
-  current_version?: string | null
-  version: number
-}
+export type RoleUpdateRequest = GenRoleUpdateRequest
 
 /** 批量新增部位单项 */
 export interface BatchPartItem {
@@ -143,19 +128,12 @@ export interface BatchPartItem {
 }
 
 /** 批量新增部位请求 */
-export interface BatchPartCreateRequest {
-  items: BatchPartItem[]
-}
+export type BatchPartCreateRequest = GenBatchPartCreateRequest
 
 // ==================== 版本 ====================
 
 /** 版本简要信息 */
-export interface VersionBrief {
-  id: number
-  version_no: string
-  created_at: string
-  reason: string
-}
+export type VersionBrief = Required<GenVersionBrief>
 
 /** 版本列表响应 */
 export interface VersionListResponse {
@@ -164,11 +142,7 @@ export interface VersionListResponse {
 }
 
 /** 字段级差异 */
-export interface FieldDiff {
-  field: string
-  old: unknown
-  new: unknown
-}
+export type FieldDiff = Required<GenFieldDiff>
 
 /** 变更记录（版本 diff 元素） */
 export interface ChangeRecord {
@@ -199,20 +173,7 @@ export interface VersionDetailResponse {
 // ==================== 变更日志 ====================
 
 /** 变更日志条目 */
-export interface ChangeLogEntry {
-  id: number
-  project_id: number
-  target_version: string
-  action: string
-  action_label: string
-  change_type: string
-  change_type_label: string
-  part_name: string
-  field_diffs: unknown[]
-  operator_id: number | null
-  operator_name: string
-  created_at: string
-}
+export type ChangeLogEntry = Required<GenChangeLogEntry>
 
 /** 变更日志列表响应（分页） */
 export interface ChangeLogListResponse {
@@ -311,47 +272,13 @@ export interface ProjectCreateRequest {
 /** 编辑打样项目请求（version 为乐观锁版本号，必填）
  *  pattern_maker_id / product_image_file_id 三态语义：
  *  字段缺省（undefined，JSON 序列化时丢弃）= 不修改；显式 null = 清空；传值 = 设置 */
-export interface ProjectUpdateRequest {
-  product_name?: string | null
-  pattern_maker_id?: number | null
-  remark?: string | null
-  product_image_file_id?: number | null
-  current_version?: string | null
-  version: number
-}
+export type ProjectUpdateRequest = GenProjectUpdateRequest
 
 /** 新增部位请求 */
-export interface PartCreateRequest {
-  part_name: string
-  sort_order?: number
-  fabric_name?: string | null
-  fabric_spec?: string | null
-  /** 色号 */
-  fabric_color_no?: string | null
-  supplier_id?: number | null
-  contact_person?: string | null
-  contact_phone?: string | null
-  unit_price?: number | null
-  delivery_days?: number | null
-  remark?: string | null
-}
+export type PartCreateRequest = GenPartCreateRequest
 
 /** 编辑部位请求（version 为乐观锁版本号，必填） */
-export interface PartUpdateRequest {
-  part_name?: string | null
-  sort_order?: number | null
-  fabric_name?: string | null
-  fabric_spec?: string | null
-  fabric_color_no?: string | null
-  supplier_id?: number | null
-  supplier_name?: string | null
-  contact_person?: string | null
-  contact_phone?: string | null
-  unit_price?: number | null
-  delivery_days?: number | null
-  remark?: string | null
-  version: number
-}
+export type PartUpdateRequest = GenPartUpdateRequest
 
 // ==================== 查询参数 ====================
 
