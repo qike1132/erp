@@ -11104,7 +11104,7 @@
           "来料登记"
         ],
         "summary": "List Registrations",
-        "description": "获取来料登记列表（支持分页和多维度筛选）。\n\nArgs:\n    page: 页码，从 1 开始。\n    per_page: 每页数量，1-100。\n    status: 状态筛选（与 exclude_completed 互斥，status 优先）。\n    order_no: 采购订单号筛选。\n    supplier: 供应商筛选。\n    customer_name: 客户名称筛选。\n    material_category: 物料类别筛选。\n    start_date: 开始日期（YYYY-MM-DD）。\n    end_date: 结束日期（YYYY-MM-DD）。\n    exclude_completed: 排除已完成的登记（用于来料进度 tab）。\n    user: 当前登录用户（仅需通过权限校验）。\n    db: 异步数据库会话（只读副本）。\n\nReturns:\n    RegistrationListResponse: 包含来料登记列表和分页信息的响应。",
+        "description": "获取来料登记列表（支持分页和多维度筛选）。\n\nArgs:\n    page: 页码，从 1 开始。\n    per_page: 每页数量，1-100。\n    status: 状态筛选（与 exclude_completed 互斥，status 优先）。\n    order_no: 采购订单号筛选。\n    supplier: 供应商筛选。\n    customer_name: 客户名称筛选。\n    material_category: 物料类别筛选。\n    start_date: 开始日期（YYYY-MM-DD）。\n    end_date: 结束日期（YYYY-MM-DD）。\n    exclude_completed: 排除已完成的登记（用于来料进度 tab）。\n    keyword: 跨字段模糊搜索（采购订单号 / 供应商 / 物料名称）。\n    user: 当前登录用户（仅需通过权限校验）。\n    db: 异步数据库会话（只读副本）。\n\nReturns:\n    RegistrationListResponse: 包含来料登记列表和分页信息的响应。",
         "operationId": "list_registrations_api_v1_material_registrations_registrations_get",
         "parameters": [
           {
@@ -11208,6 +11208,23 @@
               "type": "boolean",
               "default": false,
               "title": "Exclude Completed"
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
             }
           }
         ],
@@ -12377,7 +12394,7 @@
           "辅助接口"
         ],
         "summary": "Delete Stockout Api",
-        "description": "删除出库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）。\n\nRaises:\n    HTTPException: 出库记录不存在（或跨厂被闸门拦截）时抛出 404。",
+        "description": "删除出库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）",
         "operationId": "delete_stockout_api_api_v1_aux_stockout__id__delete",
         "parameters": [
           {
@@ -12420,7 +12437,7 @@
           "辅助接口"
         ],
         "summary": "Delete Stockin Api",
-        "description": "删除入库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）。\n\nRaises:\n    HTTPException: 入库记录不存在（或跨厂被闸门拦截）时抛出 404。",
+        "description": "删除入库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）",
         "operationId": "delete_stockin_api_api_v1_aux_stockin__id__delete",
         "parameters": [
           {
@@ -12742,7 +12759,7 @@
           "异步任务"
         ],
         "summary": "Async Import Orders",
-        "description": "异步批量导入订单（提交后台任务）\n\n已知缺口：本端点**不走** ``import_guard.run_guarded_import``（文件指纹幂等）。\n导入在 ARQ worker 中异步执行、与请求级事务分离，无法原子登记文件哈希；\n故同一文件重复上传会重复建单，去重仅到 ARQ job_id 级（防 ``max_tries`` 重投）。\n详见 ``api/v1/endpoints/import_guard.py`` 模块文档。",
+        "description": "异步批量导入订单（提交后台任务）\n\n本端点**不走** ``import_guard.run_guarded_import``（文件指纹幂等）——\n导入在 ARQ worker 中异步执行、与请求级事务分离，无法原子登记文件哈希。\n\n去重由**第 2 层行级业务键**兜住（Z06-R6）：worker 写 ``inventory_log`` 时\n带 ``idem_key``（同客户/产品/数量/业务日），撞 ``uq_inventory_log_idem`` 的行\n被跳过而非重复建单。订单导入无日期列，业务日取导入当日 —— 同一文件跨日\n重传按「不同日的同客户同产品同数量是合法重复」放行。\n详见 ``api/v1/endpoints/import_guard.py`` 模块文档。",
         "operationId": "async_import_orders_api_v1_tasks_import_orders_post",
         "requestBody": {
           "content": {
@@ -12785,7 +12802,7 @@
           "异步任务"
         ],
         "summary": "Async Import Stockins",
-        "description": "异步批量导入备货（提交后台任务）\n\n已知缺口：同 ``/tasks/import-orders`` —— 本端点**不走**文件指纹幂等守卫，\n重复上传同一文件会重复入库；详见 ``api/v1/endpoints/import_guard.py`` 模块文档。",
+        "description": "异步批量导入备货（提交后台任务）\n\n同 ``/tasks/import-orders`` —— 本端点**不走**文件指纹幂等守卫；去重由\n第 2 层行级业务键兜住（Z06-R6）：worker 写 ``inventory_log`` 时带\n``idem_key``（同客户/产品/数量/业务日），撞 ``uq_inventory_log_idem`` 的行\n被跳过而非重复入库。备货导入取 Excel 的「时间/备货时间」列作业务日，\n缺列才回落到导入当日（与同步导入路径同口径）。\n详见 ``api/v1/endpoints/import_guard.py`` 模块文档。",
         "operationId": "async_import_stockins_api_v1_tasks_import_stockins_post",
         "requestBody": {
           "content": {
@@ -21204,6 +21221,11 @@
             "type": "integer",
             "title": "Invalid Files"
           },
+          "unverified_files": {
+            "type": "integer",
+            "title": "Unverified Files",
+            "default": 0
+          },
           "corrupted_files": {
             "items": {
               "type": "string"
@@ -22178,6 +22200,18 @@
             "title": "Effective Backup Dir",
             "description": "实际生效的备份目录(环境变量 BACKUP_DIR)",
             "default": ""
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning",
+            "description": "保存成功但存在不生效字段时的明确提示"
           }
         },
         "type": "object",
@@ -23328,7 +23362,6 @@
               "$ref": "#/components/schemas/BatchStockInItem"
             },
             "type": "array",
-            "maxItems": 500,
             "title": "Stockins"
           }
         },
@@ -23400,7 +23433,6 @@
               "$ref": "#/components/schemas/BatchStockOutItem"
             },
             "type": "array",
-            "maxItems": 500,
             "title": "Stockouts"
           }
         },
@@ -31732,19 +31764,6 @@
             ],
             "title": "Remark",
             "description": "备注"
-          },
-          "shipped_qty": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Shipped Qty",
-            "description": "已出货数量"
           }
         },
         "type": "object",
@@ -32725,6 +32744,30 @@
         "type": "object",
         "title": "PurchaseOrderDetailResponse"
       },
+      "PurchaseOrderItemPriceUpdate": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Id",
+            "description": "采购明细ID"
+          },
+          "unit_price": {
+            "type": "number",
+            "maximum": 9999999999.99,
+            "minimum": 0.0,
+            "title": "Unit Price",
+            "description": "单价，不能为负数；上限 9999999999.99（与落库列一致）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "unit_price"
+        ],
+        "title": "PurchaseOrderItemPriceUpdate",
+        "description": "采购明细单价补录（按明细 id 定位）"
+      },
       "PurchaseOrderItemsResponse": {
         "properties": {
           "success": {
@@ -32899,6 +32942,21 @@
             "type": "string",
             "title": "Modify Reason",
             "default": ""
+          },
+          "item_prices": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PurchaseOrderItemPriceUpdate"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Prices",
+            "description": "按明细ID补录单价（只改单价，不动数量/物料，也不删行）"
           }
         },
         "type": "object",

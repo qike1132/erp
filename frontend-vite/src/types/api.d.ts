@@ -156,6 +156,7 @@ export interface BackupIntegrityCheckResponse {
   total_files: number
   valid_files: number
   invalid_files: number
+  unverified_files?: number
   corrupted_files?: Array<string>
   missing_files?: Array<string>
   details?: Array<Record<string, unknown>>
@@ -311,6 +312,7 @@ export interface BackupSettingsOut {
   initialized?: boolean
   effective_source?: string
   effective_backup_dir?: string
+  warning?: string | null
 }
 
 export interface BackupSettingsUpdate {
@@ -2096,7 +2098,6 @@ export interface ProductionPlanUpdate {
   plan_date?: string | null
   status?: string | null
   remark?: string | null
-  shipped_qty?: number | null
 }
 
 export interface ProductionRecordActionResponse {
@@ -2239,6 +2240,11 @@ export interface PurchaseOrderDetailResponse {
   order?: Record<string, unknown> | null
 }
 
+export interface PurchaseOrderItemPriceUpdate {
+  id: number
+  unit_price: number
+}
+
 export interface PurchaseOrderItemsResponse {
   success?: boolean
   items?: Array<Record<string, unknown>>
@@ -2272,6 +2278,7 @@ export interface PurchaseOrderUpdateRequest {
   supplier_name?: string | null
   customer_name?: string | null
   modify_reason?: string
+  item_prices?: Array<PurchaseOrderItemPriceUpdate> | null
 }
 
 export interface PurchasePlanActionResponse {
