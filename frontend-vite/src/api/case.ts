@@ -3,8 +3,8 @@
  * 主件与配件同为 SKU；出入库统一为一张流水（direction 区分方向）。
  */
 import { get, post, put, del, upload, download } from './request'
-import type { CaseActionResponse as GenCaseActionResponse, CaseBatchFailedItem as GenCaseBatchFailedItem, CaseInventoryStats as GenCaseInventoryStats, CaseMovementCreateResponse as GenCaseMovementCreateResponse, CaseSearchItem as GenCaseSearchItem, CaseBatchMovementResponse as GenCaseBatchMovementResponse } from '@/types/api'
-import type { WithItems } from '@/types'
+import type { CaseActionResponse as GenCaseActionResponse, CaseBatchFailedItem as GenCaseBatchFailedItem, CaseInventoryStats as GenCaseInventoryStats, CaseMovementCreateResponse as GenCaseMovementCreateResponse, CaseSearchItem as GenCaseSearchItem, CaseBatchMovementResponse as GenCaseBatchMovementResponse, CaseItemOut as GenCaseItemOut, CaseProductItem as GenCaseProductItem, CaseMovementOut as GenCaseMovementOut, CaseInventoryNode as GenCaseInventoryNode, CaseInventoryResponse as GenCaseInventoryResponse, CaseItemListResponse as GenCaseItemListResponse, CaseProductListResponse as GenCaseProductListResponse, CaseMovementListResponse as GenCaseMovementListResponse } from '@/types/api'
+import type { WithField, WithItems } from '@/types'
 
 // ===== 共享类型 =====
 
@@ -12,21 +12,9 @@ import type { WithItems } from '@/types'
 export type CaseSearchItem = Required<GenCaseSearchItem>
 
 /** 产品列表项（GET /cases/products）：附配件数，供「有配件/无配件」筛选 */
-export interface CaseProduct {
-  id: number
-  name: string
-  barcode: string
-  part_count: number
-  has_parts: boolean
-}
+export type CaseProduct = Required<GenCaseProductItem>
 
-export interface CaseProductListResponse {
-  products: CaseProduct[]
-  total: number
-  page: number
-  per_page: number
-  pages: number
-}
+export type CaseProductListResponse = WithItems<GenCaseProductListResponse, 'products', CaseProduct>
 
 /** 客户下拉选项 */
 export interface CustomerOption {
@@ -35,50 +23,14 @@ export interface CustomerOption {
 }
 
 /** 皮套 SKU（主件或配件） */
-export interface CaseItem {
-  id: number
-  name: string
-  barcode: string
-  image: string
-  unit: string
-  product_id: number | null
-  parent_id: number | null
-  qty_per_set: number
-  initial_stock: number
-  current_stock: number
-  total_in: number
-  total_out: number
-}
+export type CaseItem = Required<GenCaseItemOut>
 
-export interface CaseItemListResponse {
-  items: CaseItem[]
-  total: number
-  page: number
-  per_page: number
-  pages: number
-}
+export type CaseItemListResponse = WithItems<GenCaseItemListResponse, 'items', CaseItem>
 
 /** 出入库流水 */
-export interface CaseMovement {
-  id: number
-  case_id: number
-  case_name: string
-  case_barcode: string
-  direction: 'in' | 'out'
-  movement_no: string
-  quantity: number
-  customer: string
-  movement_date: string
-  note: string
-  create_time: string
-}
+export type CaseMovement = WithField<GenCaseMovementOut, 'direction', 'in' | 'out'>
 
-export interface CaseMovementListResponse {
-  movements: CaseMovement[]
-  total: number
-  pages: number
-  current_page: number
-}
+export type CaseMovementListResponse = WithItems<GenCaseMovementListResponse, 'movements', CaseMovement>
 
 /** 新增/批量出入库请求体 */
 export interface CaseMovementPayload {
@@ -97,20 +49,11 @@ export type CaseBatchFailedItem = Required<GenCaseBatchFailedItem>
 export type CaseBatchMovementResponse = WithItems<GenCaseBatchMovementResponse, 'failed', CaseBatchFailedItem>
 
 /** 库存分组节点（主件 + 其配件） */
-export interface CaseInventoryNode extends CaseItem {
-  children: CaseItem[]
-}
+export type CaseInventoryNode = WithItems<GenCaseInventoryNode, 'children', CaseItem>
 
 export type CaseInventoryStats = Required<GenCaseInventoryStats>
 
-export interface CaseInventoryResponse {
-  inventory: CaseInventoryNode[]
-  total: number
-  page: number
-  per_page: number
-  pages: number
-  stats: CaseInventoryStats | null
-}
+export type CaseInventoryResponse = WithField<WithItems<GenCaseInventoryResponse, 'inventory', CaseInventoryNode>, 'stats', CaseInventoryStats | null>
 
 export type CaseActionResponse = Required<GenCaseActionResponse>
 
