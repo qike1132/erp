@@ -566,8 +566,10 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # 危险写护栏（审查 H13）：批量 UPDATE "user" 直写生产库；--dry-run 预览不放拦截。
-    if not args.dry_run:
+    # 危险写护栏（审查 H13；OCR 复核补 --restore）：批量 UPDATE "user" 直写
+    # 生产库；--dry-run 预览不放拦截，但 --restore 回写备份与正式迁移同险，
+    # 两者叠加时同样必须过授权口。
+    if args.restore or not args.dry_run:
         from _prod_write_guard import require_prod_write_consent
         require_prod_write_consent(
             '密码哈希迁移（批量 UPDATE "user"）',
