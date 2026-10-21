@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import _BUSINESS_TZ
 from fastapi_app.core.cache_invalidation import schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.schemas.batch import (
@@ -93,6 +94,19 @@ def _require_not_none[T](value: T | None, source: str) -> T:
     if value is None:
         raise ValueError(f'{source}未返回数据')
     return value
+
+
+def _blank_time_fallback() -> datetime:
+    """Excel 时间列缺失时的稳定回退：业务日 00:00（aware）。
+
+    旧回退 ``datetime.now(UTC)`` 带微秒，而 :func:`_case_movement_exists` 用等值
+    比较 movement_date ⇒ 幂等键永远不命中，同一份文件重复上传会把皮套库存
+    再加减一遍。落到业务日零点后，同日同量同客的重复行才能被拦下。
+
+    取业务时区（Asia/Shanghai）零点：movement_date 是 timestamptz 列，写入的是
+    绝对时刻；业务日零点 = 北京墙钟 00:00，与 Excel 里「只有日期」的语义一致。
+    """
+    return datetime.now(_BUSINESS_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 # ==================== 单 Sheet 导入共享骨架 ====================
@@ -491,7 +505,7 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                 message=f'库存不足，当前库存: {case.current_stock}',
             ):
                 return False, reason
-            movement_date = parse_date_value(stockout_date_val) or datetime.now(UTC)
+            movement_date = parse_date_value(stockout_date_val) or _blank_time_fallback()
             if await _case_movement_exists(
                 db, case_id=case.id, direction='out', movement_date=movement_date,
                 quantity=qty, customer=customer,
@@ -549,7 +563,7 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
             if case_err:
                 return False, case_err
             case = _require_not_none(case, '皮套查询')
-            stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：movement_date 列为 timestamptz
+            stockin_date = parse_date_value(stockin_date_val) or _blank_time_fallback()  # aware：movement_date 列为 timestamptz
             if await _case_movement_exists(
                 db, case_id=case.id, direction='in', movement_date=stockin_date,
                 quantity=qty, customer=customer,

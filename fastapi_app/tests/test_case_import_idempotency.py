@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from fastapi_app.core.business_time import _BUSINESS_TZ
 from fastapi_app.services import batch_import_service as bis
 from fastapi_app.services import batch_service
 
@@ -78,3 +80,68 @@ async def test_case_stockout_duplicate_row_is_skipped(monkeypatch) -> None:
     assert '重复行' in result.message
     assert len(db.added) == 1
     assert case.current_stock == 95  # 只扣一次
+
+
+# ==================== 时间留空时幂等键必须可命中 ====================
+
+
+class _RecordingDb(_FakeDb):
+    """在 _FakeDb 基础上记下每次查重用到的日期绑定值。
+
+    真实库里键能不能命中，取决于两次查询传的是不是**同一个时刻**；mock 的
+    返回值不看参数，所以断言必须落在参数上，否则换成 ``datetime.now(UTC)``
+    也照样「通过」。
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.dates: list[datetime | None] = []
+
+    async def execute(self, stmt, *args, **kwargs):
+        params = stmt.compile().params
+        self.dates.append(next((v for v in params.values() if isinstance(v, datetime)), None))
+        return await super().execute(stmt, *args, **kwargs)
+
+
+def _blank_time_rows(qty_key: str) -> list[dict]:
+    return [
+        {'产品名称': '皮套A', qty_key: 5, '客户名称': '客户A', '时间': None, '备注': ''},
+        {'产品名称': '皮套A', qty_key: 5, '客户名称': '客户A', '时间': None, '备注': ''},
+    ]
+
+
+def test_blank_time_fallback_is_business_day_midnight() -> None:
+    """回退值必须稳定（微秒恒 0）且落在业务日零点，否则等值查重永不命中。"""
+    first = bis._blank_time_fallback()
+    second = bis._blank_time_fallback()
+
+    assert first == second, f'两次回退值不同，幂等键每次都不一样: {first!r} vs {second!r}'
+    assert first.microsecond == 0 and (first.hour, first.minute, first.second) == (0, 0, 0)
+    assert first.utcoffset() == timedelta(hours=8), f'不是业务时区零点: {first!r}'
+    assert first.date() == datetime.now(_BUSINESS_TZ).date()
+
+
+async def test_case_stockin_blank_time_rows_share_one_key(monkeypatch) -> None:
+    case = _patch_common(monkeypatch, _blank_time_rows('入库数量'))
+    monkeypatch.setattr(bis, 'generate_case_stockin_number', AsyncMock(side_effect=['CSI-1']))
+    db = _RecordingDb()
+
+    result = await bis.import_case_stockins_service(db, SimpleNamespace(filename='x.xlsx'))
+
+    assert db.dates == [db.dates[0], db.dates[0]], f'两行查重日期不一致: {db.dates!r}'
+    assert result.imported == 1 and result.skipped == 1, result.message
+    assert len(db.added) == 1
+    assert case.current_stock == 105
+
+
+async def test_case_stockout_blank_time_rows_share_one_key(monkeypatch) -> None:
+    case = _patch_common(monkeypatch, _blank_time_rows('出库数量'))
+    monkeypatch.setattr(bis, 'generate_case_stockout_number', AsyncMock(side_effect=['CSO-1']))
+    db = _RecordingDb()
+
+    result = await bis.import_case_stockouts_service(db, SimpleNamespace(filename='x.xlsx'))
+
+    assert db.dates == [db.dates[0], db.dates[0]], f'两行查重日期不一致: {db.dates!r}'
+    assert result.imported == 1 and result.skipped == 1, result.message
+    assert len(db.added) == 1
+    assert case.current_stock == 95
