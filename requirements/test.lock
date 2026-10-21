@@ -2,7 +2,7 @@
 #    uv pip compile requirements/test.txt -o requirements/test.lock --python-platform windows --python-version 3.13
 aiohappyeyeballs==2.7.1
     # via aiohttp
-aiohttp==3.14.3
+aiohttp==3.14.4
     # via -r requirements/test.txt
 aiosignal==1.4.0
     # via aiohttp
@@ -196,7 +196,7 @@ packaging==26.3
     #   opentelemetry-instrumentation-sqlalchemy
     #   pytest
     #   pytest-sugar
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements/base.txt
 pluggy==1.7.0
     # via

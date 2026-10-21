@@ -148,7 +148,7 @@ packaging==26.3
     #   limits
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-sqlalchemy
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements/base.txt
 polars==1.35.2
     # via -r requirements/base.txt
