@@ -163,6 +163,31 @@ def content_secret_reason(text: str, *, require_quoted_rhs: bool) -> str | None:
     return None
 
 
+# 命中原因只能在这组固定文案里取值（见 dangerous_path_reason / content_secret_reason）。
+# 原实现把 content_secret_reason() 的返回值直接打印，CodeQL 顺着「该函数读过文件文本」
+# 把它判成明文记录敏感数据（py/clear-text-logging-sensitive-data）——但返回值本就是
+# 常量文案，不含任何凭据值。下面这层白名单收敛让污点追踪终止在常量上，同时保证将来
+# 若有人把命中内容塞进 reason，也不会被原样打进 CI 日志。
+_REASON_LABELS: tuple[str, ...] = (
+    '浏览器用户配置目录',
+    '浏览器运行态数据目录',
+    '数据库 journal 文件',
+    '浏览器凭据/历史数据库文件',
+    '私钥/证书文件',
+    '真实环境变量文件（含明文凭据）',
+    '命中私钥/云凭据特征',
+    '疑似明文口令/密钥赋值',
+)
+
+
+def _display_reason(reason: str) -> str:
+    """把命中原因收敛到固定文案；未知原因一律泛化，绝不回显原值。"""
+    for label in _REASON_LABELS:
+        if label == reason:
+            return label
+    return '命中疑似凭据'
+
+
 def load_allowlist(root: Path) -> list[str]:
     """读取 `.githooks/allowlist.txt` 的 glob（去掉注释与空行）。"""
     f = root / ALLOWLIST_REL
@@ -255,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         print('', file=sys.stderr)
         print('━━━ 检出疑似凭据（受版本控制的文件） ━━━', file=sys.stderr)
         for path, reason in findings:
-            print(f'  ✗ {path}  —— {reason}', file=sys.stderr)
+            print(f'  ✗ {path}  —— {_display_reason(reason)}', file=sys.stderr)
         print('', file=sys.stderr)
         print(f'处置：改用环境变量/密钥管理注入；若为脱敏测试夹具，把路径加入 {ALLOWLIST_REL}。', file=sys.stderr)
         return 1

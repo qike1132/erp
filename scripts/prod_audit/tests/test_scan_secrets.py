@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from scripts.scan_secrets import (
+    _display_reason,
     content_scan_applies,
     content_secret_reason,
     dangerous_path_reason,
@@ -172,6 +173,22 @@ class TestScanTracked:
             '受版本控制的文件中检出疑似凭据（若为脱敏测试夹具，请加入 .githooks/allowlist.txt）：\n'
             + '\n'.join(f'  ✗ {p} —— {r}' for p, r in findings)
         )
+
+
+class TestDisplayReason:
+    """CI 日志里的命中原因必须收敛到固定文案。
+
+    这是 CodeQL `py/clear-text-logging-sensitive-data` 误报的处置：reason 本就是常量
+    文案，但把「读过文件文本的函数」的返回值直接打印，静态分析无法区分。更实际的
+    价值是——将来若有人把命中内容塞进 reason，也不会被原样打进 CI 日志。
+    """
+
+    def test_known_reason_is_echoed(self) -> None:
+        assert _display_reason('私钥/证书文件') == '私钥/证书文件'
+
+    def test_unknown_reason_is_generalized_not_echoed(self) -> None:
+        """关键契约：未知原因一律泛化，绝不回显原值（原值可能正是凭据本身）。"""
+        assert _display_reason('AKIAIOSFODNN7EXAMPLE') == '命中疑似凭据'
 
 
 class TestAllowlist:
