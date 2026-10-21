@@ -26,6 +26,7 @@ from fastapi_app.services.purchase_plan_order_quota import (
     check_order_remaining,
     format_without_order_error,
 )
+from fastapi_app.services.purchase_plan_shipment import _get_shipped_fifo_map_safe
 from fastapi_app.shared_models import (
     Customer,
     Product,
@@ -235,13 +236,26 @@ async def update_detail(db: AsyncSession, detail_id: int, *, created_by: str='',
             )
     await db.flush()
 
+    # F2-1：detail.shipped_qty 是 [DEPRECATED] 缓存列（只有出货 recalc 写它），而列表/详情/
+    # 进度三条读路径用的是 FIFO 实时分配。改数量或改期恰恰会改变分配结果，响应若仍回缓存列，
+    # 前端保存后这一行就跳回与列表不一致的数字。不传 plan_month → 不走月缓存，
+    # 否则把未提交的分配结果写进 plan_fifo:* 会污染其它请求（与 get_plan_detail 同口径）。
+    shipped_fifo_map, fifo_degraded = await _get_shipped_fifo_map_safe(
+        db, [detail], {detail.plan_id: plan_month_row[1]} if plan_month_row else None,
+    )
+    result_dict = detail.to_dict()
+    shp_qty = shipped_fifo_map.get(detail.id, 0)
+    result_dict['shipped_qty'] = shp_qty
+    result_dict['remaining_qty'] = detail.quantity - shp_qty
+    result_dict['fifo_degraded'] = fifo_degraded
+
     async def _post_commit():
         if plan_month_row:
             await _invalidate_plan_caches(plan_month_row[0])
         await publish_stock_event(StockEvent.SHIPMENT_PLAN_UPLOADED, {'detail_id': detail_id, 'operation': 'update_detail'})
     _schedule_post_commit(db, _post_commit)
 
-    return detail.to_dict()
+    return result_dict
 
 async def delete_detail(db: AsyncSession, detail_id: int) -> None:
     """删除单条明细"""
