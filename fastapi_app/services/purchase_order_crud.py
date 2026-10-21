@@ -19,7 +19,12 @@ from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
 from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
-from fastapi_app.services.purchase_utils import calc_spare_quantity, normalize_spare_rate
+from fastapi_app.services.purchase_utils import (
+    calc_spare_quantity,
+    magnified_purchase_qty,
+    normalize_spare_rate,
+    resolve_item_loss_rate,
+)
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -160,6 +165,19 @@ def _apply_order_field_updates(order: PurchaseOrder, data: dict) -> None:
             order.status = status_value
 
 
+def _recalc_item_total_price(item: PurchaseOrderItem, order_spare_rate: float | None) -> None:
+    """按当前（数量, 损耗率）重算该行金额。
+
+    计价数量 = 落库数量按有效损耗率加放（不取整），与前端「金额」列同口径：
+    前端 ``useOrderItemPrices.lineAmount`` 用同一公式，两边必须一起改，否则
+    页面上「数量 × 单价 ≠ 金额」，且采购单总金额会低于实际采购额。
+    """
+    rate = resolve_item_loss_rate(item.loss_rate, order_spare_rate)
+    item.total_price = (item.unit_price or Decimal('0')) * magnified_purchase_qty(
+        item.quantity, rate
+    )
+
+
 def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: PurchaseOrder) -> Decimal:
     """将 item_data 中的字段写入明细对象，返回本行总价（运行期恒为 Decimal）。"""
     item.material_name = item_data.get('material_name', '')
@@ -168,8 +186,8 @@ def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: Purchase
     item.unit = item_data.get('unit', '')
     item.unit_price = Decimal(str(item_data.get('unit_price', 0)))
     item.quantity = Decimal(str(item_data.get('quantity', 0)))
-    line_total = item.unit_price * item.quantity
-    item.total_price = line_total
+    _recalc_item_total_price(item, order.spare_rate)
+    line_total = item.total_price or Decimal('0')
     item.material_category = item_data.get('category', '')
     item.remark = item_data.get('remark') or _scope_remark(item_data.get('source_role'))
     item.supplier_name = order.supplier_name
@@ -267,10 +285,10 @@ async def _update_item_prices(
         if item is None:
             raise ValueError(f'采购明细 {item_id} 不存在或不属于该采购单')
         item.unit_price = price
-        item.total_price = price * (item.quantity or Decimal('0'))
+        _recalc_item_total_price(item, order.spare_rate)
 
     order.total_amount = sum(
-        (item.total_price or Decimal('0')) for item in items.values()
+        (item.total_price or Decimal('0') for item in items.values()), Decimal('0')
     )
 
 
@@ -490,6 +508,7 @@ async def save_factory_summary_edits(
     """
     updated = 0
     involved_po_ids: list[int] = list(order_ids or [])
+    touched_items: list[PurchaseOrderItem] = []
     for entry in data:
         item_ids = entry.get('item_ids', [])
         new_quantity = entry.get('quantity')
@@ -510,11 +529,11 @@ async def save_factory_summary_edits(
             continue
 
         involved_po_ids.extend(it.order_id for it in items)
+        touched_items.extend(items)
 
         if new_quantity is not None:
             if len(items) == 1:
                 items[0].quantity = Decimal(str(new_quantity))
-                items[0].total_price = (items[0].unit_price or 0) * items[0].quantity
                 updated += 1
             else:
                 original_total = sum(float(it.quantity or 0) for it in items)
@@ -522,13 +541,11 @@ async def save_factory_summary_edits(
                     ratio = float(new_quantity) / original_total
                     for it in items:
                         it.quantity = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
-                        it.total_price = (it.unit_price or 0) * it.quantity
                         updated += 1
                 else:
                     per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
                     for it in items:
                         it.quantity = per_item
-                        it.total_price = (it.unit_price or 0) * it.quantity
                         updated += 1
 
         if new_loss_rate is not None:
@@ -540,8 +557,50 @@ async def save_factory_summary_edits(
     # 编辑应用完毕后，再批量覆盖写所涉采购单的损耗率 / 备品（一次查询，无 N+1）
     spare_written = await _write_spare_rate_to_orders(db, involved_po_ids, spare_rate)
 
+    # 数量与损耗率都会改变**计价数量**（落库数量按损耗率加放），
+    # 因此行金额与采购单总金额必须在编辑后重算，否则停留在旧口径。
+    await _recalc_touched_orders_amount(db, touched_items)
+
     await db.flush()
     return {'updated_count': updated, 'spare_updated_count': spare_written}
+
+
+async def _recalc_touched_orders_amount(
+    db: AsyncSession, touched_items: list[PurchaseOrderItem]
+) -> None:
+    """按编辑后的（数量, 损耗率）重算受影响明细的行金额与所属采购单总金额。
+
+    计价数量口径与前端「金额」列一致（见 :func:`_recalc_item_total_price`）：
+    数量改大或损耗率改高都会让行金额变化，采购单总金额必须同步，
+    否则「明细金额之和 ≠ 采购单金额」，供应商金额汇总随之失真。
+    """
+    if not touched_items:
+        return
+
+    touched_order_ids = {it.order_id for it in touched_items if it.order_id}
+    if not touched_order_ids:
+        return
+
+    orders_result = await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.id.in_(touched_order_ids))
+    )
+    order_map = {o.id: o for o in orders_result.scalars().all()}
+
+    for it in touched_items:
+        order = order_map.get(it.order_id)
+        _recalc_item_total_price(it, order.spare_rate if order else None)
+
+    # 采购单总金额 = 该单全部明细金额之和（一次查询，避免逐单 N+1）
+    all_items_result = await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(touched_order_ids))
+    )
+    totals: dict[int, Decimal] = defaultdict(lambda: Decimal('0'))
+    for it in all_items_result.scalars().all():
+        totals[it.order_id] += (it.total_price or Decimal('0'))
+    for order_id, total in totals.items():
+        order = order_map.get(order_id)
+        if order is not None:
+            order.total_amount = total
 
 
 async def _build_order_summary(db: AsyncSession, order) -> dict:

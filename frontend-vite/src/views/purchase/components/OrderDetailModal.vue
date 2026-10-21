@@ -74,6 +74,7 @@ import type { PurchaseOrder, PurchaseOrderItem } from '@/types'
 import { formatNumber } from '@/utils/format'
 import { useOrderItemPrices } from '../composables/useOrderItemPrices'
 import { factoryQtyDisplayValue } from '../composables/useSummaryModal'
+import { resolveItemLossRate } from '../composables/perSkuRows'
 
 const props = defineProps<{
   open: boolean
@@ -94,13 +95,7 @@ const emit = defineEmits<{ close: []; saved: [orderId: number] }>()
  */
 function displayQty(item: PurchaseOrderItem): number {
   const baseQty = parseFloat(String(item.quantity)) || 0
-  const itemRate = item.loss_rate
-  const orderRate = props.order?.spare_rate
-  const rate = typeof itemRate === 'number' && Number.isFinite(itemRate)
-    ? itemRate
-    : typeof orderRate === 'number' && Number.isFinite(orderRate)
-      ? orderRate
-      : 0
+  const rate = resolveItemLossRate(item.loss_rate, props.order?.spare_rate)
   return factoryQtyDisplayValue(baseQty, rate, false)
 }
 

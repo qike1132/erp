@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import type { PurchaseOrder, PurchaseOrderItem } from '@/types'
+import { magnifyByLossRate, resolveItemLossRate } from './perSkuRows'
 
 /**
  * 采购明细单价补录状态机（订单详情弹窗用）。
@@ -42,11 +43,24 @@ export function useOrderItemPrices(
     return parsed
   }
 
-  /** 行金额 = 单价 × 数量（单价取草稿值，与保存后一致） */
+  /**
+   * 计价数量 = 落库数量按有效损耗率加放（**不取整**，与后端 total_price 同口径）。
+   *
+   * 落库的 quantity 是损耗加放前的原始用量，真正下单结算的是加放后的数量
+   * （「数量」列展示的就是它的向上取整值）。金额若按加放前的数量算，
+   * 采购单总金额会系统性低于实际采购额。
+   */
+  function pricingQty(item: PurchaseOrderItem): number {
+    const baseQty = parseFloat(String(item.quantity)) || 0
+    const rate = resolveItemLossRate(item.loss_rate, order()?.spare_rate)
+    return magnifyByLossRate(baseQty, rate)
+  }
+
+  /** 行金额 = 单价 × 计价数量（单价取草稿值，与保存后一致） */
   function lineAmount(item: PurchaseOrderItem): number {
     const price = parsePrice(item)
     if (price === null) return 0
-    return price * (parseFloat(String(item.quantity)) || 0)
+    return price * pricingQty(item)
   }
 
   /** 与库里已存值不同的行 = 待保存项（未改动的行不进请求体） */

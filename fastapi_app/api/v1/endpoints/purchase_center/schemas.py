@@ -117,8 +117,13 @@ class PurchaseOrderCreateRequest(BaseModel):
 
 class PurchaseOrderItemPriceUpdate(BaseModel):
     """采购明细单价补录（按明细 id 定位）"""
+
     id: int = Field(..., gt=0, description="采购明细ID")
-    unit_price: float = Field(..., ge=0, description="单价，不能为负数")
+    # 上限与落库列一致（purchase_order_item.unit_price 为 Numeric(12,2)）：
+    # 越界值在 flush 时才炸成 NumericValueOutOfRange → 500，超出范围应在此拦成 422。
+    unit_price: float = Field(
+        ..., ge=0, le=9999999999.99, description="单价，不能为负数；上限 9999999999.99（与落库列一致）"
+    )
 
 
 class PurchaseOrderUpdateRequest(BaseModel):

@@ -91,6 +91,21 @@ export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
   return Math.ceil(magnifyByLossRate(qty, lossRate))
 }
 
+/**
+ * 明细行的**有效损耗率**（千分之几）：逐行 loss_rate → 订单级 spare_rate → 0。
+ *
+ * 与后端 `fastapi_app/services/purchase_utils.py::resolve_item_loss_rate` 逐字同源。
+ * 「数量」列（最终采购数量）与「金额」列（计价数量）必须用同一个损耗率，
+ * 否则同一行会按两个数量计价，采购单总金额也会低于实际采购额。
+ *
+ * 显式的 0 视为有效值（不再回退订单级），与后端一致。
+ */
+export function resolveItemLossRate(itemLossRate: unknown, orderSpareRate: unknown): number {
+  if (typeof itemLossRate === 'number' && Number.isFinite(itemLossRate)) return itemLossRate
+  if (typeof orderSpareRate === 'number' && Number.isFinite(orderSpareRate)) return orderSpareRate
+  return 0
+}
+
 export interface PerSkuRow {
   skuIdx: number
   /** 该 SKU 块在左侧「产品名称/订单数量/备品数量」三列里要显示的文本行（per-SKU 模式恒 1 行） */

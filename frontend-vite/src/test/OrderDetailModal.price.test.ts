@@ -131,4 +131,24 @@ describe('OrderDetailModal 单价补录', () => {
     // 2.5 × 10 = 25；第二行 5 × 4 = 20
     expect(amounts).toEqual(['25', '20'])
   })
+
+  it('行金额按损耗加放后的计价数量算（不是按落库数量）', async () => {
+    // 落库 quantity 是损耗加放前的原始用量；实际下单结算的是加放后的数量。
+    // 金额若按落库数量算，采购单总金额会系统性低于实际采购额。
+    const w = mountModal(makeOrder({
+      items: [
+        { id: 1, material_name: '面料A', quantity: 890, unit: '米', unit_price: 0, loss_rate: 1000 },
+        { id: 2, material_name: '面料B', quantity: 10, unit: '米', unit_price: 0, loss_rate: null },
+      ],
+      spare_rate: 1000,
+    }))
+
+    await priceInputs(w)[0]!.setValue('5')
+    await priceInputs(w)[1]!.setValue('5')
+
+    const amounts = w.findAll('td.odm-td-amount').map((td) => td.text())
+    // 第 1 行：890 × (1 + 1000‰) = 1780 → 5 × 1780 = 8900
+    // 第 2 行：逐行 loss_rate 为空 → 回退订单级 spare_rate=1000 → 10 × 2 = 20 → 5 × 20 = 100
+    expect(amounts).toEqual(['8,900', '100'])
+  })
 })
