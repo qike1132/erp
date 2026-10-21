@@ -20,6 +20,11 @@ from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import Case, CaseMovement, CraftWork, PackagingRecord, Product
 from fastapi_app.utils import parse_date_with_fallback
 
+# Excel 公式注入清洗（审查 H12）：worker_name/remark/customer/product_name 都是
+# 用户可控文本，直入单元格会被 Excel 当公式/DDE 解析。复用权威清洗器，
+# 与 purchase_center/export_utils.py 同口径，不另立标准。
+from utils.report_exporter import _sanitize_excel_value
+
 logger = logging.getLogger(__name__)
 
 # 导出最大行数（仿 report_data_service），防止 openpyxl 全量内存构建导致 OOM
@@ -113,7 +118,7 @@ async def export_craft_works(db: AsyncSession, start_date: str='', end_date: str
     for r in records:
         d = r.work_date.isoformat() if r.work_date else ''
         daily_total[d] = daily_total.get(d, 0) + r.quantity
-        ws.append([d, r.worker_name, r.quantity, r.remark or '', r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else ''])
+        ws.append([d, _sanitize_excel_value(r.worker_name), r.quantity, _sanitize_excel_value(r.remark or ''), r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else ''])
     ws.append([])
     ws.append(['日期', '当天生产总数'])
     for d in sorted(daily_total.keys()):
@@ -285,7 +290,7 @@ async def export_packaging_records(db: AsyncSession, start_date: str='', end_dat
     total_qty = 0
     for r in records:
         total_qty += r.quantity
-        ws.append([r.pack_date.isoformat() if r.pack_date else '', r.customer, r.product_name, r.barcode, r.quantity, r.remark or '', r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else ''])
+        ws.append([r.pack_date.isoformat() if r.pack_date else '', _sanitize_excel_value(r.customer), _sanitize_excel_value(r.product_name), _sanitize_excel_value(r.barcode), r.quantity, _sanitize_excel_value(r.remark or ''), r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else ''])
     ws.append([])
     ws.append(['合计', '', '', '', total_qty])
     output = io.BytesIO()

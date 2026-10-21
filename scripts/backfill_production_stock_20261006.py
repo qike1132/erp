@@ -117,4 +117,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='历史生产记录一次性补入库存')
     parser.add_argument('--execute', action='store_true', help='真正执行（默认 dry-run）')
     args = parser.parse_args()
+    # 危险写护栏（审查 H13）：--execute 才写库（默认 dry-run 只读）。
+    if args.execute:
+        from _prod_write_guard import require_prod_write_consent
+        require_prod_write_consent(
+            '历史生产记录补入库存（写库存 + InventoryLog 流水）',
+            hint='一次性补录；先跑默认 dry-run 核对待补行数。',
+        )
     raise SystemExit(asyncio.run(main(args.execute)))

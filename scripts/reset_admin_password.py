@@ -73,6 +73,14 @@ if __name__ == "__main__":
         print("示例: python scripts/reset_admin_password.py --password YourStrongPwd123")
         sys.exit(1)
 
+    # 危险写护栏（审查 H13）：UPDATE "user" 直写生产库，与 init_permissions/
+    # db_manager 同一授权口（ERP_ALLOW_PROD_WRITE=1 或 --allow-prod-write）。
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent(
+        '重置 admin 用户密码（UPDATE "user"）',
+        hint='不可逆：原密码哈希将被覆盖。仅限初始化/忘记密码场景。',
+    )
+
     print("开始重置 admin 用户密码...")
     success = reset_admin_password(password)
     sys.exit(0 if success else 1)
