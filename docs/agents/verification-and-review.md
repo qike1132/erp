@@ -79,6 +79,10 @@ AI 说"修好了/应该没问题/测试过了"而实际没跑，是最高频的 
 - `quality_gate.py` 读 `pyproject.toml [tool.code-quality]`：`max_function_length=80`、`max_vue_component_length=400`、`max_file_size=1600`。**只拦新增违规**；清理存量后可 `--update-baseline` 收紧。
 - 提交钩子 `core.hooksPath = .githooks`。`.githooks/pre-commit` 四层：①危险路径 ②密钥扫描（**总是跑**）③Python 字面量收窄 ④`.pre-commit-config.yaml`（`ruff --fix` + local `quality-gate`；`ruff-format` 已于 2026-10-01 移除，理由见该文件注释）。
 - 第 ④ 层：`pre-commit` 在项目 `.venv`（4.6.2，git-bash PATH 通常看不到）。钩子按 **venv → PATH** 解析并以 `.venv/Scripts` 为 PATH 前缀，使 `entry: python scripts/quality_gate.py` 用 venv 解释器；落到系统 Python 会让 pip-audit 混扫整机依赖判 FAIL、挡掉所有提交（2026-10-01 实测 172 条）。
+- **pre-commit 的 stash/restore 会吞掉并发会话的未暂存改动**（2026-10-21 实测）：钩子跑之前把「未暂存」整体 stash，跑完 `git apply` + `git checkout -- .` 还原。这两步的 `git.exe` 在并发提交压力下会偶发 `0xC0000142`（DLL 初始化失败）**静默中断**，于是工作树被整体退回 HEAD、别人的活当场消失（本次一次吞掉 21 个文件，含 `auxiliary.py` / `prod_runner.py` / `tests/conftest.py`）。
+  - **恢复**：`.pre-commit-home/patch<epoch>-<pid>` 就是那份 stash（崩溃时不会被删）。先 `git apply --check` 整片验证，通过后 `git apply --whitespace=nowarn` 打回即可；按文件切块逐段打会因缺尾换行报 `corrupt patch`。
+  - **预防**：① 只 `git add` 本任务文件并**带 pathspec 提交**；② 提交前把 `git diff` 存一份副本；③ 提交后立即 `git status --porcelain | grep -c '^ M'` 数一遍，条数掉了就是被吞了；④ `.git/index.lock` 存在时**等锁重试，绝不删锁**（本机同时有多个会话在提交）。
+  - 附带坑：门禁红的那几次，`git checkout -- .` 会把**我自己刚改的内容**也退回 index 版本——所以「改完立刻 `git add`」在这个仓库不是习惯而是必要动作。
 - `pre-commit` **自身跑不起来时**（本机实测：hook 环境需联网 clone，而 python 派生的 MSYS `ssh/sh` 报 `NtCreateDirectoryObject 0xC0000022`），钩子回退跑等价本地检查：`ruff check --fix`（仅暂存 `.py`，改动即拒绝、需重新暂存）+ `quality_gate.py`。回退照常拦真实违规，但**不因工具跑不起来而拦截**；只有 pre-commit 真失败（输出含 `- hook id:`）才按它判负。
 - `.githooks/commit-msg`（第 5 层）：**剥掉第三方 AI 工具署名尾行**（`🤖 Generated with <tool>` / `Co-Authored-By: <tool>`，清单见该文件）。背景：Codebuff 曾写进 12 个提交（2026-08-11 起），与 §7 相悖；就地剥离不阻断工作流。**故意不剥 Claude 的署名**。
 - 密钥扫描误报的**正确**处置：命中行尾加 `secret-scan:allow <理由>`（或上一行 `secret-scan:allow-next-line`）；`.githooks/allowlist.txt` 是逐文件豁免，**新增条目须在提交信息说明理由**。
