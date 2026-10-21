@@ -12,6 +12,17 @@ import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as Ge
  */
 export type WithRequired<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>
 
+/**
+ * 列表/分组信封的派生形式：字段清单仍取生成层，只把某个数组字段的**元素类型**
+ * 换成本地加强后的类型。
+ *
+ * 不能直接写 `Required<生成层信封>`：生成层信封引用的是生成层元素（全可选镜像），
+ * Required<> 只去掉信封自身的 `?`，元素口径反而变松。
+ * 也不能写成 `… & { items: X[] }`：等号右侧一出现花括号，就等于把字段清单抄了第二遍，
+ * check-mobile-dto 的「派生别名放行」判据（右侧不含 `{`）正是拦这个的。
+ */
+export type WithItems<T, K extends keyof T, E> = Omit<Required<T>, K> & Record<K, E[]>
+
 /** 通用 API 响应（精简版，仅保留通用字段） */
 export interface ApiResponse<T = unknown> {
   success: boolean

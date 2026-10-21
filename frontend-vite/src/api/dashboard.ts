@@ -1,6 +1,6 @@
 import { get } from './request'
-import type { NavSection } from '@/types'
-import type { MobileDeptData as GenMobileDeptData, MobileShippingData as GenMobileShippingData, MobileStockData as GenMobileStockData, MobileWarehouseData as GenMobileWarehouseData } from '@/types/api'
+import type { NavSection, WithItems } from '@/types'
+import type { MobileDeptData as GenMobileDeptData, MobileShippingData as GenMobileShippingData, MobileStockData as GenMobileStockData, MobileWarehouseData as GenMobileWarehouseData, MobileProductionData as GenMobileProductionData } from '@/types/api'
 
 interface ApiEnvelope<T = unknown> {
   success: boolean
@@ -11,10 +11,7 @@ export type MobileDeptData = Required<GenMobileDeptData>
 
 export type MobileStockData = Required<GenMobileStockData>
 
-export interface MobileProductionData {
-  total_value: number
-  departments: MobileDeptData[]
-}
+export type MobileProductionData = WithItems<GenMobileProductionData, 'departments', MobileDeptData>
 
 export type MobileShippingData = Required<GenMobileShippingData>
 

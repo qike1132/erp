@@ -3,7 +3,8 @@
  * 主件与配件同为 SKU；出入库统一为一张流水（direction 区分方向）。
  */
 import { get, post, put, del, upload, download } from './request'
-import type { CaseActionResponse as GenCaseActionResponse, CaseBatchFailedItem as GenCaseBatchFailedItem, CaseInventoryStats as GenCaseInventoryStats, CaseMovementCreateResponse as GenCaseMovementCreateResponse, CaseSearchItem as GenCaseSearchItem } from '@/types/api'
+import type { CaseActionResponse as GenCaseActionResponse, CaseBatchFailedItem as GenCaseBatchFailedItem, CaseInventoryStats as GenCaseInventoryStats, CaseMovementCreateResponse as GenCaseMovementCreateResponse, CaseSearchItem as GenCaseSearchItem, CaseBatchMovementResponse as GenCaseBatchMovementResponse } from '@/types/api'
+import type { WithItems } from '@/types'
 
 // ===== 共享类型 =====
 
@@ -93,11 +94,7 @@ export type CaseMovementCreateResponse = Required<GenCaseMovementCreateResponse>
 
 export type CaseBatchFailedItem = Required<GenCaseBatchFailedItem>
 
-export interface CaseBatchMovementResponse {
-  success: boolean
-  results: Record<string, unknown>[]
-  failed: CaseBatchFailedItem[]
-}
+export type CaseBatchMovementResponse = WithItems<GenCaseBatchMovementResponse, 'failed', CaseBatchFailedItem>
 
 /** 库存分组节点（主件 + 其配件） */
 export interface CaseInventoryNode extends CaseItem {

@@ -9,8 +9,8 @@
  * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 23 个 API 方法。
  */
 import { get, post, put, del, upload } from './request'
-import type { WithRequired } from '@/types'
-import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest, BatchPartItem as GenBatchPartItem } from '@/types/api'
+import type { WithRequired, WithItems } from '@/types'
+import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest, BatchPartItem as GenBatchPartItem, RoleListResponse as GenRoleListResponse, VersionListResponse as GenVersionListResponse, ChangeLogListResponse as GenChangeLogListResponse } from '@/types/api'
 
 // ==================== 类型别名 ====================
 
@@ -107,10 +107,7 @@ export type RoleBrief = Required<GenRoleBrief>
 // version 是乐观锁版本号
 
 /** 角色列表响应 */
-export interface RoleListResponse {
-  success: boolean
-  items: RoleBrief[]
-}
+export type RoleListResponse = WithItems<GenRoleListResponse, 'items', RoleBrief>
 
 /** 新增角色请求 */
 export type RoleCreateRequest = GenRoleCreateRequest
@@ -130,10 +127,7 @@ export type BatchPartCreateRequest = GenBatchPartCreateRequest
 export type VersionBrief = Required<GenVersionBrief>
 
 /** 版本列表响应 */
-export interface VersionListResponse {
-  success: boolean
-  items: VersionBrief[]
-}
+export type VersionListResponse = WithItems<GenVersionListResponse, 'items', VersionBrief>
 
 /** 字段级差异 */
 export type FieldDiff = Required<GenFieldDiff>
@@ -170,13 +164,7 @@ export interface VersionDetailResponse {
 export type ChangeLogEntry = Required<GenChangeLogEntry>
 
 /** 变更日志列表响应（分页） */
-export interface ChangeLogListResponse {
-  success: boolean
-  items: ChangeLogEntry[]
-  total: number
-  pages: number
-  current_page: number
-}
+export type ChangeLogListResponse = WithItems<GenChangeLogListResponse, 'items', ChangeLogEntry>
 
 // ==================== 打样项目 ====================
 
