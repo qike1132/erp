@@ -1,7 +1,7 @@
 import { get, post, del } from './request'
-import type { QueryParams, WithRequired } from '@/types'
+import type { QueryParams, WithRequired, WithItems } from '@/types'
 import type { OrderListApiResponse } from './order'
-import type { GenerateProcessResponse as GenGenerateProcessResponse, ShipmentReceiveResponse as GenShipmentReceiveResponse, HubeiProductSearchItem as GenHubeiProductSearchItem, ShippableProcessItem as GenShippableProcessItem, UnshippedProcessItem as GenUnshippedProcessItem } from '@/types/api'
+import type { GenerateProcessResponse as GenGenerateProcessResponse, ShipmentReceiveResponse as GenShipmentReceiveResponse, HubeiProductSearchItem as GenHubeiProductSearchItem, ShippableProcessItem as GenShippableProcessItem, UnshippedProcessItem as GenUnshippedProcessItem, OrderProcessListResponse as GenOrderProcessListResponse, ProcessTypeListResponse as GenProcessTypeListResponse, ShipmentBatchOrder as GenShipmentBatchOrder, ShipmentBatchResponse as GenShipmentBatchResponse, ShipmentListResponse as GenShipmentListResponse } from '@/types/api'
 
 /** SKU 外发工序预设 */
 export interface OutsourceProcessType {
@@ -41,17 +41,9 @@ export interface OrderOutsourceProcess {
   update_time?: string | null
 }
 
-export interface ProcessTypeListResponse {
-  success: boolean
-  data: OutsourceProcessType[]
-  total: number
-}
+export type ProcessTypeListResponse = WithItems<Required<GenProcessTypeListResponse>, 'data', OutsourceProcessType>
 
-export interface OrderProcessListResponse {
-  success: boolean
-  data: OrderOutsourceProcess[]
-  total: number
-}
+export type OrderProcessListResponse = WithItems<Required<GenOrderProcessListResponse>, 'data', OrderOutsourceProcess>
 
 export type GenerateProcessResponse = Required<GenGenerateProcessResponse>
 
@@ -112,30 +104,14 @@ export interface Shipment {
   items?: ShipmentItem[]
 }
 
-export interface ShipmentListResponse {
-  success: boolean
-  data: Shipment[]
-  total: number
-  page: number
-  per_page: number
-  shipped_count: number
-  received_count: number
-}
+export type ShipmentListResponse = WithItems<Required<GenShipmentListResponse>, 'data', Shipment>
 
 export type ShipmentReceiveResponse = Required<GenShipmentReceiveResponse>
 
 /** 批量发货：单个订单的发货明细 */
-export interface ShipmentBatchOrder {
-  order_id: number
-  items: { process_id: number; quantity: number }[]
-}
+export type ShipmentBatchOrder = GenShipmentBatchOrder
 
-export interface ShipmentBatchResponse {
-  success: boolean
-  data: Shipment[]
-  total: number
-  message: string
-}
+export type ShipmentBatchResponse = WithItems<Required<GenShipmentBatchResponse>, 'data', Shipment>
 
 export const outsourceApi = {
   /** 湖北工厂订单列表（强制 factory=湖北，含备货） */

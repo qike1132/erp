@@ -1,20 +1,15 @@
 import { get, post, del } from './request'
+import type { PatternMakerActionResponse as GenPatternMakerActionResponse, PatternMakerListResponse as GenPatternMakerListResponse } from '@/types/api'
+import type { WithField, WithItems, WithRequired } from '@/types'
 
 export interface PatternMaker {
   id: number
   name: string
 }
 
-export interface PatternMakerListResponse {
-  success: boolean
-  items: PatternMaker[]
-}
+export type PatternMakerListResponse = WithItems<Required<GenPatternMakerListResponse>, 'items', PatternMaker>
 
-export interface PatternMakerActionResponse {
-  success: boolean
-  message: string
-  id?: number
-}
+export type PatternMakerActionResponse = WithField<WithRequired<GenPatternMakerActionResponse, 'success' | 'message' | 'id'>, 'id', number>
 
 export const patternMakerApi = {
   list: () => get<PatternMakerListResponse>('/pattern-maker/pattern-makers'),

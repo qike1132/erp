@@ -1,6 +1,8 @@
 import { get, post, put, del, postDownload } from './request'
+import type { MaterialCalcRow as GenMaterialCalcRow, SearchSuggestionResponse as GenSearchSuggestionResponse } from '@/types/api'
 import type {
   Product, PurchaseOrder, UnprocessedOrder, QueryParams, ExportResponse,
+  WithItems, WithRequired,
 } from '@/types'
 
 // === 物料计算器相关类型（与后端 schemas/purchase_center.py 对齐）===
@@ -11,16 +13,7 @@ export interface MaterialCalcProduct {
   has_bom: boolean
 }
 
-export interface MaterialCalcRow {
-  /** 后端 `MaterialCalcRow.name`（与 material_name 同值，保留以兼容两种口径） */
-  name?: string
-  supplier_name: string
-  material_name: string
-  material_code?: string
-  specification?: string
-  total_quantity: number
-  unit: string
-}
+export type MaterialCalcRow = WithRequired<GenMaterialCalcRow, 'supplier_name' | 'material_name' | 'total_quantity' | 'unit'> // name 与 material_name 同值，保留以兼容两种口径
 
 /**
  * 供应商导出数量行（对应后端 `SupplierExportQuantityItem`）。
@@ -82,10 +75,7 @@ export interface ProductListResponse {
   current_page: number
 }
 
-export interface SearchSuggestionResponse {
-  success: boolean
-  suggestions: MaterialCalcProduct[]
-}
+export type SearchSuggestionResponse = WithItems<Required<GenSearchSuggestionResponse>, 'suggestions', MaterialCalcProduct>
 
 // BOM 相关接口（从 productApi 迁移，属于采购中心域）
 export const bomApi = {

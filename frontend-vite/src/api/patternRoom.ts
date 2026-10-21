@@ -9,8 +9,8 @@
  * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 23 个 API 方法。
  */
 import { get, post, put, del, upload } from './request'
-import type { WithRequired, WithItems } from '@/types'
-import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest, BatchPartItem as GenBatchPartItem, RoleListResponse as GenRoleListResponse, VersionListResponse as GenVersionListResponse, ChangeLogListResponse as GenChangeLogListResponse } from '@/types/api'
+import type { WithRequired, WithItems, ReplaceField, WithField } from '@/types'
+import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest, BatchPartItem as GenBatchPartItem, RoleListResponse as GenRoleListResponse, VersionListResponse as GenVersionListResponse, ChangeLogListResponse as GenChangeLogListResponse, GroupedListResponse as GenGroupedListResponse, PartDetail as GenPartDetail, PartListResponse as GenPartListResponse, PartsByVersionResponse as GenPartsByVersionResponse, PatternMakerGroup as GenPatternMakerGroup, ProjectCreateRequest as GenProjectCreateRequest, ProjectListResponse as GenProjectListResponse, ProjectSummary as GenProjectSummary, VersionDetailResponse as GenVersionDetailResponse } from '@/types/api'
 
 // ==================== 类型别名 ====================
 
@@ -42,35 +42,10 @@ export interface ActionResponse {
 // ==================== 部位布料 ====================
 
 /** 部位布料详情 */
-export interface PartDetail {
-  id: number | null
-  project_id?: number
-  role_id?: number | null
-  part_name: string
-  sort_order: number
-  fabric_name: string
-  fabric_spec: string
-  fabric_color_no: string
-  supplier_id: number | null
-  supplier_name: string
-  contact_person: string
-  contact_phone: string
-  unit_price: number | null
-  delivery_days: number | null
-  remark: string
-  created_at?: string
-  updated_at?: string
-  /** 乐观锁版本号 */
-  version: number
-  /** 所属版本号（跨版本查询时填充） */
-  version_no?: string | null
-}
+export type PartDetail = WithRequired<GenPartDetail, 'part_name' | 'sort_order' | 'fabric_name' | 'fabric_spec' | 'fabric_color_no' | 'supplier_id' | 'supplier_name' | 'contact_person' | 'contact_phone' | 'unit_price' | 'delivery_days' | 'remark' | 'version' | 'id'> // version 是乐观锁版本号；version_no 仅跨版本查询时填充
 
 /** 部位列表响应 */
-export interface PartListResponse {
-  success: boolean
-  items: PartDetail[]
-}
+export type PartListResponse = WithItems<Required<GenPartListResponse>, 'items', PartDetail>
 
 /** 单个历史候选值（板房已录字段值 trim + 忽略大小写归并后的结果） */
 export interface PartFieldCandidateValue {
@@ -93,12 +68,7 @@ export interface PartFieldCandidatesResponse {
 }
 
 /** 部位跨版本汇总响应 */
-export interface PartsByVersionResponse {
-  success: boolean
-  items: PartDetail[]
-  versions: string[]
-  final_version: string
-}
+export type PartsByVersionResponse = WithItems<Required<GenPartsByVersionResponse>, 'items', PartDetail>
 
 // ==================== 角色 ====================
 
@@ -147,16 +117,7 @@ export interface ChangeRecord {
  * - T2+ 正常：返回 change_summary（预计算 diff），full_snapshot=null
  * - 降级（degraded=true，前一版本缺失）：返回 full_snapshot + degraded=true
  */
-export interface VersionDetailResponse {
-  id: number
-  project_id: number
-  version_no: string
-  created_at: string
-  is_baseline: boolean
-  degraded: boolean
-  full_snapshot: PartDetail[] | null
-  change_summary: ChangeRecord[] | null
-}
+export type VersionDetailResponse = WithItems<WithItems<Required<GenVersionDetailResponse>, 'full_snapshot', PartDetail>, 'change_summary', ChangeRecord>
 
 // ==================== 变更日志 ====================
 
@@ -169,52 +130,16 @@ export type ChangeLogListResponse = WithItems<GenChangeLogListResponse, 'items',
 // ==================== 打样项目 ====================
 
 /** 打样项目摘要（列表展示） */
-export interface ProjectSummary {
-  id: number
-  sequence_no: string
-  product_name: string
-  product_image_url: string | null
-  product_image_thumbnail_url: string | null
-  product_image_blur_url: string | null
-  current_version: string
-  /** 状态：in_progress / completed / cancelled */
-  status: ProjectStatus
-  /** 完成时间（状态为 completed 时有值） */
-  completed_at: string | null
-  /** 部位数量 */
-  parts_count: number
-  updated_at: string
-}
+export type ProjectSummary = WithField<Required<GenProjectSummary>, 'status', ProjectStatus> // completed_at 仅在 status=completed 时有值；status 口径由 ProjectStatus 本身表达
 
 /** 版师分组 */
-export interface PatternMakerGroup {
-  pattern_maker_id: number | null
-  pattern_maker_name: string
-  project_count: number
-  latest_update_time: string
-  projects: ProjectSummary[]
-}
+export type PatternMakerGroup = WithItems<Required<GenPatternMakerGroup>, 'projects', ProjectSummary>
 
 /** 按版师分组聚合查询响应 */
-export interface GroupedListResponse {
-  success: boolean
-  groups: PatternMakerGroup[]
-  total_projects: number
-  total: number
-  pages: number
-  current_page: number
-  /** 命中后端 5000 条分组截断上限（分组统计不含全部匹配项目） */
-  truncated?: boolean
-}
+export type GroupedListResponse = WithRequired<ReplaceField<GenGroupedListResponse, 'groups', PatternMakerGroup[]>, 'success' | 'total_projects' | 'total' | 'pages' | 'current_page'> // truncated=命中后端 5000 条分组截断上限（分组统计不含全部匹配项目）
 
 /** 打样项目列表响应（分页） */
-export interface ProjectListResponse {
-  success: boolean
-  items: ProjectSummary[]
-  total: number
-  pages: number
-  current_page: number
-}
+export type ProjectListResponse = WithItems<Required<GenProjectListResponse>, 'items', ProjectSummary>
 
 /** 打样项目详情响应 */
 export interface ProjectDetailResponse {
@@ -244,12 +169,7 @@ export interface ProjectDetailResponse {
 // ==================== 请求 Schema ====================
 
 /** 新增打样项目请求 */
-export interface ProjectCreateRequest {
-  product_name: string
-  pattern_maker_id?: number | null
-  remark?: string | null
-  initial_roles?: string[] | null
-}
+export type ProjectCreateRequest = GenProjectCreateRequest
 
 /** 编辑打样项目请求（version 为乐观锁版本号，必填）
  *  pattern_maker_id / product_image_file_id 三态语义：

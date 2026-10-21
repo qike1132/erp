@@ -46,7 +46,7 @@ const exemptionFile = resolve(root, 'scripts', 'dto-duplicate-exemptions.json')
  * 取文件里声明的类型名（export interface X / export type X / interface X / type X）。
  *
  * derivation=true 表示「纯别名」：`export type X = Required<GenX>` 这种等号右侧不含 `{`
- * 的声明。它不重复字段清单，字段真相仍只有一份（生成层），因此 R2/R3 不该把它算作重复。
+ * 的声明。它不重复字段清单，字段真相仍只有一份（生成层），因此 R1/R2/R3 都不该把它算作重复。
  * 反例 `export type X = {` —— 右侧起花括号，字段清单被抄了一遍，照旧判重。
  */
 function declaredTypes(src) {
@@ -81,19 +81,19 @@ function walk(dir) {
 }
 
 // ===== R1：移动端重复声明 @/types 的 DTO =====
+// 名称集合要覆盖 `export type`：手写接口迁移成派生别名后（2026-10-21 的 F1-1/F1-2 批次），
+// 只认 interface 会让这些名字从 R1 的保护里悄悄掉出去。
 const dtoNames = new Set(
-  [...readFileSync(typesFile, 'utf-8').matchAll(/export\s+interface\s+(\w+)/g)].map((m) => m[1]),
+  [...readFileSync(typesFile, 'utf-8').matchAll(/export\s+(?:interface|type)\s+(\w+)/g)].map((m) => m[1]),
 )
 
 const violations = []
 for (const file of walk(mobileDir)) {
-  const lines = readFileSync(file, 'utf-8').split(/\r?\n/)
-  lines.forEach((line, i) => {
-    const match = /^\s*(?:export\s+)?(?:interface|type)\s+(\w+)/.exec(line)
-    if (match && dtoNames.has(match[1])) {
-      violations.push({ file: relative(root, file).replaceAll('\\', '/'), line: i + 1, name: match[1] })
-    }
-  })
+  for (const { name, line, derivation } of declaredTypes(readFileSync(file, 'utf-8'))) {
+    // 与 R2/R3 同一口径：派生别名不是第二真相源。
+    if (derivation) continue
+    if (dtoNames.has(name)) violations.push({ file: relative(root, file).replaceAll('\\', '/'), line, name })
+  }
 }
 
 if (violations.length > 0) {
@@ -173,6 +173,6 @@ if (unexempted.length > 0 || stale.length > 0) {
 }
 
 console.log(
-  `[PASS] src/mobile 无重复 DTO 声明（对照 @/types 的 ${dtoNames.size} 个导出接口）；` +
+  `[PASS] src/mobile 无重复 DTO 声明（对照 @/types 的 ${dtoNames.size} 个导出类型）；` +
   `手写层无未登记的生成层同名类型（生成层 ${generatedNames.size} 个类型，登记豁免 ${exempted.size} 条）。`,
 )

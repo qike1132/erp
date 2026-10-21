@@ -1,4 +1,4 @@
-import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate } from '@/types/api'
+import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate, BatchQueryItem as GenBatchQueryItem, InventoryResponse as GenInventoryResponse, ProductionRecordListResponse as GenProductionRecordListResponse, UserUpdate as GenUserUpdate } from '@/types/api'
 // ===== 基础 API 响应类型 =====
 
 /**
@@ -21,10 +21,22 @@ export type WithRequired<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K
  * 也不能写成 `… & { items: X[] }`：等号右侧一出现花括号，就等于把字段清单抄了第二遍，
  * check-mobile-dto 的「派生别名放行」判据（右侧不含 `{`）正是拦这个的。
  */
-export type WithField<T, K extends keyof T, V> = Omit<Required<T>, K> & Record<K, V>
+export type ReplaceField<T, K extends keyof T, V> = Omit<T, K> & Record<K, V>
+
+/** 覆盖字段并要求整份必填：WithField<T,K,V> === Required<ReplaceField<T,K,V>> */
+export type WithField<T, K extends keyof T, V> = Required<ReplaceField<T, K, V>>
 
 /** 数组字段的简写：WithItems<T, K, E> === WithField<T, K, E[]> */
 export type WithItems<T, K extends keyof T, E> = WithField<T, K, E[]>
+
+/**
+ * 只取生成层里前端确实在用的那几个字段，并把它们断言为必填。
+ *
+ * 用于「后端模型字段比前端消费的更多」的手写 DTO：抄字段清单会连类型一起抄第二份，
+ * 而 Pick 只抄名字——后端加字段不需要同步前端，改名/删字段则直接编译报错。
+ * 不能顺手写 Required<生成层>：那会替前端**没用的**字段也发出「一定存在」的断言。
+ */
+export type PickRequired<T, K extends keyof T> = Required<Pick<T, K>>
 
 /** 通用 API 响应（精简版，仅保留通用字段） */
 export interface ApiResponse<T = unknown> {
@@ -179,18 +191,7 @@ export interface InventoryItem {
 }
 
 /** 后端 /stock/inventory 响应结构（InventoryResponse schema） */
-export interface InventoryResponse {
-  success: boolean
-  data: InventoryItem[]
-  total_order_quantity: number
-  total_stockin_quantity: number
-  total_stock: number
-  total_available_stock: number
-  all_customers: string[]
-  total_items: number
-  page: number
-  per_page: number
-}
+export type InventoryResponse = WithItems<Required<GenInventoryResponse>, 'data', InventoryItem>
 
 export type FinishedStockItem = Required<GenFinishedStockItem>
 // image 是原图 URL（已出站签名），点击缩略图预览用它；image_thumb 是确定性后缀派生的列表缩略图，列表 img 用它；
@@ -356,15 +357,7 @@ export interface User {
 export type UserCreate = GenUserCreate
 // factory（东莞/湖北）与 department（生产部/仓库/业务部/采购部）：空字符串表示清除
 
-export interface UserUpdate {
-  /** 新密码（不修改则不传） */
-  password?: string
-  is_super?: boolean
-  /** 所属工厂：东莞/湖北/NULL（空字符串表示清除） */
-  factory?: string | null
-  /** 所属部门：生产部/仓库/业务部/采购部/NULL（空字符串表示清除） */
-  department?: string | null
-}
+export type UserUpdate = Partial<WithField<WithField<GenUserUpdate, 'password', string>, 'is_super', boolean>> // password 不修改则不传；factory/department 传空字符串表示清除
 
 export interface NavSection {
   /** section_key，用于权限选择模块与导航栏建立关联 */
@@ -463,17 +456,7 @@ export interface ProductionRecordStats {
 }
 
 /** GET /daily-production/records 的响应体（`get<T>` 不拆 { data }，data 是顶层字段） */
-export interface ProductionRecordListResponse {
-  success: boolean
-  data: DailyProductionRecord[]
-  total: number
-  page: number
-  per_page: number
-  pages: number
-  /** 后端 get_records 始终构造 stats（无记录时是全 0），不会返回 null；
-   *  pydantic 模型上的 `| None` 只是序列化缺省。前端按非空消费。 */
-  stats: ProductionRecordStats
-}
+export type ProductionRecordListResponse = WithField<WithItems<GenProductionRecordListResponse, 'data', DailyProductionRecord>, 'stats', ProductionRecordStats> // 后端 get_records 始终构造 stats（无记录时全 0），故断言非 null
 
 /** 明细抽屉的查询参数。year/month 与 start_date/end_date 二选一，区间优先。 */
 export interface RecordsQuery {
@@ -690,24 +673,7 @@ export interface OrderBatchItem {
   is_locked: boolean | null
 }
 
-export interface BatchQueryItem {
-  id: number
-  order_no: string
-  customer: string
-  order_date: string | null
-  product_id: number
-  product_name: string | null
-  product_barcode: string | null
-  quantity: number
-  deducted_qty: number
-  shipped_qty: number
-  status: string | null
-  computed_status: string | null
-  batch_no: string | null
-  batch_completed_at: string | null
-  is_locked: boolean | null
-  record_type?: string  // 'order' or 'stockin'
-}
+export type BatchQueryItem = WithRequired<GenBatchQueryItem, 'order_date' | 'product_name' | 'product_barcode' | 'deducted_qty' | 'shipped_qty' | 'status' | 'computed_status' | 'batch_no' | 'batch_completed_at' | 'is_locked'>
 
 export interface BatchNoUpdatePayload {
   batch_no: string | null
