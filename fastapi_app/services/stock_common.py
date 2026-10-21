@@ -48,16 +48,21 @@ def _parse_date_preserve_time(date_str: str, old_time: datetime | None = None) -
     Z03-R2：StockIn/StockOut/StockReturn 的日期列均为 timestamptz；旧实现返回
     naive 北京墙钟，asyncpg 按机器本地时区解释——生产机（Asia/Shanghai）碰巧正确，
     换机器/改时区即偏 8 小时。统一挂 _BUSINESS_TZ，调用方零改动收敛。
+
+    old_time 来自 timestamptz 列，asyncpg 返回的是 **aware UTC**：直接取 .hour
+    会在编辑时把墙钟整体挪 8 小时（北京 14:30 变成 06:30）。必须先换算到业务时区
+    再取时分秒，「保留原始时间」才成立。
     """
     try:
         base = datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
         raise ValueError('日期格式不正确！') from None
     now = business_now()
-    if old_time and (old_time.hour != 0 or old_time.minute != 0 or old_time.second != 0):
+    old_local = old_time.astimezone(_BUSINESS_TZ) if old_time is not None and old_time.tzinfo else old_time
+    if old_local and (old_local.hour != 0 or old_local.minute != 0 or old_local.second != 0):
         return datetime(
             base.year, base.month, base.day,
-            old_time.hour, old_time.minute, old_time.second, tzinfo=_BUSINESS_TZ,
+            old_local.hour, old_local.minute, old_local.second, tzinfo=_BUSINESS_TZ,
         )
     return datetime(
         base.year, base.month, base.day,

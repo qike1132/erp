@@ -308,11 +308,13 @@ async def delete_stockout_api(
     from fastapi_app.services.stock_service import delete_stockout as svc_delete
     # 工厂闸门（OCR 第四轮 H2）：stock.py 的 /stock/out/delete 与本文件批量
     # 端点均已校验，本端点漏网——厂绑定用户可按 id 跨厂删他厂出货行。
-    # 行不存在时 product_id 为 None、闸门放行，保持 svc 原有
-    # ValueError('出库记录不存在') → 400 语义不变（不抢答 404）。
+    # 行不存在时 product_id 为 None：必须与「跨厂」同为 404，否则
+    # 「不存在→400 / 他厂→404」构成按 id 枚举他厂数据的 oracle（与 stock.py 同口径）。
     _product_id = (await db.execute(
         select(StockOut.product_id).where(StockOut.id == id)
     )).scalar_one_or_none()
+    if _product_id is None:
+        raise HTTPException(status_code=404, detail='出库记录不存在')
     await assert_product_factory_scoped(db, _product_id, user, what='出库记录')
     async with db_transaction(db, commit=False):
         await svc_delete(db, id)
@@ -328,11 +330,12 @@ async def delete_stockin_api(
     """删除入库记录（API方式；厂绑定用户先过工厂闸门，2026-10-19 OCR 第四轮 H2）"""
     from fastapi_app.services.stock_service import delete_stockin as svc_delete
     # 工厂闸门（OCR 第四轮 H2）：与 stockout 端点同款漏网，同款修法——
-    # 先查该行 product_id 过闸门，行不存在时放行保持 svc 原有
-    # ValueError('入库记录不存在') → 400 语义。
+    # 行不存在必须与「跨厂」同为 404（否则 400/404 差异可被用来枚举他厂记录）。
     _product_id = (await db.execute(
         select(StockIn.product_id).where(StockIn.id == id)
     )).scalar_one_or_none()
+    if _product_id is None:
+        raise HTTPException(status_code=404, detail='入库记录不存在')
     await assert_product_factory_scoped(db, _product_id, user, what='入库记录')
     async with db_transaction(db, commit=False):
         await svc_delete(db, id)
@@ -474,8 +477,12 @@ async def batch_submit_stockins(
         orchestrated = await orchestrate_batch_stockins(db, allowed, operator_id=user.id)
         for slot, r in zip(slots, orchestrated['results'], strict=True):
             results[slot] = r or {'success': False, 'error': '入库处理失败，请稍后重试'}
-    # 顶层 success 保持 batch_create_stockins 的恒 True 语义；部分失败由 results[].success 表达
-    return {'success': True, 'results': results}
+    # 顶层 success 与 /batch-submit-stockouts 同口径：全成功才为 True；
+    # 逐条失败仍由 results[].success 表达（服务层已不再恒 True）。
+    return {
+        'success': all(r is not None and r.get('success') for r in results),
+        'results': results,
+    }
 
 
 @router.post("/batch-submit-stockouts", response_model=BatchStockoutResponse)

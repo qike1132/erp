@@ -478,7 +478,11 @@ async def _reset_sequences_after_json_restore(db, tables) -> tuple[list[str], li
             quoted = quote_table(table_name)
             await db.execute(
                 text(
-                    f'SELECT setval(:seq::regclass, '
+                    # 必须用 CAST(...) 而不是 :seq::regclass：SQLAlchemy 的绑定参数
+                    # 正则会把 `:seq::` 解析成 `:se`（回溯到 (?!:) 能过的最短前缀），
+                    # 编译后原样保留 `:seq::regclass` → 服务端语法错误 → 整个恢复事务被
+                    # 中止（提交变回滚），而结果只报 partial。
+                    f'SELECT setval(CAST(:seq AS regclass), '
                     f'COALESCE((SELECT MAX(id) FROM {quoted}), 1), '
                     f'(SELECT MAX(id) FROM {quoted}) IS NOT NULL)'
                 ),

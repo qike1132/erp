@@ -13,7 +13,7 @@ import asyncio
 import random
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -28,7 +28,11 @@ CUSTOMERS = [f"客户_{i:04d}" for i in range(200)]
 SUPPLIERS = [f"供应商_{i:04d}" for i in range(50)]
 PRODUCT_NAMES = [f"产品_{i:04d}" for i in range(500)]
 BARCODES = [f"BC{random.randint(100000, 999999)}" for _ in range(500)]
-STATUSES = ["pending", "confirmed", "completed", "cancelled", "processing"]
+# 状态取值必须落在各自的 DB CHECK 约束白名单内，否则整批 INSERT 直接报错：
+#   order.status            → order_status_check（迁移 063）：中文状态
+#   purchase_order.status   → purchase_order_status_check：pending/confirmed/completed
+ORDER_STATUSES = ["待备货", "已备货", "部分备货", "待出货", "已出货", "批次已完成"]
+PURCHASE_ORDER_STATUSES = ["pending", "confirmed", "completed"]
 
 
 async def seed_products(session: AsyncSession, count: int) -> int:
@@ -79,7 +83,7 @@ async def seed_orders(session: AsyncSession, count: int) -> int:
     need = count - existing
     print(f"  需生成 {need} 条订单...")
 
-    base_date = datetime(2024, 1, 1)
+    base_date = datetime(2024, 1, 1, tzinfo=UTC)
     for offset in range(0, need, BATCH_SIZE):
         batch = min(BATCH_SIZE, need - offset)
         orders = []
@@ -87,12 +91,12 @@ async def seed_orders(session: AsyncSession, count: int) -> int:
             offset + j
             order_date = base_date + timedelta(days=random.randint(0, 730))
             orders.append(Order(
-                customer_name=random.choice(CUSTOMERS),
+                # Order 的客户列叫 customer（不是 customer_name），且没有 create_time 列
+                customer=random.choice(CUSTOMERS),
                 product_id=random.choice(product_ids),
                 quantity=random.randint(1, 500),
-                status=random.choice(STATUSES),
+                status=random.choice(ORDER_STATUSES),
                 order_date=order_date,
-                create_time=order_date,
             ))
         session.add_all(orders)
         await session.flush()
@@ -118,19 +122,21 @@ async def seed_stockins(session: AsyncSession, count: int) -> int:
     need = count - existing
     print(f"  需生成 {need} 条入库记录...")
 
-    base_date = datetime(2024, 1, 1)
+    base_date = datetime(2024, 1, 1, tzinfo=UTC)
     for offset in range(0, need, BATCH_SIZE):
         batch = min(BATCH_SIZE, need - offset)
         stockins = []
         for j in range(batch):
-            offset + j
+            idx = offset + j
             si_date = base_date + timedelta(days=random.randint(0, 730))
             stockins.append(StockIn(
+                # StockIn 的客户列叫 customer、时间列叫 stockin_date（timestamptz），
+                # 且 stockin_no 是 NOT NULL UNIQUE —— 缺一个都是整批 INSERT 报错。
+                stockin_no=f"SI{datetime.now().strftime('%Y%m%d')}{existing + idx:06d}",
+                stockin_date=si_date,
+                customer=random.choice(CUSTOMERS),
                 product_id=random.choice(product_ids),
                 quantity=random.randint(1, 1000),
-                customer_name=random.choice(CUSTOMERS),
-                date=si_date.date(),
-                create_time=si_date,
             ))
         session.add_all(stockins)
         await session.flush()
@@ -151,7 +157,7 @@ async def seed_purchase_orders(session: AsyncSession, count: int) -> int:
     need = count - existing
     print(f"  需生成 {need} 条采购订单...")
 
-    base_date = datetime(2024, 1, 1)
+    base_date = datetime(2024, 1, 1, tzinfo=UTC)
     for offset in range(0, need, BATCH_SIZE):
         batch = min(BATCH_SIZE, need - offset)
         orders = []
@@ -163,7 +169,7 @@ async def seed_purchase_orders(session: AsyncSession, count: int) -> int:
                 supplier_name=random.choice(SUPPLIERS),
                 customer_name=random.choice(CUSTOMERS),
                 order_date=order_date.date(),
-                status=random.choice(STATUSES),
+                status=random.choice(PURCHASE_ORDER_STATUSES),
                 product_name=random.choice(PRODUCT_NAMES),
                 product_quantity=random.randint(100, 5000),
                 total_amount=round(random.uniform(1000, 500000), 2),

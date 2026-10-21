@@ -27,6 +27,7 @@ from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.notification_service import StockEvent
 from fastapi_app.services.numbering import generate_number_async
+from fastapi_app.services.numbering_sequence import _BUSINESS_TZ
 from fastapi_app.services.stock_common import _parse_date_preserve_time, business_now
 from fastapi_app.services.stock_event_service import recalc_order_status_after_return
 from fastapi_app.shared.stock_concurrency import assert_stock_available, update_stock_with_optimistic_lock
@@ -323,7 +324,12 @@ async def edit_stockreturn(db: AsyncSession, return_id: int, quantity: int | Non
     if return_date_str:
         new_date_str = return_date_str
     elif old.return_date:
-        new_date_str = old.return_date.strftime('%Y-%m-%d')
+        # timestamptz 读回是 aware UTC：先换算业务时区再取日期，
+        # 否则北京时间 00:00–07:59 创建的退货会在每次编辑时倒退一天。
+        _rd = old.return_date
+        new_date_str = (
+            _rd.astimezone(_BUSINESS_TZ) if _rd.tzinfo else _rd
+        ).strftime('%Y-%m-%d')
     else:
         new_date_str = business_now().strftime('%Y-%m-%d')
     new_reason = reason if reason is not None else old.reason

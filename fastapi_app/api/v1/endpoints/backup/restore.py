@@ -302,9 +302,13 @@ async def import_backup(
     # P1-9：安全备份必须放在**取锁成功之后**——并发恢复时先 409，避免
     # create_pre_restore_backup 的 BackupLockError 被吞成「无回滚点」428
     # 诱导用户带 allow_missing 跳过回滚点。
+    # 锁已由本请求持有，create_full_backup 的「还原进行中」互斥检查必然命中自己，
+    # 故必须 skip_restore_check=True（与异步路径同口径），否则安全备份恒失败→428。
     lock_owner = await _acquire_sync_restore_lock('sync_import')
     try:
-        pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
+        pre_restore_info = await _pre_restore_info_or_fail(
+            db, allow_missing_pre_restore_backup, skip_restore_check=True,
+        )
         if is_zip:
             # zip 路径的提交点在策略层（strategies.py `await db.commit()`，已按
             # TRANSACTION_BOUNDARY_GUIDE §2.2 标注豁免）；端点层不重复提交。
@@ -407,7 +411,10 @@ async def restore_server_backup(
         zip_lock_owner = await _acquire_sync_restore_lock('sync_restore_by_name')
         try:
             # P0-5 + P1-9：两条路径都落安全备份，且移到取锁之后（并发时先 409）
-            pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
+            # 同 /import：锁已在手，跳过「还原进行中」互斥检查（详见该处注释）
+            pre_restore_info = await _pre_restore_info_or_fail(
+                db, allow_missing_pre_restore_backup, skip_restore_check=True,
+            )
             # 同 /import 的 zip 分支：提交点在策略层，此处只统一异常→HTTP 的映射
             try:
                 result = await backup_service.restore_from_zip(
@@ -440,7 +447,9 @@ async def restore_server_backup(
 
     json_lock_owner = await _acquire_sync_restore_lock('sync_restore_by_name_json')
     try:
-        pre_restore_info = await _pre_restore_info_or_fail(db, allow_missing_pre_restore_backup)
+        pre_restore_info = await _pre_restore_info_or_fail(
+            db, allow_missing_pre_restore_backup, skip_restore_check=True,
+        )
         # 同 /import：提交点归 db_transaction，异常回滚由它统一负责
         async with db_transaction(db, error_map={
             BackupError: _restore_error_to_http,

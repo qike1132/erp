@@ -167,6 +167,13 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
    * 有未保存修改时先确认「放弃修改」，用户选择保留则**不关闭**。
    */
   async function requestCloseBom() {
+    // 保存在途时不得关闭：saveBom 的全量替换请求还在路上，关闭会让用户以为
+    // 「放弃了本次修改」，实际请求却仍会把 BOM 写库（且保存成功回调还会把
+    // 弹窗再关一次）。
+    if (bomSaving.value) {
+      showToast('保存进行中，请稍候再关闭', 'warning')
+      return
+    }
     if (bomDirty.value) {
       const ok = await confirmDialog.confirm(
         '有未保存的 BOM 修改，确定放弃吗？',
@@ -196,6 +203,10 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     selectedRole.value = null
     defaultScopeName.value = '默认BOM'
     Object.keys(bomByScope).forEach(key => delete bomByScope[key])
+    // 重载期间没有有效编辑基线：旧基线对应的是**上一次加载的**内容，与已清空的
+    // 作用域一比必然「有未保存修改」⇒ 加载中/加载失败时关闭弹窗会弹出
+    // 「放弃修改」确认（假打扰）。基线只应在加载成功后按新内容重建。
+    bomBaselineSignature.value = null
     bomLoadFailed.value = true // 进入加载即置失败态，成功路径末尾解除
     try {
       const res = (await productApi.loadBom(productId)) as {

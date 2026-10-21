@@ -32,9 +32,12 @@ naive 值按**会话时区（Asia/Shanghai, +08）**解释，于是存入的瞬�
 
 生产数据核验（2026-10-20，只读查询）结论：**实际影响为 0，无需数据修正迁移**。
 
-    SELECT count(*) FROM stock_out WHERE date_part('microsecond', stockout_date)=0;
-      → 0（共 21 行，全部非零微秒，且最早 2026-09-30，晚于本迁移的 09-29）
-    SELECT count(*) FROM "order" WHERE date_part('microsecond', order_date)=0;
+    -- 「微秒部分为 0」的正确判定是 date_part('microsecond', ts)::bigint % 1000000 = 0：
+    -- date_part('microsecond', ts) 返回的是「秒 × 1e6 + 微秒小数」（PG 的 microseconds
+    -- 字段含整秒），直接 `= 0` 只会命中「整分整秒」的行，分不出「秒非 0、微秒为 0」。
+    SELECT count(*) FROM stock_out WHERE date_part('microsecond', stockout_date)::bigint % 1000000 = 0;
+      → 0（共 21 行，微秒部分全部非零，且最早 2026-09-30，晚于本迁移的 09-29）
+    SELECT count(*) FROM "order" WHERE date_part('microsecond', order_date)::bigint % 1000000 = 0;
       → 48（共 67 行），但这 48 行的订单号日期全部 ≥ 20260929，即创建于本迁移
         之后，未被 +8h 波及；被错改的指纹（微秒=0 且小时=8）计数为 0。
 

@@ -657,14 +657,15 @@ class DisasterRecoveryTestService:
                 }
 
             # 删除测试数据库
-            import os
-
             from sqlalchemy import create_engine
 
-            db_host = os.environ.get('DB_HOST', 'localhost')
-            db_port = os.environ.get('DB_PORT', '5432')
-            db_user = os.environ.get('DB_USER', 'postgres')
-            db_password = os.environ.get('DB_PASSWORD', '')
+            # P1-9 同源：建库/连接/还原都用 test_env 的口径，清理必须用同一套；
+            # 否则配了 BACKUP_TEST_DB_* 时 DROP 打在另一个实例上，IF EXISTS 空跑成功，
+            # 却回报 cleaned=True，测试库永久泄漏。
+            db_host = test_env['test_db_host']
+            db_port = test_env['test_db_port']
+            db_user = test_env['test_db_user']
+            db_password = test_env['test_db_password']
 
             sync_engine = create_engine(
                 f"postgresql+psycopg://{db_user}:{db_password}@{db_host}:{db_port}/postgres",  # sql-safe: escape_like/绑定参数/常量片段

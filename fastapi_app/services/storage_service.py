@@ -489,6 +489,22 @@ async def save_upload(
     }
 
 
+def normalize_storage_key(key: str) -> str:
+    """把入库用的**相对路径**还原成对象存储里的原始 key。
+
+    入库存的是「可长期访问的相对路径」``/static/uploads/20261021/x.png``，
+    而对象存储里的 key 是 ``20261021/x.png``。LocalStorageBackend.delete 用
+    ``base_dir / key`` 定位文件，而 ``Path`` 遇到以 '/' 开头的右操作数会
+    **丢掉 base_dir**（``D:/erp_system/static/uploads`` + ``/static/uploads/x.png``
+    = ``D:/static/uploads/x.png``）⇒ 补偿删除永远打空，savepoint 回滚的行
+    落盘图片全部留成孤儿。
+    """
+    bare = key.split('?', 1)[0]
+    if bare.startswith(_UPLOAD_URL_PREFIX):
+        return bare[len(_UPLOAD_URL_PREFIX):]
+    return bare.lstrip('/')
+
+
 async def delete_storage_keys(storage_keys: list[str]) -> None:
     """按 storage key 直接删除主图及缩略图/模糊变体（不回查 DB）。
 
@@ -499,10 +515,11 @@ async def delete_storage_keys(storage_keys: list[str]) -> None:
         return
     storage = get_storage()
     for key in storage_keys:
-        for variant in (key, get_thumbnail_key(key), get_blur_key(key)):
+        raw_key = normalize_storage_key(key)
+        for variant in (raw_key, get_thumbnail_key(raw_key), get_blur_key(raw_key)):
             try:
                 await storage.delete(variant)
-            except (CircuitBreakerOpenError, OSError) as e:
+            except Exception as e:  # noqa: BLE001 - 删除失败只告警，不得中断导入主流程
                 logger.warning('补偿删除上传文件失败 key=%s: %s', variant, e)
 
 

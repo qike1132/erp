@@ -596,6 +596,9 @@ class Supervisor:
         # F4-7：Windows 控制台处理器在独立线程执行，shutdown 后主循环必须收到停止信号；
         # 否则 SetConsoleCtrlHandler 返回 True 阻止默认终止后，监督器进程永久存活。
         self._stop = threading.Event()
+        # shutdown 幂等：控制台处理器与 main() 的 finally 都会调用它，
+        # 重复杀进程树没有意义，还会让「正在关闭/已停止」日志计数翻倍。
+        self._shutdown_done = False
         # F-BE-CORE-04 / F-OPS-DEPLOY-11：started_at 必须是监督器启动时刻，
         # 不是每次 write_status 的落盘时刻（后者见 last_write_at）。
         self._supervisor_started_at = _iso_now()
@@ -746,6 +749,9 @@ class Supervisor:
 
     # -- 优雅关闭 -----------------------------------------------------------
     def shutdown(self) -> None:
+        if self._shutdown_done:
+            return
+        self._shutdown_done = True
         print("[prod_runner] 正在关闭...")
         for svc in (self.arq, self.backend):
             if svc:
@@ -814,6 +820,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         sup.run()
     except KeyboardInterrupt:
+        pass
+    finally:
+        # 任何退出路径（含未捕获异常）都必须回收子进程树：否则 uvicorn/ARQ 子进程
+        # 继续占着 :5002，成为孤儿后端（2026-10-02 实测同端口堆过两台后端）。
+        # request_stop() 先叫醒主循环，shutdown() 再杀进程树，顺序不能反。
+        sup.request_stop()
         sup.shutdown()
     return 0
 

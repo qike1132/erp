@@ -52,6 +52,7 @@ router = APIRouter()
 @router.post('/validate', response_model=BackupValidateResponse)
 async def validate_backup(
     file: UploadFile = File(...),
+    x_backup_password: str | None = Header(None, alias='X-Backup-Password'),
     user: User = Depends(require_backup_permission('validate_backup')),
 ):
     """验证备份文件，不执行恢复，仅返回摘要信息"""
@@ -86,10 +87,29 @@ async def validate_backup(
             status_code=400,
             detail='该 .enc 备份无法在没有密码的情况下预检（legacy 裸信封），请直接执行恢复或先解密',
         )
+    # 加密包不能直接交给 validate_backup_file：它只认 ZIP/JSON，密文会被当 JSON 解析
+    # 并抛 UnicodeDecodeError（不是 JSONDecodeError，逃出 except → 500）。这里与
+    # GET /validate/{filename} 同口径：有密码先解密，没密码明确回 400「需密码」。
+    if _is_encrypted_data(content):
+        if not x_backup_password:
+            raise HTTPException(
+                status_code=400,
+                detail='该备份已加密，预检需通过 X-Backup-Password 请求头提供密码',
+            )
+        try:
+            content = _decrypt_backup_data(content, x_backup_password)
+        except Exception as e:  # broad-except: 端点层兜底，解密失败统一回 400
+            raise HTTPException(
+                status_code=400, detail=_sanitize_error(f'备份文件解密失败: {e}'),
+            ) from e
     try:
         summary = backup_service.validate_backup_file(content, file.filename or '')
     except BackupFileError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except (ValueError, UnicodeDecodeError) as e:
+        raise HTTPException(
+            status_code=400, detail=_sanitize_error(f'备份文件无法解析: {e}'),
+        ) from e
     return {'success': True, 'summary': summary}
 
 

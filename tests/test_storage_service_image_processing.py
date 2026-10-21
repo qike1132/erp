@@ -228,6 +228,51 @@ class TestLocalBackendUrlConsistency:
         assert uploaded == '/static/uploads/20261002/a.webp'
 
 
+class TestDeleteStorageKeys:
+    """补偿删除（savepoint 回滚后删已落盘图片）必须真的删掉文件。
+
+    导入路径登记的是**入库用的相对路径** `/static/uploads/<key>`，而对象存储里的
+    key 是 `<key>`。LocalStorageBackend.delete 用 `base_dir / key` 定位文件，
+    `Path` 遇到以 '/' 开头的右操作数会丢掉 base_dir ⇒ 补偿删除永远打空，
+    回滚行的图片全部留成孤儿（Z04-R2 的补偿形同虚设）。
+    """
+
+    async def test_deletes_file_when_given_upload_relative_path(self, tmp_storage):
+        key = '20261021/orphan.png'
+        main = tmp_storage.base_dir / key
+        thumb = tmp_storage.base_dir / svc.get_thumbnail_key(key)
+        blur = tmp_storage.base_dir / svc.get_blur_key(key)
+        for p in (main, thumb, blur):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b'x')
+
+        await svc.delete_storage_keys([f'/static/uploads/{key}'])
+
+        assert not main.exists()
+        assert not thumb.exists()
+        assert not blur.exists()
+
+    async def test_deletes_file_when_given_raw_key(self, tmp_storage):
+        key = '20261021/raw.png'
+        main = tmp_storage.base_dir / key
+        main.parent.mkdir(parents=True, exist_ok=True)
+        main.write_bytes(b'x')
+
+        await svc.delete_storage_keys([key])
+
+        assert not main.exists()
+
+    async def test_backend_failure_does_not_raise(self, tmp_storage, monkeypatch):
+        """删除失败只告警：异常不得冒泡打断导入主流程（docstring 的承诺）。"""
+
+        async def boom(_key):
+            raise RuntimeError('存储后端炸了')
+
+        monkeypatch.setattr(tmp_storage, 'delete', boom)
+
+        await svc.delete_storage_keys(['20261021/x.png'])
+
+
 @pytest.mark.integration
 class TestSaveUploadVariants:
     async def test_generate_thumbnail_flag_creates_all_variants(self, storage_db, tmp_storage):

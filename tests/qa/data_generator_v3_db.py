@@ -198,7 +198,10 @@ def insert_users(session, count):
 
 def insert_orders(session, count, product_ids, user_ids):
     print(f"  生成 {count} 条订单...")
-    statuses = [None, "待备货", "已备货", "部分备货", "待出货", "已出货", "已完成"]
+    # 状态必须落在 order_status_check 的白名单内（见迁移 063）：
+    # 待备货/部分备货/已备货/待出货/已出货/已取消/批次已完成。
+    # 旧值 '已完成' 不在白名单里 ⇒ 整批 INSERT 撞 CHECK 约束报错。
+    statuses = [None, "待备货", "已备货", "部分备货", "待出货", "已出货", "批次已完成"]
     order_types = ["regular", "custom"]
     countries = ["中国", "美国", "日本", "德国", "英国", "巴西", "韩国", "印度", "法国", "澳大利亚"]
     ids = []
@@ -309,7 +312,9 @@ def insert_approvals(session, count, order_ids, user_ids):
 
 def insert_purchase_orders(session, count, supplier_ids, customer_ids, user_ids):
     print(f"  生成 {count} 条采购订单...")
-    statuses = ["pending", "approved", "purchasing", "received", "cancelled"]
+    # purchase_order_status_check 只允许 pending/confirmed/completed
+    # （见 fastapi_app/shared_models/purchase_order.py 的 CheckConstraint）。
+    statuses = ["pending", "confirmed", "completed"]
     ids = []
     for batch_start in range(0, count, BATCH_SIZE):
         batch_count = min(BATCH_SIZE, count - batch_start)

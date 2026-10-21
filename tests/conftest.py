@@ -136,13 +136,36 @@ def _assert_is_test_database(url: str) -> None:
     派生逻辑 parsed.path.replace(f"/{db_name}", ...) 在 DB_NAME 与实际库名不一致时
     静默 no-op，返回的就是生产库 URL；TEST_DATABASE_URL 环境变量分支则完全无校验。
     两个来路都在这里收口——不满足直接终止整个会话，不跑任何用例。
-    """
-    from urllib.parse import urlparse as _urlparse
 
-    p = _urlparse(url)
-    if not p.path.rstrip("/").endswith("_test"):
+    ⚠️ 必须按 **SQLAlchemy 的解析口径**判定，而不是 urlparse：PG 方言的
+    ``create_connect_args`` 会 ``opts.update(url.query)``，URL 里的
+    ``?database=erp_system`` / ``?host=…`` 会**覆盖**路径上的库名与主机。
+    只看 path 会让
+    ``postgresql+asyncpg://u:p@h:5432/erp_system_test?database=erp_system``
+    通过校验，实际连的却是生产库 ⇒ DROP SCHEMA 打生产。故：这类覆盖参数一律拒绝。
+    """
+    from sqlalchemy.engine import make_url
+
+    try:
+        parsed = make_url(url)
+    except Exception as exc:
         pytest.exit(
-            f"拒绝运行：测试库 URL 指向非测试库 {p.path!r}"
+            f"拒绝运行：无法解析测试库 URL（{type(exc).__name__}: {exc}）：{url!r}",
+            returncode=2,
+        )
+
+    forbidden = {'database', 'host', 'port'} & set(parsed.query.keys())
+    if forbidden:
+        pytest.exit(
+            f"拒绝运行：测试库 URL 带了会覆盖连接目标的 query 参数 "
+            f"{sorted(forbidden)}（SQLAlchemy 的 PG 方言会让它们覆盖 URL 路径上的"
+            f"库名/主机）。请把它们写进 URL 路径本身，不要用 query 参数。",
+            returncode=2,
+        )
+
+    if not (parsed.database or '').rstrip('/').endswith('_test'):
+        pytest.exit(
+            f"拒绝运行：测试库 URL 指向非测试库 {(parsed.database or '')!r}"
             f"（本会话会对它执行 DROP SCHEMA public CASCADE）。"
             f"请检查 DB_NAME 与 ASYNC_DATABASE_URL 的库名是否一致，"
             f"或显式设置指向 *_test 库的 TEST_DATABASE_URL。",
