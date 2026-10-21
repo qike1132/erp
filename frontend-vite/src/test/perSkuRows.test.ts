@@ -9,7 +9,7 @@
  *   R5 无 materials（旧后端 / 无 BOM）→ 返回 []，调用方据此回退现状。
  */
 import { describe, it, expect } from 'vitest'
-import { buildPerSkuRows, computeQuantityDiff, materialKeyOf, buildStoredRows } from '@/views/purchase/composables/perSkuRows'
+import { buildPerSkuRows, computeQuantityDiff, materialKeyOf, buildStoredRows, resolveItemLossRate } from '@/views/purchase/composables/perSkuRows'
 import type { FactoryGroup } from '@/views/purchase/composables/useSummaryModal'
 
 /** 2 SKU × 同供应商；共享布跨 SKU 各算各的；另有一条「只出现在 BOM、落库里没有」的新物料 */
@@ -193,5 +193,41 @@ describe('buildStoredRows（屏幕与打印共用的落库行模型）', () => {
 
     // 50 @500‰ → ceil(75)=75；20 @10‰ → ceil(20.2)=21；10 @10‰ → ceil(10.1)=11
     expect(rows.map((r) => r.displayQuantity)).toEqual([75, 21, 11])
+  })
+})
+
+/**
+ * 有效损耗率的归一化口径（与后端 purchase_utils.resolve_item_loss_rate 同源）。
+ *
+ * 2026-10-21 OCR 评审发现：前端此前不归一化，越界/负值/NaN 会直接参与计价，
+ * 与后端算出的金额对不上（页面上「数量 × 单价 ≠ 金额」）。
+ */
+describe('resolveItemLossRate', () => {
+  it('逐行率优先，回退订单级', () => {
+    expect(resolveItemLossRate(15, 1000)).toBe(15)
+    expect(resolveItemLossRate(null, 1000)).toBe(1000)
+  })
+
+  it('显式的 0 是有效值（不回退订单级）', () => {
+    expect(resolveItemLossRate(0, 1000)).toBe(0)
+  })
+
+  it('超上限截断到 1000（与后端 normalize_spare_rate 一致）', () => {
+    expect(resolveItemLossRate(5000, 0)).toBe(1000)
+    expect(resolveItemLossRate(null, 5000)).toBe(1000)
+  })
+
+  it('负值归零', () => {
+    expect(resolveItemLossRate(-5, 1000)).toBe(0)
+  })
+
+  it('非有限值按 0 处理（不回退订单级，与后端一致）', () => {
+    expect(resolveItemLossRate(Number.NaN, 1000)).toBe(0)
+    expect(resolveItemLossRate(Number.POSITIVE_INFINITY, 1000)).toBe(0)
+  })
+
+  it('两级都缺省时为 0', () => {
+    expect(resolveItemLossRate(null, null)).toBe(0)
+    expect(resolveItemLossRate(undefined, undefined)).toBe(0)
   })
 })

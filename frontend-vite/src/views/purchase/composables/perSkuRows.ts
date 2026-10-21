@@ -92,17 +92,37 @@ export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
 }
 
 /**
+ * 损耗率归一化：与后端 `fastapi_app/services/purchase_utils.py::normalize_spare_rate` 同源。
+ *
+ * - `null` / `undefined` → `null`（语义为「没有值」，由调用方决定是否回退）；
+ * - 非数值 / 非有限值（NaN / Infinity）→ `0`；
+ * - `< 0` → `0`；`> 1000` → `1000`（与输入框 max=1000 一致）。
+ */
+function normalizeLossRate(rate: unknown): number | null {
+  if (rate === null || rate === undefined) return null
+  const value = typeof rate === 'number' ? rate : Number(rate)
+  if (!Number.isFinite(value)) return 0
+  if (value < 0) return 0
+  if (value > 1000) return 1000
+  return value
+}
+
+/**
  * 明细行的**有效损耗率**（千分之几）：逐行 loss_rate → 订单级 spare_rate → 0。
  *
  * 与后端 `fastapi_app/services/purchase_utils.py::resolve_item_loss_rate` 逐字同源。
  * 「数量」列（最终采购数量）与「金额」列（计价数量）必须用同一个损耗率，
  * 否则同一行会按两个数量计价，采购单总金额也会低于实际采购额。
  *
- * 显式的 0 视为有效值（不再回退订单级），与后端一致。
+ * 显式的 0 视为有效值（不再回退订单级），与后端一致；
+ * 逐行值非法（NaN / 负数 / 超上限）时按**归一化后的值**生效，不回退订单级 ——
+ * 后端也是这样（它只对 None 回退），两边必须一致。
  */
 export function resolveItemLossRate(itemLossRate: unknown, orderSpareRate: unknown): number {
-  if (typeof itemLossRate === 'number' && Number.isFinite(itemLossRate)) return itemLossRate
-  if (typeof orderSpareRate === 'number' && Number.isFinite(orderSpareRate)) return orderSpareRate
+  const itemRate = normalizeLossRate(itemLossRate)
+  if (itemRate !== null) return itemRate
+  const orderRate = normalizeLossRate(orderSpareRate)
+  if (orderRate !== null) return orderRate
   return 0
 }
 
