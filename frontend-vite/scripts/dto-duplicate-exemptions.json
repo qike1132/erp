@@ -1,16 +1,24 @@
 {
   "_comment": "手写层与生成层（src/types/api.d.ts）同名类型的存量豁免。每条「相对路径:类型名」。",
-  "_note": "门禁只拦新增重复；本表条目一旦失效（对应重复声明已不存在）也会判红——迁移后请同步删除条目。审计 F1-1/F1-2（2026-10-17）。",
+  "_note": "门禁只拦新增重复；本表条目一旦失效（对应重复声明已不存在）也会判红——迁移后请同步删除条目。审计 F1-1/F1-2（2026-10-17）。 余下条目按 _reasons 逐条写明「为什么不能派生」——迁移判据是派生形式读起来不比手写差（覆盖层数 ≤2），不是为了把计数清零而硬套嵌套。",
   "entries": [
-    "src/api/batch.ts:BatchQueryListResponse",
     "src/api/dashboard.ts:MobileDashboardData",
     "src/api/patternRoom.ts:ChangeRecord",
     "src/api/patternRoom.ts:ProjectDetailResponse",
     "src/api/purchase.ts:MaterialCalcScopeGroup",
-    "src/types/index.ts:BackupScheduleTask",
     "src/types/index.ts:LoginResponse",
     "src/types/index.ts:MonthlySummary",
     "src/types/index.ts:NavItem",
     "src/types/index.ts:NavSection"
-  ]
-}
+  ],
+  "_reasons": {
+    "src/api/dashboard.ts:MobileDashboardData": "5 个字段全引用本地加强类型，派生要 5 层 WithField 嵌套；比手抄字段清单更难读，故保留手写。",
+    "src/api/patternRoom.ts:ChangeRecord": "new_value/old_value/field_diffs 三个字段要同时「收窄必填 + 换成本地加强元素」，加上 change_type 换枚举共 4 层覆盖；同类型名陷阱（生成层 ChangeRecord 引用生成层 PartDetail）使 Required<GenChangeRecord> 会把元素口径改松。",
+    "src/api/patternRoom.ts:ProjectDetailResponse": "19 个字段里 16 个与生成层书写不同（13 个必填断言 + status 换枚举 + 嵌套数组加强）；逐字段派生需十几层嵌套，手写清单在这里仍是更清楚的表达。",
+    "src/api/purchase.ts:MaterialCalcScopeGroup": "4 个必填断言 + 4 个数组元素换成加强后的 MaterialCalcRow，需要 5 层覆盖；同上，保留手写。",
+    "src/types/index.ts:LoginResponse": "user 要换成前端 UserInfo 且保持可选；现有派生原语只能整份必填（WithField）或在替换键上丢掉 ?（ReplaceField 用 Record 加键）。为此再造一个 OptionalField 原语不值当。",
+    "src/types/index.ts:MonthlySummary": "前端按月聚合出来的视图模型，字段名与后端同名 schema 完全不重叠（后端 7 个字段一个都不叫这个名）。它不是 DTO 的第二真相源，而是撞名；由 generateApiTypes.honesty.test.ts 显式钉住「不得被生成物覆盖」。",
+    "src/types/index.ts:NavItem": "同 MonthlySummary：前端视图模型与后端同名 schema 字段完全不重叠，由 honesty 测试钉住必须留在手写层。",
+    "src/types/index.ts:NavSection": "同 NavItem。注意 layouts/composables/useSidebarNav.ts 另有一份更窄的同名 NavSection，那是前端内部撞名，不属于本表口径（本表只管「与生成层同名」）。"
+  }
+}

@@ -1,4 +1,4 @@
-import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate, BatchQueryItem as GenBatchQueryItem, InventoryResponse as GenInventoryResponse, ProductionRecordListResponse as GenProductionRecordListResponse, UserUpdate as GenUserUpdate } from '@/types/api'
+import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate, BatchQueryItem as GenBatchQueryItem, InventoryResponse as GenInventoryResponse, ProductionRecordListResponse as GenProductionRecordListResponse, UserUpdate as GenUserUpdate, BackupScheduleTask as GenBackupScheduleTask } from '@/types/api'
 // ===== 基础 API 响应类型 =====
 
 /**
@@ -769,14 +769,7 @@ export interface BackupRecord {
   updated_at: string | null
 }
 
-export interface BackupScheduleTask {
-  name: string
-  task: string
-  schedule: string
-  enabled: boolean
-  last_run?: string | null
-  last_status?: string | null
-}
+export type BackupScheduleTask = ReplaceField<Pick<GenBackupScheduleTask, 'name' | 'task' | 'schedule' | 'enabled' | 'last_run' | 'last_status'>, 'enabled', boolean> // 只取前端消费的 6 个字段：enabled 后端恒发故必填，last_run/last_status 允许缺省
 
 export interface BackupStatus {
   success: boolean

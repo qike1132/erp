@@ -1,18 +1,12 @@
 import { get, upload, download } from './request'
-import type { BatchImportResult, BatchQueryItem } from '@/types'
-import type { ProductImportPreviewResult } from '@/types/api'
+import type { BatchImportResult, BatchQueryItem, WithItems } from '@/types'
+import type { BatchQueryListResponse as GenBatchQueryListResponse, ProductImportPreviewResult } from '@/types/api'
 
 /** Excel 解析 + 落库耗时远超全局 15s 超时（与 stock / plan 的导入约定一致） */
 const IMPORT_TIMEOUT = 120_000
 
-/** 批次查询列表响应（与后端 BatchQueryListResponse 对齐） */
-interface BatchQueryListResponse {
-  success: boolean
-  data: BatchQueryItem[]
-  total: number
-  page: number
-  per_page: number
-}
+/** 批次查询列表响应：字段清单取生成层，只断言必填并把 data 元素换成加强后的 BatchQueryItem */
+export type BatchQueryListResponse = WithItems<GenBatchQueryListResponse, 'data', BatchQueryItem>
 
 export const batchApi = {
   list: (params?: Record<string, unknown>) =>
