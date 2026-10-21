@@ -173,15 +173,18 @@ class TestPurchaseCenterService:
         from fastapi_app.services.purchase_center_service import export_completed_orders
 
         # 模拟订单列查询返回的 Row（属性访问）
+        # spare_rate 必须给出：导出的「数量」按有效损耗率加放后取值
         order_row = SimpleNamespace(
             id=1, order_no='CG-20260723-0001', supplier_name='供应商A',
             customer_name='客户B', completed_at=datetime(2026, 7, 23, 10, 0, 0),
+            spare_rate=None,
         )
         # 模拟明细列查询返回的 Row
         item_row = SimpleNamespace(
             order_id=1, material_name='面料X', material_code='M001',
             specification='规格1', unit='米', quantity=10.5,
             unit_price=20.0, total_price=210.0,
+            loss_rate=None,
         )
         db = MagicMock()
         db.execute = AsyncMock(side_effect=[
@@ -329,11 +332,13 @@ class TestPurchaseCenterService:
         order_row = SimpleNamespace(
             id=1, order_no='CG-1', supplier_name='S',
             customer_name='C', completed_at=datetime(2026, 1, 1),
+            spare_rate=None,
         )
         item_rows = [
             SimpleNamespace(
                 order_id=1, material_name='m', material_code='c', specification='',
                 unit='米', quantity=1.0, unit_price=1.0, total_price=1.0,
+                loss_rate=None,
             )
             for _ in range(EXPORT_MAX_ROWS + 1)
         ]
@@ -1328,6 +1333,10 @@ class TestUpdatePurchaseOrderCrossOrderTampering:
         order_100.customer_name = '原客户A'
         order_100.supplier_name = '原供应商A'
         order_100.remark = '原备注'
+        # 订单级损耗率为 NULL：行金额按落库数量计价。
+        # ⚠️ 必须显式置 None：MagicMock 会自动生成任意属性，
+        # float(MagicMock()) == 1.0 → 会被当成 1‰ 损耗率，把行金额算成 200.2000。
+        order_100.spare_rate = None
 
         item_1 = MagicMock()
         item_1.id = 1
@@ -1343,6 +1352,8 @@ class TestUpdatePurchaseOrderCrossOrderTampering:
         item_1.remark = '明细1备注'
         item_1.supplier_name = '原供应商A'
         item_1.customer_name = '原客户A'
+        # 逐行损耗率为 NULL（落库真实形态）：行金额按落库数量计价，见 order_100.spare_rate 注释
+        item_1.loss_rate = None
 
         # ---- 构造 Order 200 + Item 2（其他订单，不应被触碰） ----
         item_2 = MagicMock()
@@ -1359,6 +1370,7 @@ class TestUpdatePurchaseOrderCrossOrderTampering:
         item_2.remark = '其他订单备注'
         item_2.supplier_name = '其他供应商'
         item_2.customer_name = '其他客户'
+        item_2.loss_rate = None
 
         # ---- 快照 item_2 原始值用于后续断言 ----
         item_2_orig = {

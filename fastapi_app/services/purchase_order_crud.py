@@ -9,7 +9,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -171,11 +171,15 @@ def _recalc_item_total_price(item: PurchaseOrderItem, order_spare_rate: float | 
     计价数量 = 落库数量按有效损耗率加放（不取整），与前端「金额」列同口径：
     前端 ``useOrderItemPrices.lineAmount`` 用同一公式，两边必须一起改，否则
     页面上「数量 × 单价 ≠ 金额」，且采购单总金额会低于实际采购额。
+
+    结果按落库列的精度（Numeric(12,2)）**先对齐再写**：PG 落库时把多出的小数位
+    按「逢五进位」截到 2 位，内存里若保留 3 位，内存合计与落库合计就会差分
+    （对账不平）。``ROUND_HALF_UP`` 与 PG numeric 的取整方向一致 —— Python 默认的
+    ``ROUND_HALF_EVEN``（逢五取偶）与 PG 不同，会差 0.01。
     """
     rate = resolve_item_loss_rate(item.loss_rate, order_spare_rate)
-    item.total_price = (item.unit_price or Decimal('0')) * magnified_purchase_qty(
-        item.quantity, rate
-    )
+    total = (item.unit_price or Decimal('0')) * magnified_purchase_qty(item.quantity, rate)
+    item.total_price = total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
 def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: PurchaseOrder) -> Decimal:
@@ -431,6 +435,9 @@ async def complete_purchase_order(
         _apply_spare_rate(order, spare_rate)
         # 逐 SKU 快照的备品按新率同步重算（保持逐 SKU 行与主表备品口径一致）
         await resync_po_sku_spare(db, [order.id], spare_rate)
+        # 订单级损耗率是明细有效损耗率的回退源 → 该单行金额与总金额同步重算，
+        # 否则「完成时改了损耗率、金额却还是旧口径」。
+        await _recalc_orders_amount(db, {order.id})
     await db.flush()
     return {'id': order.id, 'order_no': order.order_no, 'status': 'completed'}
 
@@ -491,6 +498,8 @@ async def batch_complete_purchase_orders(
     # 逐 SKU 快照的备品按新率批量同步重算（一次查询，无 N+1）
     if resync_ids:
         await resync_po_sku_spare(db, resync_ids, spare_rate)
+        # 订单级损耗率变了 → 这些单的行金额与总金额同步重算（口径同单张完成）
+        await _recalc_orders_amount(db, set(resync_ids))
 
     await db.flush()
     return {'completed': completed, 'errors': errors}
@@ -559,43 +568,50 @@ async def save_factory_summary_edits(
 
     # 数量与损耗率都会改变**计价数量**（落库数量按损耗率加放），
     # 因此行金额与采购单总金额必须在编辑后重算，否则停留在旧口径。
-    await _recalc_touched_orders_amount(db, touched_items)
+    #
+    # 重算范围 = 被编辑明细所属采购单 ∪ 本次覆盖写损耗率的采购单：
+    # **订单级损耗率**同样是明细有效损耗率的来源（逐行 loss_rate 为空时回退到它），
+    # 只改订单级损耗率而不重算，该单的行金额就还是旧口径；
+    # 而「只改损耗率、没改任何布料」时 touched_items 为空，光看它会一个单都不重算。
+    recalc_order_ids = {it.order_id for it in touched_items if it.order_id}
+    if spare_rate is not None:
+        recalc_order_ids.update(oid for oid in involved_po_ids if oid)
+    await _recalc_orders_amount(db, recalc_order_ids)
 
     await db.flush()
     return {'updated_count': updated, 'spare_updated_count': spare_written}
 
 
-async def _recalc_touched_orders_amount(
-    db: AsyncSession, touched_items: list[PurchaseOrderItem]
-) -> None:
-    """按编辑后的（数量, 损耗率）重算受影响明细的行金额与所属采购单总金额。
+async def _recalc_orders_amount(db: AsyncSession, order_ids: set[int]) -> None:
+    """重算所涉采购单**全部**明细的行金额与该单总金额。
 
     计价数量口径与前端「金额」列一致（见 :func:`_recalc_item_total_price`）：
-    数量改大或损耗率改高都会让行金额变化，采购单总金额必须同步，
-    否则「明细金额之和 ≠ 采购单金额」，供应商金额汇总随之失真。
-    """
-    if not touched_items:
-        return
+    数量改大、逐行损耗率改高、或**订单级损耗率**被覆盖，都会让行金额变化，
+    采购单总金额必须同步，否则「明细金额之和 ≠ 采购单金额」，供应商金额汇总随之失真。
 
-    touched_order_ids = {it.order_id for it in touched_items if it.order_id}
-    if not touched_order_ids:
+    必须重算该单的**全部**明细，而不只是被编辑的那几行：一行按新率、另一行按旧率，
+    同一张单里就混着两种口径，合计既不是旧口径也不是新口径。
+
+    Args:
+        db: 数据库会话。
+        order_ids: 需要重算的采购单 ID 集合。
+    """
+    if not order_ids:
         return
 
     orders_result = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id.in_(touched_order_ids))
+        select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
     )
     order_map = {o.id: o for o in orders_result.scalars().all()}
 
-    for it in touched_items:
-        order = order_map.get(it.order_id)
-        _recalc_item_total_price(it, order.spare_rate if order else None)
-
-    # 采购单总金额 = 该单全部明细金额之和（一次查询，避免逐单 N+1）
+    # 一次查询取回这些单的全部明细，避免逐单 N+1
     all_items_result = await db.execute(
-        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(touched_order_ids))
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(order_ids))
     )
     totals: dict[int, Decimal] = defaultdict(lambda: Decimal('0'))
     for it in all_items_result.scalars().all():
+        order = order_map.get(it.order_id)
+        _recalc_item_total_price(it, order.spare_rate if order else None)
         totals[it.order_id] += (it.total_price or Decimal('0'))
     for order_id, total in totals.items():
         order = order_map.get(order_id)

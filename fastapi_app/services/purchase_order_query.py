@@ -19,6 +19,7 @@ from sqlalchemy.orm import selectinload
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.export_limits import EXPORT_MAX_ROWS
+from fastapi_app.services.purchase_utils import magnified_purchase_qty, resolve_item_loss_rate
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, Supplier
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
@@ -415,7 +416,7 @@ async def export_completed_orders(
     # 只查需要的列，避免大量 ORM 实例驻留内存（防 OOM）
     order_cols = (
         PurchaseOrder.id, PurchaseOrder.order_no, PurchaseOrder.supplier_name,
-        PurchaseOrder.customer_name, PurchaseOrder.completed_at,
+        PurchaseOrder.customer_name, PurchaseOrder.completed_at, PurchaseOrder.spare_rate,
     )
     query = select(*order_cols).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
     if supplier_id:
@@ -468,6 +469,7 @@ async def export_completed_orders(
             PurchaseOrderItem.material_code, PurchaseOrderItem.specification,
             PurchaseOrderItem.unit, PurchaseOrderItem.quantity,
             PurchaseOrderItem.unit_price, PurchaseOrderItem.total_price,
+            PurchaseOrderItem.loss_rate,
         )
         items_result = await db.execute(
             select(*item_cols).where(PurchaseOrderItem.order_id.in_(order_ids))
@@ -481,6 +483,15 @@ async def export_completed_orders(
     for order in orders:
         items = items_by_order.get(order.id, [])
         for item in items:
+            # 导出的「数量」用**计价数量**（落库数量按有效损耗率加放），与同一行的
+            # 「金额」同源 —— 金额就是按这个数量算出来的。若数量仍给落库原值，
+            # 导出表里会出现「数量 × 单价 ≠ 金额」（损耗率 > 0 时必现），
+            # 对账时无法判断是导出错了还是单价错了。
+            # 有效损耗率口径与落库金额一致：逐行 loss_rate → 订单级 spare_rate → 0。
+            pricing_qty = magnified_purchase_qty(
+                item.quantity,
+                resolve_item_loss_rate(item.loss_rate, order.spare_rate),
+            )
             rows.append({
                 'order_no': order.order_no,
                 'supplier_name': order.supplier_name,
@@ -489,7 +500,7 @@ async def export_completed_orders(
                 'material_code': item.material_code or '',
                 'specification': item.specification or '',
                 'unit': item.unit or '',
-                'quantity': float(item.quantity or 0),
+                'quantity': float(pricing_qty),
                 'unit_price': float(item.unit_price or 0),
                 'amount': float(item.total_price or 0),
                 'completed_at': order.completed_at.strftime('%Y-%m-%d') if order.completed_at else '',
