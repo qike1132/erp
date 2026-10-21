@@ -22,7 +22,11 @@
 运行前提：根 `.env` 的 ACL 只授予 Administrators/SYSTEM，非提权进程读不到 → 本探针会报
 `error: PermissionError '.env'`（**不会**折算成「最新」）。请在提权 shell 里跑。
 
-退出码：0 = up_to_date；1 = behind / unknown；2 = error。
+退出码：0 = up_to_date；1 = behind；**3 = unknown**；2 = error。
+
+unknown 单独占一个退出码（不复用 1）：巡检脚本普遍写成「exit==1 → 跑 upgrade」，
+而 unknown 恰恰是**不该 upgrade** 的形态（库声明的版本不在图里，直接 upgrade 只会
+撞 `Can't locate revision`，把人引向手工 stamp）。分开之后 `if code == 1` 才动手。
 """
 
 from __future__ import annotations
@@ -158,10 +162,21 @@ def build_report(root: str, db_url: str) -> tuple[int, dict[str, Any]]:
         status=status,
         script_head=head,
         pending=pending,
+        # unknown 的 pending 是「图内全集」而非真实待应用集，消费方不得据此 upgrade
+        pending_is_apply_order=status == STATUS_BEHIND,
         unrecognized=unrecognized,
         **({"reason": reason} if reason else {}),
     )
-    return (0 if status == STATUS_UP_TO_DATE else 1), base
+    return _exit_code(status), base
+
+
+def _exit_code(status: str) -> int:
+    """状态 → 退出码。unknown 必须与 behind 区分，见模块 docstring。"""
+    if status == STATUS_UP_TO_DATE:
+        return 0
+    if status == STATUS_UNKNOWN:
+        return 3
+    return 1
 
 
 def _print_human(report: dict[str, Any]) -> None:
@@ -172,11 +187,23 @@ def _print_human(report: dict[str, Any]) -> None:
     if report.get("reason"):
         print(f"reason             = {report['reason']}")
     if report.get("pending"):
-        print(f"pending（{len(report['pending'])} 条，应用顺序 旧→新）：")
+        if report.get("pending_is_apply_order"):
+            print(f"pending（{len(report['pending'])} 条，应用顺序 旧→新）：")
+        else:
+            # unknown 下的 pending 只是图内全集：库真实位置不明，直接按此顺序 upgrade 会撞
+            # `Can't locate revision`。标签必须说清，否则等于把运维往手工 stamp 上推。
+            print(f"⚠️ 图内全集（{len(report['pending'])} 条，库位置不明，**不可**直接顺序 upgrade）：")
         for rev in report["pending"]:
             print(f"  - {rev}")
     if report.get("unrecognized"):
         print(f"⚠️ 图外版本号: {report['unrecognized']}")
+
+
+def _db_url() -> str:
+    """取库地址。单独成函数是为了让「读不到 .env」这条失败路径可被单测注入。"""
+    from fastapi_app.core.config import settings
+
+    return settings.DATABASE_URL
 
 
 def main(argv: Iterable[str] | None = None) -> int:
@@ -186,9 +213,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     try:
-        from fastapi_app.core.config import settings
-
-        code, report = build_report(root, settings.DATABASE_URL)
+        code, report = build_report(root, _db_url())
     except Exception as exc:  # noqa: BLE001 — 探针失败必须显式 error，不得退化成「最新」
         report = {"status": STATUS_ERROR, "reason": f"{type(exc).__name__}: {exc}"}
         code = 2

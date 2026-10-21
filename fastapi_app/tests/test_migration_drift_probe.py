@@ -101,3 +101,74 @@ class TestRealMigrationGraph:
             for up in parents.get(rev, ()):
                 if up in pos:
                     assert pos[up] < idx, f'{up} 是 {rev} 的祖先，却被排到了后面'
+
+
+class TestReportAndExitCodes:
+    """`build_report` / `main` 的失败路径。
+
+    只测 `classify_drift` 是不够的：探针自己坏掉（多 head、连不上库、读不到 .env）时
+    必须报 error，不能静默降级成「没发现落后」。下面几条各自钉一个出口。
+    """
+
+    def test_multi_head_graph_is_error_not_guessed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """多 head 没有唯一终点可判定——必须 error，不能挑一个当 head 猜。"""
+        monkeypatch.setattr(probe, 'load_graph', lambda _root: (['h1', 'h2'], {'h1': (), 'h2': ()}))
+        monkeypatch.setattr(probe, 'query_db', lambda _url: ('erp_system', ['h1']))
+
+        code, report = probe.build_report(str(tmp_path), 'sqlite://')
+
+        assert code == 2
+        assert report['status'] == probe.STATUS_ERROR
+        assert 'head' in report['reason']
+
+    def test_empty_version_table_exits_3_not_1(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """unknown 必须与 behind 分码：巡检脚本 `exit==1 → upgrade` 不能在这里被触发。"""
+        monkeypatch.setattr(probe, 'load_graph', lambda _root: (['head'], LINEAR))
+        monkeypatch.setattr(probe, 'query_db', lambda _url: ('erp_system', []))
+
+        code, report = probe.build_report(str(tmp_path), 'sqlite://')
+
+        assert code == 3
+        assert report['status'] == probe.STATUS_UNKNOWN
+        assert report['pending_is_apply_order'] is False
+
+    def test_behind_exits_1_with_apply_order(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        monkeypatch.setattr(probe, 'load_graph', lambda _root: (['head'], LINEAR))
+        monkeypatch.setattr(probe, 'query_db', lambda _url: ('erp_system', ['a']))
+
+        code, report = probe.build_report(str(tmp_path), 'sqlite://')
+
+        assert code == 1
+        assert report['pending'] == ['b', 'head']
+        assert report['pending_is_apply_order'] is True
+
+    def test_main_turns_probe_crash_into_error_exit(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        """探针自身异常（连不上库 / 读不到 .env）必须是 error，不得当成「没发现落后」。
+
+        `_db_url` 与 `build_report` 都注入，测试才不依赖运行环境能否读到根 `.env`
+        ——否则非提权机上测的是 settings 的导入失败，而不是这条兜底路径。
+        """
+        monkeypatch.setattr(probe, '_db_url', lambda: 'sqlite://')
+
+        def _boom(*_args: object, **_kwargs: object) -> tuple[int, dict[str, object]]:
+            raise RuntimeError('permission denied: .env')
+
+        monkeypatch.setattr(probe, 'build_report', _boom)
+
+        code = probe.main(['--json'])
+
+        assert code == 2
+        # 钉住 reason 内容而非仅状态码：换成别的异常也必须是这条路径的产物
+        assert 'permission denied: .env' in capsys.readouterr().out
+
+    def test_unknown_pending_is_not_labelled_as_apply_order(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """unknown 的 pending 是图内全集，人读输出不能标成「应用顺序 旧→新」。"""
+        probe._print_human({
+            'status': probe.STATUS_UNKNOWN,
+            'pending': ['a', 'b'],
+            'pending_is_apply_order': False,
+        })
+
+        out = capsys.readouterr().out
+        assert '不可' in out
+        assert '应用顺序 旧→新' not in out
