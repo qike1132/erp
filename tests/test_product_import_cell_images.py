@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image
 from sqlalchemy import select
 
-from fastapi_app.services import batch_import_service, storage_service
+from fastapi_app.services import batch_import_core, batch_import_service, storage_service
 from fastapi_app.shared_models import Product
 
 TEMPLATE = Path(__file__).resolve().parent.parent / 'static' / 'files' / '统一导入模板.xlsx'
@@ -78,7 +78,7 @@ async def test_transparent_png_survives_webp_conversion(async_db_session, tmp_pa
     buf = io.BytesIO()
     Image.new('RGBA', (24, 24), (255, 0, 0, 0)).save(buf, format='PNG')
 
-    saved = await batch_import_service._save_imported_image(
+    saved = await batch_import_core._save_imported_image(
         async_db_session, buf.getvalue(), '透明底测试', None,
     )
 

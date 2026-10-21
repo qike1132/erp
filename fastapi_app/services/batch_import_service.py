@@ -41,7 +41,6 @@ from fastapi_app.services.batch_import_core import (
     _parse_product_price,
     _resolve_import_customer_id,
     _row_failure_message,
-    _save_imported_image,
 )
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import (
@@ -67,7 +66,6 @@ from fastapi_app.shared_models import (
     InventoryLog,
     Order,
     Product,
-    ProductCustomer,
     StockIn,
     StockOut,
 )
@@ -899,104 +897,27 @@ async def import_products_service(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    from fastapi_app.services.batch_service import get_product_by_name_ci
-
     if (file_err := _validate_xlsx_file(file)):
         return file_err
     try:
         data_list, cell_images, err = await _read_product_sheet(file)
         if err:
             return BatchImportResult(success=False, message=err)
-        imported = 0
-        skipped = 0
-        errors: list[str] = []
-        customer_cache: dict = {}
-        seen_names: set[str] = set()
-        # 行号从 2 起：Excel 第 1 行是表头，与用户看到的行号一致（与 core 那条实现同口径）
-        for idx, row_data in enumerate(data_list, start=2):
-            # Z04-R2：savepoint 回滚时按 key 补偿删除本行已落盘的图片
-            image_keys: list[str] = []
-            if isinstance(getattr(db, 'info', None), dict):
-                db.info['import_image_keys'] = image_keys
-            try:
-                # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
-                async with db.begin_nested():
-                    name = row_data.get('产品名称') or row_data.get('名称')
-                    barcode = row_data.get('69码') or row_data.get('条码')
-                    price = row_data.get('产品价格') or row_data.get('价格')
-                    factory = row_data.get('工厂')
-                    customer_name = row_data.get('客户') or row_data.get('客户名称')
-                    initial_stock = row_data.get('初始库存') or 0
-                    image_id = parse_dispimg_id(row_data.get('图片') or row_data.get('产品图片'))
-                    image_bytes = cell_images.get(image_id) if image_id else None
-                    if not name:
-                        skipped += 1
-                        continue
-                    name = str(name).strip()
-                    name_key = name.casefold()
-                    if name_key in seen_names:
-                        # 文件内同名重复行 → 跳过。与 core 路径的去重同口径，也与导入
-                        # 预览的判定一致：本行若落进下面的「已存在」分支，会把上一行刚建
-                        # 的同名产品补全并计数，而预览说它是「跳过」—— 预览说写入 N 条、
-                        # 导入写 N+1 条，正是那条哨兵测试要拦的漂移。
-                        skipped += 1
-                        errors.append(f'行{idx}: 产品名称在文件内重复，已跳过: {name}')
-                        continue
-                    seen_names.add(name_key)
-                    customer_id = await _resolve_import_customer_id(
-                        db, customer_name, customer_cache, idx, errors)
-                    # 检查产品是否已存在（按名称忽略大小写）
-                    existing = await get_product_by_name_ci(db, name)
-                    if existing:
-                        # 已存在 → 只补空值（价格/工厂/客户归属）；图片仍按模板覆盖
-                        changed, _ = await _backfill_empty_product_fields(
-                            db, existing, price=price, factory=factory, customer_id=customer_id,
-                            customer_name=str(customer_name).strip() if customer_name else '')
-                        if image_bytes is not None:
-                            image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
-                            if image_key:
-                                existing.image = image_key
-                                changed = True
-                        if changed:
-                            imported += 1
-                        else:
-                            skipped += 1
-                            errors.append(f'行{idx}: 产品名称与已有数据重复，已存在且无可补字段，未改动: {name}')
-                        continue
-                    try:
-                        stock = int(initial_stock) if initial_stock else 0
-                    except ValueError:
-                        stock = 0
-                    product = Product(
-                        name=name, barcode=str(barcode).strip() if barcode else '',
-                        price=_parse_product_price(price, name),
-                        factory=str(factory).strip() if factory else '',
-                        initial_stock=stock, current_stock=stock,
-                    )
-                    if image_bytes is not None:
-                        product.image = await _save_imported_image(db, image_bytes, name, uploader_id)
-                    db.add(product)
-                    if customer_id is not None:
-                        await db.flush()  # 挂归属需要 product.id
-                        db.add(ProductCustomer(product_id=product.id, customer_id=customer_id))
-                # savepoint 成功提交后才计数，失败行不计入 imported
-                imported += 1
-            except (ValueError, TypeError, SQLAlchemyError) as exc:
-                # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                if image_keys:
-                    from fastapi_app.services.storage_service import delete_storage_keys
-                    await delete_storage_keys(image_keys)
-                logger.error(f'产品导入 - 行处理失败: {exc}', exc_info=True)
-                errors.append(_row_failure_message(exc, idx))
-                skipped += 1
-                continue
-            finally:
-                if isinstance(getattr(db, 'info', None), dict):
-                    db.info.pop('import_image_keys', None)
-        # 提交交给请求级事务（get_async_db），服务层不再手动 commit
-        if imported > 0:
-            schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-        return _build_batch_result(imported, skipped, errors, success_msg='成功导入产品', fail_msg='没有找到需要导入的产品数据（可能都已存在）')
+        # 产品行逻辑只有 core 一份（2026-10-17 审计 Z04-R3）：此前这里内嵌了
+        # 第二套行循环（字段别名解析 / 批内同名处理 / 只补空值 / 图片落库），
+        # 与 core 实现各持一份、改一处漏一处。现统一委托给
+        # import_products_from_data —— 综合导入与 ARQ 走的也是它。
+        # use_savepoint=True 保留端点级「单行异常只回滚本行」的隔离语义。
+        stats: dict = {}
+        imported, messages = await import_products_from_data(
+            db, data_list, cell_images=cell_images, uploader_id=uploader_id,
+            use_savepoint=True, stats=stats,
+        )
+        return _build_batch_result(
+            imported, int(stats.get('skipped', 0)), messages,
+            success_msg='成功导入产品',
+            fail_msg='没有找到需要导入的产品数据（可能都已存在）',
+        )
     except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         logger.error(f'产品批量导入失败: {exc}', exc_info=True)

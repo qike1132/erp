@@ -273,6 +273,81 @@ def _parse_positive_quantity(quantity, idx: int, *, label: str,
     return qty if qty > 0 else None
 
 
+async def _apply_batch_dedupe(
+    data_list: list,
+    dedupe: DedupeSpec,
+    context: dict,
+    debug_messages: list[str] | None,
+    label: str,
+) -> tuple[list, int]:
+    """按 :class:`DedupeSpec` 剔除重复行，返回 ``(待处理行, 被剔除行数)``。
+
+    去重先于行处理：重复行不进循环，也就不会撞唯一约束。``kept`` 保留原始行号，
+    使后续错误消息与 Excel 里看到的行号一致。
+
+    被剔除的行根本没进循环，但它们对用户就是「跳过的行」——调用方必须把返回值
+    计入 skipped，否则「2 行文件、1 行重复」会报 skipped=0，与导入预览的 skip
+    计数对不上（预览/导入计数一致性有哨兵测试盯着）。
+    """
+    existing_keys = dedupe.existing_keys
+    if dedupe.existing_keys_key is not None:
+        existing_keys = context.get(dedupe.existing_keys_key) or ()
+    deduped = dedupe_by_keys(
+        data_list,
+        dedupe.key_fn,
+        existing_keys=existing_keys,
+        label=dedupe.label,
+    )
+    if debug_messages is not None:
+        debug_messages.extend(deduped.error_messages(limit=dedupe.message_limit))
+    if deduped.removed_count:
+        logger.info(
+            "%s：去重跳过 %d 行（输入 %d 行）",
+            label, deduped.removed_count, deduped.total_count,
+        )
+    return deduped.kept, deduped.removed_count
+
+
+async def _run_import_row(
+    db: AsyncSession,
+    row_handler,
+    idx: int,
+    row_data,
+    context: dict,
+    debug_messages: list[str] | None,
+    use_savepoint: bool,
+    label: str,
+) -> bool:
+    """跑单行处理器，返回该行是否写入成功。行级异常在这里吞掉：返回 False，
+    失败消息 append 进 ``debug_messages``（骨架据此把本行计入 skipped）。
+    """
+    # Z04-R2：每行单独登记已落盘图片 key；savepoint 回滚时补偿删除，避免孤儿文件
+    image_keys: list[str] = []
+    if isinstance(getattr(db, 'info', None), dict):
+        db.info['import_image_keys'] = image_keys
+    try:
+        if use_savepoint:
+            # 计数必须在 savepoint 成功退出之后：InventoryLog 的 INSERT 要到
+            # savepoint 退出（autoflush）才落库，幂等键冲突恰在此时爆发。若在块内
+            # 判成功，冲突行会被虚报为「成功导入」——而「编辑后重传」每次都会撞键。
+            ok = False
+            async with db.begin_nested():
+                ok = await row_handler(db, row_data, idx, context, debug_messages)
+            return bool(ok)
+        return bool(await row_handler(db, row_data, idx, context, debug_messages))
+    except (ValueError, TypeError, SQLAlchemyError) as e:
+        if image_keys:
+            from fastapi_app.services.storage_service import delete_storage_keys
+            await delete_storage_keys(image_keys)
+        if debug_messages is not None:
+            debug_messages.append(_row_failure_message(e, idx))
+        logger.error(f"{label} - 行{idx}: 异常 - {e!s}", exc_info=True)
+        return False
+    finally:
+        if isinstance(getattr(db, 'info', None), dict):
+            db.info.pop('import_image_keys', None)
+
+
 async def _import_data_generic(
     db: AsyncSession,
     data_list: list,
@@ -282,6 +357,7 @@ async def _import_data_generic(
     has_debug_messages: bool = True,
     label: str = "导入",
     dedupe: DedupeSpec | None = None,
+    stats: dict | None = None,
 ):
     """
     通用导入数据框架
@@ -296,64 +372,30 @@ async def _import_data_generic(
         has_debug_messages: 是否收集调试消息
         label: 导入类型标签，用于日志和完成消息
         dedupe: 可选的内存去重规格（见 :class:`DedupeSpec`）。不传则行为完全不变。
+        stats: 可选的出参字典；骨架把 ``skipped``（未写入行数，含异常行）写进去。
+            需要「跳过 N 行」这类计数的调用方（端点级 service）用它取数，
+            不必再靠 debug_messages 反推（一条跳过行可能同时产生多条消息）。
     """
     count = 0
+    skipped = 0
     debug_messages: list[str] | None = [] if has_debug_messages else None
 
     context = await pre_load(db) if pre_load else {}
 
     if dedupe is not None:
-        # 去重先于行处理：重复行不进循环，也就不会撞唯一约束。
-        # kept 保留原始行号，使后续错误消息与 Excel 里看到的行号一致。
-        existing_keys = dedupe.existing_keys
-        if dedupe.existing_keys_key is not None:
-            existing_keys = context.get(dedupe.existing_keys_key) or ()
-        deduped = dedupe_by_keys(
-            data_list,
-            dedupe.key_fn,
-            existing_keys=existing_keys,
-            label=dedupe.label,
-        )
-        rows_to_process = deduped.kept
-        if debug_messages is not None:
-            debug_messages.extend(deduped.error_messages(limit=dedupe.message_limit))
-        if deduped.removed_count:
-            logger.info(
-                "%s：去重跳过 %d 行（输入 %d 行）",
-                label, deduped.removed_count, deduped.total_count,
-            )
+        rows_to_process, removed_count = await _apply_batch_dedupe(
+            data_list, dedupe, context, debug_messages, label)
+        skipped += removed_count
     else:
         rows_to_process = list(enumerate(data_list, start=2))
 
     for idx, row_data in rows_to_process:
-        # Z04-R2：每行单独登记已落盘图片 key；savepoint 回滚时补偿删除，避免孤儿文件
-        image_keys: list[str] = []
-        if isinstance(getattr(db, 'info', None), dict):
-            db.info['import_image_keys'] = image_keys
-        try:
-            if use_savepoint:
-                # 计数必须在 savepoint 成功退出之后：InventoryLog 的 INSERT 要到
-                # savepoint 退出（autoflush）才落库，幂等键冲突恰在此时爆发。若在块内
-                # count+=1，冲突行会被虚报为「成功导入」——而「编辑后重传」每次都会撞键。
-                ok = False
-                async with db.begin_nested():
-                    ok = await row_handler(db, row_data, idx, context, debug_messages)
-                if ok:
-                    count += 1
-            else:
-                if await row_handler(db, row_data, idx, context, debug_messages):
-                    count += 1
-        except (ValueError, TypeError, SQLAlchemyError) as e:
-            if image_keys:
-                from fastapi_app.services.storage_service import delete_storage_keys
-                await delete_storage_keys(image_keys)
-            if debug_messages is not None:
-                debug_messages.append(_row_failure_message(e, idx))
-            logger.error(f"{label} - 行{idx}: 异常 - {e!s}", exc_info=True)
-            continue
-        finally:
-            if isinstance(getattr(db, 'info', None), dict):
-                db.info.pop('import_image_keys', None)
+        if await _run_import_row(
+            db, row_handler, idx, row_data, context, debug_messages, use_savepoint, label
+        ):
+            count += 1
+        else:
+            skipped += 1
 
     await db.flush()
 
@@ -370,6 +412,9 @@ async def _import_data_generic(
     # debug_messages 的语义是「行级消息」，调用方（_process_comprehensive_sheet）
     # 会把它整体并进 results.errors 展示给用户，混入完成消息会污染错误列表。
     logger.info("%s完成: 共导入 %d 条", label, count)
+
+    if stats is not None:
+        stats['skipped'] = skipped
 
     if has_debug_messages:
         return count, debug_messages
@@ -565,6 +610,8 @@ async def import_products_from_data(
     db: AsyncSession, data_list: list, *,
     cell_images: dict[str, bytes] | None = None,
     uploader_id: int | None = None,
+    use_savepoint: bool = False,
+    stats: dict | None = None,
 ) -> tuple[int, list[str]]:
     """从数据列表导入产品。
 
@@ -585,6 +632,9 @@ async def import_products_from_data(
         data_list: 解析后的行数据。
         cell_images: 单元格图片映射（图片 ID → 图片字节）；无图片时为 None/空。
         uploader_id: 图片落库时登记的上传人；未知则 None。
+        use_savepoint: 每行用 savepoint 隔离（端点级 Excel 导入用 True：单行异常
+            只回滚本行，其余行照常落库）；ARQ/综合导入沿用 False（整批同事务）。
+        stats: 可选出参，骨架写入 ``skipped``（未写入行数）。
 
     Returns:
         ``(成功导入条数, 错误消息列表)``。「条数」含新建与**有改动**的补全；
@@ -679,9 +729,10 @@ async def import_products_from_data(
     return await _import_data_generic(
         db, data_list, _row_handler,
         pre_load=_pre_load,
-        use_savepoint=False,
+        use_savepoint=use_savepoint,
         has_debug_messages=True,
         label="产品导入",
+        stats=stats,
         # 只做**批内**去重：与库中已有产品同名的行必须走到行处理器，才有机会按
         # 「只补空值」回填价格/工厂/客户（用户真实场景：先建了产品，后来才拿到
         # 这些字段）。此前把「与库中重复」的行也在这里剔除，等于把回填机会一起
