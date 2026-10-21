@@ -76,12 +76,18 @@ def test_run_loop_never_calls_frontend_restart(monkeypatch, tmp_path) -> None:
     class _StopLoopError(Exception):
         pass
 
-    def _fake_sleep(_s: float) -> None:
+    # 退出通道必须挂在循环**真正使用**的机制上：4791eac2（F4-7 让 Ctrl+C 能退出主循环）
+    # 把 `time.sleep(3)` 换成 `self._stop.wait(3)`，桩 time.sleep 就此失效 —— 循环
+    # 再也收不到 _StopLoopError，`while not self._stop.is_set()` 永远为真，
+    # 本用例会无限跑下去（PR #2 的 CI test job 因此挂了 2 小时以上，
+    # 而正常全量只需 ~9 分钟）。`_stop.wait` 在 try/except 之外，异常仍能逃出去。
+    def _fake_wait(_s: float) -> bool:
         state["n"] += 1
         if state["n"] >= 3:
             raise _StopLoopError
+        return False
 
-    monkeypatch.setattr(prod_runner.time, "sleep", _fake_sleep)
+    monkeypatch.setattr(sup._stop, "wait", _fake_wait)
     with contextlib.suppress(_StopLoopError):
         sup.run()
     # 循环真跑了 ≥2 轮(write_status 每轮调用,STATUS_FILE 已落盘)
