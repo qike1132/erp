@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import NotFoundError
+from fastapi_app.services.batch_import_parser import (  # noqa: F401
+    _parse_deduct_flag,
+)
 from fastapi_app.services.batch_service import (
     parse_excel_file_async,
     read_excel_sheets_async,
@@ -80,22 +83,6 @@ def _format_import_result(imported: int, entity_label: str, errors: list[str]) -
         if total_err > 5:
             result_msg += f'...（仅显示前5条，共{total_err}条）'
     return result_msg
-
-def _parse_deduct_flag(deduct_flag: Any, qty: int) -> tuple[bool, int]:
-    if not deduct_flag:
-        return False, 0
-    deduct_str = str(deduct_flag).strip()
-    if deduct_str.lower() in ('是', 'yes', 'y'):
-        return True, qty
-    # Polars/openpyxl 的数字列会把整数 3 读成 3.0；str(3.0) 不是纯数字，旧实现静默丢弃抵扣标志。
-    try:
-        numeric = float(deduct_str)
-    except ValueError:
-        return False, 0
-    if not numeric.is_integer():
-        return False, 0
-    deduct_qty = int(numeric)
-    return (True, deduct_qty) if deduct_qty > 0 else (False, 0)
 
 async def _generic_import_staging_from_excel(
     db: AsyncSession,

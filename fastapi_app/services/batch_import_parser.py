@@ -11,6 +11,7 @@ import os
 import tempfile
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
+from typing import Any
 from zipfile import BadZipFile
 
 from fastapi_app.schemas.batch import BatchImportResult, ExcelUpload
@@ -256,6 +257,33 @@ def _parse_import_row(
     except (ValueError, TypeError):
         return None, qty_invalid_msg
     return str(customer), product.id, qty
+
+
+def _parse_deduct_flag(deduct_flag: Any, qty: int) -> tuple[bool, int]:
+    """解析「是否抵扣备货」列 → (是否抵扣, 抵扣数量)。
+
+    全仓唯一实现（审计 Z04-R3③）：暂存区导入（staging）与两条订单导入路径
+    （batch_import_core 的综合导入 / batch_import_service 的单 Sheet 端点）原先
+    各持一份，同一列三种语义 —— 「是」在一处折算 1 件、另两处折算整单量，
+    数字 '3.0' 在两处被静默丢弃。语义统一为：**数字 = 抵扣件数，是/yes/y = 整单量**，
+    非整数与无法解析的内容一律不抵扣（与 `_parse_import_row` 的「小数拒绝」同口径）。
+
+    openpyxl/Polars 把整列推断成 Float64 时整数以 3.0 到达，故走 `float()` 而不是
+    `str.isdigit()`（审计 P1-8）。
+    """
+    if not deduct_flag:
+        return False, 0
+    deduct_str = str(deduct_flag).strip()
+    if deduct_str.lower() in ('是', 'yes', 'y'):
+        return True, qty
+    try:
+        numeric = float(deduct_str)
+    except ValueError:
+        return False, 0
+    if not numeric.is_integer():
+        return False, 0
+    deduct_qty = int(numeric)
+    return (True, deduct_qty) if deduct_qty > 0 else (False, 0)
 
 
 def _validate_xlsx_file(file: ExcelUpload) -> BatchImportResult | None:

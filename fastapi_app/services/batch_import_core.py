@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache_invalidation import schedule_post_commit_invalidation
 from fastapi_app.services.batch_import_cache import invalidate_batch_import_caches
 from fastapi_app.services.batch_import_dedup import dedupe_by_keys
-from fastapi_app.services.batch_import_parser import parse_date_value, validate_customer_name
+from fastapi_app.services.batch_import_parser import (
+    _parse_deduct_flag,
+    parse_date_value,
+    validate_customer_name,
+)
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import (
     generate_order_number,
@@ -838,45 +842,31 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
         )
         db.add(log)
 
-        # 处理抵扣备货逻辑
-        if deduct_flag:
-            try:
-                deduct_flag_str = str(deduct_flag).strip()
-                deduct_value = 0
-                # 2026-10-18 OCR 评审：与单表端点对齐——Polars Float64 列的
-                # 整数会以 3.0 到达，str(3.0) 不是 digit，会被静默跳过。
-                if isinstance(deduct_flag, (int, float)) and not isinstance(deduct_flag, bool) \
-                        and float(deduct_flag).is_integer():
-                    deduct_value = int(deduct_flag)
-                elif deduct_flag_str.isdigit():
-                    deduct_value = int(deduct_flag_str)
-                elif deduct_flag_str.lower() in ['是', 'yes']:
-                    # 2026-10-17 审计 F-BE-SVC-STOCK-04：「是」原先折算成 1 件，
-                    # 另两套实现（staging/_generic._parse_deduct_flag、
-                    # batch_import_service）都折算成整单数量 —— 同一列两种语义。
-                    # 对齐多数派：是 → qty。
-                    deduct_value = qty
-
-                if deduct_value > 0:
-                    # 2026-10-18 OCR 评审：与 batch_import_service.import_orders_service
-                    # 同款修正——第 4 个位置参数是 `order_quantity`（订单数量），
-                    # 抵扣量必须走 `custom_deduct_quantity`。此前把 `deduct_value` 按位置
-                    # 塞进 order_quantity、不传 custom_deduct_quantity，两列语义在此路径
-                    # 碰巧一致（数字=抵扣量、是/yes=整单量）所以没暴露；一旦分叉
-                    # （部分抵扣），备货不足告警会拿抵扣量当订单量报错数。改为显式关键字。
-                    await deps.process_order_deduction(
-                        db, order, product_id, qty,
-                        deduct_stock=True,
-                        custom_deduct_quantity=deduct_value,
-                        product=product,
-                    )
-            except (ValueError, TypeError, SQLAlchemyError) as e:
-                # 第八轮审计：原仅 logger.error 后仍 return True —— 该行计入 imported，
-                # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为 return False：
-                # 抵扣失败 = 该行失败（savepoint 回滚本行），用户在错误清单里可见。
-                logger.error(f"订单导入 - 行{idx}: 抵扣处理失败，本行按失败处理: {e}", exc_info=True)
-                debug_messages.append(f"行{idx}: 抵扣备货处理失败: {e}")
-                return False
+        # 处理抵扣备货逻辑。解析口径只在 batch_import_parser._parse_deduct_flag 一份
+        # （审计 Z04-R3③：原先此处与 batch_import_service 各内嵌一份 if/elif，
+        # 「是」一度折算 1 件、'3.0' 一度静默丢弃 —— 同一列多种语义）。
+        try:
+            deduct_on, deduct_value = _parse_deduct_flag(deduct_flag, qty)
+            if deduct_on:
+                # 2026-10-18 OCR 评审：与 batch_import_service.import_orders_service
+                # 同款修正——第 4 个位置参数是 `order_quantity`（订单数量），
+                # 抵扣量必须走 `custom_deduct_quantity`。此前把 `deduct_value` 按位置
+                # 塞进 order_quantity、不传 custom_deduct_quantity，两列语义在此路径
+                # 碰巧一致（数字=抵扣量、是/yes=整单量）所以没暴露；一旦分叉
+                # （部分抵扣），备货不足告警会拿抵扣量当订单量报错数。改为显式关键字。
+                await deps.process_order_deduction(
+                    db, order, product_id, qty,
+                    deduct_stock=True,
+                    custom_deduct_quantity=deduct_value,
+                    product=product,
+                )
+        except (ValueError, TypeError, SQLAlchemyError) as e:
+            # 第八轮审计：原仅 logger.error 后仍 return True —— 该行计入 imported，
+            # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为 return False：
+            # 抵扣失败 = 该行失败（savepoint 回滚本行），用户在错误清单里可见。
+            logger.error(f"订单导入 - 行{idx}: 抵扣处理失败，本行按失败处理: {e}", exc_info=True)
+            debug_messages.append(f"行{idx}: 抵扣备货处理失败: {e}")
+            return False
 
         return True
 

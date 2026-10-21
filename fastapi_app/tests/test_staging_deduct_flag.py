@@ -2,6 +2,10 @@
 
 审计 P1-8：openpyxl/Polars 读数字列时整数会以 3.0 到达，旧实现只看
 ``str(x).isdigit()``（"3.0" 不是纯数字），导致导入订单的抵扣标志丢失。
+
+Z04-R3③ 后本函数定义在 ``batch_import_parser._parse_deduct_flag``，staging 只做
+re-export —— 这里**刻意继续从 staging 路径导入**：它同时是「三条导入路径共用一份
+解析」的语义锁（收敛接线由 ``tests/test_deduct_flag_single_implementation.py`` 负责）。
 """
 from __future__ import annotations
 
