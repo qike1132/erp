@@ -334,13 +334,17 @@ class TestInventoryService:
     """库存查看 Service 测试"""
 
     async def test_get_inventory_empty(self, mock_db):
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_unique = MagicMock()
-        mock_unique.all.return_value = []
-        mock_scalars.unique.return_value = mock_unique
-        mock_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(return_value=mock_result)
+        """CTE 内核返回空行集时，三个汇总必须都是 0。
+
+        get_inventory 自 Z03-R1（92cd6754）起只是 `get_inventory_paginated` 的
+        「取全量」薄包装，取数形状变成单次 CTE 的 `result.all()`；旧桩仍按
+        「三次独立查询 + scalars().unique().all()」建模，于是 `rows` 是 MagicMock
+        （真值）而不是空集，代码走进格式化分支，total_stock 拿到与业务无关的 1
+        —— 断言的期望值由被测替身自己造出来，属假测试。这里按现行形状建模空行集。
+        """
+        empty = MagicMock()
+        empty.all.return_value = []
+        mock_db.execute = AsyncMock(return_value=empty)
         result = await stock_service.get_inventory(mock_db)
         assert result['inventory_data'] == []
         assert result['total_stock'] == 0
@@ -425,7 +429,10 @@ class TestStockInEndpoints:
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute = AsyncMock(return_value=mock_result)
         response = await client.delete("/api/v1/stock/in/delete/999")
-        assert response.status_code == 400
+        # 404 一致化（2026-10-19 OCR-R6-M2，端点里注明了理由）：行不存在与「跨厂」
+        # 同为 404，避免厂绑定用户用自增 id 借 400/404 差异探测「存在但不是我的」。
+        # 本断言此前仍写 400 —— 端点契约改了，桩测试没跟上。
+        assert response.status_code == 404
 
 
 class TestStockOutEndpoints:

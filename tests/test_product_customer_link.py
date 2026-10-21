@@ -229,9 +229,18 @@ async def test_aux_product_search_empty_keyword_lists_customer_visible_skus(
     p_free = await _make_product(async_db_session, f"{token}-P未", f"{token}F")
 
     resp = await async_client.get(
-        "/api/v1/aux/product-search", params={"customer": cust_a.name}, headers=auth_headers)
+        "/api/v1/aux/product-search",
+        params={"customer": cust_a.name, "limit": 200}, headers=auth_headers)
     assert resp.status_code == 200
-    names = {item["name"] for item in resp.json()}
+    items = resp.json()
+    # 必须显式证明这一页没被 LIMIT 截断，否则下面的「在/不在」断言会随同会话里
+    # 其它用例攒下的产品行数漂移：本套件的 async_db_session 是**提交**模式、
+    # 整库只在会话开始时重置一次，而浏览模式（q 留空）会把「未挂客户」的存量 SKU
+    # 一并列出。实测跑完 tests/ 后 product 有 106 行 —— 用默认 limit=50 时
+    # 「甲自己的 SKU 要列出来」会假红（Postgres 无 ORDER BY，返回哪 50 行不确定）。
+    # 200 是端点上限（le=200）；将来存量再涨过这一页，这条守卫会响亮失败而不是假绿。
+    assert len(items) < 200, f"浏览页已被 limit 截断（{len(items)} 行），membership 断言失去意义"
+    names = {item["name"] for item in items}
     assert p_a.name in names, "甲自己的 SKU 要列出来"
     assert p_free.name in names, "未挂客户的 SKU 对所有客户可见，也要列出来"
     assert p_b.name not in names, "乙的专属 SKU 不能出现在甲的浏览列表里"

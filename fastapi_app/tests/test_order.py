@@ -339,23 +339,41 @@ class TestOrderEndpoints:
         product.id = 1
         product.current_stock = 100
 
-        # 2026-10-18 P2-07：delete_order 改为 db.execute 取数（先无锁读 product_id，
-        # 再 select(Order).with_for_update() 取订单行），不再走 db.get。
-        # 单测替身：前两次 execute 分别返回 product_id 与订单行，其后
-        # _collect_order_deletion_graph 的批量取数统一返回空行集（与原桩等价）。
-        call_count = {'n': 0}
+        # 替身必须**按语句**分派，不能按调用序号：
+        #   2026-10-18 P2-07 把 db.get 换成 db.execute（无锁读 product_id → 锁 Order 行），
+        #   2026-10-19 M4(a25873c4) 又把预锁段抽成 `_prelock_order_products`，在两者中间
+        #   多插了一次 `SELECT DISTINCT stock_out.product_id`。按序号写的桩因此把「订单行」
+        #   发给了那条出库查询，而 Order 行拿到的是 MagicMock（真值 + is_deleted 真值）
+        #   → delete_order 判「订单不存在」→ 400，用例在 CI 上假红。
+        # 按语句分派对读查询的**增减与重排**都免疫，且一眼看得出喂的是哪一条。
+        def _rows(values):
+            result = MagicMock()
+            result.all.return_value = list(values)
+            result.scalars.return_value.all.return_value = list(values)
+            result.first.return_value = None
+            result.one_or_none.return_value = None
+            result.scalar_one_or_none.return_value = None
+            result.scalar_one.return_value = 0
+            return result
 
-        async def _fake_execute(*_args, **_kwargs):
-            call_count['n'] += 1
-            if call_count['n'] == 1:
-                result = MagicMock()
+        async def _fake_execute(stmt=None, *_args, **_kwargs):
+            # 不能写 `str(stmt or '')`：SQLAlchemy 的 clause 真值判定直接抛
+            # TypeError("Boolean value of this clause is not defined")。
+            sql = '' if stmt is None else str(stmt)
+            if 'DISTINCT stock_out.product_id' in sql:
+                return _rows([])                      # 该单无出库行 → 预锁集合只有 order.product_id
+            if 'FOR UPDATE' in sql:
+                return _order_row()                   # 锁 Order 行
+            if '"order".product_id' in sql:
+                result = _rows([])
                 result.scalar_one_or_none.return_value = order.product_id
                 return result
-            if call_count['n'] == 2:
-                result = MagicMock()
-                result.scalar_one_or_none.return_value = order
-                return result
-            return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+            return _rows([])                          # 其余批量取数：空行集
+
+        def _order_row():
+            result = _rows([])
+            result.scalar_one_or_none.return_value = order
+            return result
 
         mock_db.execute = AsyncMock(side_effect=_fake_execute)
         mock_db.delete = AsyncMock()
