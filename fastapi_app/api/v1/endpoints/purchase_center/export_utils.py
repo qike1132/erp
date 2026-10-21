@@ -22,8 +22,22 @@ from utils.report_exporter import _sanitize_excel_value
 
 
 def _h(value) -> str:
-    """HTML 转义：打印模板里的数据库字段一律经此插值（Z06-R3）。"""
-    return html.escape('' if value is None else str(value))
+    """打印模板插值的**唯一**出口：Excel 首字符打断 + HTML 转义（Z06-R3 / F2-3）。
+
+    打印页是 HTML，但用户会「另存后用 Excel 打开」，此时 `<td>`/`<div>` 里的文本
+    落到单元格，首字符为 `= + - @` 即被当公式/DDE 载荷解析 —— 与 xlsx 导出同风险面，
+    故复用权威清洗器 `utils.report_exporter._sanitize_excel_value`，不另立口径。
+
+    只打断 `str` 输入：数量列是 `Numeric`，负数是合法退货/冲抵口径，Excel 对纯数字
+    按数值解析、本就不是注入面；若一并加前缀会把 `-5` 变成文本，破坏合计列可计算性。
+    """
+    if value is None:
+        text = ''
+    elif isinstance(value, str):
+        text = _sanitize_excel_value(value)
+    else:
+        text = str(value)
+    return html.escape(text)
 
 # 模板文件路径
 _PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..'))
