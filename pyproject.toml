@@ -50,4 +50,47 @@ max_file_size = 1600
 #   reason = "上游修复版未发布，已在该服务入口做输入校验（跟踪 INC-1234）"
 #   expires = "2026-12-31"
 # ------------------------------------------------------------
+# aiohttp 3.14.3：OSV 的 fixes 为空（截至 2026-10-21 上游未发布修复版本）。
+# 引用面：仅 tests/stress/** 与 tests/performance/bench_20k.py 的压测客户端，
+# 生产代码零 import（grep 证实）。到期复审：上游一发修复版就升级并删除豁免。
+[[tool.code-quality.pip-audit-ignores]]
+id = "CVE-2026-111063"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
+[[tool.code-quality.pip-audit-ignores]]
+id = "CVE-2026-111064"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
+[[tool.code-quality.pip-audit-ignores]]
+id = "CVE-2026-111065"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
+[[tool.code-quality.pip-audit-ignores]]
+id = "CVE-2026-111066"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
+[[tool.code-quality.pip-audit-ignores]]
+id = "CVE-2026-111748"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
+[[tool.code-quality.pip-audit-ignores]]
+id = "CVE-2026-111749"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
+[[tool.code-quality.pip-audit-ignores]]
+id = "CVE-2026-111750"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
+[[tool.code-quality.pip-audit-ignores]]
+id = "GHSA-2g87-pp6c-29x5"
+reason = "aiohttp 3.14.3 上游无修复版本；仅压测脚本使用，生产代码零 import"
+expires = "2027-01-18"
+
 pip_audit_max_days = 180
