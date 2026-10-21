@@ -11,7 +11,7 @@
         <ReportTabGroup :model-value="activeTab" @change="onTabChange" />
 
         <ReportFilterBar
-          v-model:filters="filters"
+          :filters="filters"
           :customer-options="customerOptions"
           :searched="searched"
           @search="doSearch"
