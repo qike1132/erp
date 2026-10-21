@@ -116,8 +116,13 @@ export interface ChangeRecord {
  * - T1（is_baseline=true）：返回 full_snapshot，change_summary=null
  * - T2+ 正常：返回 change_summary（预计算 diff），full_snapshot=null
  * - 降级（degraded=true，前一版本缺失）：返回 full_snapshot + degraded=true
+ *
+ * 必须用 WithField 而不是 WithItems：WithItems<T,K,E> === WithField<T,K,E[]>，
+ * 它把字段写成**非空**数组，正好抹掉上面这两条「其中一个恒为 null」的契约 ——
+ * 于是 `res.full_snapshot.map(...)` 类型检查通过、运行时对每个非基线版本抛 TypeError。
+ * 元素口径仍锁本地强类型（PartDetail / ChangeRecord），不落到生成层的全可选镜像。
  */
-export type VersionDetailResponse = WithItems<WithItems<Required<GenVersionDetailResponse>, 'full_snapshot', PartDetail>, 'change_summary', ChangeRecord>
+export type VersionDetailResponse = WithField<WithField<Required<GenVersionDetailResponse>, 'full_snapshot', PartDetail[] | null>, 'change_summary', ChangeRecord[] | null>
 
 // ==================== 变更日志 ====================
 
