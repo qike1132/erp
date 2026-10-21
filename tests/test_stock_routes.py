@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from fastapi_app.shared_models import InventoryLog, Order, StockIn, StockOut
+from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
 
 MARK = pytest.mark.integration
 
@@ -20,6 +20,12 @@ MARK = pytest.mark.integration
 # 已占 13 字符，tag 至多 7 字符。审计建议的 8 位 hex 会超列（StringDataRightTruncationError）。
 _PERF_RUN_TAG = uuid4().hex[:6]
 
+
+# F3-11 状态码契约（写路由精确断言的依据，改路由/请求模型时同步核对）：
+# - 写路由未声明 status_code → 成功恒 200（StockActionResponse，无 201）；
+# - 行不存在 → 端点显式 HTTPException(404)（与跨厂闸门同码，不给 id 枚举留 oracle）；
+# - 服务层业务校验 ValueError → db_transaction 默认映射 400；
+# - 请求模型必填/边界不满足 → RequestValidationError 处理器统一 422。
 
 # ============================================================
 # 入库路由测试
@@ -49,7 +55,7 @@ class TestStockInRoutes:
             "note": "测试入库",
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"入库创建应 200，实测 {resp.status_code}: {resp.text}"
 
         # 验证库存增加
         await async_db_session.refresh(test_product)
@@ -64,7 +70,7 @@ class TestStockInRoutes:
             "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert 400 <= resp.status_code < 500, f"缺少 product_id 应被 4xx 拒绝，实际 {resp.status_code}"
+        assert resp.status_code == 422, f"缺少 product_id 应由请求模型拒绝 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockin_create_nonexistent_product(self, async_client, auth_headers, test_customer):
@@ -76,7 +82,7 @@ class TestStockInRoutes:
             "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert 400 <= resp.status_code < 500, f"不存在的产品应被 4xx 拒绝，实际 {resp.status_code}"
+        assert resp.status_code == 400, f"产品不存在应由服务层校验拒绝 400，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockin_edit_get_success(self, async_client, auth_headers, test_stockin):
@@ -103,7 +109,7 @@ class TestStockInRoutes:
         resp = await async_client.put(
             f"/api/v1/stock/in/edit/{test_stockin.id}", headers=auth_headers, json=payload
         )
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"入库编辑应 200，实测 {resp.status_code}: {resp.text}"
 
         await async_db_session.refresh(test_stockin)
         assert test_stockin.quantity == new_quantity
@@ -138,7 +144,7 @@ class TestStockInRoutes:
         resp = await async_client.delete(
             f"/api/v1/stock/in/delete/{stockin_id}", headers=auth_headers
         )
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"入库删除应 200，实测 {resp.status_code}: {resp.text}"
 
         # 验证入库记录已删除
         result = await async_db_session.execute(
@@ -154,7 +160,7 @@ class TestStockInRoutes:
     async def test_stockin_delete_not_found(self, async_client, auth_headers):
         """测试删除不存在的入库记录"""
         resp = await async_client.delete("/api/v1/stock/in/delete/99999", headers=auth_headers)
-        assert resp.status_code in (404, 400)
+        assert resp.status_code == 404, f"删除不存在的入库记录应 404，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockin_delete_with_stockouts(self, async_client, auth_headers, async_db_session, test_stockin, test_product, test_customer):
@@ -174,9 +180,8 @@ class TestStockInRoutes:
         resp = await async_client.delete(
             f"/api/v1/stock/in/delete/{test_stockin.id}", headers=auth_headers
         )
-        assert resp.status_code in (200, 400, 409)
-        data = resp.json()
-        assert not data.get("success", True) or "error" in str(data).lower() or "无法" in str(data)
+        assert resp.status_code == 400, f"有出库关联的入库删除应 400，实测 {resp.status_code}: {resp.text}"
+        assert '出库关联' in resp.json()['detail'], f"应给出出库关联拒绝文案，实测 {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockin_edit_quantity_with_stockouts_rejected(self, async_client, auth_headers, async_db_session, test_customer):
@@ -274,38 +279,49 @@ class TestStockOutRoutes:
             "note": "测试出库",
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"出库创建应 200，实测 {resp.status_code}: {resp.text}"
 
         await async_db_session.refresh(test_product)
         assert test_product.current_stock == initial_stock - 20
 
     @pytest.mark.asyncio
-    async def test_stockout_create_insufficient_stock(self, async_client, auth_headers, async_db_session, test_product, test_customer, test_order):
-        """测试库存不足时出库（400，业务校验在服务层）"""
-        test_product.current_stock = 10
+    async def test_stockout_create_insufficient_stock(self, async_client, auth_headers, async_db_session, test_customer):
+        """测试库存结余不足时出库被服务层拒绝 400。
+
+        自建产品（同 Z09-R6 口径）：共享 test_product 的备货量会被同套件其它用例累加，
+        而「库存结余 / 订单余量 / 无订单」三道闸门的拒绝文案各不相同，命中哪道遂取决于
+        执行顺序——等于把测试顺序编进期望值。新产品无备货行，结余恒为 0，必命中第一道。
+        """
+        tag = uuid4().hex[:8]
+        product = Product(name=f"库存结余闸门产品·{tag}", current_stock=100, initial_stock=100)
+        async_db_session.add(product)
         await async_db_session.flush()
 
         payload = {
-            "product_id": test_product.id,
+            "product_id": product.id,
             "quantity": 100,
             "customer": test_customer.name,
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert resp.status_code == 400
-        data = resp.json()
-        assert not data.get("success", True) or "error" in str(data).lower() or "不足" in str(data)
+        assert resp.status_code == 400, f"库存结余不足应 400，实测 {resp.status_code}: {resp.text}"
+        assert '库存不足' in resp.json()['detail'], f"应给出库存结余拒绝文案，实测 {resp.text}"
 
     @pytest.mark.asyncio
-    async def test_stockout_create_nonexistent_product(self, async_client, auth_headers):
+    async def test_stockout_create_nonexistent_product(self, async_client, auth_headers, test_customer):
         """测试创建出库记录产品不存在"""
         payload = {
             "product_id": 99999,
             "quantity": 20,
+            "customer": test_customer.name,
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert 400 <= resp.status_code < 500, f"不存在的产品应被 4xx 拒绝，实际 {resp.status_code}"
+        # F3-11：载荷原本漏了必填 customer，请求在请求模型层就被 422 拒掉，
+        # 「产品不存在」这条路径从没被测到（旧断言 4xx 恰好放过）。补齐 customer
+        # 才真正走到 get_product_for_update 的存在性校验 → 400。
+        assert resp.status_code == 400, f"产品不存在出库应由服务层拒绝 400，实测 {resp.status_code}: {resp.text}"
+        assert '不存在' in resp.json()['detail'], f"应给出产品不存在拒绝文案，实测 {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockout_edit_get_success(self, async_client, auth_headers, test_stockout):
@@ -334,7 +350,7 @@ class TestStockOutRoutes:
         resp = await async_client.put(
             f"/api/v1/stock/out/edit/{test_stockout.id}", headers=auth_headers, json=payload
         )
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"出库编辑应 200，实测 {resp.status_code}: {resp.text}"
 
         await async_db_session.refresh(test_stockout)
         assert test_stockout.quantity == new_quantity
@@ -352,7 +368,8 @@ class TestStockOutRoutes:
         resp = await async_client.put(
             f"/api/v1/stock/out/edit/{test_stockout.id}", headers=auth_headers, json=payload
         )
-        assert resp.status_code in (200, 400)
+        assert resp.status_code == 400, f"库存不足时改大出库数量应 400，实测 {resp.status_code}: {resp.text}"
+        assert '库存不足' in resp.json()['detail'], f"应给出库存不足拒绝文案，实测 {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockout_delete_success(self, async_client, auth_headers, async_db_session, test_stockout, test_product):
@@ -364,7 +381,7 @@ class TestStockOutRoutes:
         resp = await async_client.delete(
             f"/api/v1/stock/out/delete/{stockout_id}", headers=auth_headers
         )
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"出库删除应 200，实测 {resp.status_code}: {resp.text}"
 
         result = await async_db_session.execute(
             select(StockOut).where(StockOut.id == stockout_id)
@@ -378,7 +395,7 @@ class TestStockOutRoutes:
     async def test_stockout_delete_not_found(self, async_client, auth_headers):
         """测试删除不存在的出库记录"""
         resp = await async_client.delete("/api/v1/stock/out/delete/99999", headers=auth_headers)
-        assert resp.status_code in (404, 400)
+        assert resp.status_code == 404, f"删除不存在的出库记录应 404，实测 {resp.status_code}: {resp.text}"
 
 
 # ============================================================
@@ -463,7 +480,7 @@ class TestStockBusinessLogic:
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 201), resp.text
+        assert resp.status_code == 200, f"出库创建应 200，实测 {resp.status_code}: {resp.text}"
 
         result = await async_db_session.execute(
             select(InventoryLog)
@@ -516,7 +533,7 @@ class TestStockEdgeCases:
             "stockin_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert 400 <= resp.status_code < 500, f"零数量入库应被 4xx 拒绝，实际 {resp.status_code}"
+        assert resp.status_code == 422, f"零数量入库应由请求模型拒绝 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockout_zero_quantity(self, async_client, auth_headers, test_product):
@@ -527,7 +544,7 @@ class TestStockEdgeCases:
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert 400 <= resp.status_code < 500, f"零数量出库应被 4xx 拒绝，实际 {resp.status_code}"
+        assert resp.status_code == 422, f"零数量出库应由请求模型拒绝 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockout_exact_stock(self, async_client, auth_headers, async_db_session, test_product, test_customer):
@@ -555,7 +572,7 @@ class TestStockEdgeCases:
             "stockout_date": datetime.now(UTC).strftime("%Y-%m-%d"),
         }
         resp = await async_client.post("/api/v1/stock/out/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"按订单余量足额出库应 200，实测 {resp.status_code}: {resp.text}"
 
         await async_db_session.refresh(test_product)
         assert test_product.current_stock == 0
@@ -570,7 +587,7 @@ class TestStockEdgeCases:
             "stockin_date": "2030-12-31",
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 201, 400)
+        assert resp.status_code == 200, f"未来日期入库应 200（无日期上限守卫），实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_stockin_with_past_date(self, async_client, auth_headers, test_product, test_customer):
@@ -582,7 +599,7 @@ class TestStockEdgeCases:
             "stockin_date": "2020-01-01",
         }
         resp = await async_client.post("/api/v1/stock/in/create", headers=auth_headers, json=payload)
-        assert resp.status_code in (200, 201)
+        assert resp.status_code == 200, f"过去日期入库应 200，实测 {resp.status_code}: {resp.text}"
 
 
 # ============================================================

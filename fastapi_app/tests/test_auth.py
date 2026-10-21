@@ -7,7 +7,7 @@ import pytest
 class TestAuthEndpoints:
     @pytest.mark.asyncio
     async def test_login_invalid_credentials(self, client, mock_db):
-        """POST /api/v1/auth/login 使用错误凭证应返回 401 或 403"""
+        """POST /api/v1/auth/login 使用错误凭证应返回 401（用户不存在即拒绝）。"""
         # mock_db.execute 返回空结果，模拟用户不存在
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -17,7 +17,7 @@ class TestAuthEndpoints:
             "username": "wronguser",
             "password": "wrongpass",
         })
-        assert response.status_code in (401, 403)
+        assert response.status_code == 401, f"错误凭证应 401，实测 {response.status_code}: {response.text}"
 
     @pytest.mark.asyncio
     async def test_check_unauthenticated(self, client):

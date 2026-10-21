@@ -21,7 +21,7 @@ class TestHealthEndpoints:
     @pytest.mark.asyncio
     async def test_metrics(self, client):
         r = await client.get("/metrics")
-        assert r.status_code in (200, 404)
+        assert r.status_code == 200, f"/metrics 由 register_health_routes 注册，非生产应 200，实测 {r.status_code}: {r.text}"
 
 
 class TestReadOnlyEndpoints:
@@ -50,7 +50,7 @@ class TestCSRFEnforcement:
     @pytest.mark.asyncio
     async def test_csrf_cookie_set(self, client):
         response = await client.get("/")
-        assert response.status_code in (200, 303)
+        assert response.status_code == 200, f"根路径直接返回 JSON 应 200，实测 {response.status_code}: {response.text}"
         cookie = client.cookies.get("fastapi_csrf_token")
         assert cookie is not None and len(cookie) > 0
 

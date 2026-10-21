@@ -624,7 +624,7 @@ class TestPurchaseCenterEndpoints:
     @pytest.mark.asyncio
     async def test_cache_clear_removed(self, client):
         resp = await client.post("/api/v1/purchase-center/cache/clear")
-        assert resp.status_code in (403, 404)
+        assert resp.status_code == 404, f"采购中心前缀下无 cache/clear 路由应 404，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_get_search_suggestions_empty(self, client):
@@ -709,7 +709,7 @@ class TestPurchaseCenterEndpoints:
     @pytest.mark.asyncio
     async def test_save_saved_query_missing_name(self, client):
         resp = await client.post("/api/v1/purchase-center/saved-queries", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 name/conditions 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_delete_saved_query(self, client):
@@ -737,12 +737,12 @@ class TestPurchaseCenterEndpoints:
     @pytest.mark.asyncio
     async def test_create_purchase_order_no_data(self, client):
         resp = await client.post("/api/v1/purchase-center/orders", json=None)
-        assert resp.status_code in [400, 422]
+        assert resp.status_code == 422, f"无请求体应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_one_click_generate_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/one-click-generate", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 composite_ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_one_click_generate_works_normally(self, client):
@@ -828,27 +828,27 @@ class TestPurchaseCenterEndpoints:
     @pytest.mark.asyncio
     async def test_complete_order_missing_id(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/complete", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 order_id 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_batch_complete_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/batch-complete", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_batch_print_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/batch-print", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_factory_summary_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/factory-summary", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_factory_summary_save_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/factory-summary/save", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"无可保存内容应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_factory_summary_save_empty_edits_with_spare_rate_ok(self, client):
@@ -909,17 +909,17 @@ class TestPurchaseCenterEndpoints:
     @pytest.mark.asyncio
     async def test_supplier_summary_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/supplier-summary", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_supplier_summary_by_vendor_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/supplier-summary-by-vendor", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_summary_print_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/summary-print", json={})
-        assert resp.status_code in (400, 422)
+        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_get_purchase_orders_default(self, client):
@@ -1173,7 +1173,8 @@ class TestBomCopyAndBatchDelete:
         with patch('fastapi_app.services.purchase_center_service.copy_bom_to_product') as mock_svc:
             mock_svc.side_effect = ValueError('请选择源产品')
             resp = await client.post("/api/v1/purchase-center/products/2/copy-bom", json={})
-            assert resp.status_code in (400, 422)
+            assert resp.status_code == 422, f"缺 source_product_id 应由请求模型拒绝 422，实测 {resp.status_code}: {resp.text}"
+            mock_svc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_copy_bom_target_has_existing_bom(self, client, mock_db):
@@ -1221,7 +1222,8 @@ class TestBomCopyAndBatchDelete:
         with patch('fastapi_app.services.purchase_center_service.batch_delete_purchase_orders') as mock_svc:
             mock_svc.side_effect = ValueError('请选择要删除的订单')
             resp = await client.post("/api/v1/purchase-center/orders/batch-delete", json={'order_ids': []})
-            assert resp.status_code in (400, 422)
+            assert resp.status_code == 422, f"order_ids 空列表应由请求模型拒绝 422，实测 {resp.status_code}: {resp.text}"
+            mock_svc.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_batch_delete_orders_not_found(self, client, mock_db):

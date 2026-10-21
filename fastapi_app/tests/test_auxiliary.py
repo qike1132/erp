@@ -137,10 +137,10 @@ class TestAuxiliaryEndpoints:
     async def test_delete_stockout_api(self, client, mock_db):
         with patch('fastapi_app.services.stock_service.delete_stockout', new_callable=AsyncMock):
             response = await client.delete("/api/v1/aux/stockout/1")
-            assert response.status_code in (200, 400)
+            assert response.status_code == 200, f"删除出库应 200，实测 {response.status_code}: {response.text}"
 
     @pytest.mark.asyncio
     async def test_delete_customer_api(self, client, mock_db):
         with patch('fastapi_app.services.customer_service.delete_customer', new_callable=AsyncMock):
             response = await client.delete("/api/v1/aux/customer/1")
-            assert response.status_code in (200, 400)
+            assert response.status_code == 200, f"删除客户应 200，实测 {response.status_code}: {response.text}"

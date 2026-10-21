@@ -59,9 +59,15 @@ async def test_upload_without_extension_rejected(client):
 
 @pytest.mark.asyncio
 async def test_upload_empty_filename_rejected(client):
-    """空文件名会被拒（400 业务校验 / 422 参数校验，均表示不接受）"""
+    """空文件名会被拒（422）。
+
+    httpx 对 filename='' 的分片不写 filename 参数，multipart 把它解析成普通字符串字段，
+    请求模型 `Expected UploadFile, received str` 先拒 → 处理器的 `if not file.filename`
+    对这条输入不可达（旧断言写成 400/422 两可，正是没查清是哪一层在拦）。
+    """
     resp = await _upload(client, '', PNG_BYTES)
-    assert resp.status_code in (400, 422)
+    assert resp.status_code == 422, f"空文件名应由请求模型拒绝 422，实测 {resp.status_code}: {resp.text}"
+    assert 'Expected UploadFile' in resp.json()['detail'], f"应是 UploadFile 字段类型校验拦下，实测 {resp.text}"
 
 
 @pytest.mark.asyncio
