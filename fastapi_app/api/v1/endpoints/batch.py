@@ -155,9 +155,13 @@ async def batch_import_stockins(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
+    # 工厂闸门（审查 H1，P0-2 补漏）：厂绑定用户经 Excel 导入写他厂产品
+    # 的库存此前零校验（单行/aux 批量端点均已闸，导入链漏网）。scoped 为
+    # 空表示超管/未绑定厂，服务层全部放行。
+    scoped_factory = current_user.factory if (current_user.factory and not current_user.is_super) else None
     return await run_guarded_import(
         db, file, TYPE_STOCKINS, current_user,
-        lambda f: import_stockins_service(db, f),
+        lambda f: import_stockins_service(db, f, scoped_factory=scoped_factory),
     )
 
 
@@ -177,9 +181,11 @@ async def batch_import_stockouts(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
+    # 工厂闸门（审查 H1）：与 /import-stockins 同口径
+    scoped_factory = current_user.factory if (current_user.factory and not current_user.is_super) else None
     return await run_guarded_import(
         db, file, TYPE_STOCKOUTS, current_user,
-        lambda f: import_stockouts_service(db, f),
+        lambda f: import_stockouts_service(db, f, scoped_factory=scoped_factory),
     )
 
 
@@ -253,7 +259,11 @@ async def batch_import_comprehensive(
     Returns:
         ComprehensiveImportResult: 包含各类型导入数量和错误列表的响应。
     """
+    # 工厂闸门（审查 H1）：仅透传给备货/出货 Sheet（订单/产品 Sheet 语义待业务确认）
+    scoped_factory = current_user.factory if (current_user.factory and not current_user.is_super) else None
     return await run_guarded_import(
         db, file, TYPE_COMPREHENSIVE, current_user,
-        lambda f: import_comprehensive_service(db, f, uploader_id=current_user.id),
+        lambda f: import_comprehensive_service(
+            db, f, uploader_id=current_user.id, scoped_factory=scoped_factory,
+        ),
     )

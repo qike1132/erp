@@ -442,32 +442,29 @@ class BackupPolicyService:
         return True
 
     async def _apply_storage_policy(self, policy: dict[str, Any]) -> dict[str, Any]:
-        """应用存储策略"""
-        try:
-            storage = policy.get('storage', {})
-            sync_to_secondary = storage.get('sync_to_secondary', False)
-            secondary_location = storage.get('secondary_location', '')
+        """应用存储策略。
 
-            if not sync_to_secondary or not secondary_location:
-                return {
-                    'applied': False,
-                    'message': '存储同步未启用或未配置二级存储位置'
-                }
+        Z05-R22：二级存储同步从未实现。旧代码在此直接返回「应用成功」，
+        用户以为备份已复制到二级位置。显式 NotImplementedError **上抛**，
+        由 ``apply_backup_policy`` 的异常分支报失败并发告警——此前本函数
+        自带的 ``except Exception`` 会把异常就地吞成 ``applied: False``，
+        外层照常返回 ``success: True``，告警分支永远到不了（合并前审查
+        H2：假成功换了个位置继续存在）。
+        默认未启用，不影响现行清理链路。
+        """
+        storage = policy.get('storage', {})
+        sync_to_secondary = storage.get('sync_to_secondary', False)
+        secondary_location = storage.get('secondary_location', '')
 
-            # Z05-R22：二级存储同步从未实现。旧代码在此直接返回「应用成功」，
-            # 用户以为备份已复制到二级位置。显式失败，避免假成功（默认未启用，
-            # 不影响现行清理链路）。
-            raise NotImplementedError(
-                '二级存储同步尚未实现，请关闭 storage.sync_to_secondary'
-            )
-
-        except Exception as e:  # defensive: storage policy is currently a no-op placeholder
-            logger.error(f"应用存储策略失败: {e}")
+        if not sync_to_secondary or not secondary_location:
             return {
                 'applied': False,
-                'error': str(e),
-                'message': f'应用存储策略失败: {e!s}'
+                'message': '存储同步未启用或未配置二级存储位置'
             }
+
+        raise NotImplementedError(
+            '二级存储同步尚未实现，请关闭 storage.sync_to_secondary'
+        )
 
 # 全局备份策略服务实例
 policy_service = BackupPolicyService()

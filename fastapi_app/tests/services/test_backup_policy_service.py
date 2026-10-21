@@ -325,3 +325,72 @@ class TestBackupPolicyService:
             record, 'time', retention, keep_manual=False, keep_failed=False
         )
         assert keep is True  # 没有创建时间，默认保留
+
+    @pytest.mark.asyncio
+    async def test_storage_sync_enabled_fails_loudly_and_alerts(self, policy_service):
+        """合并前审查 H2：开启二级存储同步必须让策略应用**报失败并发告警**。
+
+        此前 `_apply_storage_policy` 抛出的 NotImplementedError 被它自己函数体
+        的 ``except Exception`` 就地吞成 ``applied: False``，外层照常返回
+        ``success: True``，``send_alert`` 分支永远到不了——用户以为备份已同步
+        到二级存储，实际只有本机一份。修复后异常穿透到 ``apply_backup_policy``
+        的异常分支：``success=False`` + ``policy_applied=False`` + 告警。
+        """
+        from unittest.mock import AsyncMock
+
+        # 直接打告警单例（orchestration 包级重导出会把模块名遮蔽成类，不能
+        # 经 policy_service 模块对象取 alert_service）
+        from fastapi_app.services.backup.metrics.alert_service import alert_service
+
+        with patch.object(policy_service, 'get_current_policy') as mock_get_policy, \
+             patch.object(policy_service, '_perform_policy_checks') as mock_checks, \
+             patch.object(policy_service, '_apply_retention_policy') as mock_retention, \
+             patch.object(alert_service, 'send_alert', new=AsyncMock()) as mock_alert:
+
+            mock_get_policy.return_value = {
+                'policy_name': 'sync_enabled_policy',
+                'full_backup': {'enabled': True},
+                # 不 mock _apply_storage_policy：走真实现，验证异常真的穿透
+                'storage': {'sync_to_secondary': True, 'secondary_location': '/mnt/backup2'},
+            }
+            mock_checks.return_value = {
+                'disk_space': {'passed': True, 'message': ''},
+                'backup_location': {'passed': True, 'message': ''},
+                'encryption_key': {'passed': True, 'message': ''},
+                'schedule_validity': {'passed': True, 'message': ''},
+            }
+            mock_retention.return_value = {'applied': True, 'message': 'ok'}
+
+            result = await policy_service.apply_backup_policy()
+
+            assert result['success'] is False
+            assert result['policy_applied'] is False
+            assert '二级存储' in result['message'] or 'NotImplementedError' in str(result.get('error', ''))
+            mock_alert.assert_awaited_once()
+            assert mock_alert.await_args.kwargs.get('severity') == 'error'
+
+    @pytest.mark.asyncio
+    async def test_storage_sync_disabled_stays_noop_success(self, policy_service):
+        """对照：未启用二级存储同步时，策略应用仍应 success=True（不受 H2 修复影响）。"""
+        with patch.object(policy_service, 'get_current_policy') as mock_get_policy, \
+             patch.object(policy_service, '_perform_policy_checks') as mock_checks, \
+             patch.object(policy_service, '_apply_retention_policy') as mock_retention:
+
+            mock_get_policy.return_value = {
+                'policy_name': 'no_sync_policy',
+                'full_backup': {'enabled': True},
+                'storage': {'sync_to_secondary': False},
+            }
+            mock_checks.return_value = {
+                'disk_space': {'passed': True, 'message': ''},
+                'backup_location': {'passed': True, 'message': ''},
+                'encryption_key': {'passed': True, 'message': ''},
+                'schedule_validity': {'passed': True, 'message': ''},
+            }
+            mock_retention.return_value = {'applied': True, 'message': 'ok'}
+
+            result = await policy_service.apply_backup_policy()
+
+            assert result['success'] is True
+            assert result['policy_applied'] is True
+            assert result['storage_result']['applied'] is False  # 未启用 = 合法 no-op

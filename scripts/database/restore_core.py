@@ -285,7 +285,12 @@ def restore_postgres(
 
     stderr_text = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
     error_lines = _error_lines(stderr_text)
-    if result.returncode != 0 or error_lines:
+    # 失败判定只看退出码（合并前审查 H3）：ON_ERROR_STOP=1 下真错误必然令
+    # psql 非零退出；而退出码 0 时 stderr 里的 ERROR 行几乎都是非致命噪音
+    # （`must be owner of`、`role ... does not exist`、扩展/权限类）。此前
+    # 「有 ERROR 行即判失败」会把恢复成功报成失败并提示回滚，事故现场极易
+    # 诱导运维对一个好库做破坏性重放。
+    if result.returncode != 0:
         detail = error_lines[0].strip() if error_lines else stderr_text.strip()[:200]
         for line in error_lines[1:10]:
             log(f'    {line.strip()}')
@@ -296,6 +301,9 @@ def restore_postgres(
                     f'可用恢复前备份回滚: {pre_backup}',
             pre_backup=pre_backup,
         )
+    if error_lines:
+        for line in error_lines[:10]:
+            log(f'  [警告] stderr 含非致命错误行（已忽略）: {line.strip()}')
 
     # 落地校验：退出码 0 不代表数据真的进去了（dump 本身可能是空的）
     table_count = count_public_tables(config)

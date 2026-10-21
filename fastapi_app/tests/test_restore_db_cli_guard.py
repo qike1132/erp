@@ -361,3 +361,56 @@ def test_db_manager_restore_mysql_aborts_when_pre_backup_fails(monkeypatch):
 
     assert ok is False
     assert '已中止恢复' in message
+
+
+# ---------------------------------------------------------------------------
+# ② 合并前审查 H3：恢复成功不得被 stderr 噪音误报成失败
+# ---------------------------------------------------------------------------
+
+
+def test_restore_success_with_noisy_stderr_is_not_reported_failed(core, monkeypatch):
+    """psql 退出码 0 + stderr 含非致命 ERROR 行（must be owner / role 不存在）
+    → 恢复**成功**，不得 ok=False 诱导运维对好库重放。
+
+    ON_ERROR_STOP=1 下真错误必然非零退出，故失败判定只看 returncode；
+    ERROR 噪音行降级为日志告警。
+    """
+    noisy_stderr = (
+        b'psql: WARNING: there is already a transaction in progress\n'
+        b'ERROR: must be owner of table public.foo\n'
+        b'ERROR: role "app_rw" does not exist\n'
+    )
+    monkeypatch.setattr(core, 'create_pre_restore_backup', lambda *a, **k: Path('pre.dump'))
+    monkeypatch.setattr(core, 'terminate_connections', lambda *a, **k: None)
+    monkeypatch.setattr(core, 'drop_and_recreate_db', lambda *a, **k: None)
+    monkeypatch.setattr(
+        core, '_psql_restore',
+        lambda *a, **k: _completed(['psql'], 0, b'', noisy_stderr),
+    )
+    monkeypatch.setattr(core, 'count_public_tables', lambda *a, **k: 42)
+
+    logs: list[str] = []
+    outcome = core.restore_postgres(sql_bytes=b'SELECT 1;', require_consent=False, log=logs.append)
+
+    assert outcome.ok is True
+    assert outcome.table_count == 42
+    # 噪音行以警告形式留痕，方便运维排查，但不改变结论
+    assert any('[警告]' in line and 'must be owner' in line for line in logs)
+
+
+def test_restore_nonzero_exit_still_reports_failed(core, monkeypatch):
+    """对照：退出码非 0（真错误）必须维持 ok=False——防止把 H3 修成放水。"""
+    monkeypatch.setattr(core, 'create_pre_restore_backup', lambda *a, **k: Path('pre.dump'))
+    monkeypatch.setattr(core, 'terminate_connections', lambda *a, **k: None)
+    monkeypatch.setattr(core, 'drop_and_recreate_db', lambda *a, **k: None)
+    monkeypatch.setattr(
+        core, '_psql_restore',
+        lambda *a, **k: _completed(['psql'], 1, b'', b'ERROR: syntax error at or near "xxx"'),
+    )
+    monkeypatch.setattr(core, 'count_public_tables', lambda *a, **k: 0)
+
+    outcome = core.restore_postgres(sql_bytes=b'bad', require_consent=False)
+
+    assert outcome.ok is False
+    assert '恢复失败' in outcome.message
+    assert '退出码=1' in outcome.message

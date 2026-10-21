@@ -38,6 +38,7 @@ from fastapi_app.services.batch_import_core import (
     _import_idem_key,
     _parse_product_price,
     _resolve_import_customer_id,
+    _row_factory_rejected,
     _row_failure_message,
 )
 from fastapi_app.services.inventory_service import calculate_available_shipment_quantity
@@ -278,6 +279,7 @@ async def _process_comprehensive_sheet(
     data_list: list, results: ComprehensiveImportResult,
     cell_images: dict[str, bytes] | None = None,
     uploader_id: int | None = None,
+    scoped_factory: str | None = None,
 ) -> None:
     """处理综合导入中的单个 Sheet。
 
@@ -289,6 +291,7 @@ async def _process_comprehensive_sheet(
         results: 综合导入结果对象，原地更新。
         cell_images: 工作簿内的单元格图片（图片 ID → 字节），仅产品 Sheet 使用。
         uploader_id: 图片落库时登记的上传人。
+        scoped_factory: 厂绑定用户的工厂闸门（H1），仅透传给备货/出货 Sheet。
     """
     entry = _SHEET_IMPORTERS.get(sheet_type)
     if entry is None:
@@ -302,6 +305,7 @@ async def _process_comprehensive_sheet(
             # 四种 Sheet 的导入函数现在统一返回 (计数, 行级消息列表)。
             count, messages = await _call_sheet_importer(
                 importer, db, data_list, cell_images, uploader_id,
+                scoped_factory=scoped_factory,
             )
         results.imported[count_key] += count
         if messages:
@@ -317,14 +321,20 @@ async def _process_comprehensive_sheet(
 async def _call_sheet_importer(
     importer, db: AsyncSession, data_list: list,
     cell_images: dict[str, bytes] | None, uploader_id: int | None,
+    *, scoped_factory: str | None = None,
 ) -> tuple[int, list]:
     """调用 Sheet 导入函数。
 
     只有产品导入接收单元格图片与上传人（其余 Sheet 无图片列），故在此分派，
-    而不是让所有导入函数都背上一组用不到的参数。
+    而不是让所有导入函数都背上一组用不到的参数。``scoped_factory`` 只给
+    备货/出货导入（H1 工厂闸门）；订单/产品导入暂不接闸门（订单域工厂归属
+    经产品推导、产品 Sheet 本身携带「工厂」列，语义待业务确认，见审查报告
+    H1 跟进项）。
     """
     if importer is import_products_from_data:
         return await importer(db, data_list, cell_images=cell_images, uploader_id=uploader_id)
+    if scoped_factory and importer in (import_stockins_from_data, import_stockouts_from_data):
+        return await importer(db, data_list, scoped_factory=scoped_factory)
     return await importer(db, data_list)
 
 
@@ -583,8 +593,15 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
-    """批量导入备货 - 支持统一导入模板（骨架见 :func:`_run_sheet_rows`）。"""
+async def import_stockins_service(
+    db: AsyncSession, file: ExcelUpload, *, scoped_factory: str | None = None,
+) -> BatchImportResult:
+    """批量导入备货 - 支持统一导入模板（骨架见 :func:`_run_sheet_rows`）。
+
+    Args:
+        scoped_factory: 厂绑定用户的工厂闸门（H1）：非空时他厂产品的行
+            按行拒绝，其余行正常导入。由端点传入。
+    """
     from fastapi_app.services.batch_service import get_all_products
 
     if (file_err := _validate_xlsx_file(file)):
@@ -598,6 +615,8 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
         all_products = await get_all_products(db)
         product_map = {prod.name.lower().strip(): prod for prod in all_products}
         product_map.update({prod.barcode: prod for prod in all_products if prod.barcode})
+        # 工厂闸门（H1）：按产品 id 建 factory 映射，行级判定用
+        factory_by_id = {prod.id: prod.factory for prod in all_products}
         # 客户必须在客户主数据中（校验经 _reject_unknown_customer，与 core 路径同口径）
         customer_names = await _pre_load_customer_names(db)
 
@@ -613,6 +632,9 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
             # 客户主数据校验（与 core 的 _resolve_row_identity 同口径）
             if (cust_err := _reject_unknown_customer(customer, customer_names)) is not None:
                 return False, cust_err
+            # 工厂闸门（H1）：厂绑定用户不能借导入给他厂产品入仓
+            if _row_factory_rejected(scoped_factory, factory_by_id.get(product_id)):
+                return False, '产品不在你的工厂范围，已拒绝该条'
             stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
             stockin_no = await generate_stockin_number(db)
             stockin = StockIn(
@@ -642,8 +664,15 @@ async def import_stockins_service(db: AsyncSession, file: ExcelUpload) -> BatchI
         return BatchImportResult(success=False, message='导入失败，请稍后重试')
 
 
-async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> BatchImportResult:
-    """批量导入出库（骨架见 :func:`_run_sheet_rows`）。"""
+async def import_stockouts_service(
+    db: AsyncSession, file: ExcelUpload, *, scoped_factory: str | None = None,
+) -> BatchImportResult:
+    """批量导入出库（骨架见 :func:`_run_sheet_rows`）。
+
+    Args:
+        scoped_factory: 厂绑定用户的工厂闸门（H1）：非空时他厂产品的行
+            按行拒绝，其余行正常导入。由端点传入。
+    """
     from fastapi_app.services.batch_service import get_product_by_identifier
 
     if (file_err := _validate_xlsx_file(file)):
@@ -669,6 +698,9 @@ async def import_stockouts_service(db: AsyncSession, file: ExcelUpload) -> Batch
             product = await get_product_by_identifier(db, product_identifier)
             if not product:
                 return False, f'产品 {product_identifier} 不存在'
+            # 工厂闸门（H1）：厂绑定用户不能借导入给他厂产品出仓
+            if _row_factory_rejected(scoped_factory, product.factory):
+                return False, '产品不在你的工厂范围，已拒绝该条'
             product = await get_product_for_update(db, product.id)
             try:
                 qty = int(quantity)
@@ -924,6 +956,7 @@ async def import_products_service(
 
 async def import_comprehensive_service(
     db: AsyncSession, file: ExcelUpload, *, uploader_id: int | None = None,
+    scoped_factory: str | None = None,
 ) -> ComprehensiveImportResult:
     """综合批量导入 - 支持4个Sheet自动识别。
 
@@ -935,6 +968,8 @@ async def import_comprehensive_service(
         file: 上传的 Excel 文件（.xlsx 格式）。
         db: 异步数据库会话（读写主库）。
         uploader_id: 图片落库时登记的上传人（由端点传入当前用户 id）。
+        scoped_factory: 厂绑定用户的工厂闸门（H1）：非空时备货/出货 Sheet
+            中他厂产品的行按行拒绝。由端点传入。
 
     Returns:
         ComprehensiveImportResult: 包含各类型导入数量和错误列表的响应。
@@ -970,6 +1005,7 @@ async def import_comprehensive_service(
                 await _process_comprehensive_sheet(
                     db, sheet_type, sheet_name, data_list, results,
                     cell_images=cell_images, uploader_id=uploader_id,
+                    scoped_factory=scoped_factory,
                 )
             results.message = '导入完成！'
         # 提交交给请求级事务（get_async_db）：全部 Sheet 在同一事务内原子落库，

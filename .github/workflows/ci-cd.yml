@@ -262,6 +262,9 @@ jobs:
     # 依赖 checkout 的 fetch-depth: 0（merge-base 需要完整历史）。
     - name: Review packet (advisory, PR only)
       if: github.event_name == 'pull_request'
+      # advisory 步骤自身故障（base ref 解析失败等 PacketError）不得让 lint job 变红：
+      # 无缘无故的红灯会诱导 --no-verify / admin merge，比少一道门禁更危险（审查 M9）。
+      continue-on-error: true
       run: |
         python scripts/review_packet.py \
           --base "origin/${{ github.base_ref }}" \

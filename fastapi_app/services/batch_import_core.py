@@ -96,6 +96,24 @@ def _import_idem_key(prefix: str, customer: str, product_id: int, qty: int, when
     return f'{prefix}:{str(customer).strip()}|{int(product_id)}|{int(qty)}|{day.isoformat()}'
 
 
+def _row_factory_rejected(scoped_factory: str | None, row_factory: str | None) -> bool:
+    """厂绑定用户的导入行工厂闸门（合并前审查 H1，P0-2 补漏）。
+
+    与 ``shared/factory_scope.assert_product_factory_scoped`` 同口径：
+    - 未绑定厂的用户/超管（``scoped_factory`` 为空）→ 全部放行；
+    - 产品未分配工厂（factory 为 NULL/空串）→ 放行（与「读放行写拦截」
+      口径一致，product_service.create_product 落库写 ``factory or ''``）；
+    - 产品属于他厂 → 拒绝该行。
+
+    为什么不用 ``assert_product_factory_scoped``：那是「整请求 404」语义，
+    适合按 id 直取的单行端点；导入是逐行处理，跨厂行应按行拒绝并进错误
+    清单，其余合法行正常导入（与 a5dd07b0 批量端点的逐项拒绝模式对齐）。
+    """
+    if not scoped_factory:
+        return False
+    return bool(row_factory) and row_factory != scoped_factory
+
+
 def _row_failure_message(exc: Exception, idx: int | None = None) -> str:
     """行级失败的人话消息。
 
@@ -898,11 +916,16 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
     return count, debug_messages
 
 
-async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None) -> tuple[int, list]:
+async def import_stockins_from_data(
+    db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None,
+    scoped_factory: str | None = None,
+) -> tuple[int, list]:
     """从数据列表导入备货
 
     Args:
         deps: 可注入的依赖包（默认解析模块级实现）。
+        scoped_factory: 厂绑定用户的工厂闸门（非空时他厂产品的行被拒绝，
+            见 :func:`_row_factory_rejected`；由综合导入/端点传入）。
     """
     deps = deps or default_import_deps()
 
@@ -925,6 +948,12 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
         if product is None or customer is None:
             return False
         product_id = product.id
+
+        # 工厂闸门（H1）：厂绑定用户不能借导入给他厂产品入仓
+        if _row_factory_rejected(scoped_factory, product.factory):
+            debug_messages.append(
+                f'行{idx}: 产品不在你的工厂范围，已拒绝该行（{product_name}）')
+            return False
 
         qty = _parse_positive_quantity(
             quantity, idx, label='备货', product_name=product_name, customer=customer)
@@ -985,11 +1014,45 @@ async def import_stockins_from_data(db: AsyncSession, data_list: list, *, deps: 
     )
 
 
-async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None) -> tuple[int, list]:
+async def _allocate_and_write_stockout_rows(
+    db: AsyncSession, deps: ImportDeps, *, product, customer: str, qty: int,
+    stockout_date: datetime, note: str, shipment_info: dict,
+) -> None:
+    """按订单可用量分配出货并逐条写 StockOut（自 import_stockouts_from_data 抽出）。
+
+    拆出本辅助只为满足函数长度门禁（阈值 80 行），行为与原内联循环逐字一致：
+    依次吃掉每个订单的可用量，直到本次出货数量耗尽。
+    """
+    remaining_qty = qty
+    for order_detail in shipment_info['orders']:
+        if remaining_qty <= 0:
+            break
+        if order_detail['available'] > 0:
+            ship_qty = min(remaining_qty, order_detail['available'])
+            stockout_no = await deps.generate_stockout_number(db)
+            stockout = StockOut(
+                stockout_no=stockout_no,
+                stockout_date=stockout_date,
+                product_id=product.id,
+                quantity=ship_qty,
+                customer=customer,
+                order_id=order_detail['order_id'],
+                note=str(note).strip() if note else ''
+            )
+            db.add(stockout)
+            remaining_qty -= ship_qty
+
+
+async def import_stockouts_from_data(
+    db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None,
+    scoped_factory: str | None = None,
+) -> tuple[int, list]:
     """从数据列表导入出货
 
     Args:
         deps: 可注入的依赖包（默认解析模块级实现）。
+        scoped_factory: 厂绑定用户的工厂闸门（非空时他厂产品的行被拒绝，
+            见 :func:`_row_factory_rejected`；由综合导入/端点传入）。
     """
     deps = deps or default_import_deps()
 
@@ -1019,6 +1082,12 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps:
         if not product:
             return False
 
+        # 工厂闸门（H1）：厂绑定用户不能借导入给他厂产品出仓
+        if _row_factory_rejected(scoped_factory, product.factory):
+            debug_messages.append(
+                f'行{idx}: 产品不在你的工厂范围，已拒绝该行（{product_identifier}）')
+            return False
+
         try:
             qty = int(quantity)
             if qty <= 0:
@@ -1042,24 +1111,10 @@ async def import_stockouts_from_data(db: AsyncSession, data_list: list, *, deps:
 
         stockout_date = parse_date_value(stockout_date_val) or datetime.now(UTC)  # aware UTC：stockout_date 列为 timestamptz
 
-        remaining_qty = qty
-        for order_detail in shipment_info['orders']:
-            if remaining_qty <= 0:
-                break
-            if order_detail['available'] > 0:
-                ship_qty = min(remaining_qty, order_detail['available'])
-                stockout_no = await deps.generate_stockout_number(db)
-                stockout = StockOut(
-                    stockout_no=stockout_no,
-                    stockout_date=stockout_date,
-                    product_id=product.id,
-                    quantity=ship_qty,
-                    customer=customer,
-                    order_id=order_detail['order_id'],
-                    note=str(note).strip() if note else ''
-                )
-                db.add(stockout)
-                remaining_qty -= ship_qty
+        await _allocate_and_write_stockout_rows(
+            db, deps, product=product, customer=customer, qty=qty,
+            stockout_date=stockout_date, note=note, shipment_info=shipment_info,
+        )
 
         # 使用悲观锁更新产品库存，防止并发修改
         locked_product = await deps.get_product_for_update(db, product.id)
