@@ -196,7 +196,7 @@ packaging==26.3
     #   opentelemetry-instrumentation-sqlalchemy
     #   pytest
     #   pytest-sugar
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements/base.txt
 pluggy==1.7.0
     # via

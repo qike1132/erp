@@ -194,7 +194,7 @@ packaging==26.3
     #   onnxruntime
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-sqlalchemy
-pillow==12.3.0
+pillow==13.0.0
     # via
     #   -r requirements/base.txt
     #   rapid-table
