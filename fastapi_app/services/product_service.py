@@ -486,6 +486,9 @@ async def delete_product(db: AsyncSession, product_id: int) -> None:
     # 逐列 coalesce：已有快照（写入时带出的真实值）优先，缺哪列补哪列。
     # 条码**只在此处快照**：产品存在时 JOIN 就能取到，写路径无需冗余它，
     # 少一次热路径上的属性依赖（写路径只带 name）。
+    # 口径分工（审计 Z08-R5，改任一处必须同步另一处）：新增行的快照以存储层触发器
+    # `fill_inventory_log_product_name`（pg_standalone_087）为权威；这里只兜存量 NULL
+    # 行 —— 触发器 BEFORE INSERT 看不见删除前就存在的行。
     await db.execute(
         update(InventoryLog)
         .where(InventoryLog.product_id == product_id)
