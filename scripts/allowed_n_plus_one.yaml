@@ -28,7 +28,6 @@ fastapi_app/services/backup/verify/query_service.py
 fastapi_app/services/backup/json_backup.py
 fastapi_app/services/backup/orchestration/core.py
 fastapi_app/services/backup/orchestration/recovery_test_service.py
-fastapi_app/services/backup/incremental.py
 
 # === 启动预热：固定 5 次连接池预热，非请求路径 ===
 fastapi_app/main.py

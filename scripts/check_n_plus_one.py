@@ -21,9 +21,14 @@ N+1 查询静态扫描脚本（AST based）
     python scripts/check_n_plus_one.py [--whitelist scripts/allowed_n_plus_one.yaml] [路径...]
 
 退出码:
-    0: 未发现违规（或仅命中白名单）
-    1: 发现违规
-    2: AST 解析失败（语法错误）
+    0: 未发现违规（或仅命中白名单），且白名单无僵尸键
+    1: 发现违规，**或**白名单里有已失效的豁免键
+
+（历史文档曾写「2: AST 解析失败」——本脚本从不返回 2：解析失败只打 [WARN] 并跳过该文件，
+ 与 check_function_length.py 的「解析失败 ≠ 无违规」口径不同，改动这里要一并核对。）
+
+僵尸键（`zombie_whitelist_keys`）= 指向已删除文件 / 已改名函数 / 越界行号的豁免。
+它们不报错、只静默失效，等于扫描面偷偷缩小，故与新增违规同等拦下。
 
 任务来源: .codeartsdoer/specs/code_quality_opt/tasks.md 1.1
 """
@@ -217,6 +222,53 @@ def is_whitelisted(v: Violation, whitelist: set[str]) -> bool:
     )
 
 
+def find_zombie_keys(whitelist: set[str], root: Path = PROJECT_ROOT) -> list[str]:
+    """白名单里已经不生效的键：指向已删除的文件、已改名的函数、越界的行号。
+
+    僵尸键不会报错，只会**静默失效**——豁免名单于是变成一份没人核对的历史包袱，
+    而文件仍在时它曾压住的违规也会突然以"新增违规"的形式冒出来（更难归因）。
+    与 scan_secrets 的 allowlist「只增不减」是同一类腐烂，故做成门禁而不是文档条目。
+    """
+    zombies: list[str] = []
+    for key in sorted(whitelist):
+        norm = key.replace("\\", "/")
+        if "::" in norm:
+            target, tail = norm.split("::", 1)
+            kind = "func"
+        elif ":" in norm:
+            target, tail = norm.split(":", 1)
+            kind = "line"
+        else:
+            target, tail, kind = norm, "", "file"
+        path = root / target
+        if not path.is_file():
+            zombies.append(key)
+            continue
+        if kind == "file":
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError:
+            zombies.append(key)
+            continue
+        if kind == "func":
+            try:
+                tree = ast.parse(source, filename=str(path))
+            except SyntaxError:
+                zombies.append(key)
+                continue
+            names = {
+                n.name
+                for n in ast.walk(tree)
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if tail not in names:
+                zombies.append(key)
+        elif not tail.isdigit() or int(tail) > len(source.splitlines()):
+            zombies.append(key)
+    return zombies
+
+
 def collect_py_files(scan_dirs: list[Path]) -> list[Path]:
     files: list[Path] = []
     for d in scan_dirs:
@@ -279,14 +331,18 @@ def main() -> int:
         all_violations.extend(vs)
 
     real_violations = [v for v in all_violations if not is_whitelisted(v, whitelist)]
+    zombie_keys = find_zombie_keys(whitelist)
 
     if args.json:
         print(
             json.dumps(
                 {
                     "violations": [v.to_dict() for v in real_violations],
+                    "zombie_whitelist_keys": zombie_keys,
                     "parse_errors": parse_errors,
-                    "total": len(real_violations),
+                    # 僵尸键不是 N+1 违规，但同样计入门禁总数：豁免名单烂掉必须和
+                    # 新增违规一样拦下来（prod_audit 只读 violations，不受影响）。
+                    "total": len(real_violations) + len(zombie_keys),
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -297,24 +353,32 @@ def main() -> int:
             print(f"[WARN] {len(parse_errors)} 个文件 AST 解析失败（跳过）:")
             for fp, err in parse_errors[:10]:
                 print(f"  {fp}: {err}")
-        if not real_violations:
+        if zombie_keys:
+            print(
+                f"[FAIL] 白名单有 {len(zombie_keys)} 个僵尸键（指向已删除文件/已改名函数/越界行号，"
+                "豁免会静默失效）:"
+            )
+            for k in zombie_keys:
+                print(f"  {k}")
+        if not real_violations and not zombie_keys:
             print("[PASS] 未发现 N+1 查询风险（循环内 execute/scalar/scalars）")
             return 0
-        by_file: dict[str, list[Violation]] = {}
-        for v in real_violations:
-            by_file.setdefault(v.file, []).append(v)
-        print(
-            f"[FAIL] 发现 {len(real_violations)} 处 N+1 风险（{len(by_file)} 个文件）:\n"
-        )
-        for fp, vs in sorted(by_file.items()):
-            print(f"  {fp} ({len(vs)})")
-            for v in vs:
-                print(
-                    f"    L{v.line}: {v.function}() -> .{v.query_call}()  [loop: {v.loop_var}]"
-                )
-            print()
+        if real_violations:
+            by_file: dict[str, list[Violation]] = {}
+            for v in real_violations:
+                by_file.setdefault(v.file, []).append(v)
+            print(
+                f"[FAIL] 发现 {len(real_violations)} 处 N+1 风险（{len(by_file)} 个文件）:\n"
+            )
+            for fp, vs in sorted(by_file.items()):
+                print(f"  {fp} ({len(vs)})")
+                for v in vs:
+                    print(
+                        f"    L{v.line}: {v.function}() -> .{v.query_call}()  [loop: {v.loop_var}]"
+                    )
+                print()
 
-    return 1 if real_violations else 0
+    return 1 if (real_violations or zombie_keys) else 0
 
 
 if __name__ == "__main__":

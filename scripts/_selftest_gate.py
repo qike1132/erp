@@ -117,6 +117,25 @@ def _check_n_plus_one_semantics() -> list[tuple[str, bool, str]]:
          all(v.function != "real_n_plus_one" for v in rest) and any(v.function == "marker_without_reason" for v in rest),
          f"过滤后={sorted(v.function for v in rest)}")
     )
+    # 僵尸键：豁免名单指向已删文件/已改名函数/越界行号时必须报错，而不是静默失效
+    good_key = f"{rel}::real_n_plus_one"
+    zombie_set = {
+        good_key,
+        f"{rel}::renamed_away",
+        f"{rel}:99999",
+        "fastapi_app/_zz_does_not_exist.py",
+    }
+    found = set(mod.find_zombie_keys(zombie_set, ROOT))
+    cases.append(
+        ("僵尸键必须报（改名函数/越界行号/已删文件）",
+         found == {f"{rel}::renamed_away", f"{rel}:99999", "fastapi_app/_zz_does_not_exist.py"},
+         f"实测={sorted(found)}")
+    )
+    cases.append(
+        ("有效键不得误判为僵尸（含整文件豁免）",
+         good_key not in found and f"{rel}::nested_loops" not in mod.find_zombie_keys({f"{rel}::nested_loops"}, ROOT),
+         "")
+    )
     return cases
 
 
