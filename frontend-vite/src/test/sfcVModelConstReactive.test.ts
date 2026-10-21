@@ -129,7 +129,9 @@ describe('单向 :prop 绑定的运行期等价性', () => {
       props: { filters, customerOptions: [], searched: false },
       global: { stubs: { FontAwesomeIcon: true } },
     })
-    await wrapper.find('input').setValue('保温杯')
+    // 走 UiInput 那条（v-model="filters.product"）；UiSelect 的 onInput 只更新组件内的
+    // 搜索草稿、要选中才 emit，与本门禁要证的「共享 proxy」无关，不掺进来。
+    await wrapper.find('.rp-field input').setValue('保温杯')
     expect(filters.product).toBe('保温杯')
     expect(wrapper.emitted('update:filters')).toBeUndefined()
   })
