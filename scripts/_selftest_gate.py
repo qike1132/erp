@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -63,6 +64,11 @@ BAD_SOURCE = "def broken(:\n    pass\n"
 
 
 def run(*args: str) -> tuple[int, str, str]:
+    # 强制子进程用 UTF-8 写 stdout/stderr：本文件的断言比对的是**中文串**
+    # （"解析失败"），而 Windows 子进程默认按本地码页（cp936）写未包装的
+    # stderr。这里按 utf-8 解码就会得到乱码 → 明明发了 WARN 却判 FAIL，
+    # 于是"门禁自检"本身变成一个恒红的摆设（2026-10-21 实测两条红项即此因；
+    # 比对纯 ASCII 串的断言如 "WARN"/"REGRESS" 不受影响，故此前一直"看起来正常"）。
     proc = subprocess.run(
         [sys.executable, *args],
         cwd=ROOT,
@@ -70,6 +76,7 @@ def run(*args: str) -> tuple[int, str, str]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     return proc.returncode, proc.stdout or "", proc.stderr or ""
 
@@ -142,6 +149,16 @@ def _check_n_plus_one_semantics() -> list[tuple[str, bool, str]]:
 def main() -> int:
     cleanup()
     results: list[tuple[str, bool, str]] = []
+
+    # ---- 0. 自检自身的编码前提（中文断言比对的先决条件）----
+    _rc, _out, probe_err = run("-c", "import sys; sys.stderr.write('解析失败')")
+    results.append(
+        (
+            "子进程中文 stderr 能按 utf-8 读回",
+            "解析失败" in probe_err,
+            f"实测={probe_err[:24]!r}（乱码则下面所有中文断言恒红）",
+        )
+    )
 
     # ---- 1. 棘轮能拦新增违规 ----
     try:
