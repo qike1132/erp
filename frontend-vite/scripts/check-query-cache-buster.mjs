@@ -1,6 +1,11 @@
-#!/usr/bin/env node
 /**
  * Vue Query 持久化缓存 buster 同步门禁。
+ *
+ * 本文件不带 shebang：它同时被 `src/test/queryCacheBuster.gate.test.ts` 以 ESM
+ * import 消费，而 vite 的 SSR transform 会在模块头部插入 `__vite_ssr_exportName__()`
+ * 调用——`#!/usr/bin/env node` 一旦被挤离首字节，V8 就以
+ * `SyntaxError: Invalid or unexpected token` 拒绝整个模块（注释排版改动即可触发，
+ * 2026-10-21 实测）。脚本只经 `node scripts/...` 调用，不需要 shebang。
  *
  * 背景（2026-10-17 审计 待核实 #20）：``src/main.ts`` 的 ``persistQueryClient``
  * 用 ``buster: 'binfa-erp-v1'`` 作为 sessionStorage 缓存的失效开关——buster 一变，
@@ -32,8 +37,18 @@ export function readBuster(source) {
   return match ? match[1] : null
 }
 
+/**
+ * 契约指纹：**先把行尾归一化再哈希**。
+ *
+ * 直接哈希原始字节是平台相关的：core.autocrlf=true 的 Windows 工作区里
+ * api.d.ts 是 CRLF，Linux CI 签出的是 LF，同一份内容算出两个 sha256 ——
+ * 门禁在本地恒绿、在 CI 恒红（2026-10-21 PR #2 实测）。
+ * 归一化后哈希只取决于内容本身，两端一致。
+ */
 export function computeHash(source) {
-  return createHash('sha256').update(source).digest('hex')
+  return createHash('sha256')
+    .update(source.replace(/\r\n/g, '\n'), 'utf8')
+    .digest('hex')
 }
 
 /**

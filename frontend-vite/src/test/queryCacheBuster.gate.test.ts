@@ -12,6 +12,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  computeHash,
   evaluate,
   evaluateUpdate,
   readBuster,
@@ -24,6 +25,13 @@ describe('query-cache-buster 门禁', () => {
     expect(readBuster("  buster: 'binfa-erp-v3',")).toBe('binfa-erp-v3')
     expect(readBuster('  buster: "binfa-erp-v4",')).toBe('binfa-erp-v4')
     expect(readBuster('  // 没有 buster')).toBeNull()
+  })
+
+  it('CRLF 与 LF 两种行尾算出同一个 hash（跨平台一致）', () => {
+    const lf = 'export type A = {\n  id: number\n}\n'
+    const crlf = lf.replace(/\n/g, '\r\n')
+    expect(computeHash(crlf)).toBe(computeHash(lf))
+    expect(computeHash(crlf)).not.toBe(computeHash(lf.replace('number', 'string')))
   })
 
   it('hash 变了但 buster 没 bump → 失败', () => {
