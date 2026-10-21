@@ -904,10 +904,12 @@ async def import_products_service(
         # 与 core 实现各持一份、改一处漏一处。现统一委托给
         # import_products_from_data —— 综合导入与 ARQ 走的也是它。
         # use_savepoint=True 保留端点级「单行异常只回滚本行」的隔离语义。
+        # auto_generate_purchase=False 保留端点级**既有**行为：导入产品只清缓存，
+        # 不触发采购单自动生成（自动生成只挂在综合导入 / ARQ 上，见 core 文档）。
         stats: dict = {}
         imported, messages = await import_products_from_data(
             db, data_list, cell_images=cell_images, uploader_id=uploader_id,
-            use_savepoint=True, stats=stats,
+            use_savepoint=True, stats=stats, auto_generate_purchase=False,
         )
         return _build_batch_result(
             imported, int(stats.get('skipped', 0)), messages,

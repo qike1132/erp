@@ -641,6 +641,7 @@ async def import_products_from_data(
     uploader_id: int | None = None,
     use_savepoint: bool = False,
     stats: dict | None = None,
+    auto_generate_purchase: bool = True,
 ) -> tuple[int, list[str]]:
     """从数据列表导入产品。
 
@@ -664,6 +665,11 @@ async def import_products_from_data(
         use_savepoint: 每行用 savepoint 隔离（端点级 Excel 导入用 True：单行异常
             只回滚本行，其余行照常落库）；ARQ/综合导入沿用 False（整批同事务）。
         stats: 可选出参，骨架写入 ``skipped``（未写入行数）。
+        auto_generate_purchase: 成功后是否登记采购单自动生成的提交后钩子。
+            默认 True（**综合导入 / ARQ 的既有行为**，见
+            :func:`_schedule_post_import_hooks`）；产品导入**端点**必须传 False ——
+            端点级导入从来只清缓存，不生成采购单（骨架合并前该端点不经过 core，
+            没有这个钩子；合并后若沿用默认值，用户导入一次产品就会凭空多出采购单）。
 
     Returns:
         ``(成功导入条数, 错误消息列表)``。「条数」含新建与**有改动**的补全；
@@ -675,11 +681,15 @@ async def import_products_from_data(
     async def _pre_load(db):
         existing_result = await db.execute(select(func.lower(Product.name)))
         existing_names = {row[0].casefold() for row in existing_result.all() if row[0]}
-        return {'existing_names': existing_names, 'created_products': {}}
+        # seen_names：本文件内已出现过的产品名（与预览侧同名的集合同义）。
+        # 批内去重阶段只剔除**无图**的同名行，带图行要走到行处理器才有机会落图，
+        # 所以「文件内重复 → 跳过」这条规则必须在这里再兜一次。
+        return {'existing_names': existing_names, 'created_products': {}, 'seen_names': set()}
 
     async def _row_handler(db, row_data, idx, context, debug_messages):
         existing_names = context['existing_names']
         created_products = context['created_products']
+        seen_names = context['seen_names']
         customer_cache = context.setdefault('customer_id_cache', {})
         name = row_data.get('产品名称') or row_data.get('产品名') or row_data.get('名称')
         barcode = row_data.get('69码') or row_data.get('条码') or row_data.get('条形码')
@@ -693,32 +703,38 @@ async def import_products_from_data(
 
         name = str(name).strip()
         name_key = name.casefold()
-        customer_id = await _resolve_import_customer_id(
-            db, customer_name, customer_cache, idx, debug_messages)
 
         image_id = parse_dispimg_id(row_data.get('图片') or row_data.get('产品图片'))
         image_bytes = images.get(image_id) if image_id else None
 
-        # 带图片的行绕过了 DB 去重（见 _product_dedupe_key），批内同名改在此拦截：
-        # 否则同文件内两条同名带图行会在最终 flush 时撞 product.name 唯一约束。
-        # 若本批先创建的那条**没图**、本行带图，则把图补进去 —— 该行之所以绕过
-        # 去重，正是为了让图片有机会落地；整行跳过会让图被静默丢弃。
+        # 文件内重复行（同一产品名在本文件第二次及以后出现）：按「跳过」处置，
+        # 与预览的 seen_names 口径一致（预览对该行判「跳过」，导入就必须不写它）。
+        # 无图行在去重阶段已被剔除，能走到这里的重复行都是**带图**行 ——
+        # 它们绕过去重正是为了让图有机会落地，所以图仍补进先前的同名产品，
+        # 但**不计数**、也**不覆盖**先前落下的图（先出现者胜，与去重口径一致）。
         #
-        # **只补图片，不做字段回填**：文件内同名重复行按「跳过」处置（无图行在去重
-        # 阶段已被丢弃，这里只是把带图行补齐到同一语义）。若在此回填价格/工厂/客户，
-        # 两行同名就会被合并计数，而导入预览按「重复 → 跳过」判定 —— 预览说写入 N 条、
-        # 导入却写 N+1 条，正是 tests/test_product_import_preview.py 那条哨兵要拦的漂移。
-        pending = created_products.get(name_key)
-        if pending is not None:
-            if image_bytes is not None and not pending.image:
+        # 不做字段回填：若在此回填价格/工厂/客户，两行同名就会被合并计数 ——
+        # 预览说写入 N 条、导入却写 N+1 条，正是
+        # tests/test_product_import_preview.py 那条哨兵要拦的漂移。
+        #
+        # 判定放在**解析客户之前**：重复行不该播报客户警告（预览对该行同样不播报）。
+        if name_key in seen_names:
+            target = created_products.get(name_key)
+            if target is None:
+                target = await _find_product_by_name_ci(db, name)
+            if target is not None and image_bytes is not None and not target.image:
                 image_key = await _save_imported_image(db, image_bytes, name, uploader_id)
                 if image_key:
-                    pending.image = image_key
+                    target.image = image_key
                     debug_messages.append(
-                        f'行{idx}: 产品名称在文件内重复，图片已补入先前创建的同名产品: {name}')
+                        f'行{idx}: 产品名称在文件内重复，图片已补入先前的同名产品: {name}')
                     return False
             debug_messages.append(f'行{idx}: 产品名称在文件内重复，已跳过: {name}')
             return False
+        seen_names.add(name_key)
+
+        customer_id = await _resolve_import_customer_id(
+            db, customer_name, customer_cache, idx, debug_messages)
 
         if name_key in existing_names:
             product = await _find_product_by_name_ci(db, name)
@@ -762,6 +778,7 @@ async def import_products_from_data(
         has_debug_messages=True,
         label="产品导入",
         stats=stats,
+        auto_generate_purchase=auto_generate_purchase,
         # 只做**批内**去重：与库中已有产品同名的行必须走到行处理器，才有机会按
         # 「只补空值」回填价格/工厂/客户（用户真实场景：先建了产品，后来才拿到
         # 这些字段）。此前把「与库中重复」的行也在这里剔除，等于把回填机会一起

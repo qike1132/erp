@@ -88,3 +88,29 @@ async def test_bad_row_rolls_back_only_itself(async_db_session, monkeypatch):
     names = set((await async_db_session.execute(
         select(Product.name).where(Product.name.like('收敛测试-存活%')))).scalars().all())
     assert names == {'收敛测试-存活前', '收敛测试-存活后'}, names
+
+
+async def test_endpoint_import_does_not_auto_generate_purchase_orders(
+    async_db_session, monkeypatch,
+):
+    """产品导入**端点**不得触发采购单自动生成；综合导入 / ARQ 仍要触发。
+
+    骨架合并（Z04-R3②）前，端点级导入只清缓存、不生成采购单；合并后端点改走
+    core，若沿用 core 的默认 True，用户导入一次产品就会凭空多出采购单。
+    """
+    from fastapi_app.services.purchase import _auto_generate
+
+    calls: list = []
+    monkeypatch.setattr(
+        _auto_generate, 'schedule_auto_generate_purchase_orders', lambda db: calls.append(db),
+    )
+
+    _patch_sheet(monkeypatch, [_row('端点不生成采购单', price=3)])
+    await batch_import_service.import_products_service(async_db_session, _Upload())
+    assert calls == [], '产品导入端点触发了采购单自动生成'
+
+    # 综合导入 / ARQ 走 core 的默认行为：仍要登记采购单自动生成
+    await batch_import_service.import_products_from_data(
+        async_db_session, [_row('综合导入才生成采购单', price=3)],
+    )
+    assert len(calls) == 1, '综合导入路径丢失了采购单自动生成'

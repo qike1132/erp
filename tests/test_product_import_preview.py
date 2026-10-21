@@ -78,6 +78,15 @@ async def _product_by_name(db, name: str) -> Product | None:
     return (await db.execute(select(Product).where(Product.name == name))).scalars().first()
 
 
+def _png_bytes() -> bytes:
+    """一张真实的小 PNG（图片要走 Pillow 变体生成，伪造魔数会被跳过）。"""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new('RGBA', (24, 24), (255, 0, 0, 255)).save(buf, format='PNG')
+    return buf.getvalue()
+
+
 # ==================== 1. 预览不写库（核心回归） ====================
 
 
@@ -280,6 +289,40 @@ async def test_core_import_skips_in_file_duplicate_rows(async_db_session):
     product = (await async_db_session.execute(
         select(Product).where(Product.name == '预览一致-core同名'))).scalars().one()
     assert float(product.price or 0) == 0, f'重复行的价格不该并进来: {product.price!r}'
+
+
+async def test_duplicate_of_existing_product_with_image_is_skipped(
+    async_db_session, local_storage,
+):
+    """已存在产品 + 文件内同名重复行（带图）：预览说跳过，导入就只能写 1 条。
+
+    2026-10-21 OCR 评审发现的口径漂移：带图行绕过了批内去重（去重阶段要留住它们，
+    好让图片落地），于是「与库中已有产品同名」的重复行落进了「已存在 → 补空值」
+    分支，被回填并**计数** —— 预览说跳过 1 条、导入却写 2 条。
+    """
+    await _add_product(async_db_session, '预览一致-已存在同名', price=0)
+    await async_db_session.flush()
+
+    row = {'客户': '', '产品名称': '预览一致-已存在同名', '工厂': '东莞',
+           '产品价格': 15, '图片': '=DISPIMG("ID_dup",1)'}
+    cell_images = {'ID_dup': _png_bytes()}
+
+    # 预览侧：第一行「补全」、第二行「跳过」
+    context = {'cell_images': cell_images, 'customer_cache': {}, 'seen_names': set()}
+    first = await batch_import_service._classify_product_row(async_db_session, row, 2, context)
+    second = await batch_import_service._classify_product_row(async_db_session, row, 3, context)
+    assert first.action == 'backfill', first
+    assert second.action == 'skip', second
+
+    # 导入侧：只写 1 条（第二行不得被回填 + 计数）
+    count, messages = await batch_import_service.import_products_from_data(
+        async_db_session, [row, dict(row)], cell_images=cell_images)
+
+    assert count == 1, messages
+    products = (await async_db_session.execute(
+        select(Product).where(Product.name == '预览一致-已存在同名'))).scalars().all()
+    assert len(products) == 1, [p.name for p in products]
+    assert float(products[0].price or 0) == 15, products[0].price
 
 
 # ==================== 4. 文件级校验 ====================
