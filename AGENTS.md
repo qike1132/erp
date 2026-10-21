@@ -65,7 +65,7 @@ npm run check:types               # 类型对齐
 
 - **pytest 必须提权跑**：根 `.env` 的 ACL 只授予 Administrators/SYSTEM，非提权跑会因 conftest 读不到 `.env` 整批假红（连的是真实测试库 `erp_system_test`，非派生库）。正路：提权跑 `logs/_run_pytest_elevated.ps1`（2026-10-12 实测全量 4353 passed / 271 skipped）；非提权只读场景用「stub .env 为空流」脚本绕。**全量 pytest 必须独占单实例**——两进程共用 `erp_system_test` 会互撞假红（`DROP SCHEMA` + 硬编码 `SO-PERF-*`，见 `docs/agents/pitfalls.md` §7）。
 - **vitest 要把 TEMP 指进仓内**（如 `frontend-vite/.vitest-tmp`），否则 EPERM mkdir 导致全部 0 test 失败；前端构建用 `npm run build:atomic`，esbuild 需 `ESBUILD_BINARY_PATH` 指外部副本，绕开 `%TEMP%` 删除限制。
-- **pip-audit 口径（2026-10-11 起）**：CI 已恢复判定——步骤输出 JSON 后由 `scripts/quality_gate.py --only pip_audit` 判定（豁免项见 `ruff.toml` 的 `[tool.code-quality.pip-audit-ignores]`）。**不要**为过门禁批量登记豁免；依赖升级后再收紧。
+- **pip-audit 口径（2026-10-11 起判定；2026-10-21 更正豁免所在文件，审计 F1-8）**：CI 已恢复判定——步骤输出 JSON 后由 `scripts/quality_gate.py --only pip_audit` 判定（豁免项见 **`pyproject.toml`** 的 `[[tool.code-quality.pip-audit-ignores]]`，门禁只读 `quality_gate.py:74` 定义的 `PYPROJECT`；写进 `ruff.toml` 不会被任何代码读到 = 静默失效的豁免）。**不要**为过门禁批量登记豁免；依赖升级后再收紧。
 - CI 的 lint job 另跑四项：`scan_secrets.py --verbose`（全树密钥）、`check_orphan_modules.py`（孤儿模块）、`file_size_gate.py`（PR 基线对比）、`check_requirements_lock.py`（`requirements/<tier>.lock` 与 `.txt` 同步，需 `uv`）。改动涉及模块接线/删文件/新增大文件/改 `requirements/*.txt` 时先本地跑。
 
 ### 改动范围 → 最小验证
