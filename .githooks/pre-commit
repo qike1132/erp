@@ -281,22 +281,48 @@ elif command -v pre-commit >/dev/null 2>&1; then
     pc_bin="pre-commit"
 fi
 
+# 挑一个**真能跑**的 ruff。
+# 只判 `-x` 不够：本机 .venv 曾被 Low 完整性标签打坏，ruff.exe 能跑 `--version`
+# 却读不了 ruff.toml（OS Error 5），随后 `check` 以退出码 2 失败 —— 钩子把「跑不起来」
+# 当成「代码违规」，提交被永久挡死（2026-10-21 实测）。探针必须同时验证「能启动」和
+# 「能读仓库配置」，所以走一次真实的 stdin 检查而不是 --version。
+find_ruff() {
+    for cand in "$(pwd)/.venv/Scripts/ruff.exe" "$(pwd)/.venv/Scripts/ruff" ruff; do
+        if [ -x "$cand" ] || command -v "$cand" >/dev/null 2>&1; then
+            if "$cand" check --stdin-filename _probe.py - </dev/null >/dev/null 2>&1; then
+                printf '%s' "$cand"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
 # 判「将要提交的那份内容」（索引里的 blob）是否 ruff 干净。
 # 为什么不用工作区文件：并发会话会在提交期间写工作区（AGENTS §6.1-5），
 # 工作区内容既可能不是将要提交的内容，也可能已被 pre-commit 的 ruff 钩子改过
 # —— 只有索引里的 blob 才是真正会进这次提交的东西。
 check_staged_ruff_clean() {
-    ruff_bin="$(pwd)/.venv/Scripts/ruff.exe"
-    [ -x "$ruff_bin" ] || ruff_bin="$(pwd)/.venv/Scripts/ruff"
-    [ -x "$ruff_bin" ] || return 0
+    ruff_bin="$(find_ruff)" || {
+        echo "pre-commit: 未找到可用的 ruff，暂存内容 ruff 检查跳过（CI 会兜底）" >&2
+        return 0
+    }
     old_ifs4=$IFS
     IFS='
 '
     for f in $staged; do
         case "$f" in
             *.py)
-                if ! git show ":$f" 2>/dev/null \
-                    | "$ruff_bin" check --stdin-filename "$f" - >/dev/null 2>&1; then
+                git show ":$f" 2>/dev/null \
+                    | "$ruff_bin" check --stdin-filename "$f" - >/dev/null 2>&1
+                ruff_rc=$?
+                if [ "$ruff_rc" -eq 2 ]; then
+                    # 退出码 2 = ruff 自身故障（配置读不了、参数错），不是代码违规。
+                    echo "" >&2
+                    echo "━━━ 提交被拒绝：ruff 运行失败（退出码 2，环境故障而非代码违规）━━━" >&2
+                    echo "诊断：$ruff_bin check $f" >&2
+                    fail=1
+                elif [ "$ruff_rc" -ne 0 ]; then
                     echo "" >&2
                     echo "━━━ 提交被拒绝：暂存内容有 ruff 违规（ruff --fix 后请重新 git add）━━━" >&2
                     "$ruff_bin" check "$f" 1>&2 2>/dev/null || true
@@ -346,9 +372,8 @@ run_degraded_gate() {
     # 与 pre-commit 同语义：改动了文件即判失败（需重新 `git add` 再提交），
     # 而不是「修完就当通过」——否则自动修复会静默进入工作区却没进这次提交。
     # 注意 ruff --fix 修完返回 0，故不能只看退出码，要比对文件哈希是否变化。
-    ruff_bin="$(pwd)/.venv/Scripts/ruff.exe"
-    [ -x "$ruff_bin" ] || ruff_bin="$(pwd)/.venv/Scripts/ruff"
-    if [ -n "$py_files" ] && [ -x "$ruff_bin" ]; then
+    ruff_bin="$(find_ruff)" || ruff_bin=""
+    if [ -n "$py_files" ] && [ -n "$ruff_bin" ]; then
         ruff_before="$(git hash-object -- $py_files 2>/dev/null)"
         "$ruff_bin" check --fix $py_files >/dev/null 2>&1
         ruff_after="$(git hash-object -- $py_files 2>/dev/null)"
@@ -359,7 +384,14 @@ run_degraded_gate() {
             fail=1
             return 0
         fi
-        if ! "$ruff_bin" check $py_files >/dev/null 2>&1; then
+        "$ruff_bin" check $py_files >/dev/null 2>&1
+        ruff_rc=$?
+        if [ "$ruff_rc" -eq 2 ]; then
+            echo "" >&2
+            echo "━━━ 提交被拒绝：ruff 运行失败（退出码 2，环境故障而非代码违规）━━━" >&2
+            echo "诊断：$ruff_bin check $py_files" >&2
+            fail=1
+        elif [ "$ruff_rc" -ne 0 ]; then
             "$ruff_bin" check $py_files 1>&2 2>/dev/null || true
             echo "" >&2
             echo "━━━ 提交被拒绝：ruff 未通过（第 3 层降级模式） ━━━" >&2
@@ -386,7 +418,17 @@ run_degraded_gate() {
         python python3 py \
         "/c/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe" \
         "/c/Users/Administrator/.workbuddy/binaries/python/versions/3.13.12/python.exe"; do
-        if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then py="$cand"; break; fi
+        if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then
+            # 文件存在 ≠ 能跑。本机 .venv 曾被 Low 完整性标签打坏：python.exe 打印
+            # "failed to open pyvenv.cfg" 后以 107 退出，一行代码都没执行（用管道时
+            # $? 会被下游命令覆盖，肉眼很容易读成 0）。只看 `-x` 会选中坏解释器，
+            # 随后门禁「跑不起来」被误判成「检查不通过」，提交被永久挡死（2026-10-21
+            # 实测）。判据必须是 stdout 里的哨兵串——坏解释器的 stdout 是空的。
+            if [ "$("$cand" -c "import sys; sys.stdout.write('PYOK')" 2>/dev/null)" = "PYOK" ]; then
+                py="$cand"
+                break
+            fi
+        fi
     done
     if [ -z "$py" ]; then
         echo "pre-commit: 未找到可用 Python，代码质量门禁未运行（请人工补跑）" >&2
