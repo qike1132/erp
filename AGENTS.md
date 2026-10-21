@@ -93,6 +93,8 @@ npm run check:types               # 类型对齐
 
 - **评审时点 = 推送前一次**（owner 2026-10-13 定）：修复 → 跑门禁 → 只提交当前任务（不夹带并发会话的活）→ **等 owner 说「推送」** → 用 `/open-code-review:delegate-review` **一次**审完「当前分支相对 main 的 merge-base 起的全部提交」→ 迭代到零 High/Medium 才推送 → 跑 CL 盯到全绿；评审子代理一律用**最强模型**。理由：逐提交评审会把同一段代码反复审，而提交钩子判不了「评审做没做」；攒到推送前审的是**真正要进 main 的那一坨**。
 
+- **评审标准与流程**：分级（Blocker/High/Medium/Low/Nit）、按改动类型的必查表、证据要求见 [docs/agents/code-review-standard.md](docs/agents/code-review-standard.md)；阶段、命令与异常路径见 [docs/agents/code-review-process.md](docs/agents/code-review-process.md)。评审前先跑 `python scripts/review_packet.py` 生成评审包（自动解析远端 main；本仓远端名为 `erp`）（风险标记 + 必查项 + 必跑命令，只读），别靠翻 diff 猜重点。
+
 - **提交钩子/门禁参数/迁移禁令的细节**（`quality_gate.py` 阈值、`.githooks` 四层与回退、`commit-msg` 剥第三方 AI 署名、密钥扫描误报处置、`alembic autogenerate` 禁令）见 [docs/agents/verification-and-review.md](docs/agents/verification-and-review.md) §6。**每次提交都要看见的三条**：提交信息写**为什么**；一个提交只做一件事；**只 `git add` 当前任务涉及的文件**，提交前 `git status --porcelain` 确认没卷进 AI 痕迹或运行期数据。
 
 ## 5. 红线（会打挂生产，别做）
