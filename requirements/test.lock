@@ -38,7 +38,7 @@ attrs==26.1.0
     #   trio
 bcrypt==5.0.0
     # via -r requirements/base.txt
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
@@ -196,7 +196,7 @@ packaging==26.3
     #   opentelemetry-instrumentation-sqlalchemy
     #   pytest
     #   pytest-sugar
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements/base.txt
 pluggy==1.7.0
     # via
@@ -346,7 +346,7 @@ watchfiles==1.3.0
     # via uvicorn
 websocket-client==1.9.2
     # via selenium
-websockets==17.2
+websockets==17.3
     # via uvicorn
 wrapt==1.17.3
     # via
