@@ -32,7 +32,7 @@ L4 不做有两个硬理由：① 钩子只能判「能不能提交」，判不�
 
 ## 2. 首次启用：把文件入库（需要你确认）
 
-待提交 7 个文件（其余 49 个改动属于并发会话，**不要**卷进来）：
+待提交 8 个文件（其余并发会话的改动，**不要**卷进来）：
 
 ```bash
 git add AGENTS.md \
@@ -41,6 +41,7 @@ git add AGENTS.md \
         docs/agents/code-review-rollout.md \
         .github/pull_request_template.md \
         scripts/review_packet.py \
+        tests/test_review_packet_rules.py \
         .github/workflows/ci-cd.yml
 
 git status --porcelain -- AGENTS.md docs/agents .github scripts/review_packet.py

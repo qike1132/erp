@@ -67,16 +67,23 @@ SENSITIVE_PREFIXES = (
     "_ops/credentials/",
     "config/pgbouncer/userlist.txt",
 )
-SENSITIVE_SUFFIXES = (".pem", ".key")
+SENSITIVE_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".keystore", ".jks")
+SENSITIVE_NAMES = ("id_rsa", "id_ed25519")
 
 DOC_ASSET_PREFIXES = ("docs/", "deliverables/", "mockups/")
 
 
 def is_sensitive(path: str) -> bool:
-    """凭据/密钥文件。`.env.example` 是模板（env_drift 门禁还要求同步它），不算敏感。"""
+    """凭据/密钥文件。口径与 `scripts/scan_secrets.py` 的 `_KEY_SUFFIXES` / 名称片段对齐。
+
+    `.env.example` 是模板（env_drift 门禁还要求同步它），不算敏感；`.envrc` 也不是。
+    """
+    name = path.rsplit("/", 1)[-1]
     if path.startswith(SENSITIVE_PREFIXES) or path.endswith(SENSITIVE_SUFFIXES):
         return True
-    return path == ".env" or (path.startswith(".env") and not path.endswith(".example"))
+    if name in SENSITIVE_NAMES:
+        return True
+    return path == ".env" or (path.startswith(".env.") and not path.endswith(".example"))
 
 
 def is_test_path(path: str) -> bool:
@@ -89,12 +96,15 @@ SELF_PATH = "scripts/review_packet.py"
 def is_suppression_site(path: str, line: str) -> bool:
     """真正的抑制是「行尾注释」；纯注释行与规则定义文件自身不算。
 
-    本仓实测：文档/注释里描述 `secret-scan:allow` 的句子、
-    以及 `review_packet.py` 里的正则字面量，都会被当成人肉核验过的例外。
+    例外：`secret-scan:allow-next-line` 本身就是独立一行声明，
+    它豁免的是**下一行**，所以这行注释必须算作抑制点。
     """
     if path == SELF_PATH:
         return False
-    return not line.strip().startswith(("#", "//", "*", "/*"))
+    stripped = line.strip()
+    if stripped.startswith(("#", "//", "*", "/*", "<!--")):
+        return "allow-next-line" in stripped
+    return True
 
 
 def is_code(path: str) -> bool:
@@ -300,7 +310,7 @@ def collect_files(base: str, head: str) -> list[ChangedFile]:
 
 def collect_added_lines(base: str, head: str) -> dict[str, list[str]]:
     """按文件收集新增行（只看 + 行，用于风险规则）。"""
-    diff = git("diff", "-U0", "--no-color", f"{base}...{head}")
+    diff = git("diff", "-U0", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", f"{base}...{head}")
     added: dict[str, list[str]] = {}
     current: str | None = None
     for raw in diff.splitlines():

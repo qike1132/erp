@@ -24,8 +24,8 @@
 | 结论 | 条件 | 动作 |
 |---|---|---|
 | **通过** | 零 Blocker / High / Medium；Low/Nit 可留 | 合并 |
-| **有条件通过** | 仅 Low/Nit，作者承诺后续处理 | 合并；遗留项必须建 issue 并写期限 |
-| **打回** | ≥1 High 或 Medium | 修复后复审 |
+| **有条件通过** | 仅 Low/Nit；或 Medium 已获 owner 同意延期并建了 issue | 合并；遗留项必须有 issue 与期限 |
+| **打回** | ≥1 High，或 ≥1 未获同意延期的 Medium | 修复后复审 |
 | **阻断** | ≥1 Blocker | 禁止合并，与其他项无关 |
 
 **「零发现」不是合格评审。** 评审者必须能说出「我重点看了哪三处、为什么它们安全」；
@@ -37,7 +37,7 @@
 |---|---|---|---|
 | `[B]` Blocker | 可致生产不可用、数据错误、凭据泄露，或**无法在 5 分钟内回滚** | 合并后最坏情况是什么？回滚路径是什么？ | 禁止合并 |
 | `[H]` High | 在真实用户路径上产生错误结果、破坏前后端契约、突破安全边界，但影响可控 | 哪个操作会触发？触发后是数据错还是页面错？ | 当版必修 |
-| `[M]` Medium | 不立即出错，但显著提高故障概率或维护成本（事务边界错、异常被吞、无观测、性能退化 >30%、缺回归测试） | 半年后别人改这里会不会踩？ | 当版修，或建 issue 并写期限 |
+| `[M]` Medium | 不立即出错，但显著提高故障概率或维护成本（事务边界错、异常被吞、无观测、性能退化 >30%、缺回归测试） | 半年后别人改这里会不会踩？ | 当版修；确需延期须 owner 同意并建 issue（结论转「有条件通过」） |
 | `[L]` Low | 可读性、重复、命名、注释缺失，不影响行为 | 改不改都不影响正确性？ | 可后续 |
 | `[N]` Nit | 个人偏好，**必须显式标注「可不改」** | —— | 不阻断 |
 
@@ -140,10 +140,13 @@
 
 ### 3.3 明确**不**由人审承担（机器已覆盖，别再逐行挑）
 
-`quality_gate.py` 14 项：`n_plus_one`、`bare_except`、`function_length`、`vue_component_length`、
-`service_commit`、`bom`、`alembic_heads`、`env_drift`、`ruff`、`complexity`、`loop_shadow`、
-`pip_audit`、`nosec_budget`、`bandit`（+ CI 的 `file_size_gate`、`scan_secrets`、`check_orphan_modules`、
-`check_requirements_lock`、mypy 聚焦门禁）。
+`quality_gate.py` 的 `GATES`（**清单以该文件为准，不要背数字**）：`n_plus_one`、`bare_except`、
+`function_length`、`vue_component_length`、`service_commit`、`bom`、`alembic_heads`、`env_drift`、
+`ruff`、`complexity`、`loop_shadow`、`pip_audit`（+ CI 的 `file_size_gate`、`scan_secrets`、
+`check_orphan_modules`、`check_requirements_lock`、mypy 聚焦门禁）。
+
+**bandit 在 CI 是 `--exit-zero`，只产出 `security-report.json`，不做判定**——评审看到 bandit 报告里
+的新发现，仍要自己判断是否 High；不要因为 CI 绿了就认为安全。
 
 CI 门禁 job（test/lint/frontend，另有 build 打包校验）：pytest + coverage≥40、ruff/mypy、前端 `type-check`/`lint`/`vitest`/`build`/`check:api`/`check:routes`/`check:dto`/`check:types`。
 
