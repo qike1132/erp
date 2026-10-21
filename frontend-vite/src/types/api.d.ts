@@ -1022,6 +1022,7 @@ export interface CustomerSummaryResponse {
   total_remaining_qty?: number
   warning_count?: number
   fifo_degraded?: boolean
+  inventory_degraded?: boolean
 }
 
 export interface CustomerSyncRequest {
@@ -1280,6 +1281,7 @@ export interface InventoryCompareItem {
 
 export interface InventoryCompareResponse {
   details?: Array<InventoryCompareItem>
+  inventory_degraded?: boolean
 }
 
 export interface InventoryLogItem {
@@ -1465,6 +1467,7 @@ export interface MonthlyAggregatedResponse {
   customers?: Array<Record<string, unknown>>
   customer_totals?: Record<string, unknown>
   fifo_degraded?: boolean
+  inventory_degraded?: boolean
 }
 
 export interface MonthlyCalendarResponse {
@@ -2314,6 +2317,7 @@ export interface PurchasePlanDetailItem {
 export interface PurchasePlanDetailResponse {
   plan: Record<string, unknown>
   details: Array<PurchasePlanDetailItem>
+  inventory_degraded?: boolean
 }
 
 export interface PurchasePlanDetailUpdate {

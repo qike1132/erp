@@ -36,6 +36,8 @@ export function usePurchasePlanData(y: Ref<number>, m: Ref<number>, _viewTab: Re
   const skuSummary = computed<SkuRow[]>(() => (d.value?.sku_summary ?? []) as unknown as SkuRow[]);
   const skuDateIndex = computed<Record<string, SkuDateItem[]>>(() => (d.value?.sku_date_index ?? {}) as unknown as Record<string, SkuDateItem[]>);
   const customers = computed<CustSumItem[]>(() => (d.value?.customers ?? []) as unknown as CustSumItem[]);
+  // Z02-R6：后端库存映射降级（查询超时/失败）时值是空映射，页面会把「没货」显示成 0
+  const inventoryDegraded = computed(() => d.value?.inventory_degraded === true);
 
-  return { d, isLoading, isFetching, isError, refetch, rows, skuSummary, skuDateIndex, customers };
+  return { d, isLoading, isFetching, isError, refetch, rows, skuSummary, skuDateIndex, customers, inventoryDegraded };
 }

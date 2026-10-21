@@ -101,6 +101,8 @@ class PurchasePlanDetailResponse(BaseModel):
     """主单+明细响应"""
     plan: dict
     details: list[PurchasePlanDetailItem]
+    # Z02-R6：库存映射降级标记；不在此声明则服务层的 inventory_degraded 会在序列化边界被静默丢弃
+    inventory_degraded: bool = False
 
 
 class CustomerSummaryItem(BaseModel):
@@ -124,6 +126,7 @@ class CustomerSummaryResponse(BaseModel):
     warning_count: int = 0
     # FIFO 出货量统计降级标记（服务异常时为 True，前端可提示数据可能不完整）
     fifo_degraded: bool = False
+    inventory_degraded: bool = False
 
 
 class InventoryCompareItem(BaseModel):
@@ -142,6 +145,7 @@ class InventoryCompareItem(BaseModel):
 class InventoryCompareResponse(BaseModel):
     """库存对比响应"""
     details: list[InventoryCompareItem] = []
+    inventory_degraded: bool = False
 
 
 class ShipmentProgressItem(BaseModel):
@@ -208,6 +212,7 @@ class MonthlyAggregatedResponse(BaseModel):
     customers: list[dict] = []
     customer_totals: dict = {}
     fifo_degraded: bool = False
+    inventory_degraded: bool = False
 
 
 class CreatePlanResponse(BaseModel):

@@ -446,3 +446,77 @@ class TestPurchasePlanEndpoints:
                 params={"year": 2026, "month": 4},
             )
         assert response.status_code == 500
+
+
+class TestPurchasePlanInventoryDegraded:
+    """Z02-R6：库存降级标记必须穿过响应模型到达客户端。
+
+    服务层早已把 ``inventory_degraded`` 放进返回值，但响应模型没声明该字段时
+    FastAPI 会在**序列化边界静默丢弃**——「后端已透出」只成立到服务层，前端拿不到，
+    「库存值为不可信的空降级结果」对用户不可见（读起来像真的没库存）。
+    这几条断言钉的是响应模型，不是服务层字典：删掉模型字段即变红。
+    """
+
+    @pytest.mark.asyncio
+    async def test_plan_detail_exposes_inventory_degraded(self, client, mock_db):
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_plan_detail = AsyncMock(return_value={
+                'plan': {'id': 1, 'plan_no': 'PP-20260415-0001', 'plan_month': '2026-04',
+                         'customer_id': 1, 'customer_name': '测试客户', 'status': 'pending'},
+                'details': [],
+                'inventory_degraded': True,
+            })
+            response = await client.get("/api/v1/plans/detail/1")
+        assert response.status_code == 200
+        assert response.json().get('inventory_degraded') is True, (
+            f"降级标记应透出到响应体，实测键缺失或为假：{response.text}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_detail_degraded_flag_defaults_false(self, client, mock_db):
+        """未降级时字段仍须存在（前端据「字段在不在」判断契约，不该再写 optional 兜底）。"""
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_plan_detail = AsyncMock(return_value={
+                'plan': {'id': 1, 'plan_no': 'PP-20260415-0001'}, 'details': [],
+            })
+            response = await client.get("/api/v1/plans/detail/1")
+        assert response.status_code == 200
+        assert response.json()['inventory_degraded'] is False, f"缺省应为 False，实测 {response.text}"
+
+    @pytest.mark.asyncio
+    async def test_customer_summary_exposes_inventory_degraded(self, client, mock_db):
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_customer_summary = AsyncMock(return_value={
+                'customers': [], 'inventory_degraded': True,
+            })
+            response = await client.get(
+                "/api/v1/plans/customer-summary", params={"year": 2026, "month": 4}
+            )
+        assert response.status_code == 200
+        assert response.json().get('inventory_degraded') is True, f"实测 {response.text}"
+
+    @pytest.mark.asyncio
+    async def test_inventory_compare_exposes_inventory_degraded(self, client, mock_db):
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_inventory_compare = AsyncMock(return_value={
+                'details': [], 'inventory_degraded': True,
+            })
+            response = await client.get(
+                "/api/v1/plans/inventory-compare", params={"year": 2026, "month": 4}
+            )
+        assert response.status_code == 200
+        assert response.json().get('inventory_degraded') is True, f"实测 {response.text}"
+
+    @pytest.mark.asyncio
+    async def test_monthly_aggregated_exposes_inventory_degraded(self, client, mock_db):
+        with patch('fastapi_app.api.v1.endpoints.purchase_plan.purchase_plan_service') as mock_svc:
+            mock_svc.get_monthly_aggregated = AsyncMock(return_value={
+                'year': 2026, 'month': 4, 'days_in_month': 30, 'rows': [], 'sku_summary': [],
+                'sku_date_index': {}, 'customers': [], 'customer_totals': {},
+                'inventory_degraded': True,
+            })
+            response = await client.get(
+                "/api/v1/plans/monthly-aggregated", params={"year": 2026, "month": 4}
+            )
+        assert response.status_code == 200
+        assert response.json().get('inventory_degraded') is True, f"实测 {response.text}"

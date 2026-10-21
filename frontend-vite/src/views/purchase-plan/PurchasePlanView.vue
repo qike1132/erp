@@ -21,6 +21,11 @@
         />
       </div>
 
+      <!-- Z02-R6：库存映射降级时空值会伪装成「没货」，必须在数字旁边说明，而不是让用户自己发现 -->
+      <div v-if="inventoryDegraded" class="pp-degraded" role="alert">
+        本次库存数据获取超时，下方「库存 / 缺口」数字不可信（显示为 0 不代表真的没货），请稍后重试。
+      </div>
+
       <PurchasePlanDailyTab
         v-if="viewTab === 'daily'"
         v-model:sel="sel"
@@ -110,6 +115,7 @@ watch(factory, () => { custFilter.value = ''; });
 const {
   d, isLoading, isFetching, isError, refetch,
   rows: rawRows, skuSummary: rawSkuSummary, skuDateIndex: rawSkuDateIndex, customers: rawCustomers,
+  inventoryDegraded,
 } = usePurchasePlanData(y, m, viewTab);
 
 // 工厂维度拆分：一次性拿到整月聚合后本地切换，切换零延迟（见 useFactorySplit）。
@@ -273,5 +279,12 @@ function exportCSV() {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+}
+.pp-degraded {
+  padding: 8px 16px;
+  background: var(--color-warning-50);
+  color: var(--color-warning-700);
+  font-size: 12px;
+  font-weight: 600;
 }
 </style>

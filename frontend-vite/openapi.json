@@ -25779,6 +25779,11 @@
             "type": "boolean",
             "title": "Fifo Degraded",
             "default": false
+          },
+          "inventory_degraded": {
+            "type": "boolean",
+            "title": "Inventory Degraded",
+            "default": false
           }
         },
         "type": "object",
@@ -27057,6 +27062,11 @@
             "type": "array",
             "title": "Details",
             "default": []
+          },
+          "inventory_degraded": {
+            "type": "boolean",
+            "title": "Inventory Degraded",
+            "default": false
           }
         },
         "type": "object",
@@ -27968,6 +27978,11 @@
           "fifo_degraded": {
             "type": "boolean",
             "title": "Fifo Degraded",
+            "default": false
+          },
+          "inventory_degraded": {
+            "type": "boolean",
+            "title": "Inventory Degraded",
             "default": false
           }
         },
@@ -32847,12 +32862,18 @@
           },
           "unit_price": {
             "type": "number",
+            "maximum": 9999999999.99,
+            "minimum": 0.0,
             "title": "Unit Price",
+            "description": "单价，不能为负数；上限 9999999999.99（与落库列一致）",
             "default": 0
           },
           "quantity": {
             "type": "number",
+            "maximum": 9999999999.99,
+            "minimum": 0.0,
             "title": "Quantity",
+            "description": "数量，不能为负数；上限 9999999999.99（与落库列一致）",
             "default": 0
           },
           "supplier_id": {
@@ -33123,6 +33144,11 @@
             },
             "type": "array",
             "title": "Details"
+          },
+          "inventory_degraded": {
+            "type": "boolean",
+            "title": "Inventory Degraded",
+            "default": false
           }
         },
         "type": "object",
