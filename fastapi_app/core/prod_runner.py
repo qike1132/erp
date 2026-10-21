@@ -779,8 +779,11 @@ def _install_signal_handlers(sup: Supervisor) -> None:
             def _win_handler(ctrl_type):
                 # CTRL_C_EVENT=0, CTRL_BREAK_EVENT=1, CTRL_CLOSE_EVENT=2,
                 # CTRL_LOGOFF_EVENT=5, CTRL_SHUTDOWN_EVENT=6
+                # 先叫醒主循环再杀进程树（OCR 复核换序）：否则 shutdown 的
+                # 数秒窗口里主循环 poll() 见子进程退出会 maybe_restart()
+                # 把 uvicorn 复活成无人监督的孤儿（占 :5002）。
+                sup.request_stop()
                 sup.shutdown()
-                sup.request_stop()  # F4-7：通知主循环退出，否则监督器进程不结束
                 return True  # 阻止默认终止，让 shutdown 完成
 
             global _console_handler_ref

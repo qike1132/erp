@@ -185,7 +185,7 @@ def test_backfill_script_guard_respects_execute_flag():
 
 
 @pytest.mark.parametrize('rel,flag', [
-    ('scripts/migrate_password_hashes.py', 'if not args.dry_run:'),
+    ('scripts/migrate_password_hashes.py', 'args.restore or not args.dry_run:'),
     ('scripts/perf_add_indexes.py', None),
     ('scripts/reset_admin_password.py', None),
 ])
