@@ -6,7 +6,6 @@ import typesIndexSource from '@/types/index.ts?raw'
 import sidebarNavSource from '@/layouts/composables/useSidebarNav.ts?raw'
 import summaryModalSource from '@/views/purchase/composables/useSummaryModal.ts?raw'
 import purchaseApiSource from '@/api/purchase.ts?raw'
-import auxiliaryApiSource from '@/api/auxiliary.ts?raw'
 import customerOrderTypesSource from '@/views/customer-order/composables/types.ts?raw'
 
 describe('生成物诚实性', () => {
@@ -34,19 +33,20 @@ describe('生成物诚实性', () => {
 })
 
 describe('前端视图模型未被删（生成物不覆盖它们）', () => {
-  // 这批名字与后端 schema 同名但结构不同（含前端自加字段），必须保留手写。
-  // spec 点名的 8 个名字实测分散在 8 个文件 / 9 处声明：NavItem / NavSection 各两份
-  // （layouts/composables/useSidebarNav.ts 与 types/index.ts 各一）。
+  // 入选判据是「这份手写声明带了生成层没有的字段」——被生成物替换就会丢字段。
+  // 只是字段名相同、结构也相同（至多断言必填）的那类不算，它们已迁成派生别名：
+  // api/auxiliary.ts 的 AvailableStockinItem 曾经在这里，但 7 个字段与生成层逐字相同、
+  // 只多一个 quantity 必填（2026-10-21 be9abaa9 迁成 WithRequired），属于该被迁走的一类，
+  // 所以从本表移除；同名但真带 schema 没有的 deducted 的是 customer-order 那份。
   const handwritten: Record<string, { source: string; names: string[] }> = {
     'src/layouts/composables/useSidebarNav.ts': { source: sidebarNavSource, names: ['NavItem', 'NavSection'] },
     'src/types/index.ts': { source: typesIndexSource, names: ['NavSection', 'NavItem', 'MonthlySummary'] },
     'src/views/purchase/composables/useSummaryModal.ts': { source: summaryModalSource, names: ['FabricItem'] },
     'src/api/purchase.ts': { source: purchaseApiSource, names: ['ProductListResponse'] },
-    'src/api/auxiliary.ts': { source: auxiliaryApiSource, names: ['AvailableStockinItem'] },
     'src/views/customer-order/composables/types.ts': { source: customerOrderTypesSource, names: ['AvailableStockinItem'] },
   }
 
-  it('会丢字段的前端视图模型仍在手写层（逐文件断言，覆盖全部 8 个名字）', () => {
+  it('会丢字段的前端视图模型仍在手写层（逐文件断言，覆盖全部 8 处声明）', () => {
     for (const [file, { source, names }] of Object.entries(handwritten)) {
       for (const name of names) {
         expect(source, `${file} 缺少手写声明 ${name}`).toMatch(new RegExp(`export interface ${name}\\b`))
@@ -54,5 +54,9 @@ describe('前端视图模型未被删（生成物不覆盖它们）', () => {
     }
     // MonthlySummary 的前端聚合字段（后端 schema 不含）
     expect(typesIndexSource).toMatch(/daily_data/)
+    // customer-order 那份 AvailableStockinItem 的 deducted（后端 schema 不含）
+    const stockin = /export interface AvailableStockinItem \{([\s\S]*?)\n\}/.exec(customerOrderTypesSource)
+    expect(stockin, 'customer-order 的 AvailableStockinItem 声明形态变了').not.toBeNull()
+    expect(stockin![1]).toContain('deducted')
   })
 })
