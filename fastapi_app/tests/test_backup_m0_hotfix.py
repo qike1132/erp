@@ -253,5 +253,9 @@ class TestResolveEncryption:
     def test_degrades_to_plain_when_unconfigured(self, monkeypatch):
         from fastapi_app.services.backup import crypto
         monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_ENABLED', True, raising=False)
+        # 密码常量在导入期从 settings（.env）固化，仅 delenv 拦不住——本机 .env
+        # 配有真实密码时该用例恒红（CI 无 .env 所以绿）。与上面 ENABLED 的打桩
+        # 模式一致，把模块级常量一并钉住。
         monkeypatch.delenv('BACKUP_ENCRYPTION_PASSWORD', raising=False)
+        monkeypatch.setattr(crypto, 'BACKUP_ENCRYPTION_PASSWORD', None, raising=False)
         assert _deps._resolve_encryption(True) == (False, None)
