@@ -70,7 +70,6 @@ SENSITIVE_PREFIXES = (
 SENSITIVE_SUFFIXES = (".pem", ".key")
 
 DOC_ASSET_PREFIXES = ("docs/", "deliverables/", "mockups/")
-CODE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".vue")
 
 
 def is_sensitive(path: str) -> bool:
@@ -80,13 +79,33 @@ def is_sensitive(path: str) -> bool:
     return path == ".env" or (path.startswith(".env") and not path.endswith(".example"))
 
 
-def is_code(path: str) -> bool:
-    """内容规则只对代码文件生效：.md 里的示例文字不该触发风险标记。"""
-    return path.endswith(CODE_SUFFIXES) and not path.startswith(DOC_ASSET_PREFIXES)
-
-
 def is_test_path(path: str) -> bool:
     return path.startswith(("tests/", "fastapi_app/tests/")) or ".test." in path
+
+
+SELF_PATH = "scripts/review_packet.py"
+
+
+def is_suppression_site(path: str, line: str) -> bool:
+    """真正的抑制是「行尾注释」；纯注释行与规则定义文件自身不算。
+
+    本仓实测：文档/注释里描述 `secret-scan:allow` 的句子、
+    以及 `review_packet.py` 里的正则字面量，都会被当成人肉核验过的例外。
+    """
+    if path == SELF_PATH:
+        return False
+    return not line.strip().startswith(("#", "//", "*", "/*"))
+
+
+def is_code(path: str) -> bool:
+    """内容规则只审生产代码。
+
+    文档示例、测试夹具、工具自身的正则字面量都不该触发风险标记
+    （本仓实测：评审包的 `.md` 说明与单测夹具曾把 4 类规则全部误报）。
+    """
+    if path.endswith(".md") or is_test_path(path):
+        return False
+    return path.startswith(("fastapi_app/", "frontend-vite/src/", "utils/", "server_manager/")) or path == "start.py"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("后端 API", ("fastapi_app/api/",)),
@@ -416,8 +435,16 @@ def detect_risks(
         )
 
     for name, pattern in SUPPRESSION_PATTERNS.items():
-        # secret-scan:allow 是仓库文档化的豁免标记，任何文件类型都算；其余只看代码文件
-        pool = flat if name == "secret-scan:allow" else flat_code
+        # secret-scan:allow 是仓库文档化的豁免标记，代码/配置都算，但文档示例与测试夹具不算；
+        # 其余抑制标记只审生产代码（本仓实测：`.md` 说明与单测夹具曾把规则全部误报）。
+        if name == "secret-scan:allow":
+            pool = [
+                (p, line)
+                for p, line in flat
+                if not p.endswith(".md") and not is_test_path(p) and is_suppression_site(p, line)
+            ]
+        else:
+            pool = [(p, line) for p, line in flat_code if is_suppression_site(p, line)]
         hits = [(path, line) for path, line in pool if pattern.search(line)]
         if hits:
             sample = ", ".join(sorted({path for path, _ in hits})[:3])
@@ -635,7 +662,7 @@ def build_packet(base: str, head: str) -> Packet:
         commits=commits,
         files=files,
         dirty_count=dirty,
-        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        generated_at=datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
     )
     packet.risks = detect_risks(files, added, base, head, dirty)
     packet.checks = build_checks(files, packet.risks)

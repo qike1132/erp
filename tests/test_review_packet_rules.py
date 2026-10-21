@@ -39,8 +39,11 @@ class TestContentScope:
     def test_only_code_files_feed_content_rules(self) -> None:
         assert rp.is_code("fastapi_app/services/x.py") is True
         assert rp.is_code("frontend-vite/src/a.vue") is True
+        assert rp.is_code("start.py") is True
         assert rp.is_code("docs/devlog.md") is False
         assert rp.is_code("mockups/index.html") is False
+        assert rp.is_code("scripts/review_packet.py") is False
+        assert rp.is_code("tests/test_x.py") is False
 
     def test_markdown_prose_does_not_trigger_code_rules(self) -> None:
         files = [rp.ChangedFile("M", "docs/devlog.md", added=1)]
@@ -48,6 +51,30 @@ class TestContentScope:
         titles = " ".join(risk.title for risk in risks)
         assert "datetime" not in titles
         assert "宽泛" not in titles
+
+    def test_test_fixtures_do_not_trigger_suppression_rules(self) -> None:
+        # 本仓实测：单测夹具里的抑制标记字符串曾让评审包报「新增 1 处 noqa 抑制」
+        files = [rp.ChangedFile("M", "tests/test_x.py", added=1)]
+        risks = _risks(files, {"tests/test_x.py": ['x = ["y = 1  # nosec B105"]']})
+        assert not any("nosec" in risk.title for risk in risks)
+
+    def test_secret_scan_allow_ignores_markdown_but_flags_config(self) -> None:
+        md = _risks(
+            [rp.ChangedFile("M", "docs/a.md", added=1)],
+            {"docs/a.md": ["示例：secret-scan:allow 标记"]},
+        )
+        assert not any("secret-scan:allow" in risk.title for risk in md)
+        yml = _risks(
+            [rp.ChangedFile("M", ".github/workflows/ci.yml", added=1)],
+            {".github/workflows/ci.yml": ["  DB_PASSWORD: x  # secret-scan:allow CI 测试口令"]},
+        )
+        assert any("secret-scan:allow" in risk.title for risk in yml)
+
+    def test_comment_only_lines_and_self_definition_are_not_suppression_sites(self) -> None:
+        # 纯注释里描述标记、以及规则定义文件自身的正则字面量，都不是人肉核验过的例外
+        assert rp.is_suppression_site("scripts/review_packet.py", "x = 1  # secret-scan:allow") is False
+        assert rp.is_suppression_site("fastapi_app/a.py", "# 说明：secret-scan:allow 的用法") is False
+        assert rp.is_suppression_site("fastapi_app/a.py", "PASSWORD = 'x'  # secret-scan:allow 测试夹具") is True
 
 
 class TestNoTestRisk:
