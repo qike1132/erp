@@ -1,6 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
+
+// CI（GitHub Actions）磁盘较慢：挂载视图会触发 PurchasePlanView 里两个
+// defineAsyncComponent 的动态导入，模块 chunk 在 vitest 环境拆除后才解析完
+// → EnvironmentTeardownError 未处理拒绝 → vitest 进程整体退出非 0
+// （1609 个用例全过步骤仍红，2026-10-21 CI 实测）。在环境存活期内预热
+// 两个对话框的模块缓存，使挂载时的 import() 立即命中缓存。
+beforeAll(async () => {
+  await Promise.all([
+    import('@/views/purchase-plan/components/CreateShipmentPlanDialog.vue'),
+    import('@/views/purchase-plan/components/SkuDetailDialog.vue'),
+  ])
+})
 
 /**
  * Z02-R6：后端库存映射降级标记（inventory_degraded）必须在采购计划页可见。

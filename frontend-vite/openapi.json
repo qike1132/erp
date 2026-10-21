@@ -17876,15 +17876,33 @@
         "summary": "Validate Backup",
         "description": "验证备份文件，不执行恢复，仅返回摘要信息",
         "operationId": "validate_backup_api_v1_backup_validate_post",
+        "parameters": [
+          {
+            "name": "X-Backup-Password",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Backup-Password"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
                 "$ref": "#/components/schemas/Body_validate_backup_api_v1_backup_validate_post"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
