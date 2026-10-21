@@ -9,7 +9,8 @@
  * 内部完全重写为面向"客户分组 + 部位布料 + 版本快照"扁平结构的 23 个 API 方法。
  */
 import { get, post, put, del, upload } from './request'
-import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest } from '@/types/api'
+import type { WithRequired } from '@/types'
+import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest, BatchPartItem as GenBatchPartItem } from '@/types/api'
 
 // ==================== 类型别名 ====================
 
@@ -118,14 +119,7 @@ export type RoleCreateRequest = GenRoleCreateRequest
 export type RoleUpdateRequest = GenRoleUpdateRequest
 
 /** 批量新增部位单项 */
-export interface BatchPartItem {
-  part_name: string
-  supplier_id: number | null
-  supplier_name?: string | null
-  fabric_name: string | null
-  fabric_color_no: string | null
-  version_no?: string
-}
+export type BatchPartItem = WithRequired<GenBatchPartItem, 'supplier_id' | 'fabric_name' | 'fabric_color_no'>
 
 /** 批量新增部位请求 */
 export type BatchPartCreateRequest = GenBatchPartCreateRequest

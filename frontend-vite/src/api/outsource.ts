@@ -1,7 +1,7 @@
 import { get, post, del } from './request'
-import type { QueryParams } from '@/types'
+import type { QueryParams, WithRequired } from '@/types'
 import type { OrderListApiResponse } from './order'
-import type { GenerateProcessResponse as GenGenerateProcessResponse, ShipmentReceiveResponse as GenShipmentReceiveResponse, HubeiProductSearchItem as GenHubeiProductSearchItem } from '@/types/api'
+import type { GenerateProcessResponse as GenGenerateProcessResponse, ShipmentReceiveResponse as GenShipmentReceiveResponse, HubeiProductSearchItem as GenHubeiProductSearchItem, ShippableProcessItem as GenShippableProcessItem, UnshippedProcessItem as GenUnshippedProcessItem } from '@/types/api'
 
 /** SKU 外发工序预设 */
 export interface OutsourceProcessType {
@@ -76,31 +76,10 @@ export interface ProcessFlowListResponse {
 export type HubeiProductSearchItem = GenHubeiProductSearchItem
 
 /** 未到货（未发完）工序明细：未到数量 = 订单数量 - 已发数量 */
-export interface UnshippedProcessItem {
-  order_id: number
-  order_no: string
-  customer: string
-  order_date?: string | null
-  product_name?: string | null
-  product_barcode?: string | null
-  process_type: string
-  target_qty: number
-  shipped_qty: number
-  remaining: number
-}
+export type UnshippedProcessItem = WithRequired<GenUnshippedProcessItem, 'target_qty' | 'shipped_qty' | 'remaining'>
 
 /** 待发货工序（批量发货面板数据源） */
-export interface ShippableProcessItem {
-  process_id: number
-  order_id: number
-  order_no: string
-  customer: string
-  product_name?: string | null
-  process_type: string
-  target_qty: number
-  shipped_qty: number
-  remaining: number
-}
+export type ShippableProcessItem = WithRequired<GenShippableProcessItem, 'target_qty' | 'shipped_qty' | 'remaining'>
 
 /** 发货单明细行（SKU + 工序 + 发货/收货数量） */
 export interface ShipmentItem {

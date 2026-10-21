@@ -1,20 +1,12 @@
 import { get } from './request'
-import type { ApiResponse } from '@/types'
-import type { ProductSearchItem as GenProductSearchItem } from '@/types/api'
+import type { ApiResponse, WithRequired } from '@/types'
+import type { ProductSearchItem as GenProductSearchItem, AvailableStockinItem as GenAvailableStockinItem } from '@/types/api'
 
 /** 产品搜索建议项（后端 `auxiliary.py::ProductSearchItem`，裸数组响应） */
 export type ProductSearchItem = GenProductSearchItem
 
 /** 可用备货单项（后端 `auxiliary.py::AvailableStockinItem`，裸数组响应） */
-export interface AvailableStockinItem {
-  id: number
-  product_id: number
-  product_name?: string
-  quantity: number
-  customer?: string
-  stockin_date?: string
-  available?: number
-}
+export type AvailableStockinItem = WithRequired<GenAvailableStockinItem, 'quantity'>
 
 /**
  * 辅助数据查询 API

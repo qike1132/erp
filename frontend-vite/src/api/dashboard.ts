@@ -2,7 +2,7 @@ import { get } from './request'
 import type { NavSection } from '@/types'
 import type { MobileDeptData as GenMobileDeptData, MobileShippingData as GenMobileShippingData, MobileStockData as GenMobileStockData, MobileWarehouseData as GenMobileWarehouseData } from '@/types/api'
 
-interface DashboardResponse<T = unknown> {
+interface ApiEnvelope<T = unknown> {
   success: boolean
   data: T
 }
@@ -37,11 +37,11 @@ export interface MobileDashboardData {
 
 export const dashboardApi = {
   stats: async () => {
-    const resp = await get<DashboardResponse<Record<string, unknown>>>('/dashboard/stats');
+    const resp = await get<ApiEnvelope<Record<string, unknown>>>('/dashboard/stats');
     return resp.data;
   },
   mobile: async (): Promise<MobileDashboardData> => {
-    const resp = await get<DashboardResponse<MobileDashboardData>>('/dashboard/mobile');
+    const resp = await get<ApiEnvelope<MobileDashboardData>>('/dashboard/mobile');
     return resp.data;
   },
   activities: () => get<Record<string, unknown>[]>('/dashboard/activities'),

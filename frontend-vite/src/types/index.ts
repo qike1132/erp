@@ -1,6 +1,17 @@
 import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate } from '@/types/api'
 // ===== 基础 API 响应类型 =====
 
+/**
+ * 把生成层（@/types/api）里可选、但后端实际必发的字段断言为必填。
+ *
+ * 用于替代「整份重抄一遍字段清单」的手写 DTO：字段名与类型仍以生成层为唯一真相，
+ * 手写层只保留「这几个字段一定存在」这一条口径断言。后端改字段名时 Pick<T, K> 直接报错。
+ *
+ * 注意 `Required<Pick<…>>` 不能简写成 `Pick<…>`：Pick 会**保留** `?` 修饰符，
+ * 断言会静默失效（vue-tsc 里表现为消费方拿到 `number | undefined`）。
+ */
+export type WithRequired<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>
+
 /** 通用 API 响应（精简版，仅保留通用字段） */
 export interface ApiResponse<T = unknown> {
   success: boolean
