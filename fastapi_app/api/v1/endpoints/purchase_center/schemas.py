@@ -3,7 +3,7 @@
 """
 
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # BOM 保存 DTO 已收口到 canonical 位置 fastapi_app/schemas/purchase_center.py（见架构 §9.3）；
 # 此处 re-export 以保持既有导入路径 `...endpoints.purchase_center.schemas` 可用。
@@ -92,18 +92,36 @@ class PurchaseOrderMaterialItem(BaseModel):
 
     允许额外字段以兼容前端未声明的扩展字段。
     """
+
     model_config = {"extra": "allow"}
     material_name: str = ''
     material_code: str = ''
     specification: str = ''
     unit: str = ''
-    unit_price: float = 0
-    quantity: float = 0
+    # 上限与落库列一致（purchase_order_item.unit_price / quantity 为 Numeric(12,2)）：
+    # 越界值在 flush 时才炸成 NumericValueOutOfRange → 500，超出范围应在此拦成 422。
+    unit_price: float = Field(
+        0, ge=0, le=9999999999.99, description="单价，不能为负数；上限 9999999999.99（与落库列一致）"
+    )
+    quantity: float = Field(
+        0, ge=0, le=9999999999.99, description="数量，不能为负数；上限 9999999999.99（与落库列一致）"
+    )
     supplier_id: int | None = None
     supplier_name: str = ''
     customer_name: str = ''
     category: str = ''
     remark: str = ''
+
+    @model_validator(mode='after')
+    def _check_line_amount(self):
+        """行金额（单价 × 数量）同样落在 Numeric(12,2) 列上，越界应在入口拦成 422。
+
+        单价与数量各自合法，积仍可能越界（两个上限相乘远大于列上限）——
+        那时错误要到 flush 才炸成 NumericValueOutOfRange → 500。
+        """
+        if self.unit_price * self.quantity > 9999999999.99:
+            raise ValueError('行金额（单价 × 数量）超出可存储范围，上限 9999999999.99')
+        return self
 
 
 class PurchaseOrderCreateRequest(BaseModel):

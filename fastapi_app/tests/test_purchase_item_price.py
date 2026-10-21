@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
     PurchaseOrderItemPriceUpdate,
+    PurchaseOrderMaterialItem,
     PurchaseOrderUpdateRequest,
 )
 from fastapi_app.services.purchase_order_crud import update_purchase_order
@@ -238,6 +239,36 @@ class TestItemPricesSchema:
         """越界单价在 schema 层拦成 422，而不是等到 flush 才炸成 500。"""
         with pytest.raises(ValidationError):
             PurchaseOrderItemPriceUpdate(id=1, unit_price=99999999999)
+
+
+class TestPurchaseOrderMaterialItemSchema:
+    """采购单创建请求的物料行：单价 / 数量 / 行金额都要在入口拦住越界值
+
+    越界值在 flush 时才炸成 NumericValueOutOfRange → 500；入口拦成 422 才是
+    用户能看懂的错误。
+    """
+
+    def test_rejects_price_above_column_range(self):
+        with pytest.raises(ValidationError):
+            PurchaseOrderMaterialItem(unit_price=99999999999)
+
+    def test_rejects_negative_price(self):
+        with pytest.raises(ValidationError):
+            PurchaseOrderMaterialItem(unit_price=-1)
+
+    def test_rejects_negative_quantity(self):
+        with pytest.raises(ValidationError):
+            PurchaseOrderMaterialItem(quantity=-1)
+
+    def test_rejects_line_amount_above_column_range(self):
+        """单价与数量各自合法，积仍可能越界（两个上限相乘远大于列上限）。"""
+        with pytest.raises(ValidationError):
+            PurchaseOrderMaterialItem(unit_price=9999999999.99, quantity=2)
+
+    def test_accepts_normal_line(self):
+        item = PurchaseOrderMaterialItem(material_name='布料', unit_price=12.5, quantity=3)
+        assert item.unit_price == 12.5
+        assert item.quantity == 3
 
 
 class TestPurchaseQtyHelpers:
