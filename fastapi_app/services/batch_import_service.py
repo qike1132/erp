@@ -23,7 +23,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_time import _BUSINESS_TZ
-from fastapi_app.core.cache_invalidation import schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.schemas.batch import (
     BatchImportResult,
@@ -33,7 +32,6 @@ from fastapi_app.schemas.batch import (
     ProductImportPreviewRow,
     ProductImportPreviewSummary,
 )
-from fastapi_app.services.batch_import_cache import invalidate_batch_import_caches
 from fastapi_app.services.batch_import_core import (
     _backfill_empty_product_fields,
     _fmt_money,
@@ -118,13 +116,25 @@ async def _run_sheet_rows(
     *,
     log_label: str,
 ) -> BatchImportResult:
-    """单 Sheet 批量导入的共享行循环（2026-10-15 抽取）。
+    """单 Sheet 批量导入的结果适配层 —— 行循环本体在 core 的唯一骨架里。
 
-    此前 5 个 ``import_*_service`` 各持一份逐字相同的骨架：行循环（savepoint
-    隔离单行）→ 计数 → post-commit 缓存失效 → 结果构建 → 异常兜底。改导入
-    规则要同步 5 处（2026-08-10 的孤儿订单事故正是 core 路径改了、单 Sheet
-    端点漏改），故收敛为一份。文件校验与读 Sheet 由调用方先行完成（订单/
-    备货路径要在循环前预加载产品映射与客户名单，读 Sheet 的时机归调用方）。
+    本函数**不再自带循环**（Z04-R3②，2026-10-21）：此前它自己有一份与
+    ``batch_import_core._import_data_generic`` 同构的行循环（savepoint 包行 →
+    成功后计数 → 异常兜底 → post-commit 失效），两条路径各持一份，改导入规则要
+    同步两处（2026-08-10 的 19 张孤儿订单正是 core 改了、单 Sheet 端点漏改）。
+    现在这里只剩两套骨架之间那层真实的差异：
+
+    - **回调签名**：端点用 ``async (db, row_data) -> (ok, message)``，core 用
+      ``async (db, row_data, idx, context, debug_messages) -> bool``；``(False, msg)``
+      的「跳过并回显」由适配层翻译成「把 msg 追加进行级消息」。
+    - **返回结构**：core 返回 ``(count, messages)``，端点要 ``BatchImportResult``；
+      ``skipped`` 由 core 经 ``stats`` 出参交回，再喂给 :func:`_build_batch_result`。
+    - **提交后钩子**：``auto_generate_purchase=False``。采购单自动生成从来只挂在
+      综合导入 / ARQ 路径上，合并骨架不能顺手让单 Sheet 导入当场生成采购单
+      （详见 :func:`batch_import_core._schedule_post_import_hooks`）。
+
+    文件校验与读 Sheet 由调用方先行完成（订单/备货路径要在循环前预加载产品映射与
+    客户名单，读 Sheet 的时机归调用方）。
 
     Args:
         row_writer: ``async (db, row_data) -> tuple[bool, str | None]``。
@@ -133,33 +143,29 @@ async def _run_sheet_rows(
             （消息文案由 row_writer 负责，保持既有用户可见文案不变）。
             行内抛 (ValueError, TypeError, SQLAlchemyError) 由骨架统一回滚
             该行、记异常消息、计 skipped。
-        log_label: 行级异常日志前缀（如 '订单导入'）。
+        log_label: 行级异常日志前缀与 core 骨架的 ``label``（如 '订单导入'）。
     """
-    imported = 0
-    skipped = 0
-    errors: list[str] = []
-    for row_data in data_list:
-        try:
-            # savepoint 隔离单行：行内异常仅回滚本行，不影响循环内已成功的行
-            async with db.begin_nested():
-                ok, row_err = await row_writer(db, row_data)
-            if not ok:
-                if row_err is not None:
-                    errors.append(row_err)
-                skipped += 1
-                continue
-            # savepoint 成功提交后才计数，失败行不计入 imported
-            imported += 1
-        except (ValueError, TypeError, SQLAlchemyError) as exc:
-            # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-            logger.error(f'{log_label} - 行处理失败: {exc}', exc_info=True)
-            errors.append(_row_failure_message(exc))
-            skipped += 1
-            continue
-    # 提交交给请求级事务（get_async_db），服务层不再手动 commit
-    if imported > 0:
-        schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-    return _build_batch_result(imported, skipped, errors, success_msg=success_msg, fail_msg=fail_msg)
+    async def _row_handler(db_, row_data, idx, context, debug_messages) -> bool:
+        ok, row_err = await row_writer(db_, row_data)
+        if row_err is not None and debug_messages is not None:
+            debug_messages.append(row_err)
+        return bool(ok)
+
+    stats: dict = {}
+    # 行号从 2 起（表头占第 1 行）与 Excel 所见一致，core 骨架统一带 `行N:` 前缀，
+    # 单 Sheet 端点由此白拿上行号信息（原先异常文案只有「异常 - ...」，无法定位）。
+    imported, errors = await _import_data_generic(
+        db, data_list, _row_handler,
+        use_savepoint=True,
+        has_debug_messages=True,
+        label=log_label,
+        stats=stats,
+        auto_generate_purchase=False,
+    )
+    return _build_batch_result(
+        imported, int(stats.get('skipped', 0)), errors,
+        success_msg=success_msg, fail_msg=fail_msg,
+    )
 
 
 def _reject_unknown_customer(customer: str, customer_names: set) -> str | None:

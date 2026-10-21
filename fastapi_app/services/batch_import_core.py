@@ -348,6 +348,30 @@ async def _run_import_row(
             db.info.pop('import_image_keys', None)
 
 
+def _schedule_post_import_hooks(
+    db: AsyncSession, imported: int, *, auto_generate_purchase: bool,
+) -> None:
+    """导入有成功行时登记提交后钩子：缓存失效 +（可选）采购单自动生成。
+
+    回调在请求收尾 commit 成功后执行（get_async_db / db_transaction 都会跑
+    run_post_commit_callbacks），保证「提交后再清」，避免提交前失效被并发读回写脏数据。
+
+    ``auto_generate_purchase`` 是两条导入路径的**既有差异**，不是本函数新增的开关：
+    采购单自动生成只挂在综合导入 / ARQ（from_data）路径上，5 个单 Sheet 端点
+    （订单/备货/出货/皮套入出仓）从来没有挂过。骨架合并（Z04-R3②）若把它变成
+    无条件调用，单 Sheet 导入会当场生成真实采购单 —— 那是功能变更，不是重构。
+    该不对称是否应当补齐属业务决策，不在收敛范围内。
+    """
+    if imported <= 0:
+        # 全跳过（重复/空文件）不需要清缓存，也不该触发扫描
+        return
+    schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
+    if auto_generate_purchase:
+        # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
+        from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+        schedule_auto_generate_purchase_orders(db)
+
+
 async def _import_data_generic(
     db: AsyncSession,
     data_list: list,
@@ -358,9 +382,13 @@ async def _import_data_generic(
     label: str = "导入",
     dedupe: DedupeSpec | None = None,
     stats: dict | None = None,
+    auto_generate_purchase: bool = True,
 ):
-    """
-    通用导入数据框架
+    """通用导入数据框架 —— **全仓唯一的导入行循环骨架**（Z04-R3②）。
+
+    单 Sheet 端点不再自带一份循环：``batch_import_service._run_sheet_rows`` 是
+    本函数的适配器（行写回调签名 + 返回结构差异在那里收敛）。改导入规则只改这里，
+    不会再出现「core 改了、单 Sheet 漏改」的漂移（2026-08-10 的 19 张孤儿订单即此模式）。
 
     Args:
         db: 数据库会话
@@ -375,6 +403,10 @@ async def _import_data_generic(
         stats: 可选的出参字典；骨架把 ``skipped``（未写入行数，含异常行）写进去。
             需要「跳过 N 行」这类计数的调用方（端点级 service）用它取数，
             不必再靠 debug_messages 反推（一条跳过行可能同时产生多条消息）。
+        auto_generate_purchase: 成功后是否登记采购单自动生成的提交后钩子。
+            默认 True（综合导入 / ARQ 的既有行为）；单 Sheet 端点经
+            :func:`~fastapi_app.services.batch_import_service._run_sheet_rows`
+            传 False，见 :func:`_schedule_post_import_hooks`。
     """
     count = 0
     skipped = 0
@@ -399,14 +431,7 @@ async def _import_data_generic(
 
     await db.flush()
 
-    # 有行成功才失效缓存：全跳过（重复/空文件）不需要清。
-    # 回调在请求收尾 commit 成功后执行（get_async_db / db_transaction 都会跑
-    # run_post_commit_callbacks），保证「提交后再清」，避免提交前失效被并发读回写脏数据。
-    if count > 0:
-        schedule_post_commit_invalidation(db, invalidate_batch_import_caches)
-        # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
-        from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
-        schedule_auto_generate_purchase_orders(db)
+    _schedule_post_import_hooks(db, count, auto_generate_purchase=auto_generate_purchase)
 
     # 完成消息只进日志，不再 append 进 debug_messages：
     # debug_messages 的语义是「行级消息」，调用方（_process_comprehensive_sheet）

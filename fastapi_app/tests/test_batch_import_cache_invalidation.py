@@ -22,10 +22,19 @@ SERVICES = REPO_ROOT / 'fastapi_app' / 'services'
 class TestInvalidationWiring:
     """结构守卫：导入源码必须接线缓存失效。"""
 
-    def test_batch_import_service_invalidates_cache(self):
+    def test_sheet_import_path_has_no_second_wiring(self):
+        """单 Sheet 路径的失效接线只在 core 一份（Z04-R3② 合并行循环骨架）。
+
+        合并前 ``batch_import_service._run_sheet_rows`` 自带一份
+        ``schedule_post_commit_invalidation`` 调用，与 core 骨架各持一份 —— 正是
+        「改一处漏一处」的温床。现在行循环与钩子都只在 core，服务层再出现直连
+        接线就说明第二份实现长回来了。
+        行为侧的证据在 ``tests/test_sheet_import_shares_core_skeleton.py``
+        （真实会话断言登记了哪些 post-commit 回调）。
+        """
         text = (SERVICES / 'batch_import_service.py').read_text(encoding='utf-8')
-        assert 'invalidate_batch_import_caches' in text, (
-            'batch_import_service.py 缺少批量导入的缓存失效调用'
+        assert 'schedule_post_commit_invalidation' not in text, (
+            'batch_import_service.py 又出现了自己的缓存失效接线：两条导入路径应共用 core 骨架'
         )
 
     def test_batch_import_core_invalidates_cache(self):

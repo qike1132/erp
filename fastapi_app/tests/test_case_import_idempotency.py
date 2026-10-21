@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fastapi_app.core.business_time import _BUSINESS_TZ
+from fastapi_app.services import batch_import_core as bic
 from fastapi_app.services import batch_import_service as bis
 from fastapi_app.services import batch_service
 
@@ -25,6 +26,7 @@ class _FakeDb:
     def __init__(self):
         self._execute_calls = 0
         self.added = []
+        self.flushed = 0
 
     @asynccontextmanager
     async def begin_nested(self):
@@ -33,6 +35,10 @@ class _FakeDb:
     async def execute(self, stmt, *args, **kwargs):
         self._execute_calls += 1
         return _Result(1 if self._execute_calls > 1 else None)
+
+    async def flush(self):
+        # 骨架收尾会 flush 一次（提交交给请求级事务，服务层不 commit）
+        self.flushed += 1
 
     def add(self, obj):
         self.added.append(obj)
@@ -48,7 +54,10 @@ def _rows(qty_key: str) -> list[dict]:
 def _patch_common(monkeypatch, rows):
     monkeypatch.setattr(bis, '_validate_xlsx_file', lambda _f: None)
     monkeypatch.setattr(bis, '_read_excel_sheets', AsyncMock(return_value=(rows, None)))
-    monkeypatch.setattr(bis, 'schedule_post_commit_invalidation', lambda *a, **k: None)
+    # Z04-R3② 合并骨架后，行循环与 post-commit 失效都在 core 骨架里：替身必须打在
+    # batch_import_core 上（本用例只验幂等去重，不碰 Redis）。打在 bis 上会变成
+    # 无人读取的死替身 → 真实失效回调被 create_task 抛出去。
+    monkeypatch.setattr(bic, 'schedule_post_commit_invalidation', lambda *a, **k: None)
     case = SimpleNamespace(id=1, current_stock=100, version=0)
     monkeypatch.setattr(batch_service, 'find_case_locked', AsyncMock(return_value=(case, None)))
     return case
@@ -66,6 +75,7 @@ async def test_case_stockin_duplicate_row_is_skipped(monkeypatch) -> None:
     assert '重复行' in result.message
     assert len(db.added) == 1
     assert case.current_stock == 105  # 只加一次
+    assert db.flushed == 1  # 骨架收尾统一 flush 一次（提交仍交给请求级事务）
 
 
 async def test_case_stockout_duplicate_row_is_skipped(monkeypatch) -> None:
@@ -80,6 +90,7 @@ async def test_case_stockout_duplicate_row_is_skipped(monkeypatch) -> None:
     assert '重复行' in result.message
     assert len(db.added) == 1
     assert case.current_stock == 95  # 只扣一次
+    assert db.flushed == 1
 
 
 # ==================== 时间留空时幂等键必须可命中 ====================
