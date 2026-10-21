@@ -251,6 +251,18 @@ jobs:
     - name: Run code quality gate (baseline ratchet)
       run: python scripts/quality_gate.py --verbose
 
+    # 代码评审包（advisory，不阻断）：把风险标记、必查项、必跑命令写进 PR 的
+    # Step Summary，让评审者有统一输入而不是靠翻 diff 猜重点。
+    # 先观察 2 周：确认无误报、且团队真的在看，再考虑加 --fail-on-blocker。
+    # 依赖 checkout 的 fetch-depth: 0（merge-base 需要完整历史）。
+    - name: Review packet (advisory, PR only)
+      if: github.event_name == 'pull_request'
+      run: |
+        python scripts/review_packet.py \
+          --base "origin/${{ github.base_ref }}" \
+          --out "$RUNNER_TEMP/review-packet.md"
+        cat "$RUNNER_TEMP/review-packet.md" >> "$GITHUB_STEP_SUMMARY"
+
     # P0-11⑦ 恒失败自检：在临时目录里人为制造真实违规，断言门禁退出码非 0；
     # 再移除违规，断言退出码回到 0。全程用 `--only` 隔离在单个门禁上，
     # 不依赖任何存量基线（否则基线漂移会把「门禁能拦违规」这件事掩盖掉）。
