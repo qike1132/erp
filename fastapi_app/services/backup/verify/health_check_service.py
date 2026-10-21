@@ -48,7 +48,7 @@ class _UnverifiableBackupError(ValueError):
     """备份**无法校验**（口令缺失/错误、密文损坏、口令轮换后旧包解不开）。
 
     刻意继承 `ValueError`（既有 `except ValueError` 调用方照常工作），但类型足够具体，
-    使 `perform_recovery_test` 能**精确**把它与 `json.JSONDecodeError` /
+    使 `_verify_zip_payload` 能**精确**把它与 `json.JSONDecodeError` /
     `UnicodeDecodeError`（都是 ValueError 子类，代表**真的损坏**）区分开 ——
     否则一个 manifest 损坏、实际不可还原的备份会被判成"无法校验"，
     而清理侧对 `unverifiable` 不判 corrupted、不从 keep 剔除 → 它永远不被优先清理。
@@ -93,15 +93,6 @@ def _open_backup_zip(file_path: Path):
         # 无论成功、抛错、还是调用方在 with 内抛错，都清掉整个临时目录
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-
-def _unverifiable_result(filename: str, err: Exception) -> dict[str, Any]:
-    """构造「无法校验」结果（**不是**损坏）。
-
-    清理侧（cleanup/service.py）会对 success=False 判 corrupted 并优先删除，
-    故必须用 `unverifiable` 与之区分：口令错误 / 密文损坏的包不能被当成损坏删掉。
-    """
-    return {'success': False, 'unverifiable': True,
-            'error': f'无法校验（{err!s}）', 'tested_file': filename}
 
 
 def _verify_zip_payload(file_path: Path) -> dict[str, Any] | None:
@@ -722,120 +713,6 @@ class BackupHealthCheckService:
         except Exception as e:  # defensive: health check alert failure must not propagate
             logger.error(f"发送健康检查告警失败: {e}")
 
-    async def perform_recovery_test(self, backup_file: str | None = None) -> dict[str, Any]:
-        """
-        执行恢复测试
-
-        Args:
-            backup_file: 指定要测试的备份文件，如果为None则使用最新备份
-
-        Returns:
-            Dict[str, Any]: 恢复测试结果
-        """
-        logger.info("开始执行恢复测试...")
-
-        try:
-            ensure_backup_dir()
-
-            # 确定要测试的备份文件
-            if backup_file:
-                test_file = BACKUP_DIR / Path(backup_file).name
-                if not test_file.exists():
-                    return {
-                        'success': False,
-                        'error': f"指定的备份文件不存在: {backup_file}"
-                    }
-            else:
-                # 使用最新的备份文件（含加密的 .zip.enc）
-                backup_files = _iter_backup_files()
-                if not backup_files:
-                    return {
-                        'success': False,
-                        'error': "没有找到备份文件进行恢复测试"
-                    }
-                test_file = max(backup_files, key=lambda f: f.stat().st_mtime)
-
-            # 创建临时目录进行恢复测试
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
-
-                # 解压备份文件（加密包先解密；拿不到口令时明确报"需密码"，
-                # **不能**当成"文件损坏" —— 唯一调用方 cleanup/service.py 会把判损坏的
-                # 备份在 BACKUP_TEST_BEFORE_DELETE=true 时优先删除）
-                try:
-                    with _open_backup_zip(test_file) as zip_path, \
-                            zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(temp_path)
-
-                    # 检查必要的文件（metadata.json 是可选的）
-                    required_files = ['manifest.json']
-                    for req_file in required_files:
-                        if not (temp_path / req_file).exists():
-                            return {
-                                'success': False,
-                                'error': f"备份文件缺少必要文件: {req_file}",
-                                'tested_file': test_file.name
-                            }
-
-                    # 验证manifest.json
-                    manifest_path = temp_path / 'manifest.json'
-                    with open(manifest_path, encoding='utf-8') as f:
-                        manifest = json.load(f)
-
-                    # metadata.json 是可选的
-                    metadata = {}
-                    metadata_path = temp_path / 'metadata.json'
-                    if metadata_path.exists():
-                        with open(metadata_path, encoding='utf-8') as f:
-                            metadata = json.load(f)
-
-                    # 检查数据文件
-                    data_files = list(temp_path.glob('*.json'))
-                    data_files = [f for f in data_files if f.name not in ['manifest.json', 'metadata.json']]
-
-                    result = {
-                        'success': True,
-                        'tested_file': test_file.name,
-                        'file_size_mb': round(test_file.stat().st_size / (1024 ** 2), 2),
-                        'manifest_version': manifest.get('version'),
-                        'backup_time': metadata.get('backup_time'),
-                        'table_count': manifest.get('table_count'),
-                        'total_rows': manifest.get('total_rows'),
-                        'data_files_count': len(data_files),
-                        'extracted_size_mb': round(self._get_directory_size(temp_path) / (1024 ** 2), 2),
-                        'test_time': datetime.now().isoformat()
-                    }
-
-                    logger.info(f"恢复测试成功: {test_file.name}")
-                    return result
-
-                except _UnverifiableBackupError as e:
-                    # **精确**匹配"解不开"（口令错/密文损坏/口令轮换），**不是**"损坏"
-                    #（见 _open_backup_zip）。刻意不用裸 ValueError —— json.JSONDecodeError
-                    # 与 UnicodeDecodeError 都是 ValueError 子类、代表**真的损坏**，
-                    # 若被这里抢先捕获会误判成"无法校验"而永久留在 keep 里不被清理。
-                    return _unverifiable_result(test_file.name, e)
-                except (zipfile.BadZipFile, OSError, json.JSONDecodeError) as e:
-                    return {
-                        'success': False,
-                        'error': f"备份文件损坏或格式错误: {e!s}",
-                        'tested_file': test_file.name
-                    }
-
-        except Exception as e:  # defensive: recovery test failure must be reported gracefully
-            logger.error(f"恢复测试失败: {e}")
-            return {
-                'success': False,
-                'error': f"恢复测试执行失败: {e!s}"
-            }
-
-    def _get_directory_size(self, directory: Path) -> int:
-        """计算目录大小"""
-        total_size = 0
-        for file_path in directory.rglob('*'):
-            if file_path.is_file():
-                total_size += file_path.stat().st_size
-        return total_size
 
     async def get_health_history(self, days: int = 7) -> list[dict[str, Any]]:
         """获取健康检查历史记录"""

@@ -22,7 +22,6 @@ def test_backup_health_check_service_import():
     service = BackupHealthCheckService()
     assert service is not None
     assert hasattr(service, 'perform_health_check')
-    assert hasattr(service, 'perform_recovery_test')
     assert hasattr(service, 'get_health_history')
 
 
