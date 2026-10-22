@@ -69,19 +69,28 @@ def clear_degradations() -> None:
     _DEGRADED_REASONS.clear()
 
 
-_DEGRADED_REDIS_PREFIX = "security_degraded:"
+_DEGRADED_REDIS_KEY = "security_degraded_reasons"
 _DEGRADED_TTL = 300
 
 
 async def publish_degradation(reason: str) -> None:
-    """把降级原因广播到 Redis，供 /api/health 跨 worker 汇总（best-effort）。"""
+    """把降级原因广播到 Redis，供 /api/health 跨 worker 汇总（best-effort）。
+
+    用**单个键存列表**而非按 reason 分键 + KEYS：KEYS 是 O(全键空间) 阻塞命令，
+    而 /api/health 会被监督器高频轮询，不能给它加 Redis 阻塞点。
+    并发读改写可能丢一次更新，但下次降级会重新登记，且 TTL 只 5 分钟。
+    """
     record_degradation(reason)
     try:
-        from fastapi_app.core.redis_wrapper import get_client
+        from fastapi_app.core.redis_wrapper import safe_get, safe_set
 
-        client = get_client()
-        if client:
-            await client.set(f"{_DEGRADED_REDIS_PREFIX}{reason}", "1", ex=_DEGRADED_TTL)
+        remote = await safe_get(_DEGRADED_REDIS_KEY, [], context="安全降级原因")
+        reasons = set(remote) if isinstance(remote, list) else set()
+        reasons.add(reason)
+        await safe_set(
+            _DEGRADED_REDIS_KEY, sorted(reasons), timeout=_DEGRADED_TTL,
+            context="安全降级原因",
+        )
     except Exception as e:  # defensive: 降级上报本身不得影响主流程
         logger.debug("降级原因上报失败（忽略）: %s", e)
 
@@ -90,14 +99,11 @@ async def degraded_reasons_all() -> list[str]:
     """本地 + Redis 的降级原因并集（多 worker 下每个进程各报各的，必须汇总）。"""
     reasons = set(degraded_reasons())
     try:
-        from fastapi_app.core.redis_wrapper import get_client
+        from fastapi_app.core.redis_wrapper import safe_get
 
-        client = get_client()
-        if client:
-            keys = await client.keys(f"{_DEGRADED_REDIS_PREFIX}*")
-            for k in keys or ():
-                name = k.decode() if isinstance(k, bytes) else str(k)
-                reasons.add(name[len(_DEGRADED_REDIS_PREFIX):])
+        remote = await safe_get(_DEGRADED_REDIS_KEY, [], context="安全降级原因")
+        if isinstance(remote, list):
+            reasons.update(str(r) for r in remote)
     except Exception as e:  # defensive: 汇总失败时退回本地列表
         logger.debug("降级原因汇总失败（退回本地）: %s", e)
     return sorted(reasons)
