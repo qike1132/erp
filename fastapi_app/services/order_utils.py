@@ -69,6 +69,35 @@ async def compute_order_status_from_db(db: AsyncSession, order: Order) -> str:
     return compute_status_from_stockouts(order, deducted_qty, shipped_qty)
 
 
+async def compute_order_statuses_batch(
+    db: AsyncSession, orders: list[Order]
+) -> dict[int, str]:
+    """一次聚合算出多张订单的状态（替代循环内逐单 2 条 SQL）。
+
+    与 :func:`compute_order_status_from_db` 同口径：抵扣量按 stockin_id 非空聚合，
+    独立出货量按 stockin_id 为空聚合；只是把 N 次查询压成 2 次。
+    """
+    if not orders:
+        return {}
+    order_ids = [o.id for o in orders]
+    deduct_map = await _batch_deduct_quantities(db, order_ids)
+    result = await db.execute(
+        select(
+            StockOut.order_id,
+            func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0),
+        )
+        .where(StockOut.order_id.in_(order_ids), StockOut.stockin_id.is_(None))
+        .group_by(StockOut.order_id)
+    )
+    shipped_map = {row[0]: int(row[1]) for row in result.all()}
+    return {
+        o.id: compute_status_from_stockouts(
+            o, max(0, deduct_map.get(o.id, 0)), max(0, shipped_map.get(o.id, 0))
+        )
+        for o in orders
+    }
+
+
 async def assert_no_linked_returns(db: AsyncSession, order_id: int) -> None:
     """订单存在**未取消**的退货记录时禁止删除（迁移 072：stock_return.stockout_id ON DELETE RESTRICT）。
 
