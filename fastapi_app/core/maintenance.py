@@ -149,7 +149,13 @@ async def is_maintenance_mode() -> bool:
         return bool(value)
     except Exception as e:  # broad-except: 维护状态探测不允许中断请求
         _report_read_failure(e)
-        return _sentinel_active()
+        active = _sentinel_active()
+        if not active:
+            # Redis 不可读且本地哨兵未激活 = fail-open 放行写请求，必须可观测
+            from fastapi_app.core.middleware import publish_degradation
+
+            await publish_degradation("maintenance_mode_probe_fail_open")
+        return active
 
 
 async def enter_maintenance() -> bool:

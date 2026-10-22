@@ -98,4 +98,4 @@ async def safe_publish_event(
     except INFRA_EXCEPTIONS as e:
         logger.warning("%s失败（不影响数据）: %s", context, e)
     except Exception as e:  # defensive: event publishing is non-critical and must not interrupt business flow
-        logger.error("%s意外异常（不影响数据）: %s", context, e, exc_info=False)
+        logger.error("%s意外异常（不影响数据）: %s", context, e, exc_info=True)

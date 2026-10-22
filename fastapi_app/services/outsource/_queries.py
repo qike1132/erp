@@ -105,12 +105,14 @@ async def _scan_beile_items_with_progress(
             product_kw=product,
         )
         page_items = _detach_page_items(page_data['items'])
-        await _attach_progress_to_orders(db, page_items)
         items.extend(page_items)
         # 短页说明已到末页；total 判定兜底防止短页提前终止
         if len(page_items) < _SCAN_PAGE_SIZE or page * _SCAN_PAGE_SIZE >= page_data['total']:
-            return items
+            break
         page += 1
+    # 进度聚合只做一次：原实现每页 2 条聚合 SQL，10k 订单 = 40+ 次多余往返
+    await _attach_progress_to_orders(db, items)
+    return items
 
 
 async def list_outsource_orders(

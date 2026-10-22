@@ -14,6 +14,7 @@ import json
 import time
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -22,6 +23,10 @@ from starlette.responses import Response
 from fastapi_app.core.logger import logger
 
 WRITE_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
+
+# 审计写库失败时的本地溢出文件：至少保留原始记录，便于事后回灌与取证
+# 用 .log 后缀是为了被 utils.log_rotation 的 *.log glob 覆盖（否则无上界增长）
+_OVERFLOW_PATH = Path("logs/audit_overflow.log")
 
 RESOURCE_MAP = {
     # ⚠️ 顺序敏感：_resolve_resource_type 取**首个**前缀命中，更具体的必须排在更宽的前面。
@@ -331,8 +336,10 @@ async def _buffer_audit_entries(entries: list[dict]):
             if buf_len >= AUDIT_FLUSH_SIZE:
                 await flush_audit_buffer()
         else:
+            _inc_audit_write_failure("redis")
             await _write_audit_direct(entries)
     except Exception:  # defensive: Redis 缓冲失败时降级为按批直接写入
+        _inc_audit_write_failure("redis")
         await _write_audit_direct(entries)
 
 
@@ -405,6 +412,31 @@ def _build_batch_insert(entries: list[dict]) -> tuple[str, dict]:
     return sql, params
 
 
+def _append_audit_overflow(entries: list[dict]) -> None:
+    """写库失败时把原始条目落到本地文件，避免审计记录静默清零。"""
+    try:
+        _OVERFLOW_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _OVERFLOW_PATH.open("a", encoding="utf-8") as f:
+            for entry in entries:
+                f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+    except OSError:
+        logger.error("审计溢出文件写入失败", exc_info=True)
+
+
+def _inc_audit_write_failure(stage: str) -> None:
+    try:
+        from fastapi_app.core.metrics import AUDIT_WRITE_FAILURES
+
+        AUDIT_WRITE_FAILURES.labels(stage=stage).inc()
+    except Exception:  # defensive: 指标未启用/初始化失败不影响兜底
+        logger.debug("审计失败指标写入失败", exc_info=True)
+
+
+def _note_audit_write_failure(entries: list[dict], stage: str) -> None:
+    _inc_audit_write_failure(stage)
+    _append_audit_overflow(entries)
+
+
 async def _write_audit_direct(entries: list[dict]) -> bool:
     """整批直写 audit_log；返回是否落库成功（异常在此吞掉，只记日志）。
 
@@ -418,6 +450,7 @@ async def _write_audit_direct(entries: list[dict]) -> bool:
 
         session_factory = _get_audit_session_factory()
         if session_factory is None:
+            _note_audit_write_failure(entries, "db")
             return False
 
         for entry in entries:
@@ -443,6 +476,7 @@ async def _write_audit_direct(entries: list[dict]) -> bool:
         return True
     except Exception as e:  # defensive: 审计日志写入失败不能影响主请求
         logger.warning('审计日志直接写入失败: %s', e)
+        _note_audit_write_failure(entries, "db")
         return False
 
 

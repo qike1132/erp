@@ -907,8 +907,9 @@ class TestOutsourceRegressions:
         page2_processes = [
             make_order_process(pid=1, order_id=501, process_type='裁剪', status='pending'),
         ]
+        # 进度聚合改为整次扫描只调一次：一次返回全部页的工序统计
         mock_async_db.execute = AsyncMock(
-            side_effect=_progress_results([]) + _progress_results(page2_processes)
+            side_effect=_progress_results(page2_processes)
         )
 
         result = await list_outsource_orders(

@@ -23,7 +23,7 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, verify_db_connectivity
 from fastapi_app.core.db_health import db_health_checker
 from fastapi_app.core.deps import get_current_user_id, require_superuser
-from fastapi_app.core.middleware import degraded_reasons
+from fastapi_app.core.middleware import degraded_reasons_all
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -78,23 +78,23 @@ async def _backup_signal() -> dict:
     }
 
 
-def _with_security_degraded(payload: dict) -> dict:
+def _with_security_degraded(payload: dict, reasons: list[str]) -> dict:
     """注入安全降级标记（P0-10）：degraded 列表 + security_degraded 布尔。
 
     降级非空时仍沿用原有状态码——降级表示「某项安全能力缺失」，不代表服务不可用；
     变更类请求的 fail-closed 由 core/middleware.py 的 CSRF 生产分支负责。
+    reasons 由调用方取 `degraded_reasons_all()`（本地 ∪ Redis，覆盖多 worker）。
     """
     data = dict(payload)
-    reasons = degraded_reasons()
     data["degraded"] = reasons
     data["security_degraded"] = bool(reasons)
     return data
 
 
-def _health_from_cache(cached_public: dict, user_id: int | None):
+def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[str]):
     """基于缓存快照构建健康响应（降级标记逐请求注入，不写回缓存）。"""
     # P0-10：降级标记逐请求注入（不写回缓存，缓存只存 DB/Redis 健康快照）
-    cached_public = _with_security_degraded(cached_public)
+    cached_public = _with_security_degraded(cached_public, reasons)
     if user_id is None:
         if cached_public.get("status") == "unhealthy":
             return Response(
@@ -124,7 +124,7 @@ def _health_from_cache(cached_public: dict, user_id: int | None):
     return health_data
 
 
-async def _build_fresh_health(user_id: int | None):
+async def _build_fresh_health(user_id: int | None, reasons: list[str]):
     """无缓存时实时探测 DB/Redis 并构建健康响应。"""
     health_data: dict[str, Any] = {
         "status": "healthy",
@@ -163,7 +163,7 @@ async def _build_fresh_health(user_id: int | None):
     _set_cached_health(public_data=dict(health_data), internal_data=internal_checks)
 
     # P0-10：降级标记只加在响应上（缓存里存的是 DB/Redis 健康快照）
-    health_data = _with_security_degraded(health_data)
+    health_data = _with_security_degraded(health_data, reasons)
 
     if user_id is not None:
         health_data["version"] = settings.APP_VERSION
@@ -188,10 +188,11 @@ async def _build_fresh_health(user_id: int | None):
 
 
 async def health_check(user_id: int | None = Depends(_get_optional_user)):
+    reasons = await degraded_reasons_all()
     cached_public = _get_cached_health()
     if cached_public is not None:
-        return _health_from_cache(cached_public, user_id)
-    return await _build_fresh_health(user_id)
+        return _health_from_cache(cached_public, user_id, reasons)
+    return await _build_fresh_health(user_id, reasons)
 
 
 async def db_health_detail(

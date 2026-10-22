@@ -51,13 +51,13 @@ def test_degraded_reasons_returns_a_copy():
 
 def test_health_payload_marks_degradation_without_changing_status():
     payload = {'status': 'healthy', 'app': 'x'}
-    marked = _with_security_degraded(payload)
+    marked = _with_security_degraded(payload, degraded_reasons())
     assert marked['status'] == 'healthy', '降级不得改变既有状态字段'
     assert marked['security_degraded'] is False and marked['degraded'] == []
     assert payload == {'status': 'healthy', 'app': 'x'}, '不得就地修改入参'
 
     record_degradation(_REASON)
-    marked = _with_security_degraded(payload)
+    marked = _with_security_degraded(payload, degraded_reasons())
     assert marked['status'] == 'healthy'
     assert marked['security_degraded'] is True
     assert marked['degraded'] == [_REASON]

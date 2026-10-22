@@ -68,6 +68,46 @@ def clear_degradations() -> None:
     """清空降级登记（仅供测试重置进程级状态）。"""
     _DEGRADED_REASONS.clear()
 
+
+_DEGRADED_REDIS_KEY = "security_degraded_reasons"
+_DEGRADED_TTL = 300
+
+
+async def publish_degradation(reason: str) -> None:
+    """把降级原因广播到 Redis，供 /api/health 跨 worker 汇总（best-effort）。
+
+    用**单个键存列表**而非按 reason 分键 + KEYS：KEYS 是 O(全键空间) 阻塞命令，
+    而 /api/health 会被监督器高频轮询，不能给它加 Redis 阻塞点。
+    并发读改写可能丢一次更新，但下次降级会重新登记，且 TTL 只 5 分钟。
+    """
+    record_degradation(reason)
+    try:
+        from fastapi_app.core.redis_wrapper import safe_get, safe_set
+
+        remote = await safe_get(_DEGRADED_REDIS_KEY, [], context="安全降级原因")
+        reasons = set(remote) if isinstance(remote, list) else set()
+        reasons.add(reason)
+        await safe_set(
+            _DEGRADED_REDIS_KEY, sorted(reasons), timeout=_DEGRADED_TTL,
+            context="安全降级原因",
+        )
+    except Exception as e:  # defensive: 降级上报本身不得影响主流程
+        logger.debug("降级原因上报失败（忽略）: %s", e)
+
+
+async def degraded_reasons_all() -> list[str]:
+    """本地 + Redis 的降级原因并集（多 worker 下每个进程各报各的，必须汇总）。"""
+    reasons = set(degraded_reasons())
+    try:
+        from fastapi_app.core.redis_wrapper import safe_get
+
+        remote = await safe_get(_DEGRADED_REDIS_KEY, [], context="安全降级原因")
+        if isinstance(remote, list):
+            reasons.update(str(r) for r in remote)
+    except Exception as e:  # defensive: 汇总失败时退回本地列表
+        logger.debug("降级原因汇总失败（退回本地）: %s", e)
+    return sorted(reasons)
+
 # H-2（2026-09-29）：路径级请求体上限。全局 10MB 会把业务侧**已经声明支持**的更大
 # 上传一并挡死（备份 500MB、Excel 导入 50MB），上线后首次整库还原/大导入即 413。
 # 放宽只为让请求抵达端点，体积的真正校验仍由端点内的常量负责：
@@ -459,14 +499,21 @@ def _setup_body_size_limit(app: FastAPI) -> None:
                         media_type="application/json",
                     )
             else:
-                # 无 Content-Length（chunked/流式上传）：累积计数器边读边判，一旦超限立刻
-                # 413 并停止累积；否则 512MB 分块上传会把内存放大到同一量级（P0-12）。
+                # 无 Content-Length（chunked/流式上传）：备份路径要求带长度（nginx 正常
+                # 代理会带），否则 411；其余路径不允许借 chunked 绕过 64MB 导入上限。
+                if request.url.path.startswith('/api/v1/backup'):
+                    return Response(
+                        content='{"detail":"备份上传必须携带 Content-Length"}',
+                        status_code=411,
+                        media_type="application/json",
+                    )
+                no_length_limit = min(limit, _IMPORT_UPLOAD_BODY_LIMIT)
                 received = 0
                 chunks: list[bytes] = []
                 async for chunk in request.stream():
                     received += len(chunk)
-                    if received > limit:
-                        return _body_too_large_response(limit)
+                    if received > no_length_limit:
+                        return _body_too_large_response(no_length_limit)
                     chunks.append(chunk)
                 request._body = b"".join(chunks)
         response = await call_next(request)

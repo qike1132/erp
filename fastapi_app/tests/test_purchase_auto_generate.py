@@ -265,8 +265,8 @@ async def test_revoke_deletes_pending_pos_and_resets_source_orders():
          patch('fastapi_app.services.purchase._common.fetch_po_sku_pids_map',
                new=AsyncMock(return_value={501: [20909], 502: [999]})), \
          patch('fastapi_app.services.purchase_order_crud.delete_purchase_order', new=delete_po), \
-         patch('fastapi_app.services.order_utils.compute_order_status_from_db',
-               new=AsyncMock(return_value='待备货')):
+         patch('fastapi_app.services.order_utils.compute_order_statuses_batch',
+               new=AsyncMock(return_value={68939: '待备货'})):
         res = await revoke_pending_purchase_orders_for_product(db, 20909)
 
     assert res == {'revoked': 1, 'orders_reset': 1}, res
@@ -316,8 +316,8 @@ async def test_revoke_for_stockin_deletes_pos_and_resets_source_orders():
     delete_po = AsyncMock()
 
     with patch('fastapi_app.services.purchase_order_crud.delete_purchase_order', new=delete_po), \
-         patch('fastapi_app.services.order_utils.compute_order_status_from_db',
-               new=AsyncMock(return_value='待备货')):
+         patch('fastapi_app.services.order_utils.compute_order_statuses_batch',
+               new=AsyncMock(return_value={68939: '待备货'})):
         res = await revoke_pending_purchase_orders_for_stockin(db, 777)
 
     assert res == {'revoked': 1, 'orders_reset': 1}, res
@@ -348,8 +348,8 @@ async def test_revoke_for_order_deletes_pos_and_resets_other_orders():
     delete_po = AsyncMock()
 
     with patch('fastapi_app.services.purchase_order_crud.delete_purchase_order', new=delete_po), \
-         patch('fastapi_app.services.order_utils.compute_order_status_from_db',
-               new=AsyncMock(return_value='待备货')):
+         patch('fastapi_app.services.order_utils.compute_order_statuses_batch',
+               new=AsyncMock(return_value={68940: '待备货'})):
         res = await revoke_pending_purchase_orders_for_order(db, 68939)
 
     assert res == {'revoked': 1, 'orders_reset': 1}, res

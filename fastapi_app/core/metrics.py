@@ -105,6 +105,12 @@ DOMAIN_EVENT_PUBLISH_FAILURES = _get_or_create_counter(
     ['event_type']
 )
 
+AUDIT_WRITE_FAILURES = _get_or_create_counter(
+    'audit_write_failures_total',
+    '审计日志写入失败总数（按阶段）',
+    ['stage']
+)
+
 
 # ==================== 业务指标 ====================
 
