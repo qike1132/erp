@@ -7,7 +7,6 @@ import { FontAwesomeIconLazy } from './components/icon/FontAwesomeIconLazy'
 import './styles/app.css'
 import App from './App.vue'
 import router from './router'
-import { abortPendingRequests } from './api/request'
 import { isMobileDevice } from './composables/useDevice'
 import { devLog } from './utils/devLog'
 import { initSentry } from './utils/sentry'
@@ -17,12 +16,6 @@ import { installConsoleErrorFilter } from './utils/consoleFilter'
 
 // 静默 Chrome 扩展导致的 runtime.lastError 噪音（精确匹配，见 consoleFilter）
 installConsoleErrorFilter()
-
-// 路由切换时取消上一路由的未完成 GET，避免旧响应回填新页面
-router.beforeEach(() => {
-  abortPendingRequests()
-  return true
-})
 
 const app = createApp(App)
 const isMobile = isMobileDevice()

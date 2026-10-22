@@ -7,7 +7,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { isMobileDevice } from '@/composables/useDevice'
 import { devLog } from '@/utils/devLog'
-import { resolveNavAccess } from './navAccess'
+import { installNavigationGuards } from './guards'
 
 // ==================== PC 端路由====================
 const pcRoutes: RouteRecordRaw[] = [
@@ -163,8 +163,8 @@ router.afterEach(() => {
 })
 
 // ==================== 路由守卫：认证 + 权限检查====================
-// 判定逻辑见 src/router/navAccess.ts（纯函数，可单测）；此处只负责取 store 并委托。
+// 判定逻辑见 src/router/navAccess.ts（纯函数，可单测）；守卫注册顺序见 src/router/guards.ts。
 // 无权限语义的入口（/dashboard、移动端 tab 等）由路由表 meta.navExempt 显式声明。
-router.beforeEach((to) => resolveNavAccess(to, useAuthStore()))
+installNavigationGuards(router, () => useAuthStore())
 
 export default router
