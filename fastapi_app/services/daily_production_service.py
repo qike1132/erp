@@ -8,7 +8,7 @@ import io
 import logging
 from collections.abc import Iterable
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import openpyxl
@@ -32,6 +32,12 @@ from fastapi_app.shared.stock_concurrency import (
 )
 from fastapi_app.shared_models import Customer, DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
+
+
+def _money_to_json(value) -> float:
+    """金额只在 JSON 边界转 float；舍入始终在 Decimal 上做 HALF-UP。"""
+    d = value if isinstance(value, Decimal) else Decimal(str(value))
+    return float(d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 # Excel 公式注入清洗（审查 H12）：product_name/barcode/remark/created_by 是
 # 用户可控文本，复用权威清洗器（与 purchase_center/export_utils.py 同口径）。
@@ -390,7 +396,7 @@ async def get_records(
         'pages': calc_total_pages(total, per_page),
         'stats': {
             'total_quantity': int(total_qty),
-            'total_value': round_money(float(total_val)),
+            'total_value': _money_to_json(total_val),
             'total_sku': int(total_sku),
         },
     }
@@ -631,7 +637,7 @@ async def get_daily_summary(
             'department': dept_key,
             'department_label': DEPARTMENT_LABELS.get(dept_key, dept_key),
             'total_quantity': d_info['quantity'],
-            'total_value': float(round_money(float(d_info['value']))),
+            'total_value': _money_to_json(d_info['value']),
             'sku_count': len(d_info['skus']),
         })
 
@@ -639,7 +645,7 @@ async def get_daily_summary(
         'date': target_date,
         'departments': department_rows,
         'overall_quantity': overall_quantity,
-        'overall_value': float(round_money(float(overall_value))),
+        'overall_value': _money_to_json(overall_value),
         'overall_sku_count': len(overall_skus),
     }
 
@@ -709,7 +715,7 @@ async def get_monthly_summary(
         if dept in ('filling', 'handcraft', 'packaging'):
             daily_map[d_str][dept] = {
                 'quantity': int(row.total_qty),
-                'value': round_money(float(row.total_val)),
+                'value': _money_to_json(row.total_val),
                 'sku_count': int(row.sku_count),
             }
 
