@@ -68,6 +68,40 @@ def clear_degradations() -> None:
     """清空降级登记（仅供测试重置进程级状态）。"""
     _DEGRADED_REASONS.clear()
 
+
+_DEGRADED_REDIS_PREFIX = "security_degraded:"
+_DEGRADED_TTL = 300
+
+
+async def publish_degradation(reason: str) -> None:
+    """把降级原因广播到 Redis，供 /api/health 跨 worker 汇总（best-effort）。"""
+    record_degradation(reason)
+    try:
+        from fastapi_app.core.redis_wrapper import get_client
+
+        client = get_client()
+        if client:
+            await client.set(f"{_DEGRADED_REDIS_PREFIX}{reason}", "1", ex=_DEGRADED_TTL)
+    except Exception as e:  # defensive: 降级上报本身不得影响主流程
+        logger.debug("降级原因上报失败（忽略）: %s", e)
+
+
+async def degraded_reasons_all() -> list[str]:
+    """本地 + Redis 的降级原因并集（多 worker 下每个进程各报各的，必须汇总）。"""
+    reasons = set(degraded_reasons())
+    try:
+        from fastapi_app.core.redis_wrapper import get_client
+
+        client = get_client()
+        if client:
+            keys = await client.keys(f"{_DEGRADED_REDIS_PREFIX}*")
+            for k in keys or ():
+                name = k.decode() if isinstance(k, bytes) else str(k)
+                reasons.add(name[len(_DEGRADED_REDIS_PREFIX):])
+    except Exception as e:  # defensive: 汇总失败时退回本地列表
+        logger.debug("降级原因汇总失败（退回本地）: %s", e)
+    return sorted(reasons)
+
 # H-2（2026-09-29）：路径级请求体上限。全局 10MB 会把业务侧**已经声明支持**的更大
 # 上传一并挡死（备份 500MB、Excel 导入 50MB），上线后首次整库还原/大导入即 413。
 # 放宽只为让请求抵达端点，体积的真正校验仍由端点内的常量负责：

@@ -99,6 +99,13 @@ def _log_revocation_degraded(exc_info: bool = False) -> None:
     )
 
 
+async def _record_fail_open() -> None:
+    """把 fail-open 降级登记到 /api/health（本地 + Redis，供跨 worker 汇总）。"""
+    from fastapi_app.core.middleware import publish_degradation
+
+    await publish_degradation("token_revocation_fail_open")
+
+
 async def is_token_revoked(jti: str | None, *, fail_closed: bool = False) -> bool:
     """检查 token 是否已被撤销（在黑名单中）
 
@@ -124,6 +131,7 @@ async def is_token_revoked(jti: str | None, *, fail_closed: bool = False) -> boo
             return True
         if fail_closed:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='令牌状态校验不可用，请重新登录')
+        await _record_fail_open()
         _log_revocation_degraded()
         return False
     except HTTPException:
@@ -135,5 +143,6 @@ async def is_token_revoked(jti: str | None, *, fail_closed: bool = False) -> boo
             return True
         if fail_closed:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='令牌状态校验不可用，请重新登录') from None
+        await _record_fail_open()
         _log_revocation_degraded(exc_info=True)
         return False
