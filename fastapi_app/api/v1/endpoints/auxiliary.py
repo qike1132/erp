@@ -456,6 +456,9 @@ async def batch_submit_orders(
 ):
     """批量提交订单"""
     from fastapi_app.services.auxiliary_service import orchestrate_batch_orders
+    # 工厂隔离：按 spec 要求整批拒绝（库存批量端点是逐项部分成功，口径不同）
+    for item in data.orders:
+        await assert_product_factory_scoped(db, item.product_id, user, what="产品")
     return await orchestrate_batch_orders(
         db, [item.model_dump() for item in data.orders], created_by=user.username,
     )

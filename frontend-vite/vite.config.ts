@@ -84,6 +84,8 @@ export default defineConfig(({ mode }) => {
           navigateFallback: null,
           globIgnores: ['**/index.html'],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          // 首装带宽尖峰：单个超过 2MB 的 chunk 不预缓存，改由下方运行时缓存按需填充
+          maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -101,6 +103,18 @@ export default defineConfig(({ mode }) => {
                 cacheName: 'gstatic-fonts-cache',
                 expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
                 cacheableResponse: { statuses: [0, 200] },
+              },
+            },
+            // 超过预缓存上限的 chunk 走运行时缓存（不阻塞首装）。
+            // 用 CacheFirst 而非 StaleWhileRevalidate：assets 是内容哈希，天然不可变；
+            // 且仓库守卫禁止 SWR/NetworkFirst（会缓存陈旧业务数据）。
+            {
+              urlPattern: /\/assets\/.*\.(?:js|css)$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'large-chunks',
+                // 内容哈希每次部署换新，不设上限会永久累积
+                expiration: { maxEntries: 30 },
               },
             },
             // ERP 为数据一致性敏感系统：全部 API 请求一律 NetworkOnly（不缓存）。
