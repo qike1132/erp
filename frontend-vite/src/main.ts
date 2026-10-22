@@ -104,8 +104,9 @@ initSentry(app)
   .then((ok) => markSentryReady(ok))
   .catch(() => { /* 遥测初始化失败不得影响启动 */ })
 
-// 尽快挂载应用，不阻塞在 PrimeVue / 图标 / Token 缓存等异步初始化上
-app.mount('#app')
+// 挂载放到 bootstrap() 末尾：PrimeVue 必须在 mount 之前安装，
+// 否则窗口期内挂载的组件拿不到 $primevue 的 pt/zIndex/locale 注入，
+// 表现为偶发弹层被遮罩盖住或样式裸奔。
 
 window.addEventListener('auth:expired', async () => {
   const { useAuthStore } = await import('@/stores/auth')
@@ -116,7 +117,7 @@ window.addEventListener('auth:expired', async () => {
   }
 })
 
-// 异步初始化：设备特定资源，不阻塞首次渲染
+// 初始化设备特定资源；PrimeVue 安装完成后再 mount
 async function bootstrap() {
   if (isMobile) {
     try {
@@ -125,27 +126,27 @@ async function bootstrap() {
       console.warn('[App] mobile-tokens.css 加载失败，使用默认样式', e)
     }
   } else {
-    // PrimeVue 配置在 mount 后异步安装（Vue 3 支持运行时 install plugin）
-    import('primevue/config')
-      .then((PrimeVueMod) =>
-        import('./styles/primevue-pt').then((ptMod) => {
-          app.use(PrimeVueMod.default, {
-            unstyled: true,
-            pt: ptMod.plushCutePT,
-            // PrimeVue 弹层(autocomplete/select/datepicker 面板等)的内联 z-index
-            // 从该起点递增。项目自定义弹窗(pd-overlay 等)硬编码 z-index: 1050,
-            // 默认 overlay 起点 1000 会被弹窗遮罩盖住 —— 弹窗内打开联想下拉
-            // 表现为"面板已渲染但不可见"(BOM 配置联想失效成因,2026-09-11 修复)。
-            zIndex: { modal: 2100, overlay: 2000, menu: 2000, tooltip: 2100 },
-            locale: {
-              emptySearchMessage: '无匹配结果',
-              searchMessage: '{0} 条结果',
-            },
-          })
-        })
-      )
-      .catch((e) => console.error('[App] PrimeVue 加载失败，PC 端组件可能无法正常渲染', e))
+    try {
+      const PrimeVueMod = await import('primevue/config')
+      const ptMod = await import('./styles/primevue-pt')
+      app.use(PrimeVueMod.default, {
+        unstyled: true,
+        pt: ptMod.plushCutePT,
+        // PrimeVue 弹层(autocomplete/select/datepicker 面板等)的内联 z-index
+        // 从该起点递增。项目自定义弹窗(pd-overlay 等)硬编码 z-index: 1050,
+        // 默认 overlay 起点 1000 会被弹窗遮罩盖住 —— 弹窗内打开联想下拉
+        // 表现为"面板已渲染但不可见"(BOM 配置联想失效成因,2026-09-11 修复)。
+        zIndex: { modal: 2100, overlay: 2000, menu: 2000, tooltip: 2100 },
+        locale: {
+          emptySearchMessage: '无匹配结果',
+          searchMessage: '{0} 条结果',
+        },
+      })
+    } catch (e) {
+      console.error('[App] PrimeVue 加载失败，PC 端组件可能无法正常渲染', e)
+    }
   }
+  app.mount('#app')
 }
 
 bootstrap()
