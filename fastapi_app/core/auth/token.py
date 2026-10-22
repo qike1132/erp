@@ -4,6 +4,7 @@ JWT Token 编解码（core/deps 拆分子模块）
 职责：access/refresh token 的签发与校验（HS256 / RS256 / ES256）。
 不依赖认证请求上下文，纯 token 工具层。
 """
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -12,37 +13,48 @@ from fastapi import HTTPException, status
 
 from fastapi_app.core.config import settings
 
+_KEY_CACHE_TTL = 300  # 密钥轮换后最长 5 分钟生效，无需全量重启
 _signing_key_cache = None
 _verify_key_cache = None
+_signing_key_cache_at = 0.0
+_verify_key_cache_at = 0.0
+
+
+def _cache_fresh(cached, cached_at: float) -> bool:
+    return cached is not None and time.monotonic() - cached_at < _KEY_CACHE_TTL
 
 
 def _get_signing_key() -> str:
     """获取 JWT 签名密钥（支持 HS256 / RS256 / ES256）"""
-    global _signing_key_cache
-    if _signing_key_cache is not None:
+    global _signing_key_cache, _signing_key_cache_at
+    if _cache_fresh(_signing_key_cache, _signing_key_cache_at):
         return _signing_key_cache
     if settings.ALGORITHM in ("RS256", "ES256"):
         if not settings.JWT_PRIVATE_KEY_PATH:
             raise RuntimeError(f'{settings.ALGORITHM} 模式必须设置 JWT_PRIVATE_KEY_PATH 环境变量')
         with open(settings.JWT_PRIVATE_KEY_PATH) as f:
             _signing_key_cache = f.read()
+            _signing_key_cache_at = time.monotonic()
             return _signing_key_cache
     _signing_key_cache = settings.SECRET_KEY
+    _signing_key_cache_at = time.monotonic()
     return _signing_key_cache
 
 
 def _get_verify_key() -> str:
     """获取 JWT 验证密钥（支持 HS256 / RS256 / ES256）"""
-    global _verify_key_cache
-    if _verify_key_cache is not None:
+    global _verify_key_cache, _verify_key_cache_at
+    if _cache_fresh(_verify_key_cache, _verify_key_cache_at):
         return _verify_key_cache
     if settings.ALGORITHM in ("RS256", "ES256"):
         if not settings.JWT_PUBLIC_KEY_PATH:
             raise RuntimeError(f'{settings.ALGORITHM} 模式必须设置 JWT_PUBLIC_KEY_PATH 环境变量')
         with open(settings.JWT_PUBLIC_KEY_PATH) as f:
             _verify_key_cache = f.read()
+            _verify_key_cache_at = time.monotonic()
             return _verify_key_cache
     _verify_key_cache = settings.SECRET_KEY
+    _verify_key_cache_at = time.monotonic()
     return _verify_key_cache
 
 
