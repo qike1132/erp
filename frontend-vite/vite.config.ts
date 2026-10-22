@@ -111,7 +111,11 @@ export default defineConfig(({ mode }) => {
             {
               urlPattern: /\/assets\/.*\.(?:js|css)$/i,
               handler: 'CacheFirst',
-              options: { cacheName: 'large-chunks' },
+              options: {
+                cacheName: 'large-chunks',
+                // 内容哈希每次部署换新，不设上限会永久累积
+                expiration: { maxEntries: 30 },
+              },
             },
             // ERP 为数据一致性敏感系统：全部 API 请求一律 NetworkOnly（不缓存）。
             // 此前读接口用 StaleWhileRevalidate / 兜底 NetworkFirst，Service Worker

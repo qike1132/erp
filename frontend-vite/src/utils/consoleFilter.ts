@@ -19,6 +19,8 @@ export function shouldSuppressConsoleError(args: unknown[]): boolean {
 }
 
 export function installConsoleErrorFilter(): void {
+  // 开发环境不抑制：扩展噪音只在生产/预览环境处理，避免掩盖真实错误
+  if (import.meta.env.DEV) return
   const original = console.error.bind(console)
   console.error = (...args: unknown[]) => {
     if (shouldSuppressConsoleError(args)) return
