@@ -253,8 +253,17 @@ async def lifespan(application: FastAPI):
     # 自带重连；关停由下方 background_tasks 的 cancel+gather 统一回收。
 
     # L1 缓存跨 worker 失效广播（开关默认关，由 CACHE_L1_BROADCAST_ENABLED 启用）
-    from fastapi_app.core.cache import start_l1_broadcast_listener
+    from fastapi_app.core.cache import (
+        resolve_worker_count,
+        start_l1_broadcast_listener,
+        warn_if_l1_broadcast_disabled,
+    )
     await start_l1_broadcast_listener()
+    warn_if_l1_broadcast_disabled(resolve_worker_count())
+
+    # 生产限流必须走 Redis：memory:// 回退会让每个 worker 各自计数
+    from fastapi_app.core.limiter import assert_production_limiter_storage
+    assert_production_limiter_storage()
 
     # 2026-10-17 审计 F-BE-CORE-08：采购中心跨进程失效监听器原先只有关停钩子、
     # 从未启动（erp:cache_invalidation 频道有发布方无消费方）。与 L1 广播并列启动，

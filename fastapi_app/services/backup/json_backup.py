@@ -351,7 +351,12 @@ async def execute_legacy_backup_to_bytes(
         except (SQLAlchemyError, ValueError, OSError) as e:
             logger.error('备份表 %s 初始化失败: %s', name, e)
             table_payloads[name] = {'error': str(e), 'count': 0, 'rows': []}
-    return json.dumps(backup_data, ensure_ascii=False, indent=2).encode('utf-8')
+    return _encode_backup_json(backup_data)
+
+
+def _encode_backup_json(backup_data: dict) -> bytes:
+    """紧凑序列化：indent 会让备份体积放大约一倍，恢复侧只依赖 JSON 结构。"""
+    return json.dumps(backup_data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
 
 
 async def restore_database_from_json(zf, db: AsyncSession, task_id: str | None = None) -> dict:

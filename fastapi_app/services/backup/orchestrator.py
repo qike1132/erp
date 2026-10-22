@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -270,10 +271,10 @@ class DatabaseRestoreOrchestrator:
         """如果需要则使用注入的 decryptor 解密。"""
         if self._decryptor is not None:
             return await self._decryptor.decrypt_if_needed(data, password, True)
-        # 默认回退：直接调用现有 decrypt_backup
+        # 默认回退：整包解密是 CPU 密集操作，下沉线程池
         from fastapi_app.core.backup_encryption import decrypt_backup
 
-        return decrypt_backup(data, password)
+        return await asyncio.to_thread(decrypt_backup, data, password)
 
     async def _validate_database_checksums(
         self,
