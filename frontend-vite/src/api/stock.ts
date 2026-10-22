@@ -1,4 +1,4 @@
-import { get, post, put, del, upload, download } from './request'
+import service, { get, post, put, del, upload, download } from './request'
 import type {
   Product, StagingListResponse, StagingRow, StagingImportResult,
   InventoryResponse, StockInRecord, ShipmentInfo, ApiResponse, QueryParams,
@@ -61,7 +61,9 @@ export interface StockFlowRecord {
 
 export const stockApi = {
   stats: async (): Promise<StockStatsData> => {
-    const resp = await get<{ success?: boolean; data?: StockStatsData }>('/stock/stats')
+    // 同 dashboardApi.stats：该请求归 Vue Query 缓存所有，不能被路由级取消
+    // （取消会让查询永久卡在 fetching，首次登录仪表盘因此无数据）。
+    const resp = await service.get<unknown, { success?: boolean; data?: StockStatsData }>('/stock/stats')
     return resp.data ?? (resp as StockStatsData)
   },
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),

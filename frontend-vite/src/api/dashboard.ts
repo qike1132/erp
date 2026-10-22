@@ -29,7 +29,11 @@ export interface MobileDashboardData {
 
 export const dashboardApi = {
   stats: async () => {
-    const resp = await get<ApiEnvelope<Record<string, unknown>>>('/dashboard/stats');
+    // 该请求由 Vue Query 缓存持有（useDashboardStats），生命周期属于查询而不是路由：
+    // 走 get() 的路由级取消时，登录后紧接着的 router.push 会把它 abort，
+    // _silenceCanceled 再把取消变成永不 settle 的 Promise → 查询永久停在
+    // fetchStatus='fetching'，组件挂载不会重新取数（首次登录仪表盘无数据、刷新才恢复）。
+    const resp = await service.get<unknown, ApiEnvelope<Record<string, unknown>>>('/dashboard/stats');
     return resp.data;
   },
   mobile: async (): Promise<MobileDashboardData> => {
