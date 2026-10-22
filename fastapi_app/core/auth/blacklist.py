@@ -87,6 +87,24 @@ async def revoke_token(jti: str, exp: int) -> None:
         logger.debug("token 黑名单写入失败", exc_info=True)
 
 
+async def _consume_revocation_messages(redis) -> None:
+    """订阅一个连接的生命周期：异常/取消时也必须关闭 pubsub，避免连接池泄漏。"""
+    import contextlib
+
+    pubsub = redis.pubsub()
+    try:
+        await pubsub.subscribe(_REVOCATION_CHANNEL)
+        async for message in pubsub.listen():
+            if message.get("type") != "message":
+                continue
+            data = message.get("data")
+            jti = data.decode("utf-8") if isinstance(data, bytes) else str(data)
+            _LOCAL_REVOKED_JTIS.add(jti)
+    finally:
+        with contextlib.suppress(Exception):
+            await pubsub.aclose()
+
+
 async def _revocation_listener() -> None:
     """订阅撤销广播并写入本进程 LRU；断线退避重连。"""
     backoff = 5
@@ -98,14 +116,7 @@ async def _revocation_listener() -> None:
             if redis is None:
                 await asyncio.sleep(backoff)
                 continue
-            pubsub = redis.pubsub()
-            await pubsub.subscribe(_REVOCATION_CHANNEL)
-            async for message in pubsub.listen():
-                if message.get("type") != "message":
-                    continue
-                data = message.get("data")
-                jti = data.decode("utf-8") if isinstance(data, bytes) else str(data)
-                _LOCAL_REVOKED_JTIS.add(jti)
+            await _consume_revocation_messages(redis)
         except Exception:  # defensive: 监听失败不得拖垮进程
             logger.warning("撤销广播监听断开，%ss 后重连", backoff, exc_info=True)
             await asyncio.sleep(backoff)
