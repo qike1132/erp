@@ -57,3 +57,23 @@ async def test_large_table_uses_reltuples():
     assert not any("COUNT" in sql and "big" in sql for sql in db.calls), (
         "大表不应再发 COUNT(*)"
     )
+
+
+@pytest.mark.asyncio
+async def test_reltuples_query_runs_on_real_pg(async_db_session):
+    """真库冒烟：ANY(:names) 的数组绑定必须可用，否则优化会静默回落 COUNT。"""
+    from sqlalchemy import text
+
+    from fastapi_app.shared_models import Base
+
+    names = [t.name for t in Base.metadata.sorted_tables][:5]
+    rows = await async_db_session.execute(
+        text(
+            "SELECT c.relname, c.reltuples::bigint FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+            "AND c.relname = ANY(:names)"
+        ),
+        {"names": names},
+    )
+    assert rows.all(), "reltuples 查询未返回任何表，ANY(:names) 绑定可能不可用"

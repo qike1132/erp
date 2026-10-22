@@ -10,7 +10,13 @@ def test_logger_uses_plain_file_handler(tmp_path, monkeypatch):
     logger.setup_logging()
 
     root = logging.getLogger()
-    assert any(isinstance(h, logging.FileHandler) for h in root.handlers)
-    assert not any(isinstance(h, TimedRotatingFileHandler) for h in root.handlers), (
-        "多 worker 下不得在进程内做午夜轮转，应交给 utils.log_rotation"
-    )
+    try:
+        assert any(isinstance(h, logging.FileHandler) for h in root.handlers)
+        assert not any(
+            isinstance(h, TimedRotatingFileHandler) for h in root.handlers
+        ), "多 worker 下不得在进程内做午夜轮转，应交给 utils.log_rotation"
+    finally:
+        for handler in list(root.handlers):
+            if isinstance(handler, logging.FileHandler):
+                root.removeHandler(handler)
+                handler.close()
