@@ -211,6 +211,48 @@ erp-redis-broker` 的唯一依赖方就是它）。SCM 拒停合法，代码却�
 ⚠️ 该自检目前**未接入 CI/quality_gate**（只有 `docs/bom-multi-role/02-架构设计与任务分解.md` 里"改门禁后必跑"
 的人防规则）；它会跑两遍完整 quality_gate，接入前先评估 CI 时长。
 
+## 16. site-packages 被成批删文件时，首条报错只是冰山一角
+
+2026-10-22 实测：`erp-prod` 起不来，`logs/后端(uvicorn).out.log` 唯一可见的错是
+`ModuleNotFoundError: No module named 'annotated_doc'`（8 个 worker 全崩 → 5002 不监听 →
+健康检查 `WinError 10061` → prod_runner 判失败）。
+
+**只看首条报错会漏掉真正的范围。** `pip check` 报 7 处，逐个 import 探针查出 **12 个模块不可用**，
+且是三种不同形态：
+
+| 形态 | 涉及 | 为什么容易漏 |
+|---|---|---|
+| 整包消失（连 `dist-info`） | `annotated-doc`、`annotated-types`、`anyio`、`asgiref`、`alembic`、`arq`、`argon2-cffi` | 首条报错只露 `annotated_doc` 一个 |
+| 部分删除 | `asyncpg` 36/48 个文件（含 `connection.py`） | **`dist-info` 还在 → pip 认为"已安装" → 普通 `pip install` 根本不碰它** |
+| 锁定依赖连带 | `pydantic-settings`、`pydantic-extra-types` | 自身没坏，只因缺 `annotated-types` 而不可导入 |
+
+最贵的一处：`argon2` 被删，而 `fastapi_app/core/security.py:11` 直接 import 它——**密码哈希**。
+即使用某种办法让后端起来了，登录也是死的。**单看"服务起没起来"判断修复完成，会漏掉这条。**
+
+三条可复用手法：
+
+1. **判定范围用 import 探针，不用首条报错也不用 `pip check`。** 把运行时真正 import 的模块列成表逐个试，
+   `pip check` 只覆盖有 dist-info 的包，对"整包消失"和"部分删除"都会漏。
+2. **部分删除的包必须 `--reinstall-package <pkg>` 强制重装**；`dist-info` 在位时 pip/uv 都认为无需动作。
+   核对手法：读 `*.dist-info/RECORD` 逐行 `[ -e "$p" ]`，缺几个文件一目了然。
+3. **`uv pip sync <lock>` 在这种 venv 上是错工具。** 本仓 venv 是 `base.lock` + `ocr.lock` 叠加装成的
+   （`ocr.txt` 有 `-r base.txt`），并非任何单一 lock 的镜像——对 `base.lock` 做 dry-run 显示会**卸载 93 个包**
+   （pytest / rapidocr / ruff / selenium 全没）。正解：先从 `*.dist-info` 反推实际安装集，确认没有野包后
+   **只补缺失、不动已有的**。
+
+**反向的坑**：不是所有缺失都要补。`email-validator`、`passlib`、`pydantic-extra-types` 也不在，
+但全仓零 import（历史传递依赖，lock 未显式声明）——补回来只是制造新的无主依赖。补之前先 grep 调用方。
+
+**未定的部分**：删除发生在 19:11:27（`site-packages` 目录 mtime，删除条目会更新父目录），
+故障 22:23 才爆发，相隔 3 小时。已排除杀软（Defender 实时监控 `DisableRealtimeMonitoring: True`
+且无排除路径）；`server_manager` 日志该时段无记录；Windows 事件日志无可操作线索。
+**没有进程级审计策略，追不到是谁动的** —— 若这台机器还有别人或别的工具在跑，同样的删除可能再来一次。
+
+**为什么这不是"重启一下就好"**：同机曾有形态相近但根因不同的事故（中断的 pip 把
+`websockets`/`asyncpg` 留半成品，见 `venv-websockets-corruption-breaks-uvicorn` 的结论）——
+那次是**文件损坏**，这次是**文件消失**。修法因此不同：损坏可试着重装单个包，成批消失必须
+先摸清范围再动手，否则会反复"修好一个又崩一个"。
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。
