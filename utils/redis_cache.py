@@ -28,6 +28,30 @@ _CLIENT_OPTS: dict[str, Any] = {
     'max_connections': 100,
 }
 
+# 大 value 的 JSON 序列化/反序列化是 CPU 密集操作，下沉线程池；小 value 保持同步
+_SERIALIZE_OFFLOAD_ITEMS = 1000
+_SERIALIZE_OFFLOAD_CHARS = 64 * 1024
+
+
+def _needs_offload(value: Any) -> bool:
+    if isinstance(value, str):
+        return len(value) >= _SERIALIZE_OFFLOAD_CHARS
+    if isinstance(value, (list, tuple, dict, set)):
+        return len(value) >= _SERIALIZE_OFFLOAD_ITEMS
+    return False
+
+
+async def _serialize_async(value: Any) -> str:
+    if _needs_offload(value):
+        return await asyncio.to_thread(json.dumps, value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False)
+
+
+async def _deserialize_async(raw) -> Any:
+    if len(raw) >= _SERIALIZE_OFFLOAD_CHARS:
+        return await asyncio.to_thread(json.loads, raw)
+    return json.loads(raw)
+
 
 class RedisCacheManager:
     """异步 Redis 缓存管理器
@@ -291,7 +315,7 @@ class RedisCacheManager:
                 value = await client.get(full_key)
                 self.note_command_success()
                 if value:
-                    return json.loads(value)
+                    return await _deserialize_async(value)
             except Exception as e:
                 logger.warning("Redis async get error: %s", e)
                 self.note_command_failure(e)
@@ -311,7 +335,7 @@ class RedisCacheManager:
         client = self.ensure_client()
         if client:
             try:
-                serialized = json.dumps(value, ensure_ascii=False)
+                serialized = await _serialize_async(value)
                 ok = await client.setex(full_key, timeout, serialized)
                 self.note_command_success()
                 return ok
