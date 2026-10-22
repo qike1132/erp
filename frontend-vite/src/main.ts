@@ -7,28 +7,22 @@ import { FontAwesomeIconLazy } from './components/icon/FontAwesomeIconLazy'
 import './styles/app.css'
 import App from './App.vue'
 import router from './router'
+import { abortPendingRequests } from './api/request'
 import { isMobileDevice } from './composables/useDevice'
 import { devLog } from './utils/devLog'
 import { initSentry } from './utils/sentry'
 import { markSentryReady, reportError } from './utils/errorReporter'
 
-// 静默 Chrome 扩展导致的 runtime.lastError 噪音
-// 根因：Manifest V3 扩展的 content script 向已休眠的 background service worker
-// 发送消息时，消息端口已被关闭。这不是应用代码的问题。
-{
-  const _origError = console.error.bind(console)
-  const SUPPRESS_PATTERNS = [
-    'message port closed before a response was received',
-    'Could not establish connection. Receiving end does not exist',
-  ]
-  console.error = (...args: unknown[]) => {
-    const firstArg = args[0]
-    if (typeof firstArg === 'string' && SUPPRESS_PATTERNS.some((p) => firstArg.includes(p))) {
-      return
-    }
-    _origError(...args)
-  }
-}
+import { installConsoleErrorFilter } from './utils/consoleFilter'
+
+// 静默 Chrome 扩展导致的 runtime.lastError 噪音（精确匹配，见 consoleFilter）
+installConsoleErrorFilter()
+
+// 路由切换时取消上一路由的未完成 GET，避免旧响应回填新页面
+router.beforeEach(() => {
+  abortPendingRequests()
+  return true
+})
 
 const app = createApp(App)
 const isMobile = isMobileDevice()

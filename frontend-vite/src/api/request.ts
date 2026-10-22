@@ -166,21 +166,47 @@ async function executeWithRetry<T>(
 // 如需独立重试或快速失败，请直接使用 service.get()。
 const _inflightGet = new Map<string, Promise<unknown>>()
 
+// 路由切换时取消上一路由的未完成 GET，避免旧响应回填新页面
+const _pendingControllers = new Set<AbortController>()
+
+export function createTrackedController(): AbortController {
+  const controller = new AbortController()
+  _pendingControllers.add(controller)
+  return controller
+}
+
+export function abortPendingRequests(): void {
+  for (const controller of _pendingControllers) controller.abort()
+  _pendingControllers.clear()
+}
+
 function _dedupeKey(url: string, params?: Record<string, unknown>): string {
   return `${url}?${params ? JSON.stringify(params) : ''}`
 }
 
-export function get<T>(url: string, params?: Record<string, unknown>): Promise<T> {
+export function get<T>(
+  url: string,
+  params?: Record<string, unknown>,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
   const key = _dedupeKey(url, params)
   const existing = _inflightGet.get(key)
   if (existing) return existing as Promise<T>
   // 读接口快速失败：单次请求（axios 15s 超时即抛错），不做网络重试。
   // 叠加重试会让 UI 的"加载中"最长挂约 48s；失败后由前端错误态 + 重试按钮兜底。
-  const p = service.get(url, { params }) as Promise<T>
+  const controller = createTrackedController()
+  if (options?.signal) {
+    if (options.signal.aborted) controller.abort()
+    else options.signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  const p = service.get(url, { params, signal: controller.signal }) as Promise<T>
   _inflightGet.set(key, p)
   // finally 会派生一个与原 Promise 同状态的新 Promise；若原请求失败（403/401/网络错误），
   // 必须 catch 这个派生 Promise，否则每次失败 GET 都会产生一次未处理的 Promise 拒绝（Uncaught (in promise) AxiosError）
-  p.finally(() => _inflightGet.delete(key)).catch(() => { /* 错误已由调用方处理 */ })
+  p.finally(() => {
+    _inflightGet.delete(key)
+    _pendingControllers.delete(controller)
+  }).catch(() => { /* 错误已由调用方处理 */ })
   return p
 }
 
