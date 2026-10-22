@@ -12,7 +12,7 @@
     </div>
     <div :class="['plan-date-wrap', hasPlans && 'plan-date-open']">
       <div class="plan-date-inner">
-        <div v-for="(plan, idx) in model.shipmentPlans" :key="idx" class="plan-split-row">
+        <div v-for="(plan, idx) in model.shipmentPlans" :key="rowIds[idx]" class="plan-split-row">
           <span class="plan-batch-no">第{{ idx + 1 }}批</span>
           <UiDatePicker
             :model-value="plan.date"
@@ -63,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import UiDatePicker from '@/components/ui/UiDatePicker.vue'
 import { QUANTITY_MAX } from '../composables/quantityRange'
@@ -77,6 +77,21 @@ import type { FormState, ShipmentPlanSplit } from '../composables/types'
  * 仅订单模式挂载（v-if 在父组件）；未勾选时界面与原流程零差异。
  */
 const model = defineModel<FormState>('form', { required: true })
+
+// 稳定行 key：批次对象没有 id，用并行 id 数组避免删中间行后焦点/日期面板状态错位
+const rowIds = ref<string[]>([])
+let seq = 0
+function newRowId() {
+  return `sp-${++seq}`
+}
+watch(
+  () => model.value.shipmentPlans.length,
+  (n) => {
+    while (rowIds.value.length < n) rowIds.value.push(newRowId())
+    if (rowIds.value.length > n) rowIds.value.splice(n)
+  },
+  { immediate: true },
+)
 
 const hasPlans = computed(() => model.value.shipmentPlans.length > 0)
 const allocated = computed(() => sumSplitQuantity(model.value.shipmentPlans))
@@ -105,6 +120,7 @@ function addSplit() {
 
 function removeSplit(idx: number) {
   if (model.value.shipmentPlans.length <= 1) return
+  rowIds.value.splice(idx, 1)
   model.value.shipmentPlans.splice(idx, 1)
 }
 </script>

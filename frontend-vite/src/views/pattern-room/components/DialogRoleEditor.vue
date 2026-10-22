@@ -1,6 +1,6 @@
 <template>
   <div class="dre-roles">
-    <div v-for="(role, idx) in modelValue" :key="idx" class="dre-role-row">
+    <div v-for="(role, idx) in modelValue" :key="rowIds[idx]" class="dre-role-row">
       <input
         v-model="modelValue[idx]"
         class="dre-role-input"
@@ -12,7 +12,7 @@
         type="button"
         class="dre-role-remove"
         title="移除"
-        @click="modelValue.splice(idx, 1)"
+        @click="removeAt(idx)"
       >
         <FontAwesomeIcon icon="times" aria-hidden="true" />
       </button>
@@ -25,7 +25,29 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue'
+
 const modelValue = defineModel<string[]>({ default: () => [''] })
+
+// 稳定行 key：字符串数组本身没有 id，用并行 id 数组避免删中间行后焦点/IME 错位
+const rowIds = ref<string[]>([])
+let seq = 0
+function newId() {
+  return `role-${++seq}`
+}
+watch(
+  () => modelValue.value.length,
+  (n) => {
+    while (rowIds.value.length < n) rowIds.value.push(newId())
+    if (rowIds.value.length > n) rowIds.value.splice(n)
+  },
+  { immediate: true },
+)
+
+function removeAt(idx: number) {
+  rowIds.value.splice(idx, 1)
+  modelValue.value.splice(idx, 1)
+}
 </script>
 
 <style scoped>
