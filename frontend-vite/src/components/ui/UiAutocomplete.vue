@@ -290,6 +290,7 @@ defineExpose({ setSuppressed, focusInput })
     :append-to="(appendTo as string | undefined)"
     :show-empty-message="!suppressSearch"
     :empty-search-message="emptyText"
+    :virtual-scroller-options="{ itemSize: 40 }"
     :pt="required ? { pcInputText: { root: { 'aria-required': 'true' } } } : undefined"
     @update:model-value="onInputChange"
     @complete="onComplete"
