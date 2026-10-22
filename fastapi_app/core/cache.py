@@ -75,6 +75,18 @@ _L1_RECONNECT_BACKOFF = 5  # 断线后重连退避秒数
 _broadcast_task: asyncio.Task | None = None
 
 
+def resolve_worker_count(env=None) -> int:
+    """实际 worker 数：环境变量优先，非法值容错，未设置时与 prod_runner 默认一致。"""
+    env = os.environ if env is None else env
+    raw = (env.get("UVICORN_WORKERS") or "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            return 1
+    return min(4, os.cpu_count() or 1)
+
+
 def warn_if_l1_broadcast_disabled(workers: int) -> None:
     """多 worker 但未开 L1 广播时告警：否则最长 local_ttl 内会读到脏数据。"""
     if workers >= 2 and not _L1_BROADCAST_ENABLED:

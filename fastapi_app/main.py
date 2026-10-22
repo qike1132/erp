@@ -254,11 +254,12 @@ async def lifespan(application: FastAPI):
 
     # L1 缓存跨 worker 失效广播（开关默认关，由 CACHE_L1_BROADCAST_ENABLED 启用）
     from fastapi_app.core.cache import (
+        resolve_worker_count,
         start_l1_broadcast_listener,
         warn_if_l1_broadcast_disabled,
     )
     await start_l1_broadcast_listener()
-    warn_if_l1_broadcast_disabled(int(os.getenv('UVICORN_WORKERS', '0') or 0))
+    warn_if_l1_broadcast_disabled(resolve_worker_count())
 
     # 生产限流必须走 Redis：memory:// 回退会让每个 worker 各自计数
     from fastapi_app.core.limiter import assert_production_limiter_storage

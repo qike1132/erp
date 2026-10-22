@@ -37,3 +37,12 @@ def test_small_value_stays_synchronous():
 
     assert redis_cache._needs_offload({"a": 1}) is False
     assert redis_cache._needs_offload(["x"] * 2000) is True
+
+
+def test_few_key_large_value_offloads():
+    """少 key 但单个 value 很大（如 {"data": 2MB}）也必须下沉。"""
+    from utils import redis_cache
+
+    big = "x" * (70 * 1024)
+    assert redis_cache._needs_offload({"data": big}) is True
+    assert redis_cache._needs_offload([big]) is True

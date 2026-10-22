@@ -36,8 +36,15 @@ _SERIALIZE_OFFLOAD_CHARS = 64 * 1024
 def _needs_offload(value: Any) -> bool:
     if isinstance(value, str):
         return len(value) >= _SERIALIZE_OFFLOAD_CHARS
-    if isinstance(value, (list, tuple, dict, set)):
-        return len(value) >= _SERIALIZE_OFFLOAD_ITEMS
+    if isinstance(value, (list, tuple, set)):
+        return len(value) >= _SERIALIZE_OFFLOAD_ITEMS or any(
+            isinstance(v, str) and len(v) >= _SERIALIZE_OFFLOAD_CHARS for v in value
+        )
+    if isinstance(value, dict):
+        return len(value) >= _SERIALIZE_OFFLOAD_ITEMS or any(
+            isinstance(v, str) and len(v) >= _SERIALIZE_OFFLOAD_CHARS
+            for v in value.values()
+        )
     return False
 
 
