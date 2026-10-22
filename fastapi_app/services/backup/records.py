@@ -8,7 +8,7 @@ import json
 import logging
 import shutil
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -70,6 +70,8 @@ def write_backup_meta_file(filepath, manifest: dict, *, record_type: str = 'full
         from fastapi_app.core.backup_encryption import create_meta_file
         fp = Path(filepath)
         meta = {
+            # 本地 naive：_read_backup_timestamp 用 strptime 解析并与本地保留期比较，
+            # 改 UTC 会让存量 sidecar 解析失败/保留期偏移；刻意保持。
             'created_at': manifest.get('exported_at') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             # 增量基准（snapshot 一致性起点）随 sidecar 落盘：加密包读不到 manifest，
             # _read_backup_timestamp 对 .enc 只能查这里。缺了它加密路径回退 created_at，
@@ -445,7 +447,8 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
         'last_full_backup': last_full,
         'disk_usage_percent': disk_usage_percent,
         'checksum_tables': sorted(get_checksum_tables()),
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        # 状态 payload 只供展示/接口消费，用 aware UTC ISO（不参与解析/保留期比较）
+        'timestamp': datetime.now(UTC).isoformat(),
     }
 
 

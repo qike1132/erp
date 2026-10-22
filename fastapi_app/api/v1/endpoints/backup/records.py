@@ -11,7 +11,7 @@
 - POST   /schedule/trigger           手动触发定时任务（通过 ARQ 入队）
 """
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import FunctionType
 
@@ -59,7 +59,7 @@ async def ping(user: User = Depends(require_backup_permission('ping'))):
         'status': 'ok',
         'table_count': len(Base.metadata.sorted_tables),
         'format_version': backup_service.BACKUP_FORMAT_VERSION,
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'timestamp': datetime.now(UTC).isoformat(),
     }
 
 

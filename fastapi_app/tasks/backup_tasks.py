@@ -92,6 +92,8 @@ async def manual_full_backup_task(
             )
             # 第十四轮：秒级时间戳在同秒双全量（锁刚释放+小库秒完成）下会同名互覆——
             # 落盘在 advisory 锁外（见该函数），加毫秒后缀保证唯一；解析端正则按搜索匹配不受影响。
+            # 文件名用本地时间：多个解析点按本地时间解析并参与保留期，
+            # 改 UTC 会让文件名日期偏移 8 小时；刻意保持（DB 时间戳另行用 aware UTC）。
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S') + datetime.now().strftime('%f')[:3]
             # P0-1: 加密备份扩展名带 .enc；P0-4: 同步写 .meta sidecar
             filename = (
@@ -513,6 +515,8 @@ async def _do_auto_backup(backup_type: str) -> dict:
             )
             # 第十四轮：秒级时间戳在同秒双全量（锁刚释放+小库秒完成）下会同名互覆——
             # 落盘在 advisory 锁外（见该函数），加毫秒后缀保证唯一；解析端正则按搜索匹配不受影响。
+            # 文件名用本地时间：多个解析点按本地时间解析并参与保留期，
+            # 改 UTC 会让文件名日期偏移 8 小时；刻意保持（DB 时间戳另行用 aware UTC）。
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S') + datetime.now().strftime('%f')[:3]
             filename = (
                 f'erp_auto_daily_{timestamp}.zip.enc' if manifest.get('encrypted')
