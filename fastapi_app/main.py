@@ -260,6 +260,10 @@ async def lifespan(application: FastAPI):
     await start_l1_broadcast_listener()
     warn_if_l1_broadcast_disabled(int(os.getenv('UVICORN_WORKERS', '0') or 0))
 
+    # 生产限流必须走 Redis：memory:// 回退会让每个 worker 各自计数
+    from fastapi_app.core.limiter import assert_production_limiter_storage
+    assert_production_limiter_storage()
+
     # 2026-10-17 审计 F-BE-CORE-08：采购中心跨进程失效监听器原先只有关停钩子、
     # 从未启动（erp:cache_invalidation 频道有发布方无消费方）。与 L1 广播并列启动，
     # 自带重连；关停由下方 stop_purchase_cache_listener 统一回收。

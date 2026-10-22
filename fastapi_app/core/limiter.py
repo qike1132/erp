@@ -73,6 +73,17 @@ def rate_limit_key(request: "Request") -> str:
 default_limits = limiter_default_limits_from_env()
 
 
+def assert_production_limiter_storage() -> None:
+    """生产环境必须配置 Redis：memory:// 回退会让每个 worker 各自计数。"""
+    from fastapi_app.core.config import _is_production_env
+
+    if _is_production_env() and not os.getenv("REDIS_CACHE_URL"):
+        raise RuntimeError(
+            "生产环境必须配置 REDIS_CACHE_URL：限流回退 memory:// 会让 8 worker "
+            "各自计数，实际阈值被放大"
+        )
+
+
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message="Config file .* not found")
     limiter = Limiter(
