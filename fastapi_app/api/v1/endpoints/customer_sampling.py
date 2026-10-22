@@ -6,6 +6,7 @@ customer_sampling_manage（P0-6(a) 按端点加读权限，不整树放开），
 
 对应 design.md 2.2.2 的 22 个接口端点。
 """
+import asyncio
 import functools
 from typing import Any
 
@@ -221,6 +222,13 @@ async def api_delete_project(
 
 # ==================== 7. 上传产品图片 ====================
 
+async def _validate_project_image_async(content: bytes, content_type: str | None) -> None:
+    """PIL 解码是 CPU 密集的，必须下沉线程池，否则阻塞事件循环。"""
+    await asyncio.to_thread(
+        svc.validate_project_image, content, content_type=content_type
+    )
+
+
 @router.post('/projects/{project_id}/image', response_model=ActionResponse)
 @_svc_error_guard('上传失败')
 async def api_upload_project_image(
@@ -238,7 +246,7 @@ async def api_upload_project_image(
     # 项目存在性优先（404 语义先于文件校验 400），
     # 魔数 + 解码校验在进入事务前执行（快速失败，不占用数据库连接）
     await svc._ensure_project_exists(db, project_id)
-    svc.validate_project_image(content, content_type=file.content_type)
+    await _validate_project_image_async(content, file.content_type)
     async with db_transaction(db):
         result = await svc.upload_project_image(
             db,

@@ -163,8 +163,8 @@ def _patched(delete_po):
         patch('fastapi_app.services.purchase._unprocessed._fetch_bom_product_ids',
               new=AsyncMock(return_value=set())),
         patch('fastapi_app.services.purchase_order_crud.delete_purchase_order', new=delete_po),
-        patch('fastapi_app.services.order_utils.compute_order_status_from_db',
-              new=AsyncMock(return_value='待备货')),
+        patch('fastapi_app.services.order_utils.compute_order_statuses_batch',
+              new=AsyncMock(return_value={SOURCE_ORDER: '待备货'})),
     )
 
 

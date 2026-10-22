@@ -30,7 +30,7 @@ async def _revoke_targets(db: AsyncSession, targets: list) -> dict:
     if not targets:
         return {'revoked': 0, 'orders_reset': 0}
 
-    from fastapi_app.services.order_utils import compute_order_status_from_db
+    from fastapi_app.services.order_utils import compute_order_statuses_batch
     from fastapi_app.services.purchase_order_crud import delete_purchase_order
     from fastapi_app.shared_models import Order
     from fastapi_app.shared_models.purchase_order import PurchaseOrderSku
@@ -54,8 +54,9 @@ async def _revoke_targets(db: AsyncSession, targets: list) -> dict:
         orders = list((await db.execute(
             select(Order).where(Order.id.in_(order_ids))
         )).scalars().all())
+        status_map = await compute_order_statuses_batch(db, orders)
         for order in orders:
-            new_status = await compute_order_status_from_db(db, order)
+            new_status = status_map[order.id]
             if new_status != order.status:
                 order.status = new_status
                 orders_reset += 1

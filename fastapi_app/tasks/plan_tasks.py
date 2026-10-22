@@ -62,6 +62,23 @@ async def sync_shipment_records_task(ctx):
     return await asyncio.to_thread(_sync_impl)
 
 
+def _batch_id_for_job(job_id: str) -> str:
+    """同一 ARQ job 在重试间 job_id 不变，用它派生 batch_id 才能幂等重放。"""
+    return f"job-{job_id[:8]}"
+
+
+def _clear_batch_rows(session, batch_id: str) -> None:
+    """幂等替换：重放前清掉同一 batch 的旧行，避免重复插入。"""
+    from sqlalchemy import delete
+
+    from fastapi_app.shared_models import StagingPurchasePlan
+
+    session.execute(
+        delete(StagingPurchasePlan).where(StagingPurchasePlan.upload_batch_id == batch_id)
+    )
+    session.commit()
+
+
 async def batch_import_plans_task(ctx, file_path: str, original_filename: str, user_id: int):
     """
     大批量计划导入（>500行时由API层触发）
@@ -70,84 +87,86 @@ async def batch_import_plans_task(ctx, file_path: str, original_filename: str, u
     处理：解析 Excel → 写入 staging → 返回 batch_id
     """
     job_id = ctx['job_id']
+    return await asyncio.to_thread(_run_import_plans_impl, file_path, user_id, job_id)
 
-    def _sync_impl():
-        # 复用 batch_tasks 里已修好的版本：候选目录与 file_path 两侧都取 realpath
-        # （Windows 短名 8.3 不一致会误拒合法临时文件），且 commonpath 跨盘符
-        # 抛的 ValueError 有兜底。此处原先是未同步的旧副本，且判断在 try 之外，
-        # ValueError 会逃逸出 _sync_impl 让 ARQ 任务失败重放。
-        from fastapi_app.tasks.batch_tasks import _is_allowed_upload_path
-        if not _is_allowed_upload_path(file_path):
-            logger.error(f'批量计划导入任务拒绝非法文件路径: {file_path}')
-            return {'success': False, 'error': '非法文件路径', 'imported_count': 0}
-        delete_file = True
+
+def _run_import_plans_impl(file_path: str, user_id: int, job_id: str,
+                           session_factory=None):
+    # session_factory 仅测试注入；生产走模块级 _SyncSession
+    # 复用 batch_tasks 里已修好的版本：候选目录与 file_path 两侧都取 realpath
+    # （Windows 短名 8.3 不一致会误拒合法临时文件），且 commonpath 跨盘符
+    # 抛的 ValueError 有兜底。此处原先是未同步的旧副本，且判断在 try 之外，
+    # ValueError 会逃逸出 _sync_impl 让 ARQ 任务失败重放。
+    from fastapi_app.tasks.batch_tasks import _is_allowed_upload_path
+    if not _is_allowed_upload_path(file_path):
+        logger.error(f'批量计划导入任务拒绝非法文件路径: {file_path}')
+        return {'success': False, 'error': '非法文件路径', 'imported_count': 0}
+    delete_file = True
+    try:
+        import openpyxl
+
+        from fastapi_app.shared_models import StagingPurchasePlan
+        session = (session_factory or _SyncSession)()
         try:
-            import uuid
-
-            import openpyxl
-
-            from fastapi_app.shared_models import StagingPurchasePlan
-            session = _SyncSession()
-            try:
-                batch_id = str(uuid.uuid4())[:8]
-                session_id = str(user_id)
-                wb = openpyxl.load_workbook(file_path, read_only=True)
-                ws = wb.active
-                rows = list(ws.iter_rows(min_row=2, values_only=True))
-                wb.close()
-                # 第十轮审计：原无行数上界（对照 material_registration 5000 / case 20000）——
-                # 超大文件会整表载入内存。与前端导入模板量级对齐，20000 行封顶。
-                if len(rows) > 20000:
-                    raise ValueError(f'导入行数超限（{len(rows)} 行，上限 20000），请拆分文件后重试')
-                success_count = 0
-                errors = []
-                detected_month = None
-                for i, row in enumerate(rows, start=2):
-                    if not row or all(c is None for c in row):
+            batch_id = _batch_id_for_job(job_id)
+            # 重放前先清掉同 batch 旧行：commit 后被杀再重试不会重复插入
+            _clear_batch_rows(session, batch_id)
+            session_id = str(user_id)
+            wb = openpyxl.load_workbook(file_path, read_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(min_row=2, values_only=True))
+            wb.close()
+            # 第十轮审计：原无行数上界（对照 material_registration 5000 / case 20000）——
+            # 超大文件会整表载入内存。与前端导入模板量级对齐，20000 行封顶。
+            if len(rows) > 20000:
+                raise ValueError(f'导入行数超限（{len(rows)} 行，上限 20000），请拆分文件后重试')
+            success_count = 0
+            errors = []
+            detected_month = None
+            for i, row in enumerate(rows, start=2):
+                if not row or all(c is None for c in row):
+                    continue
+                try:
+                    customer_name = str(row[0] or '').strip()
+                    product_name = str(row[1] or '').strip()
+                    barcode = str(row[2] or '').strip()
+                    quantity = int(row[3]) if row[3] else 0
+                    plan_date_str = str(row[4] or '').strip()
+                    remark = str(row[5] or '').strip() if len(row) > 5 and row[5] else ''
+                    if not customer_name or not barcode or quantity <= 0 or (not plan_date_str):
+                        errors.append(f'第{i}行: 必填字段缺失或数量无效')
                         continue
-                    try:
-                        customer_name = str(row[0] or '').strip()
-                        product_name = str(row[1] or '').strip()
-                        barcode = str(row[2] or '').strip()
-                        quantity = int(row[3]) if row[3] else 0
-                        plan_date_str = str(row[4] or '').strip()
-                        remark = str(row[5] or '').strip() if len(row) > 5 and row[5] else ''
-                        if not customer_name or not barcode or quantity <= 0 or (not plan_date_str):
-                            errors.append(f'第{i}行: 必填字段缺失或数量无效')
-                            continue
-                        # 2026-10-03 第八轮审计：此处原为 normalize_plan_date 的**旧副本**，
-                        # 缺「剥时间部分」与「len(parts)!=3 守卫」——Excel 真日期单元格
-                        # （openpyxl 读出 '2026-09-15 00:00:00'）会解析失败致整批静默丢弃；
-                        # 畸形日期（如 '2026'）抛 IndexError 令任务崩溃、临时文件已删、
-                        # ARQ 重试必"文件不存在"。改调权威实现 plan_utils.normalize_plan_date。
-                        plan_date_val = normalize_plan_date(plan_date_str)
-                        row_month = f'{plan_date_val.year}-{plan_date_val.month:02d}'
-                        if detected_month is None:
-                            detected_month = row_month
-                        elif row_month != detected_month:
-                            errors.append(f'第{i}行: 月份不一致')
-                            continue
-                        # savepoint 隔离单行：行内异常仅回滚本行，不影响已 add 的行
-                        with session.begin_nested():
-                            record = StagingPurchasePlan(session_id=session_id, customer_name=customer_name, product_name=product_name, barcode=barcode, quantity=quantity, plan_date=plan_date_val, plan_month=detected_month, remark=remark, is_validated=False, upload_batch_id=batch_id)
-                            session.add(record)
-                        # savepoint 成功提交后才计数，失败行不计入 success_count
-                        success_count += 1
-                    except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
-                        # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
-                        errors.append(f'第{i}行: {e!s}')
-                session.commit()
-                return {'success': True, 'batch_id': batch_id, 'row_count': len(rows), 'success_count': success_count, 'error_count': len(errors), 'errors': errors[:50], 'task_id': job_id}
-            finally:
-                session.close()
-        except (ValueError, TypeError, OSError) as exc:
-            logger.error(f'批量计划导入任务失败: {exc}', exc_info=True)
-            # 保留文件以供 ARQ 重试
-            delete_file = False
-            raise exc
+                    # 2026-10-03 第八轮审计：此处原为 normalize_plan_date 的**旧副本**，
+                    # 缺「剥时间部分」与「len(parts)!=3 守卫」——Excel 真日期单元格
+                    # （openpyxl 读出 '2026-09-15 00:00:00'）会解析失败致整批静默丢弃；
+                    # 畸形日期（如 '2026'）抛 IndexError 令任务崩溃、临时文件已删、
+                    # ARQ 重试必"文件不存在"。改调权威实现 plan_utils.normalize_plan_date。
+                    plan_date_val = normalize_plan_date(plan_date_str)
+                    row_month = f'{plan_date_val.year}-{plan_date_val.month:02d}'
+                    if detected_month is None:
+                        detected_month = row_month
+                    elif row_month != detected_month:
+                        errors.append(f'第{i}行: 月份不一致')
+                        continue
+                    # savepoint 隔离单行：行内异常仅回滚本行，不影响已 add 的行
+                    with session.begin_nested():
+                        record = StagingPurchasePlan(session_id=session_id, customer_name=customer_name, product_name=product_name, barcode=barcode, quantity=quantity, plan_date=plan_date_val, plan_month=detected_month, remark=remark, is_validated=False, upload_batch_id=batch_id)
+                        session.add(record)
+                    # savepoint 成功提交后才计数，失败行不计入 success_count
+                    success_count += 1
+                except (ValueError, TypeError, OSError, SQLAlchemyError) as e:
+                    # savepoint 已自动回滚本行，不再整体 rollback（避免误伤已成功的行）
+                    errors.append(f'第{i}行: {e!s}')
+            session.commit()
+            return {'success': True, 'batch_id': batch_id, 'row_count': len(rows), 'success_count': success_count, 'error_count': len(errors), 'errors': errors[:50], 'task_id': job_id}
         finally:
-            if delete_file and file_path and os.path.exists(file_path):
-                with contextlib.suppress(OSError):
-                    os.unlink(file_path)
-
-    return await asyncio.to_thread(_sync_impl)
+            session.close()
+    except (ValueError, TypeError, OSError) as exc:
+        logger.error(f'批量计划导入任务失败: {exc}', exc_info=True)
+        # 保留文件以供 ARQ 重试
+        delete_file = False
+        raise exc
+    finally:
+        if delete_file and file_path and os.path.exists(file_path):
+            with contextlib.suppress(OSError):
+                os.unlink(file_path)
