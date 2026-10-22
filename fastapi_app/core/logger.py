@@ -8,7 +8,6 @@
 import logging
 import sys
 from datetime import UTC, datetime
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import structlog
@@ -61,16 +60,15 @@ def setup_logging():
     ))
     root_logger.addHandler(console_handler)
 
-    # 文件处理器（JSON 格式，按天轮转，保留 14 天）
-    # 为什么是 14 天（S2 可观测性）：排障与复盘需要覆盖「上周同一时间」的对照窗口；
-    # 原值 3 天使得跨周末的事故（周五发生、周一发现）已经无日志可查。
+    # 文件处理器（JSON 格式）。
+    # 多 worker 共享同一文件时，进程内 TimedRotatingFileHandler 会在午夜互相抢
+    # os.rename（Windows 上抛 PermissionError）并各自执行 backupCount 删除。
+    # 改为普通追加句柄，轮转统一交给 utils.log_rotation.rotate_oversized_logs
+    # （prod_runner 周期 + ARQ 每日兜底，copytruncate 对打开中的文件安全）。
+    # 文件名里的日期是**进程启动日**，长驻进程跨天仍写旧文件；外部轮转按体积
+    # 而非按天，所以文件名不代表日志日期（采集按 fastapi_*.log glob 即可）。
     log_file = log_dir / f"fastapi_{datetime.now(UTC).strftime('%Y%m%d')}.log"
-    file_handler = TimedRotatingFileHandler(
-        log_file,
-        when="midnight",
-        backupCount=14,
-        encoding="utf-8",
-    )
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(message)s"))  # structlog 已格式化
     root_logger.addHandler(file_handler)

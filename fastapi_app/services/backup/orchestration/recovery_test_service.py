@@ -4,6 +4,7 @@
 定期从备份中恢复测试数据到临时环境，验证恢复数据的完整性和可用性
 """
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -586,13 +587,21 @@ class DisasterRecoveryTestService:
         """
         import gzip as gzip_mod
         import os
-        import subprocess
 
+        from fastapi_app.services.backup._proc import run_proc
         from fastapi_app.services.backup.dump import resolve_pg_tool
 
+        def _extract_gz(src: Path, dst: str) -> None:
+            with gzip_mod.open(src, 'rb') as fin, open(dst, 'wb') as fout:
+                shutil.copyfileobj(fin, fout)
+
+        sql_path: str | None = None
         try:
-            with gzip_mod.open(sql_gz_path, 'rb') as f:
-                dump_sql = f.read()
+            fd, sql_path = tempfile.mkstemp(suffix='.sql')
+            os.close(fd)
+            # 解压到临时文件（流式，不把整包 SQL 读进内存），再交给 psql -f。
+            # 注意：明文 SQL 会短暂落盘（mkstemp 默认权限、finally 立即删除）。
+            await asyncio.to_thread(_extract_gz, sql_gz_path, sql_path)
 
             env = os.environ.copy()
             env['PGPASSWORD'] = test_env['test_db_password']
@@ -604,12 +613,10 @@ class DisasterRecoveryTestService:
                 '-d', test_env['test_db_name'],
                 '--single-transaction',
                 '-v', 'ON_ERROR_STOP=1',
+                '-f', sql_path,
             ]
-            proc = subprocess.run(  # 参数为固定白名单列表
-                psql_args, input=dump_sql,
-                capture_output=True,  # 等价于 stdout=PIPE + stderr=PIPE
-                env=env, timeout=600,
-            )
+            # run_proc 内部用线程池包装 subprocess，兼容 SelectorEventLoop
+            proc = await run_proc(psql_args, env=env, timeout=600)
             if proc.returncode != 0:
                 stderr = (proc.stderr or b'').decode(errors='replace')[:500]
                 logger.error(f"psql 演练导入失败 (rc={proc.returncode}): {stderr}")
@@ -619,6 +626,10 @@ class DisasterRecoveryTestService:
         except (TimeoutError, OSError, ValueError) as e:
             logger.error(f"psql 演练导入异常: {e}")
             return {'success': False, 'imported_rows': 0, 'error': str(e)}
+        finally:
+            if sql_path:
+                with contextlib.suppress(OSError):
+                    os.unlink(sql_path)
 
     async def _create_test_schema(self, conn, backup_data: dict[str, Any]) -> None:
         """按 ORM 元数据在测试库创建真实业务 schema（F5：替换原 dummy 表 stub）。"""
