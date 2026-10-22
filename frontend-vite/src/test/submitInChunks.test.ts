@@ -11,7 +11,7 @@
  *   7) shouldAbortChunkSubmit（L-6）：无状态码（传输失败/网络断）或 4xx → true；5xx → false
  */
 import { describe, it, expect, vi } from 'vitest'
-import { submitInChunks, shouldAbortChunkSubmit, BATCH_SUBMIT_CHUNK, normalizeDetail, type ChunkSubmitOutcome } from '@/utils/submitInChunks'
+import { submitInChunks, shouldAbortChunkSubmit, flattenChunkRows, BATCH_SUBMIT_CHUNK, normalizeDetail, type ChunkSubmitOutcome } from '@/utils/submitInChunks'
 
 interface ChunkRow { id: number }
 interface RowResult { ok: boolean }
@@ -523,5 +523,86 @@ describe('R40：normalizeDetail 顶层对象 message/msg 取首个非空字符�
 
   it('t113#3 回归：数组分支的对象元素取 msg——message 无效不影响数组段', () => {
     expect(normalizeDetail(['x', { message: '', msg: '库存不足' }])).toBe('x; 库存不足')
+  })
+})
+
+describe('flattenChunkRows 三态占位（R36-M-A）', () => {
+  const chunk = (
+    over: Partial<ChunkSubmitOutcome<RowResult>> & { chunkNo: number; rowCount: number },
+  ): ChunkSubmitOutcome<RowResult> => ({
+    attempted: true,
+    delivered: true,
+    rowResults: null,
+    businessFailed: false,
+    error: null,
+    ...over,
+  })
+  const opts = {
+    unverifiedRow: () => ({ ok: true }),
+    failedRow: () => ({ ok: false }),
+  }
+
+  it('rowResults 非 null → 直通透传，不重塑行级字段', () => {
+    const r = flattenChunkRows(
+      [chunk({ chunkNo: 1, rowCount: 2, rowResults: [{ ok: true }, { ok: false }] })],
+      opts,
+    )
+    expect(r.rows).toEqual([{ ok: true }, { ok: false }])
+    expect(r.unverifiedChunks).toEqual([])
+    expect(r.failedChunks).toEqual([])
+  })
+
+  it('已送达但无法校验 → 占位成功 + 记入 unverifiedChunks', () => {
+    const r = flattenChunkRows([chunk({ chunkNo: 2, rowCount: 3 })], opts)
+    expect(r.rows).toEqual([{ ok: true }, { ok: true }, { ok: true }])
+    expect(r.unverifiedChunks).toEqual([2])
+    expect(r.failedChunks).toEqual([])
+  })
+
+  it('传输失败 → 占位失败 + 记入 failedChunks', () => {
+    const r = flattenChunkRows(
+      [chunk({ chunkNo: 3, rowCount: 2, delivered: false, error: '网络中断' })],
+      opts,
+    )
+    expect(r.rows).toEqual([{ ok: false }, { ok: false }])
+    expect(r.unverifiedChunks).toEqual([])
+    expect(r.failedChunks).toEqual([3])
+  })
+
+  it('业务级整片失败 → 占位失败 + 记入 failedChunks', () => {
+    const r = flattenChunkRows([chunk({ chunkNo: 4, rowCount: 1, businessFailed: true })], opts)
+    expect(r.rows).toEqual([{ ok: false }])
+    expect(r.failedChunks).toEqual([4])
+  })
+
+  it('早停后未尝试 → 占位失败但【不】记入 failedChunks（未尝试 ≠ 失败）', () => {
+    const r = flattenChunkRows(
+      [chunk({ chunkNo: 5, rowCount: 2, attempted: false, delivered: false })],
+      opts,
+    )
+    expect(r.rows).toEqual([{ ok: false }, { ok: false }])
+    expect(r.failedChunks).toEqual([])
+  })
+
+  it('failedRow 收到该片 outcome（供占位文案按 error/attempted 分流）', () => {
+    const failedRow = vi.fn(() => ({ ok: false }))
+    flattenChunkRows(
+      [chunk({ chunkNo: 9, rowCount: 1, delivered: false, error: 'boom' })],
+      { unverifiedRow: () => ({ ok: true }), failedRow },
+    )
+    expect(failedRow).toHaveBeenCalledWith(expect.objectContaining({ chunkNo: 9, error: 'boom' }))
+  })
+
+  it('混合三态：rows 总数恒等于 ΣrowCount（对位不变量）', () => {
+    const chunks = [
+      chunk({ chunkNo: 1, rowCount: 2, rowResults: [{ ok: true }, { ok: false }] }),
+      chunk({ chunkNo: 2, rowCount: 3 }),
+      chunk({ chunkNo: 3, rowCount: 1, delivered: false }),
+      chunk({ chunkNo: 4, rowCount: 2, attempted: false, delivered: false }),
+    ]
+    const r = flattenChunkRows(chunks, opts)
+    expect(r.rows).toHaveLength(chunks.reduce((sum, c) => sum + c.rowCount, 0))
+    expect(r.unverifiedChunks).toEqual([2])
+    expect(r.failedChunks).toEqual([3])
   })
 })
