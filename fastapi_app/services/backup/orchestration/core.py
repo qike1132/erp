@@ -229,12 +229,34 @@ async def _export_database(db, user, remark, tmpdir_path: Path, snapshot_id,
     return dump_info, pg_dump_available, dump_path
 
 
+_LARGE_TABLE_ESTIMATE_THRESHOLD = 100_000
+
+
 async def _count_tables(db: AsyncSession, table_names: list[str],
                         existing_tables: set[str]) -> dict[str, int]:
-    """逐表 COUNT(*)（savepoint 隔离，失败记 -1）。库中无表直接 -1。"""
+    """大表用 pg_class.reltuples 估算，小表精确 COUNT；失败记 -1。库中无表直接 -1。"""
+    estimates: dict[str, int] = {}
+    if table_names:
+        try:
+            rows = await db.execute(
+                text(
+                    "SELECT c.relname, c.reltuples::bigint FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+                    "AND c.relname = ANY(:names)"
+                ),
+                {"names": table_names},
+            )
+            estimates = {r[0]: max(0, int(r[1])) for r in rows.all()}
+        except (OSError, ValueError, SQLAlchemyError):
+            estimates = {}
+
     async def _count_table(tname: str) -> tuple[str, int]:
         if tname not in existing_tables:
             return tname, -1
+        # reltuples 是统计信息估算值（可能滞后），只用于大表避免长事务 COUNT
+        if estimates.get(tname, 0) >= _LARGE_TABLE_ESTIMATE_THRESHOLD:
+            return tname, estimates[tname]
         nested = await db.begin_nested()
         try:
             qtname = quote_table(tname)
