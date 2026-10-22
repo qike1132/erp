@@ -57,7 +57,7 @@ colorama==0.4.6
     # via
     #   pytest
     #   uvicorn
-coverage==7.16.2
+coverage==7.17.0
     # via pytest-cov
 cryptography==50.0.1
     # via -r requirements/base.txt
@@ -87,7 +87,7 @@ googleapis-common-protos==1.75.0
     # via opentelemetry-exporter-otlp-proto-grpc
 greenlet==3.5.6
     # via sqlalchemy
-grpcio==1.84.0
+grpcio==1.84.1
     # via opentelemetry-exporter-otlp-proto-grpc
 h11==0.16.0
     # via
@@ -222,7 +222,7 @@ psycopg==3.3.3
     # via -r requirements/base.txt
 psycopg-binary==3.3.3
     # via psycopg
-pycparser==3.11
+pycparser==3.12
     # via cffi
 pydantic==2.13.2
     # via
