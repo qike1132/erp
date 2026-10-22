@@ -493,14 +493,21 @@ def _setup_body_size_limit(app: FastAPI) -> None:
                         media_type="application/json",
                     )
             else:
-                # 无 Content-Length（chunked/流式上传）：累积计数器边读边判，一旦超限立刻
-                # 413 并停止累积；否则 512MB 分块上传会把内存放大到同一量级（P0-12）。
+                # 无 Content-Length（chunked/流式上传）：备份路径要求带长度（nginx 正常
+                # 代理会带），否则 411；其余路径不允许借 chunked 绕过 64MB 导入上限。
+                if request.url.path.startswith('/api/v1/backup'):
+                    return Response(
+                        content='{"detail":"备份上传必须携带 Content-Length"}',
+                        status_code=411,
+                        media_type="application/json",
+                    )
+                no_length_limit = min(limit, _IMPORT_UPLOAD_BODY_LIMIT)
                 received = 0
                 chunks: list[bytes] = []
                 async for chunk in request.stream():
                     received += len(chunk)
-                    if received > limit:
-                        return _body_too_large_response(limit)
+                    if received > no_length_limit:
+                        return _body_too_large_response(no_length_limit)
                     chunks.append(chunk)
                 request._body = b"".join(chunks)
         response = await call_next(request)
