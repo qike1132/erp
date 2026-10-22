@@ -282,6 +282,13 @@ def get_production_config_warnings() -> list[str]:
     return list(_production_config_warnings)
 
 
+DEFAULT_DEV_CORS_ORIGINS = (
+    "http://localhost,http://localhost:5002,http://localhost:3000,"
+    "http://localhost:5173,http://localhost:5174,http://localhost:8000,"
+    "http://localhost:8080"
+)
+
+
 class Settings(BaseSettings):
     """FastAPI应用配置"""
 
@@ -340,7 +347,7 @@ class Settings(BaseSettings):
     # 包含 Nginx 统一入口（端口80）、Python HTTP 服务（端口8000/8080）、
     # 直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
     # 生产环境按 filter_cors_origins / _is_production_allowed_origin 过滤明文 HTTP 源
-    _raw_cors: str = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000,http://localhost:8080,null")
+    _raw_cors: str = os.getenv("CORS_ORIGINS", DEFAULT_DEV_CORS_ORIGINS)
     BACKEND_CORS_ORIGINS: list[str] = filter_cors_origins(
         _raw_cors, is_production=_is_production_env()
     )
