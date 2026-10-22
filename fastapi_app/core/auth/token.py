@@ -14,20 +14,19 @@ from fastapi import HTTPException, status
 from fastapi_app.core.config import settings
 
 _KEY_CACHE_TTL = 300  # 密钥轮换后最长 5 分钟生效，无需全量重启
-_signing_key_cache = None
-_verify_key_cache = None
+_signing_key_cache: str | None = None
+_verify_key_cache: str | None = None
 _signing_key_cache_at = 0.0
 _verify_key_cache_at = 0.0
-
-
-def _cache_fresh(cached, cached_at: float) -> bool:
-    return cached is not None and time.monotonic() - cached_at < _KEY_CACHE_TTL
 
 
 def _get_signing_key() -> str:
     """获取 JWT 签名密钥（支持 HS256 / RS256 / ES256）"""
     global _signing_key_cache, _signing_key_cache_at
-    if _cache_fresh(_signing_key_cache, _signing_key_cache_at):
+    if (
+        _signing_key_cache is not None
+        and time.monotonic() - _signing_key_cache_at < _KEY_CACHE_TTL
+    ):
         return _signing_key_cache
     if settings.ALGORITHM in ("RS256", "ES256"):
         if not settings.JWT_PRIVATE_KEY_PATH:
@@ -44,7 +43,10 @@ def _get_signing_key() -> str:
 def _get_verify_key() -> str:
     """获取 JWT 验证密钥（支持 HS256 / RS256 / ES256）"""
     global _verify_key_cache, _verify_key_cache_at
-    if _cache_fresh(_verify_key_cache, _verify_key_cache_at):
+    if (
+        _verify_key_cache is not None
+        and time.monotonic() - _verify_key_cache_at < _KEY_CACHE_TTL
+    ):
         return _verify_key_cache
     if settings.ALGORITHM in ("RS256", "ES256"):
         if not settings.JWT_PUBLIC_KEY_PATH:
