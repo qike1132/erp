@@ -349,6 +349,16 @@ async def arq_health_probe():
     )
 
 
+def _metrics_token_ok(authorization: str) -> bool:
+    """常数时间比较 /metrics 的 Bearer token；前缀不能绕过。"""
+    import hmac
+
+    token = os.getenv('METRICS_BEARER_TOKEN', '')
+    if not token:
+        return False
+    return hmac.compare_digest(authorization, f'Bearer {token}')
+
+
 def register_health_routes(app: FastAPI) -> None:
     """注册健康检查和监控路由"""
     app.get("/api/health", tags=["健康检查"])(health_check)
@@ -369,7 +379,7 @@ def register_health_routes(app: FastAPI) -> None:
                 if not metrics_token:
                     # fail-closed：历史 fail-open 实测无鉴权 200，指标面直接暴露
                     return JSONResponse(status_code=503, content={'detail': '监控端点未启用（未配置 METRICS_BEARER_TOKEN）'})
-                if not auth.startswith(f'Bearer {metrics_token}'):
+                if not _metrics_token_ok(auth):
                     return JSONResponse(status_code=401, content={'detail': '未授权访问'})
             # 抓取前刷新死信队列深度（Redis LLEN），使 arq_dead_letter_queue_depth 实时
             from fastapi_app.core.metrics import refresh_dead_letter_queue_depth
