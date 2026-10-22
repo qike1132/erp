@@ -102,6 +102,8 @@ service.interceptors.response.use(
         config._retried = true
         if (await refreshAccessToken()) {
           try {
+            // 原 signal 可能已被路由切换 abort；重放不应继承，否则刷新成功也会立刻取消
+            config.signal = new AbortController().signal
             return await service(config)
           } catch {
             // 重放仍失败：继续走登出逻辑
@@ -178,6 +180,24 @@ export function createTrackedController(): AbortController {
 export function abortPendingRequests(): void {
   for (const controller of _pendingControllers) controller.abort()
   _pendingControllers.clear()
+  // 取消的请求不会 settle（见 _silenceCanceled），必须主动清掉去重表，避免永久持有
+  _inflightGet.clear()
+}
+
+export function isCanceledError(error: unknown): boolean {
+  return axios.isCancel(error) || (error as { code?: string } | null)?.code === 'ERR_CANCELED'
+}
+
+/**
+ * 路由切换取消的请求**不得**触发调用方的 catch/toast：
+ * 返回一个永不 settle 的 Promise（调用方的 await 不再继续）。
+ * 取消后无外部引用，整条 promise 链可被 GC；去重表由 abortPendingRequests 清空。
+ */
+export function _silenceCanceled<T>(promise: Promise<T>): Promise<T> {
+  return promise.catch((error: unknown) => {
+    if (isCanceledError(error)) return new Promise<T>(() => {})
+    throw error
+  })
 }
 
 function _dedupeKey(url: string, params?: Record<string, unknown>): string {
@@ -199,11 +219,12 @@ export function get<T>(
     if (options.signal.aborted) controller.abort()
     else options.signal.addEventListener('abort', () => controller.abort(), { once: true })
   }
-  const p = service.get(url, { params, signal: controller.signal }) as Promise<T>
+  const raw = service.get(url, { params, signal: controller.signal }) as Promise<T>
+  const p = _silenceCanceled(raw)
   _inflightGet.set(key, p)
   // finally 会派生一个与原 Promise 同状态的新 Promise；若原请求失败（403/401/网络错误），
   // 必须 catch 这个派生 Promise，否则每次失败 GET 都会产生一次未处理的 Promise 拒绝（Uncaught (in promise) AxiosError）
-  p.finally(() => {
+  raw.finally(() => {
     _inflightGet.delete(key)
     _pendingControllers.delete(controller)
   }).catch(() => { /* 错误已由调用方处理 */ })
