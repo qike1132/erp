@@ -356,7 +356,9 @@ def _metrics_token_ok(authorization: str) -> bool:
     token = os.getenv('METRICS_BEARER_TOKEN', '')
     if not token:
         return False
-    return hmac.compare_digest(authorization, f'Bearer {token}')
+    return hmac.compare_digest(
+        authorization.encode('utf-8'), f'Bearer {token}'.encode()
+    )
 
 
 def register_health_routes(app: FastAPI) -> None:

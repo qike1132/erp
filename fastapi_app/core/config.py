@@ -300,6 +300,8 @@ class Settings(BaseSettings):
     # API配置
     API_PREFIX: str = "/api/v1"
     # 生产环境（APP_ENV=production）自动关闭文档端点，防止暴露 API 结构
+    # 已废弃（2026-10-22）：运行时唯一真相是 main.resolve_docs_urls(settings.is_production)
+    # → app.docs_url；这三项保留仅为兼容既有导入，勿在新代码使用。
     DOCS_URL: str | None = None if _is_production_env() else "/api/docs"
     REDOC_URL: str | None = None if _is_production_env() else "/api/redoc"
     OPENAPI_URL: str | None = None if _is_production_env() else "/api/openapi.json"
