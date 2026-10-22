@@ -176,6 +176,7 @@ async def _perform_shutdown(background_tasks: list[asyncio.Task]) -> None:
     await asyncio.gather(*background_tasks, return_exceptions=True)
 
     logger.info(f"{settings.APP_NAME} 正在关闭...")
+    from fastapi_app.core.auth.blacklist import stop_revocation_listener
     from fastapi_app.core.cache import stop_l1_broadcast_listener
     from fastapi_app.core.purchase_cache import stop_purchase_cache_listener
     from fastapi_app.core.redis_client import close_async_redis_client
@@ -186,6 +187,7 @@ async def _perform_shutdown(background_tasks: list[asyncio.Task]) -> None:
     await _step("stop_redis_listener", manager.stop_redis_listener)
     await _step("stop_purchase_cache_listener", stop_purchase_cache_listener)
     await _step("stop_l1_broadcast_listener", stop_l1_broadcast_listener)
+    await _step("stop_revocation_listener", stop_revocation_listener)
     await _step("db_health_checker_stop", db_health_checker.stop)
     try:
         shutdown_telemetry()  # sync 函数（telemetry.py:147），不可 await
@@ -259,6 +261,11 @@ async def lifespan(application: FastAPI):
     # 自带重连；关停由下方 stop_purchase_cache_listener 统一回收。
     from fastapi_app.core.purchase_cache import start_purchase_cache_listener
     await start_purchase_cache_listener()
+
+    # token 撤销跨 worker 广播（M9）：登出 jti 只写本进程 LRU 时，其他 worker
+    # 在 Redis 故障期会放行已登出 token；监听器让各 worker 同步撤销集合。
+    from fastapi_app.core.auth.blacklist import start_revocation_listener
+    await start_revocation_listener()
 
     # 启动时同步备份记录与文件系统（P1+P2：补录缺失/清理孤立/修正僵尸状态）
     try:

@@ -4,6 +4,7 @@ Token 黑名单/撤销（core/deps 拆分子模块）
 职责：已撤销 token 的 jti 黑名单管理。
 Redis 不可用时降级到进程级本地 LRU 缓存（fail-open/fail-closed 双模式）。
 """
+import asyncio
 import logging
 import threading
 import time
@@ -44,6 +45,9 @@ class _LRUSet:
 
 _LOCAL_REVOKED_JTIS = _LRUSet(maxsize=1000)
 
+# 撤销广播频道：Redis 正常时各 worker 通过它同步本地 LRU，避免登出后其他 worker 放行
+_REVOCATION_CHANNEL = "token_revoked"
+
 
 def _note_redis_failure(exc: Exception) -> None:
     """把裸客户端命令的失败告知缓存管理器（自愈/退避）。
@@ -75,10 +79,61 @@ async def revoke_token(jti: str, exp: int) -> None:
         redis = get_client()
         if redis:
             await redis.set(f"token_blacklist:{jti}", "1", ex=remaining)
+            # 广播到其他 worker 的本地 LRU；Redis 正常时这是唯一的跨进程通道
+            await redis.publish(_REVOCATION_CHANNEL, jti)
             note_command_success()
     except Exception as e:  # defensive: Redis 故障时本地 LRU 缓存已写入，继续服务
         _note_redis_failure(e)
         logger.debug("token 黑名单写入失败", exc_info=True)
+
+
+async def _revocation_listener() -> None:
+    """订阅撤销广播并写入本进程 LRU；断线退避重连。"""
+    backoff = 5
+    while True:
+        try:
+            from fastapi_app.core.redis_wrapper import get_client
+
+            redis = get_client()
+            if redis is None:
+                await asyncio.sleep(backoff)
+                continue
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(_REVOCATION_CHANNEL)
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                data = message.get("data")
+                jti = data.decode("utf-8") if isinstance(data, bytes) else str(data)
+                _LOCAL_REVOKED_JTIS.add(jti)
+        except Exception:  # defensive: 监听失败不得拖垮进程
+            logger.warning("撤销广播监听断开，%ss 后重连", backoff, exc_info=True)
+            await asyncio.sleep(backoff)
+
+
+_revocation_task: asyncio.Task | None = None
+
+
+async def start_revocation_listener() -> None:
+    """启动撤销广播监听器（幂等）。"""
+    global _revocation_task
+    if _revocation_task is None or _revocation_task.done():
+        _revocation_task = asyncio.create_task(
+            _revocation_listener(), name="token-revocation-listener"
+        )
+        logger.info("token 撤销广播监听器已启动")
+
+
+async def stop_revocation_listener() -> None:
+    """停止撤销广播监听器。"""
+    global _revocation_task
+    if _revocation_task is not None and not _revocation_task.done():
+        _revocation_task.cancel()
+        import contextlib
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await _revocation_task
+    _revocation_task = None
 
 
 # fail-open 降级 critical 日志的上次记录时间（monotonic），用于限频避免刷屏
