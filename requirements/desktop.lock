@@ -251,5 +251,5 @@ wrapt==1.17.3
     #   opentelemetry-instrumentation-sqlalchemy
 xlsxwriter==3.2.2
     # via -r requirements/base.txt
-zipp==4.1.1
+zipp==4.1.2
     # via importlib-metadata

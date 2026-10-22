@@ -265,7 +265,7 @@ pytest-sugar==0.9.7
     # via -r requirements/test.txt
 pytest-xdist==3.8.0
     # via -r requirements/test.txt
-python-dateutil==2.9.0.post0
+python-dateutil==3.0.0
     # via arrow
 python-dotenv==1.2.2
     # via
@@ -336,6 +336,7 @@ tzdata==2026.5
     #   arrow
     #   faker
     #   psycopg
+    #   python-dateutil
 urllib3==2.8.0
     # via
     #   selenium
@@ -360,5 +361,5 @@ xlsxwriter==3.2.2
     # via -r requirements/base.txt
 yarl==1.25.1
     # via aiohttp
-zipp==4.1.1
+zipp==4.1.2
     # via importlib-metadata

@@ -202,8 +202,8 @@ function formatTime(iso: string): string {
   flex-shrink: 0;
 }
 
-/* 缩略图描边：必须画在图片上层。图片 object-fit:cover 会铺满整格，
-   容器自身的 inset box-shadow 会被图片整个盖住而不可见。 */
+/* 缩略图描边：必须画在图片上层。图片元素占满整格（含 contain 留白区），
+   容器自身的 inset box-shadow 会被图片内容盖住而不可见。 */
 .cgl-card-thumb::after {
   content: '';
   position: absolute;
@@ -255,13 +255,13 @@ function formatTime(iso: string): string {
 }
 
 /* 清晰缩略图：默认透明，加载完成后淡入（避免占位闪烁）
-   使用 cover 铺满整格（与下方模糊底图同款取景，清晰图淡入时无取景跳变）。 */
+   使用 contain 完整展示产品图，不裁切边缘；留白由容器背景与下方模糊底图填充。 */
 .cgl-thumb-img {
   position: relative;
   z-index: 3;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   opacity: 0;
   transition: opacity 0.3s ease;
 }
