@@ -90,7 +90,9 @@ async def batch_import_plans_task(ctx, file_path: str, original_filename: str, u
     return await asyncio.to_thread(_run_import_plans_impl, file_path, user_id, job_id)
 
 
-def _run_import_plans_impl(file_path: str, user_id: int, job_id: str):
+def _run_import_plans_impl(file_path: str, user_id: int, job_id: str,
+                           session_factory=None):
+    # session_factory 仅测试注入；生产走模块级 _SyncSession
     # 复用 batch_tasks 里已修好的版本：候选目录与 file_path 两侧都取 realpath
     # （Windows 短名 8.3 不一致会误拒合法临时文件），且 commonpath 跨盘符
     # 抛的 ValueError 有兜底。此处原先是未同步的旧副本，且判断在 try 之外，
@@ -104,7 +106,7 @@ def _run_import_plans_impl(file_path: str, user_id: int, job_id: str):
         import openpyxl
 
         from fastapi_app.shared_models import StagingPurchasePlan
-        session = _SyncSession()
+        session = (session_factory or _SyncSession)()
         try:
             batch_id = _batch_id_for_job(job_id)
             # 重放前先清掉同 batch 旧行：commit 后被杀再重试不会重复插入
