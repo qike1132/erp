@@ -28,6 +28,25 @@ def _sync_target_dates(today: date, lookback_days: int = 3) -> list[date]:
     return [today - timedelta(days=i) for i in range(1, lookback_days + 1)]
 
 
+def _sync_one_date(session, target_date: date, customer_id_map: dict[str, int]) -> int:
+    """同步单日出货数据（按 shipment_no 幂等 upsert），返回写入/更新条数。"""
+    from sqlalchemy import text
+
+    rows = session.execute(text("\n                SELECT so.id, so.stockout_no, so.customer, so.product_id,\n                       so.quantity, so.returned_quantity, DATE(so.stockout_date) as stockout_date,\n                       p.name as product_name\n                FROM stock_out so\n                JOIN product p ON so.product_id = p.id\n                WHERE DATE(so.stockout_date) = :target_date\n                  AND so.customer IS NOT NULL AND so.customer != ''\n            "), {'target_date': target_date}).fetchall()
+    synced = 0
+    for row in rows:
+        customer_id = customer_id_map.get(row.customer)
+        if not customer_id:
+            continue
+        existing = session.execute(text('SELECT id FROM shipment_records WHERE shipment_no = :no'), {'no': row.stockout_no}).fetchone()
+        if existing:
+            session.execute(text('\n                        UPDATE shipment_records\n                        SET quantity = :qty, synced_at = NOW()\n                        WHERE shipment_no = :no\n                    '), {'qty': row.quantity - row.returned_quantity, 'no': row.stockout_no})
+        else:
+            session.execute(text("\n                        INSERT INTO shipment_records\n                            (shipment_no, customer_id, customer_name, product_id,\n                             product_name, quantity, shipment_date, source_type,\n                             source_id, synced_at)\n                        VALUES (:no, :cid, :cname, :pid, :pname, :qty,\n                                :sdate, 'stockout', :sid, NOW())\n                    "), {'no': row.stockout_no, 'cid': customer_id, 'cname': row.customer, 'pid': row.product_id, 'pname': row.product_name, 'qty': row.quantity - row.returned_quantity, 'sdate': row.stockout_date, 'sid': row.id})
+        synced += 1
+    return synced
+
+
 async def sync_shipment_records_task(ctx):
     """
     每日凌晨同步出货数据
@@ -48,17 +67,7 @@ async def sync_shipment_records_task(ctx):
                 customer_id_map = {c.name: c.id for c in customers}
                 synced_count = 0
                 for target_date in target_dates:
-                    rows = session.execute(text("\n                SELECT so.id, so.stockout_no, so.customer, so.product_id,\n                       so.quantity, so.returned_quantity, DATE(so.stockout_date) as stockout_date,\n                       p.name as product_name\n                FROM stock_out so\n                JOIN product p ON so.product_id = p.id\n                WHERE DATE(so.stockout_date) = :target_date\n                  AND so.customer IS NOT NULL AND so.customer != ''\n            "), {'target_date': target_date}).fetchall()
-                    for row in rows:
-                        customer_id = customer_id_map.get(row.customer)
-                        if not customer_id:
-                            continue
-                        existing = session.execute(text('SELECT id FROM shipment_records WHERE shipment_no = :no'), {'no': row.stockout_no}).fetchone()
-                        if existing:
-                            session.execute(text('\n                        UPDATE shipment_records\n                        SET quantity = :qty, synced_at = NOW()\n                        WHERE shipment_no = :no\n                    '), {'qty': row.quantity - row.returned_quantity, 'no': row.stockout_no})
-                        else:
-                            session.execute(text("\n                        INSERT INTO shipment_records\n                            (shipment_no, customer_id, customer_name, product_id,\n                             product_name, quantity, shipment_date, source_type,\n                             source_id, synced_at)\n                        VALUES (:no, :cid, :cname, :pid, :pname, :qty,\n                                :sdate, 'stockout', :sid, NOW())\n                    "), {'no': row.stockout_no, 'cid': customer_id, 'cname': row.customer, 'pid': row.product_id, 'pname': row.product_name, 'qty': row.quantity - row.returned_quantity, 'sdate': row.stockout_date, 'sid': row.id})
-                        synced_count += 1
+                    synced_count += _sync_one_date(session, target_date, customer_id_map)
                     session.commit()
                 logger.info(f'出货记录同步完成：{target_dates[-1]}..{target_dates[0]}，{synced_count}条')
                 return {'success': True, 'synced_count': synced_count, 'target_dates': [d.isoformat() for d in target_dates]}
