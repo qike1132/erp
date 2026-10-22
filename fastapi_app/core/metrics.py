@@ -36,48 +36,51 @@ except ImportError:
 # ==================== 请求指标 ====================
 # 防止热重载时重复注册：先检查指标是否已存在于全局注册表
 
+_CREATED_COLLECTORS: dict[str, object] = {}
+
+
 def _get_or_create_counter(name, doc, labelnames=None):
     """获取或创建 Counter，避免热重载时 ValueError: Duplicated timeseries"""
     if not METRICS_AVAILABLE:
         return _NoOpMetric()  # type: ignore[return-value]
-    from prometheus_client import REGISTRY
+    existing = _CREATED_COLLECTORS.get(name)
+    if existing is not None:
+        return existing
+    from prometheus_client import Counter
     try:
-        return Counter(name, doc, labelnames or [])
+        metric = Counter(name, doc, labelnames or [])
     except ValueError:
-        # 热重载场景：指标已存在于全局注册表，直接获取
-        for collector in REGISTRY._names_to_collectors.values():
-            if hasattr(collector, '_name') and collector._name == name:
-                return collector
+        # 热重载场景：指标已存在于全局注册表（可能是本进程之前创建、登记表被清空）
         raise
+    _CREATED_COLLECTORS[name] = metric
+    return metric
 
 def _get_or_create_histogram(name, doc, labelnames=None, buckets=None):
     """获取或创建 Histogram，避免热重载时 ValueError: Duplicated timeseries"""
     if not METRICS_AVAILABLE:
         return _NoOpMetric()  # type: ignore[return-value]
-    from prometheus_client import REGISTRY
+    existing = _CREATED_COLLECTORS.get(name)
+    if existing is not None:
+        return existing
+    from prometheus_client import Histogram
     kwargs = {}
     if buckets:
         kwargs['buckets'] = buckets
-    try:
-        return Histogram(name, doc, labelnames or [], **kwargs)
-    except ValueError:
-        for collector in REGISTRY._names_to_collectors.values():
-            if hasattr(collector, '_name') and collector._name == name:
-                return collector
-        raise
+    metric = Histogram(name, doc, labelnames or [], **kwargs)
+    _CREATED_COLLECTORS[name] = metric
+    return metric
 
 def _get_or_create_gauge(name, doc, labelnames=None):
     """获取或创建 Gauge，避免热重载时 ValueError: Duplicated timeseries"""
     if not METRICS_AVAILABLE:
         return _NoOpMetric()  # type: ignore[return-value]
-    from prometheus_client import REGISTRY
-    try:
-        return Gauge(name, doc, labelnames or [])
-    except ValueError:
-        for collector in REGISTRY._names_to_collectors.values():
-            if hasattr(collector, '_name') and collector._name == name:
-                return collector
-        raise
+    existing = _CREATED_COLLECTORS.get(name)
+    if existing is not None:
+        return existing
+    from prometheus_client import Gauge
+    metric = Gauge(name, doc, labelnames or [])
+    _CREATED_COLLECTORS[name] = metric
+    return metric
 
 
 REQUEST_COUNT = _get_or_create_counter(
