@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from datetime import datetime
 from functools import wraps
 from typing import ClassVar
 
@@ -253,6 +254,40 @@ from fastapi_app.tasks.report_tasks import export_report_task
 # cron_schedules 同时供 worker（派生 cron_jobs）与 backup 端点（列出/触发）使用，
 # 避免两处维护。ARQ 的 cron() 支持 hour/minute 为 int 或 set。
 # max_tries=3 对应 Celery max_retries=2（总尝试次数 = 重试次数 + 1）。
+
+# 日级 cron：worker 停机跨越触发点会永久漏跑，由 catch_up_daily_crons 补跑
+_DAILY_CRON_NAMES = {"sync-shipment-daily", "log-maintenance"}
+_CRON_LAST_OK_PREFIX = "cron_last_ok:"
+
+
+async def catch_up_daily_crons(ctx, now: datetime | None = None):
+    """日级 cron 漏跑补跑：今日应跑时刻已过且未成功 → 幂等入队一次。"""
+    from fastapi_app.core.business_time import business_today
+    from fastapi_app.core.redis_wrapper import get_client
+
+    redis = get_client()
+    if redis is None:
+        return
+    pool = await get_arq_pool()
+    now = now or datetime.now()
+    today = business_today().isoformat()
+    for entry in cron_schedules:
+        if entry["name"] not in _DAILY_CRON_NAMES:
+            continue
+        if now.hour < entry["cron"]["hour"]:
+            continue
+        key = f"{_CRON_LAST_OK_PREFIX}{entry['name']}"
+        last_ok = await redis.get(key)
+        last_ok = last_ok.decode() if isinstance(last_ok, bytes) else last_ok
+        if last_ok == today:
+            continue
+        job = await pool.enqueue_job(
+            entry["func"].__name__, _job_id=f"catchup:{entry['name']}:{today}"
+        )
+        if job is not None:
+            await redis.set(key, today, ex=86400 * 2)
+
+
 cron_schedules = [
     {
         'name': 'sync-shipment-daily',
@@ -308,6 +343,14 @@ cron_schedules = [
         # 按 ERROR 记录但不抛错（避免 max_tries 耗尽后监控静默失效）。
         'name': 'replica-lag-check',
         'func': replica_lag_task,
+        'cron': {'minute': set(range(0, 60, 10))},
+        'schedule': 'every 10m',
+        'timeout': 60,
+    },
+    {
+        # 日级 cron 漏跑补跑（M7）：每 10 分钟检查今日应跑而未成功的日级任务
+        'name': 'daily-cron-catchup',
+        'func': catch_up_daily_crons,
         'cron': {'minute': set(range(0, 60, 10))},
         'schedule': 'every 10m',
         'timeout': 60,

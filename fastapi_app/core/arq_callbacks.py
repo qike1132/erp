@@ -56,7 +56,32 @@ async def on_job_end(ctx):
     else:
         # 未包 _tracked_job 的调用方保持旧语义；WorkerSettings 注册的任务全部已包。
         await _mark_schedule_outcome(ctx, STATUS_SUCCESS)
+        await _mark_daily_cron_success(ctx)
     _record_runtime(ctx)
+
+
+async def _mark_daily_cron_success(ctx) -> None:
+    """日级 cron 成功后写当日标记，供 catch_up_daily_crons 判断是否需要补跑。"""
+    from fastapi_app.core.arq_app import (
+        _CRON_LAST_OK_PREFIX,
+        _DAILY_CRON_NAMES,
+        cron_schedules,
+    )
+    from fastapi_app.core.business_time import business_today
+    from fastapi_app.core.redis_wrapper import get_client
+
+    func_name = ctx.get('_job_function') or ctx.get('function', '')
+    if callable(func_name):
+        func_name = func_name.__name__
+    for entry in cron_schedules:
+        if entry['name'] in _DAILY_CRON_NAMES and entry['func'].__name__ == func_name:
+            redis = get_client()
+            if redis:
+                await redis.set(
+                    f"{_CRON_LAST_OK_PREFIX}{entry['name']}",
+                    business_today().isoformat(),
+                    ex=86400 * 2,
+                )
 
 
 def _record_runtime(ctx) -> None:
