@@ -803,6 +803,13 @@ def _install_signal_handlers(sup: Supervisor) -> None:
         signal.signal(signal.SIGINT, _posix_handler)
 
 
+def should_start_internal_arq(argv: list[str], env: dict) -> bool:
+    """是否启动内置 ARQ worker：--no-arq 或显式外部标记时都不启动。"""
+    if "--no-arq" in argv:
+        return False
+    return env.get("ERP_ARQ_EXTERNAL", "").strip() != "1"
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     _load_dotenv()
@@ -817,7 +824,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--check" in argv:
         return check(api_port, workers)
 
-    with_arq = "--no-arq" not in argv
+    with_arq = should_start_internal_arq(argv, os.environ)
     sup = Supervisor(workers, api_port, web_port, with_arq=with_arq)
     _install_signal_handlers(sup)
     try:
