@@ -195,3 +195,26 @@
 - 主理人独立复核：CI advisory 步骤（降级 🟡）、policy_service 假成功、restore_core 判定、auxiliary 双分支口径、金额三口径、幂等键升级链、**导入洞为 main 存量**（main 闸门调用点=0）、`.env.production` 为死配置
 
 > 本报告由软件工坊 AI 协作生成，关键决策请由工程负责人复核。
+
+---
+
+## 8. 执行结果（2026-10-21 22:20 追加）
+
+**审查发现已处置、合并已执行。**
+
+| 项 | 结果 |
+|----|------|
+| 中断会话遗留修复批（16 文件，含 H4/H8） | 已提交 `252b7097`（钩子全过，pre-commit patch 正常恢复） |
+| 审查代码级修复（H1/H2/H3/M9 + 报告入库） | 已提交 `93d3216a` |
+| H11（BOM 负数 500） | **误报**：`db_transaction` 已把 ValueError 映射 400（exceptions.py:201-203），未修 |
+| R1（幂等键） | 未改——`_import_idem_key` docstring 载明业务已确认口径，留业务裁定 |
+| 快进阻挡 | main 工作树 test_forms.py 的未提交改动与分支 913212cd **逐字相同**，备份后放弃（backups/merge-audit-20261021/） |
+| 合并 | `0c509bbf → 97d30cd8`：快进 134 提交 + 吸收远端 bot 锁刷新 `0f90ea25`（合并提交 `97d30cd8`，无冲突，锁版本核验无回退：Pillow 13.0.0 / aiohttp 3.14.4 / virtualenv .12 / certifi .19 / websockets 17.3） |
+| 推送 | `0f90ea25..97d30cd8 main -> main` 到 github.com:qike1132/erp.git ✅ |
+| 验证 | 提权 pytest 聚焦 147 passed；quality_gate 16 项全 PASS（function_length 经抽取 `_allocate_and_write_stockout_rows` 回到基线）；ruff 0 |
+
+**⚠️ 尚未执行的发布步骤（生产仍跑旧代码）**：
+1. 重启 `erp-prod` / `erp-arq` 加载新代码（同时会第一次真正加载 Pillow 13.0.0——预留回滚窗口）；
+2. 健康确认后，单独窗口人工跑 `alembic upgrade head`（100-103；103 是 DROP COLUMN，跑前确认 `SELECT count(*) FROM stock_in WHERE is_deleted IS TRUE` = 0）；
+3. 跑迁移漂移探针确认 schema 与代码一致；
+4. 发布窗口补跑全量 pytest（4353 条）。
