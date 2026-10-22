@@ -75,6 +75,16 @@ _L1_RECONNECT_BACKOFF = 5  # 断线后重连退避秒数
 _broadcast_task: asyncio.Task | None = None
 
 
+def warn_if_l1_broadcast_disabled(workers: int) -> None:
+    """多 worker 但未开 L1 广播时告警：否则最长 local_ttl 内会读到脏数据。"""
+    if workers >= 2 and not _L1_BROADCAST_ENABLED:
+        logger.warning(
+            "UVICORN_WORKERS=%d 但 CACHE_L1_BROADCAST_ENABLED=false："
+            "多 worker 下 L1 缓存最长 local_ttl 内可能读到脏数据",
+            workers,
+        )
+
+
 def _record_cache_op(operation: str) -> None:
     """记录一次缓存访问结果到 Prometheus（供命中率观测）。
 
