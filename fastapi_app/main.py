@@ -329,13 +329,22 @@ async def lifespan(application: FastAPI):
         logger.error("优雅关闭异常退出: %s", e, exc_info=True)
 
 
+def resolve_docs_urls(is_production: bool):
+    """DOCS/OpenAPI URL 的唯一求值入口（在 app 创建期调用）。"""
+    if is_production:
+        return None, None, None
+    return '/api/docs', '/api/redoc', '/api/openapi.json'
+
+
+_docs_url, _redoc_url, _openapi_url = resolve_docs_urls(settings.is_production)
+
 app = FastAPI(
     title=settings.APP_NAME,
     description="滨发协同系统 - API服务",
     version=settings.APP_VERSION,
-    docs_url=settings.DOCS_URL,
-    redoc_url=settings.REDOC_URL,
-    openapi_url=settings.OPENAPI_URL,
+    docs_url=_docs_url,
+    redoc_url=_redoc_url,
+    openapi_url=_openapi_url,
     default_response_class=MsgspecResponse,
     lifespan=lifespan,
 )
@@ -495,7 +504,7 @@ async def root():
     return {
         "message": f"欢迎使用 {settings.APP_NAME}",
         "version": settings.APP_VERSION,
-        "docs": settings.DOCS_URL,
+        "docs": app.docs_url,
     }
 
 

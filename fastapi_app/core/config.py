@@ -282,6 +282,13 @@ def get_production_config_warnings() -> list[str]:
     return list(_production_config_warnings)
 
 
+DEFAULT_DEV_CORS_ORIGINS = (
+    "http://localhost,http://localhost:5002,http://localhost:3000,"
+    "http://localhost:5173,http://localhost:5174,http://localhost:8000,"
+    "http://localhost:8080"
+)
+
+
 class Settings(BaseSettings):
     """FastAPI应用配置"""
 
@@ -293,6 +300,8 @@ class Settings(BaseSettings):
     # API配置
     API_PREFIX: str = "/api/v1"
     # 生产环境（APP_ENV=production）自动关闭文档端点，防止暴露 API 结构
+    # 已废弃（2026-10-22）：运行时唯一真相是 main.resolve_docs_urls(settings.is_production)
+    # → app.docs_url；这三项保留仅为兼容既有导入，勿在新代码使用。
     DOCS_URL: str | None = None if _is_production_env() else "/api/docs"
     REDOC_URL: str | None = None if _is_production_env() else "/api/redoc"
     OPENAPI_URL: str | None = None if _is_production_env() else "/api/openapi.json"
@@ -340,7 +349,7 @@ class Settings(BaseSettings):
     # 包含 Nginx 统一入口（端口80）、Python HTTP 服务（端口8000/8080）、
     # 直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
     # 生产环境按 filter_cors_origins / _is_production_allowed_origin 过滤明文 HTTP 源
-    _raw_cors: str = os.getenv("CORS_ORIGINS", "http://localhost,http://localhost:5002,http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:8000,http://localhost:8080,null")
+    _raw_cors: str = os.getenv("CORS_ORIGINS", DEFAULT_DEV_CORS_ORIGINS)
     BACKEND_CORS_ORIGINS: list[str] = filter_cors_origins(
         _raw_cors, is_production=_is_production_env()
     )

@@ -8,7 +8,7 @@ import io
 import logging
 from collections.abc import Iterable
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import openpyxl
@@ -32,6 +32,18 @@ from fastapi_app.shared.stock_concurrency import (
 )
 from fastapi_app.shared_models import Customer, DailyProductionRecord, InventoryLog, Product
 from fastapi_app.utils import calc_total_pages, parse_date_with_fallback
+
+
+def _money_to_json(value) -> float:
+    """金额只在 JSON 边界转 float；舍入始终在 Decimal 上做 HALF-UP。"""
+    d = value if isinstance(value, Decimal) else Decimal(str(value))
+    return float(d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def _sum_money_to_json(values) -> float:
+    """先在 Decimal 上累加再单点舍入，避免 float 二次累加的 0.01 级漂移。"""
+    total = sum((Decimal(str(v)) for v in values), Decimal('0'))
+    return _money_to_json(total)
 
 # Excel 公式注入清洗（审查 H12）：product_name/barcode/remark/created_by 是
 # 用户可控文本，复用权威清洗器（与 purchase_center/export_utils.py 同口径）。
@@ -390,7 +402,7 @@ async def get_records(
         'pages': calc_total_pages(total, per_page),
         'stats': {
             'total_quantity': int(total_qty),
-            'total_value': round_money(float(total_val)),
+            'total_value': _money_to_json(total_val),
             'total_sku': int(total_sku),
         },
     }
@@ -631,7 +643,7 @@ async def get_daily_summary(
             'department': dept_key,
             'department_label': DEPARTMENT_LABELS.get(dept_key, dept_key),
             'total_quantity': d_info['quantity'],
-            'total_value': float(round_money(float(d_info['value']))),
+            'total_value': _money_to_json(d_info['value']),
             'sku_count': len(d_info['skus']),
         })
 
@@ -639,7 +651,7 @@ async def get_daily_summary(
         'date': target_date,
         'departments': department_rows,
         'overall_quantity': overall_quantity,
-        'overall_value': float(round_money(float(overall_value))),
+        'overall_value': _money_to_json(overall_value),
         'overall_sku_count': len(overall_skus),
     }
 
@@ -709,7 +721,7 @@ async def get_monthly_summary(
         if dept in ('filling', 'handcraft', 'packaging'):
             daily_map[d_str][dept] = {
                 'quantity': int(row.total_qty),
-                'value': round_money(float(row.total_val)),
+                'value': _money_to_json(row.total_val),
                 'sku_count': int(row.sku_count),
             }
 
@@ -726,7 +738,9 @@ async def get_monthly_summary(
         entry['day'] = day
         entry['total'] = {
             'quantity': entry['filling']['quantity'] + entry['handcraft']['quantity'] + entry['packaging']['quantity'],
-            'value': round_money(entry['filling']['value'] + entry['handcraft']['value'] + entry['packaging']['value']),
+            'value': _sum_money_to_json([
+                entry['filling']['value'], entry['handcraft']['value'], entry['packaging']['value']
+            ]),
             'sku_count': entry['filling']['sku_count'] + entry['handcraft']['sku_count'] + entry['packaging']['sku_count'],
         }
         daily_data.append(entry)
@@ -735,7 +749,7 @@ async def get_monthly_summary(
     monthly_depts = []
     for dept_key in dept_keys:
         dept_total_qty = sum(d[dept_key]['quantity'] for d in daily_data)
-        dept_total_val = round_money(sum(d[dept_key]['value'] for d in daily_data))
+        dept_total_val = _sum_money_to_json([d[dept_key]['value'] for d in daily_data])
         dept_total_sku = sum(d[dept_key]['sku_count'] for d in daily_data)
         monthly_depts.append({
             'department': dept_key,
@@ -751,7 +765,7 @@ async def get_monthly_summary(
         'daily_data': daily_data,
         'monthly_departments': monthly_depts,
         'monthly_total_quantity': sum(d['total']['quantity'] for d in daily_data),
-        'monthly_total_value': round_money(sum(d['total']['value'] for d in daily_data)),
+        'monthly_total_value': _sum_money_to_json([d['total']['value'] for d in daily_data]),
     }
 
 
