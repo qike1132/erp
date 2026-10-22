@@ -68,20 +68,19 @@ async def _mark_daily_cron_success(ctx) -> None:
         cron_schedules,
     )
     from fastapi_app.core.business_time import business_today
-    from fastapi_app.core.redis_wrapper import get_client
+    from fastapi_app.core.redis_wrapper import safe_set
 
     func_name = ctx.get('_job_function') or ctx.get('function', '')
     if callable(func_name):
         func_name = func_name.__name__
     for entry in cron_schedules:
         if entry['name'] in _DAILY_CRON_NAMES and entry['func'].__name__ == func_name:
-            redis = get_client()
-            if redis:
-                await redis.set(
-                    f"{_CRON_LAST_OK_PREFIX}{entry['name']}",
-                    business_today().isoformat(),
-                    ex=86400 * 2,
-                )
+            await safe_set(
+                f"{_CRON_LAST_OK_PREFIX}{entry['name']}",
+                business_today().isoformat(),
+                timeout=86400 * 2,
+                context="日级 cron 补跑标记",
+            )
 
 
 def _record_runtime(ctx) -> None:

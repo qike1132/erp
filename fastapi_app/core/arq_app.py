@@ -263,29 +263,28 @@ _CRON_LAST_OK_PREFIX = "cron_last_ok:"
 async def catch_up_daily_crons(ctx, now: datetime | None = None):
     """日级 cron 漏跑补跑：今日应跑时刻已过且未成功 → 幂等入队一次。"""
     from fastapi_app.core.business_time import business_today
-    from fastapi_app.core.redis_wrapper import get_client
+    from fastapi_app.core.redis_wrapper import safe_get
 
-    redis = get_client()
-    if redis is None:
-        return
     pool = await get_arq_pool()
     now = now or datetime.now()
     today = business_today().isoformat()
     for entry in cron_schedules:
         if entry["name"] not in _DAILY_CRON_NAMES:
             continue
-        if now.hour < entry["cron"]["hour"]:
+        minute = entry["cron"].get("minute", 0)
+        if isinstance(minute, set):
+            continue
+        if (now.hour, now.minute) < (entry["cron"]["hour"], int(minute)):
             continue
         key = f"{_CRON_LAST_OK_PREFIX}{entry['name']}"
-        last_ok = await redis.get(key)
-        last_ok = last_ok.decode() if isinstance(last_ok, bytes) else last_ok
+        last_ok = await safe_get(key, None, context="日级 cron 补跑标记")
         if last_ok == today:
             continue
-        job = await pool.enqueue_job(
+        # 不在此处写 key：入队 ≠ 成功（3 次重试全失败时写 key 会让当天不再补跑）。
+        # 键由 on_job_end 的成功回调写；重复采样由 ARQ 的 _job_id 去重兜底。
+        await pool.enqueue_job(
             entry["func"].__name__, _job_id=f"catchup:{entry['name']}:{today}"
         )
-        if job is not None:
-            await redis.set(key, today, ex=86400 * 2)
 
 
 cron_schedules: list[dict[str, Any]] = [
