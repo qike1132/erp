@@ -1,4 +1,8 @@
-"""M5：订单创建必须接入工厂隔离闸门。"""
+"""M5：订单创建必须接入工厂隔离闸门。
+
+本文件只验证「端点是否调用闸门」；闸门本体（异厂 404 / 本厂放行 / 超管放行）
+由 `fastapi_app/shared/factory_scope.py` 的既有测试覆盖。
+"""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 

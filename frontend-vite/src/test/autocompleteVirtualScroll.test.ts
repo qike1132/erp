@@ -22,4 +22,25 @@ describe('UiAutocomplete', () => {
       itemSize: expect.any(Number),
     })
   })
+
+  it('does not virtualize small lists', () => {
+    const wrapper = mount(UiAutocomplete, {
+      props: {
+        modelValue: '',
+        suggestions: [{ id: 1, name: 'only' }],
+        optionLabel: 'name',
+      },
+      global: {
+        stubs: {
+          AutoComplete: {
+            name: 'AutoComplete',
+            props: ['virtualScrollerOptions'],
+            template: '<div class="ac-stub" />',
+          },
+        },
+      },
+    })
+    const ac = wrapper.findComponent({ name: 'AutoComplete' })
+    expect(ac.props('virtualScrollerOptions')).toBeUndefined()
+  })
 })
