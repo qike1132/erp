@@ -465,15 +465,22 @@ def _write_filestore(zf: zipfile.ZipFile, uploads_dir: Path) -> int:
     return file_count
 
 
+async def _write_to_zip_async(zf: zipfile.ZipFile, path: Path, arcname: str) -> None:
+    """大文件（dump.sql.gz / RDB）压缩写 ZIP 也是 CPU 密集操作，下沉线程池。"""
+    await asyncio.to_thread(zf.write, path, arcname)
+
+
 async def _pack_backup_zip(zip_path: Path, tmpdir_path: Path, pg_dump_available: bool,
                            dump_path: Path, manifest: dict, include_sensitive_config: bool,
                            progress_cb) -> None:
     """打包 ZIP：数据库导出 + 附件 + 配置 + Redis RDB + MeiliSearch + manifest。"""
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
         if pg_dump_available and dump_path.is_file():
-            zf.write(dump_path, 'database/dump.sql.gz')
+            await _write_to_zip_async(zf, dump_path, 'database/dump.sql.gz')
         elif (tmpdir_path / 'database' / 'dump.json').is_file():
-            zf.write(tmpdir_path / 'database' / 'dump.json', 'database/dump.json')
+            await _write_to_zip_async(
+                zf, tmpdir_path / 'database' / 'dump.json', 'database/dump.json'
+            )
 
         if UPLOADS_DIR.is_dir():
             # 全量附件压缩是 CPU 密集操作，下沉线程池；进度回调留在事件循环侧
@@ -495,7 +502,7 @@ async def _pack_backup_zip(zip_path: Path, tmpdir_path: Path, pg_dump_available:
             await progress_cb('backup_config', 1.0, f'配置 {len(config_files_added)} 个')
 
         if REDIS_DUMP.is_file():
-            zf.write(REDIS_DUMP, 'redis/dump.rdb')
+            await _write_to_zip_async(zf, REDIS_DUMP, 'redis/dump.rdb')
             manifest['includes']['redis_rdb'] = True
             if progress_cb:
                 await progress_cb('backup_redis', 1.0, 'Redis RDB 已打包')

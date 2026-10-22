@@ -599,7 +599,8 @@ class DisasterRecoveryTestService:
         try:
             fd, sql_path = tempfile.mkstemp(suffix='.sql')
             os.close(fd)
-            # 解压到临时文件（流式，不把整包 SQL 读进内存），再交给 psql -f
+            # 解压到临时文件（流式，不把整包 SQL 读进内存），再交给 psql -f。
+            # 注意：明文 SQL 会短暂落盘（mkstemp 默认权限、finally 立即删除）。
             await asyncio.to_thread(_extract_gz, sql_gz_path, sql_path)
 
             env = os.environ.copy()
