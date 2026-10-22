@@ -433,6 +433,16 @@ async def _export_meilisearch(zf, manifest: dict) -> None:
         logger.warning('MeiliSearch 索引导出失败（可忽略）: %s', e)
 
 
+def _write_filestore(zf: zipfile.ZipFile, uploads_dir: Path) -> int:
+    """同步写入附件目录（由 asyncio.to_thread 调用）。返回文件数。"""
+    file_count = 0
+    for fp in sorted(uploads_dir.rglob('*')):
+        if fp.is_file():
+            zf.write(fp, f'filestore/{fp.relative_to(uploads_dir)}')
+            file_count += 1
+    return file_count
+
+
 async def _pack_backup_zip(zip_path: Path, tmpdir_path: Path, pg_dump_available: bool,
                            dump_path: Path, manifest: dict, include_sensitive_config: bool,
                            progress_cb) -> None:
@@ -444,12 +454,8 @@ async def _pack_backup_zip(zip_path: Path, tmpdir_path: Path, pg_dump_available:
             zf.write(tmpdir_path / 'database' / 'dump.json', 'database/dump.json')
 
         if UPLOADS_DIR.is_dir():
-            file_count = 0
-            for fp in sorted(UPLOADS_DIR.rglob('*')):
-                if fp.is_file():
-                    arcname = f'filestore/{fp.relative_to(UPLOADS_DIR)}'
-                    zf.write(fp, arcname)
-                    file_count += 1
+            # 全量附件压缩是 CPU 密集操作，下沉线程池；进度回调留在事件循环侧
+            file_count = await asyncio.to_thread(_write_filestore, zf, UPLOADS_DIR)
             manifest['includes']['filestore_count'] = file_count
             if progress_cb:
                 await progress_cb('pack_filestore', 1.0, f'附件 {file_count} 个')
@@ -498,6 +504,14 @@ def _encrypt_backup(zip_bytes: bytes, effective_encryption_password,
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.error(f"备份加密失败: {e}")
         raise BackupError(f"备份加密失败: {e}") from e
+
+
+async def _encrypt_backup_async(zip_bytes: bytes, effective_encryption_password,
+                                manifest: dict, encrypt_password) -> tuple[bytes, dict]:
+    """PBKDF2 + AES-GCM 是 CPU 密集操作，必须下沉线程池。"""
+    return await asyncio.to_thread(
+        _encrypt_backup, zip_bytes, effective_encryption_password, manifest, encrypt_password
+    )
 
 
 async def _do_create_full_backup(
@@ -556,7 +570,7 @@ async def _do_create_full_backup(
         db_dump_name = 'database/dump.sql.gz' if pg_dump_available else 'database/dump.json'
         db_dump_file = dump_path if pg_dump_available else tmpdir_path / 'database' / 'dump.json'
         if db_dump_file.is_file():
-            checksums[db_dump_name] = sha256_file(db_dump_file)  # REV-14
+            checksums[db_dump_name] = await asyncio.to_thread(sha256_file, db_dump_file)  # REV-14
 
         fingerprints = await _collect_fingerprints(db, table_names, existing_tables)
         snapshot_schema = await _collect_schema_snapshot(db)
@@ -582,7 +596,9 @@ async def _do_create_full_backup(
             await progress_cb('generate_checksum', 1.0, '校验和已生成')
 
         if effective_encryption_password:
-            return _encrypt_backup(zip_bytes, effective_encryption_password, manifest, encrypt_password)
+            return await _encrypt_backup_async(
+                zip_bytes, effective_encryption_password, manifest, encrypt_password
+            )
 
     return zip_bytes, manifest
 
