@@ -20,6 +20,8 @@
         :ref="el => setItemRef(el, item.index)"
         class="virtual-list-item"
         role="listitem"
+        :aria-setsize="items.length"
+        :aria-posinset="item.index + 1"
         :style="getItemStyle(item.index)"
       >
         <slot :item="item.raw" :index="item.index" />

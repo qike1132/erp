@@ -1,6 +1,10 @@
 <template>
   <div class="prs-split-layout">
-    <aside v-if="!isNarrow" class="prs-left-pane" aria-label="链接">
+    <!--
+      地标命名：原为 aria-label="链接"（模板复制残留，与内容无关），
+      读屏器地标列表会读出「链接 地标」，语义误导（审查 A11Y-15）。
+    -->
+    <aside v-if="!isNarrow" class="prs-left-pane" aria-label="打样项目列表">
       <div class="prs-left-content">
         <slot name="group-list" />
       </div>

@@ -611,7 +611,7 @@ defineExpose({ open: openBomModal, bomDirty })
 .bom-role-add-input {
   width: 120px; padding: 6px 10px;
   border: 1px solid var(--color-primary-400, #60a5fa); border-radius: 8px;
-  font-size: 13px; font-family: inherit; outline: none;
+  font-size: 13px; font-family: inherit;
   box-shadow: 0 0 0 2px var(--color-primary-100, #dbeafe);
 }
 /* P1-04：当前作用域常驻徽标 */

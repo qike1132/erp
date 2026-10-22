@@ -1,17 +1,16 @@
 <template>
   <div class="pvt-section">
-    <div v-if="partLoading" class="pvt-loading">
-      <UiSpinner size="sm" />
-      <span>加载部位数据...</span>
-    </div>
+    <!-- 加载态：常驻 live region，读屏器可感知（审查 A11Y-13） -->
+    <UiLoadingStatus :loading="partLoading" label="加载部位数据…" />
 
-    <div v-else-if="partsByVersion.length === 0" class="pvt-empty-parts">
+    <div v-if="!partLoading && partsByVersion.length === 0" class="pvt-empty-parts">
       <FontAwesomeIcon icon="cubes" aria-hidden="true" />
       <span>暂无部位布料信息</span>
     </div>
 
-    <div v-else class="pvt-table-wrap">
+    <div v-else-if="!partLoading" class="pvt-table-wrap">
       <table class="pvt-table pvt-table--version">
+        <caption class="sr-only">部位布料版本明细</caption>
         <colgroup>
           <col style="width: 100px" />
           <col style="width: 60px" />
@@ -46,7 +45,7 @@
 
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
-import UiSpinner from '@/components/ui/UiSpinner.vue'
+import UiLoadingStatus from '@/components/ui/UiLoadingStatus.vue'
 import PartsVersionRowV2 from './PartsVersionRowV2.vue'
 import type { PartDetail } from '@/api/patternRoom'
 import { PART_EDIT_FIELDS, injectPartInlineEdit } from '../composables/usePartInlineEdit'
@@ -93,15 +92,7 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   flex-direction: column;
   padding: 12px 16px;
 }
-.pvt-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px 0;
-  color: var(--color-text-secondary, #475569);
-  font-size: 13px;
-}
+/* 加载态外观由 UiLoadingStatus 自身承载（原 .pvt-loading 已移除） */
 .pvt-empty-parts {
   display: flex;
   flex-direction: column;

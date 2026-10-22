@@ -1,19 +1,23 @@
 <template>
-  <div class="cgl-customer-list">
+  <!-- 版师列表：互斥筛选，选中态由 aria-pressed 表达（审查 A11Y-07） -->
+  <div class="cgl-customer-list" role="group" aria-label="按版师筛选">
     <button
       v-for="group in groups"
       :key="group.pattern_maker_id ?? '_unassigned'"
+      v-bind="selectionItemAttrs(isMakerSelected(group.pattern_maker_id))"
       :class="['cgl-customer-item', { active: isMakerSelected(group.pattern_maker_id) }]"
       @click="selectMaker(group.pattern_maker_id)"
     >
       <span class="cgl-customer-name">{{ group.pattern_maker_name || '未分配版师' }}</span>
-      <span class="cgl-customer-count">{{ group.project_count }}</span>
+      <span class="cgl-customer-count" aria-hidden="true">{{ group.project_count }}</span>
+      <span class="sr-only">{{ group.project_count }} 个项目</span>
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { PatternMakerGroup } from '@/api/patternRoom'
+import { selectionItemAttrs } from '@/composables/useSelectionA11y'
 
 defineProps<{
   groups: PatternMakerGroup[]

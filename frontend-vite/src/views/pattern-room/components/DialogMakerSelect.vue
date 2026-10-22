@@ -4,12 +4,15 @@
       <button
         type="button"
         class="dms-trigger"
+        :aria-labelledby="labelledby"
+        :aria-expanded="dropdownOpen ? 'true' : 'false'"
+        :aria-controls="dropdownOpen ? optionsId : undefined"
         @click="dropdownOpen = !dropdownOpen"
       >
         <span>{{ selectedName || '-- 请选择 --' }}</span>
         <FontAwesomeIcon :icon="dropdownOpen ? 'chevron-up' : 'chevron-down'" aria-hidden="true" />
       </button>
-      <div v-if="dropdownOpen" class="dms-options">
+      <div v-if="dropdownOpen" :id="optionsId" class="dms-options">
         <button
           type="button"
           :class="['dms-option', { active: patternMakerId === null }]"
@@ -29,6 +32,7 @@
             type="button"
             class="dms-del"
             title="删除"
+            :aria-label="`删除版师「${pm.name}」`"
             @click.stop="onDeleteMaker(pm.id)"
           >
             <FontAwesomeIcon icon="times" aria-hidden="true" />
@@ -59,13 +63,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, useId } from 'vue'
 import type { PatternMaker } from '@/api/patternMaker'
 
 const props = defineProps<{
   patternMakers: PatternMaker[]
   patternMakerId: number | null
+  /**
+   * 视觉标签元素的 id（宿主渲染）。触发按钮自身只有「-- 请选择 --」或版师名，
+   * 没有它读屏器不知道这个下拉在选什么（审查 A11Y-05）。
+   * 也不能用 <label for> 关联：触发按钮没有 id，且 label 只对表单控件生效。
+   */
+  labelledby?: string
 }>()
+
+/** 展开的候选面板 id，供 aria-controls 引用 */
+const optionsId = `dms-options-${useId()}`
 
 const emit = defineEmits<{
   'update:patternMakerId': [value: number | null]
@@ -145,7 +158,6 @@ function cancelAdd() {
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
-  outline: none;
   cursor: pointer;
   box-sizing: border-box;
 }
@@ -254,10 +266,9 @@ function cancelAdd() {
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
-  outline: none;
   box-sizing: border-box;
 }
-.dms-add-input:focus {
+.dms-add-input:focus-visible {
   border-color: var(--color-primary-500);
 }
 .dms-cancel {

@@ -9,6 +9,9 @@ import { isMobileDevice } from '@/composables/useDevice'
 import { devLog } from '@/utils/devLog'
 import { installNavigationGuards } from './guards'
 
+/** 产品名（与 index.html 的 <title> 保持一致），用于拼接页面标题 */
+const APP_TITLE = '滨发协同系统'
+
 // ==================== PC 端路由====================
 const pcRoutes: RouteRecordRaw[] = [
   {
@@ -69,7 +72,7 @@ const pcRoutes: RouteRecordRaw[] = [
       { path: 'settings', name: 'Settings', component: () => import('@/views/settings/SettingsView.vue') },
       { path: 'ocr-import', name: 'OcrImport', component: () => import('@/views/ocr-import/OcrImportView.vue') },
       { path: 'backup', name: 'Backup', component: () => import('@/views/backup/BackupView.vue'), meta: { hideHeader: true } },
-      { path: 'pattern-room', name: 'PatternRoom', component: () => import('@/views/pattern-room/PatternRoomView.vue'), meta: { hideHeader: true } },
+      { path: 'pattern-room', name: 'PatternRoom', component: () => import('@/views/pattern-room/PatternRoomView.vue'), meta: { hideHeader: true, title: '板房打样管理' } },
       { path: 'notifications', name: 'Notifications', component: () => import('@/views/notifications/NotificationCenterView.vue'), meta: { hideHeader: true, navExempt: true } },
     ],
   },
@@ -157,9 +160,16 @@ router.onError((error, to) => {
   window.location.href = to.fullPath
 })
 
-router.afterEach(() => {
+router.afterEach((to) => {
   sessionStorage.removeItem(CHUNK_LOAD_KEY)
   sessionStorage.removeItem(CHUNK_LOAD_TS_KEY)
+  // 页面标题（WCAG 2.4.2）：SPA 不换文档，靠这里按路由改写，多标签页才区分得开。
+  // 只在 meta.title 显式声明时改写；未声明的路由保持产品名，避免标题变成空白或占位符。
+  const pageTitle = to.meta.title
+  document.title =
+    typeof pageTitle === 'string' && pageTitle.length > 0
+      ? `${pageTitle} · ${APP_TITLE}`
+      : APP_TITLE
 })
 
 // ==================== 路由守卫：认证 + 权限检查====================

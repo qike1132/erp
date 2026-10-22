@@ -125,7 +125,7 @@ function closeDialog() {
 
       <div class="batch-part-form__body">
         <div
-          v-for="row in rows"
+          v-for="(row, rowIndex) in rows"
           :key="row.uid"
           class="batch-part-form__row"
         >
@@ -136,6 +136,7 @@ function closeDialog() {
               placeholder="如 身体，头部"
               type="text"
               maxlength="100"
+              :aria-label="`第 ${rowIndex + 1} 行 部位名称（必填）`"
             />
           </div>
 
@@ -153,6 +154,7 @@ function closeDialog() {
               :placeholder="field.placeholder"
               :maxlength="field.formMaxlength"
               :empty-hint="field.historyCandidates.hint"
+              :aria-label="`第 ${rowIndex + 1} 行 ${field.label}`"
             />
             <input
               v-else
@@ -161,6 +163,7 @@ function closeDialog() {
               :placeholder="field.placeholder"
               type="text"
               :maxlength="field.formMaxlength"
+              :aria-label="`第 ${rowIndex + 1} 行 ${field.label}`"
             />
           </div>
 
@@ -170,6 +173,7 @@ function closeDialog() {
               type="button"
               class="row-remove-btn"
               title="删除此行"
+              :aria-label="`删除第 ${rowIndex + 1} 行`"
               @click="removeRow(row.uid)"
             >
               <FontAwesomeIcon icon="times" aria-hidden="true" />
@@ -256,12 +260,12 @@ function closeDialog() {
   font-family: inherit;
   background: #fff;
   color: var(--color-text-primary);
-  outline: none;
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
 
-:deep(.batch-part-input:focus) {
+/* 不再写 outline: none —— 保留全局 :focus-visible 焦点环（审查 A11Y-10） */
+:deep(.batch-part-input:focus-visible) {
   border-color: var(--color-primary-500);
 }
 

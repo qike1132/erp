@@ -6,12 +6,14 @@
         class="dre-role-input"
         placeholder="角色名称"
         maxlength="100"
+        :aria-label="`角色名称 ${idx + 1}`"
       />
       <button
         v-if="modelValue.length > 1"
         type="button"
         class="dre-role-remove"
         title="移除"
+        :aria-label="`移除角色 ${idx + 1}`"
         @click="removeAt(idx)"
       >
         <FontAwesomeIcon icon="times" aria-hidden="true" />
@@ -70,10 +72,9 @@ function removeAt(idx: number) {
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
-  outline: none;
   box-sizing: border-box;
 }
-.dre-role-input:focus {
+.dre-role-input:focus-visible {
   border-color: var(--color-primary-500);
 }
 .dre-role-remove {

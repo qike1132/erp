@@ -1,12 +1,13 @@
 <template>
   <!-- 搜索框 + 新建打样 -->
-  <div class="cgl-search-row">
+  <div class="cgl-search-row" role="search" aria-label="搜索打样项目">
     <div class="cgl-search">
       <FontAwesomeIcon icon="search" class="cgl-search-icon" aria-hidden="true" />
       <input
         class="cgl-search-input"
         type="text"
         placeholder="搜索版师或项目..."
+        aria-label="搜索版师或项目"
         @input="onSearchInput"
       />
     </div>
@@ -20,11 +21,12 @@
     </button>
   </div>
 
-  <!-- 状态筛选胶囊 -->
-  <div class="cgl-status-filter">
+  <!-- 状态筛选胶囊：互斥切换按钮组，选中态走 aria-pressed（见 useSelectionA11y） -->
+  <div class="cgl-status-filter" role="group" aria-label="按项目状态筛选">
     <button
       v-for="opt in STATUS_OPTIONS"
       :key="opt.value"
+      v-bind="itemAttrs(opt.value)"
       type="button"
       :class="['cgl-status-btn', { active: statusFilter === opt.value }]"
       @click="onStatusChange(opt.value)"
@@ -36,13 +38,17 @@
 
 <script setup lang="ts">
 import type { ProjectStatus } from '@/api/patternRoom'
+import { useSelectionA11y } from '@/composables/useSelectionA11y'
 
-defineProps<{
+const props = defineProps<{
   /** 当前状态筛选（受控：由父级 statusFilter 传入，避免父子状态漂移） */
   statusFilter: ProjectStatus
   /** 是否可新建打样（无权限时隐藏按钮） */
   canManage: boolean
 }>()
+
+/** 状态胶囊的选中态语义统一走 useSelectionA11y，勿手写 aria-pressed 字面量 */
+const { itemAttrs } = useSelectionA11y(() => props.statusFilter)
 
 const emit = defineEmits<{
   search: [keyword: string]
@@ -96,11 +102,15 @@ function onSearchInput(e: Event) {
   border-radius: 8px;
   font-size: 13px;
   color: var(--color-text-primary);
-  outline: none;
   box-sizing: border-box;
 }
-.cgl-search-input:focus {
-  border-color: var(--color-primary-400);
+/*
+ * 不使用 outline: none —— 那会盖掉 app.css 的全局 :focus-visible 焦点环
+ * （审查 A11Y-10）。这里只叠加边框强调，2px 轮廓由全局规则提供，
+ * 满足 WCAG 2.4.11 对焦点指示面积的要求。
+ */
+.cgl-search-input:focus-visible {
+  border-color: var(--color-primary-500, #5b8def);
 }
 .cgl-add-btn {
   flex-shrink: 0;

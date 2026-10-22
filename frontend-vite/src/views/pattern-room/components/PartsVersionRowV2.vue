@@ -11,6 +11,8 @@
           v-if="selectedVersion[group.part_name] && group.totalVersionCount > 1"
           class="pvt-expand-btn"
           :title="group.collapsed ? '展开所有版本' : '折叠其他版本'"
+          :aria-label="group.collapsed ? '展开所有版本' : '折叠其他版本'"
+          :aria-expanded="group.collapsed ? 'false' : 'true'"
           @click.stop="$emit('toggle-expand', group.part_name)"
         >
           <FontAwesomeIcon :icon="group.collapsed ? 'chevron-down' : 'chevron-up'"
@@ -22,6 +24,7 @@
     <td class="pvt-version-col">
       <button
         v-if="part.version_no"
+        v-bind="selectionItemAttrs(selectedVersion[group.part_name] === part.version_no)"
         class="pvt-vp-chip"
         :class="{ 'pvt-vp-chip--active': selectedVersion[group.part_name] === part.version_no, 'pvt-vp-chip--disabled': group.totalVersionCount <= 1 }"
         :title="group.totalVersionCount <= 1 ? '该部位只有一个版本' : (selectedVersion[group.part_name] === part.version_no ? '点击取消选择，显示所有版本' : '选择 ' + part.version_no + ' 为最终版本')"
@@ -41,6 +44,7 @@
         :placeholder="field.placeholder"
         :maxlength="field.inlineMaxlength"
         :empty-hint="field.historyCandidates.hint"
+        :aria-label="`${group.part_name} ${part.version_no ?? ''} 的${field.label}`"
       />
       <input
         v-else-if="editingPartId === part.id"
@@ -48,6 +52,7 @@
         class="pvt-inline-input"
         :placeholder="field.placeholder"
         :maxlength="field.inlineMaxlength"
+        :aria-label="`${group.part_name} ${part.version_no ?? ''} 的${field.label}`"
       />
       <template v-else>{{ part[field.key] || '-' }}</template>
     </td>
@@ -57,6 +62,7 @@
           type="button"
           class="pvt-action-btn pvt-action-btn--success"
           title="保存"
+          :aria-label="`保存修改：${rowTarget(part, group)}`"
           @click="saveEdit(part)"
         >
           <FontAwesomeIcon icon="check" aria-hidden="true" />
@@ -65,6 +71,7 @@
           type="button"
           class="pvt-action-btn pvt-action-btn--muted"
           title="取消"
+          :aria-label="`取消修改：${rowTarget(part, group)}`"
           @click="cancelEdit()"
         >
           <FontAwesomeIcon icon="times" aria-hidden="true" />
@@ -76,6 +83,7 @@
           type="button"
           class="pvt-action-btn pvt-action-btn--info"
           :title="part.id == null ? '历史快照，无法复制' : '复制版本'"
+          :aria-label="actionLabel('复制版本', part, group)"
           :disabled="!canManage || part.id == null"
           @click="$emit('copy-version', part)"
         >
@@ -86,6 +94,7 @@
           type="button"
           class="pvt-action-btn pvt-action-btn--warning"
           :title="part.id == null ? '历史快照，无法编辑' : '修改版本'"
+          :aria-label="actionLabel('修改版本', part, group)"
           :disabled="!canManage || part.id == null"
           @click="startEdit(part)"
         >
@@ -95,6 +104,7 @@
           type="button"
           class="pvt-action-btn pvt-action-btn--danger"
           :title="part.id == null ? '历史快照，无法删除' : '删除版本'"
+          :aria-label="actionLabel('删除版本', part, group)"
           :disabled="!canManage || part.id == null"
           @click="$emit('delete-version', part)"
         >
@@ -110,6 +120,7 @@ import type { PartDetail } from '@/api/patternRoom'
 import type { GroupedRow } from '../composables/usePartsVersionFilter'
 import PartFieldCombobox from './PartFieldCombobox.vue'
 import { PART_EDIT_FIELDS, injectPartInlineEdit } from '../composables/usePartInlineEdit'
+import { selectionItemAttrs } from '@/composables/useSelectionA11y'
 
 defineProps<{
   group: GroupedRow
@@ -127,6 +138,24 @@ defineEmits<{
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
 }>()
+
+/**
+ * 行内图标按钮的可访问名（审查 A11Y-21）。
+ *
+ * 这些按钮只有图标、没有可见文字，原来仅靠 `title` 命名，两个问题：
+ *   1. 触屏没有 hover，看不到提示；
+ *   2. `disabled` 时多数读屏器不播报 `title`，而本表恰恰会把「历史快照」行置灰 ——
+ *      用户只会听到一串「按钮，不可用」，不知道是哪个操作、为什么不可用。
+ * 所以 aria-label 里同时带上「动作 + 部位 + 版本」，并保留禁用原因。
+ */
+function rowTarget(part: PartDetail, group: GroupedRow): string {
+  return `${group.part_name} ${part.version_no ?? ''}`.trim()
+}
+
+function actionLabel(action: string, part: PartDetail, group: GroupedRow): string {
+  const target = rowTarget(part, group)
+  return part.id == null ? `${action}（${target}：历史快照，不可操作）` : `${action}：${target}`
+}
 </script>
 
 <style scoped>
@@ -150,8 +179,9 @@ defineEmits<{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  /* 24×24：WCAG 2.5.8 Target Size (Minimum) 下限，原 20×20 不达标（审查 A11Y-14） */
+  width: 24px;
+  height: 24px;
   padding: 0;
   font-size: 9px;
   color: var(--color-warning-500, #ff9f43);
@@ -172,7 +202,8 @@ defineEmits<{
   align-items: center;
   justify-content: center;
   min-width: 28px;
-  height: 22px;
+  /* 24px：WCAG 2.5.8 下限，原 22px 不达标（审查 A11Y-14） */
+  height: 24px;
   padding: 0 6px;
   font-size: 11px;
   font-weight: 500;
@@ -307,12 +338,11 @@ defineEmits<{
   border-radius: 4px;
   font-size: 12px;
   font-family: inherit;
-  outline: none;
   box-sizing: border-box;
   background: #fff;
   color: var(--color-text-primary, #1a1a2e);
 }
-:deep(.pvt-inline-input:focus) {
+:deep(.pvt-inline-input:focus-visible) {
   border-color: var(--color-warning-500, #ff9f43);
   box-shadow: 0 0 0 2px var(--color-warning-100, #ffedd5);
 }

@@ -16,7 +16,9 @@
       <button class="ui-page-btn" :disabled="currentPage <= 1" aria-label="上一页" @click="go(currentPage - 1)">
         <FontAwesomeIcon icon="angle-left" aria-hidden="true" />
       </button>
-      <span class="ui-page-info">{{ currentPage }} / {{ totalPages }}</span>
+      <!-- 视觉仍是「1 / 5」；翻页播报由下面的 live region 承担（审查 A11Y-20） -->
+      <span class="ui-page-info" aria-hidden="true">{{ currentPage }} / {{ totalPages }}</span>
+      <span class="sr-only" role="status" aria-live="polite">第 {{ currentPage }} 页，共 {{ totalPages }} 页</span>
       <button class="ui-page-btn" aria-label="下一页" :disabled="currentPage >= totalPages" @click="go(currentPage + 1)">
         <FontAwesomeIcon icon="angle-right" aria-hidden="true" />
       </button>
@@ -29,6 +31,7 @@
         class="ui-page-jump-input"
         type="text"
         inputmode="numeric"
+        aria-label="跳至页码"
         @keyup.enter="jumpToPage"
         @blur="jumpToPage"
       />

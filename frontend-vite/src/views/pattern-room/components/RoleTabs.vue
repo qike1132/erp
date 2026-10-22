@@ -16,7 +16,14 @@
         {{ role.role_name }}
       </span>
     </button>
-    <button v-if="canManage" type="button" class="role-tab-add" title="新增角色" @click="onAddClick">
+    <button
+      v-if="canManage"
+      type="button"
+      class="role-tab-add"
+      title="新增角色"
+      aria-label="新增角色"
+      @click="onAddClick"
+    >
       <FontAwesomeIcon icon="plus" aria-hidden="true" />
     </button>
 
@@ -27,6 +34,7 @@
         v-model="newName"
         class="role-tab-input"
         placeholder="角色名称"
+        aria-label="新角色名称"
         maxlength="100"
         @keydown.enter="onAddConfirm"
         @keydown.esc="onAddCancel"
@@ -47,7 +55,14 @@
       @contextmenu.prevent="closeMenu()"
       @wheel="closeMenu()"
     />
-    <div v-if="menu" class="role-tab-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
+    <div
+      v-if="menu"
+      class="role-tab-menu"
+      role="menu"
+      aria-label="角色操作"
+      :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
+      @keydown="onMenuKeydown"
+    >
       <button ref="menuItemEl" type="button" role="menuitem" class="role-tab-menu-item danger" @click="onMenuRemove">
         <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
         删除角色
@@ -164,6 +179,23 @@ function onMenuRemove() {
 
 function onDocumentKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') closeMenu(true)
+}
+
+/**
+ * 菜单内键盘处理（APG menu 约定，审查 A11Y-19）。
+ * Tab：关闭菜单并把焦点交还触发元素 —— 否则菜单项被 v-if 移除后焦点掉到 body，
+ * 且遮罩层仍在，用户会对着一个「点不动」的界面继续 Tab。
+ * 方向键 / Home / End：当前菜单只有一项，无项可移，仅阻止页面跟着滚动。
+ */
+function onMenuKeydown(e: KeyboardEvent) {
+  if (e.key === 'Tab') {
+    e.preventDefault()
+    closeMenu(true)
+    return
+  }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+    e.preventDefault()
+  }
 }
 
 /** 窗口尺寸或滚动变化后菜单会与标签错位，直接关闭 */
@@ -345,7 +377,6 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   font-size: 13px;
   font-family: inherit;
-  outline: none;
   box-shadow: 0 0 0 2px var(--color-primary-100, #dbeafe);
 }
 </style>

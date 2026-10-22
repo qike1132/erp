@@ -1,5 +1,11 @@
 <template>
   <div class="pr-container">
+    <!--
+      页面主标题（WCAG 1.3.1 / 2.4.6）：本路由 meta.hideHeader=true，头部被隐藏后
+      页面此前没有任何标题元素，读屏器的「按标题跳转」完全失效（审查 A11Y-12）。
+      sr-only 只供辅助技术读取，不影响视觉。
+    -->
+    <h1 class="sr-only">板房打样管理</h1>
     <div class="page-card page-card-main">
       <div class="page-card-body pr-body">
         <UiAlert

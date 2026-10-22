@@ -10,6 +10,8 @@
       autocomplete="off"
       :maxlength="maxlength"
       role="combobox"
+      :aria-label="ariaLabel"
+      :aria-controls="open ? panelId : undefined"
       :aria-expanded="open"
       @focus="handleOpen"
       @click="handleOpen"
@@ -26,7 +28,7 @@
         DOM 子树里，宿主 scoped 规则（含 :deep()）碰不到它，否则会退化成裸 div。
         宿主只能用 :deep() 注入上面的 input（如表格编辑态边框）。
       -->
-      <div v-if="open" ref="panelRef" class="bss-panel" :style="panelStyle" role="listbox">
+      <div v-if="open" :id="panelId" ref="panelRef" class="bss-panel" :style="panelStyle" role="listbox">
         <div v-if="!filtered.length" class="bss-empty">
           未找到「<em>{{ text.trim() }}</em>」，{{ emptyHint }}
         </div>
@@ -60,7 +62,7 @@
  * - 空态后半句经 emptyHint 传入（BOM「保存后将自动创建」/ 板房「保存后将自动记录」）
  * - Esc 加 .stop：宿主是 reka-ui DialogContent（带 Esc 关窗），防止关面板连带关弹窗
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 
 export interface CandidateOption {
   value: string
@@ -78,6 +80,11 @@ const props = withDefaults(defineProps<{
   inputClass?: string
   /** 原生 input name，浏览器凭据自动填充需要 */
   inputName?: string
+  /**
+   * 可访问名。本组件是 role="combobox"，视觉标签由宿主承担（表格列头 / 批量表单列头），
+   * 若不给可访问名，读屏器只会念「组合框，已折叠」，用户无从判断这一列是什么（审查 A11Y-16）。
+   */
+  ariaLabel?: string
 }>(), {
   modelValue: '',
   options: () => [],
@@ -86,9 +93,13 @@ const props = withDefaults(defineProps<{
   emptyHint: '保存后将自动记录',
   inputClass: '',
   inputName: undefined,
+  ariaLabel: undefined,
 })
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+
+/** 候选面板 id：aria-controls 需要指向它（APG combobox 必备） */
+const panelId = `bss-panel-${useId()}`
 
 const rootRef = ref<HTMLElement | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -249,10 +260,10 @@ onBeforeUnmount(() => {
 .bss-root { position: relative; width: 100%; }
 .bss-input {
   width: 100%; padding: 6px 10px; border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 8px; font-size: 13px; outline: none; background: #fff;
+  border-radius: 8px; font-size: 13px; background: #fff;
   transition: border-color .2s ease, box-shadow .2s ease;
 }
-.bss-input:focus { border-color: var(--color-primary-400, #7aa2f7); box-shadow: 0 0 0 3px rgba(0, 148, 191, .1); }
+.bss-input:focus-visible { border-color: var(--color-primary-400, #7aa2f7); box-shadow: 0 0 0 3px rgba(0, 148, 191, .1); }
 .bss-panel {
   z-index: 1500; max-height: 240px; overflow-y: auto; background: #fff;
   border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 10px;

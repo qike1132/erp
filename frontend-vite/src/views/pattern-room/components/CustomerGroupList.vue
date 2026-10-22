@@ -8,19 +8,20 @@
       @add-project="$emit('add-project')"
     />
 
-    <div v-if="loading" class="cgl-loading">
-      <UiSpinner size="sm" />
-      <span>加载中...</span>
-    </div>
+    <!--
+      加载态走 UiLoadingStatus（常驻 live region，读屏器能听到「加载中」）。
+      注意不能再用 v-if 包住它 —— 容器必须一直在树里（审查 A11Y-13）。
+    -->
+    <UiLoadingStatus :loading="loading" label="加载中…" />
 
     <EmptyState
-      v-else-if="!hasData"
+      v-if="!loading && !hasData"
       icon="boxes"
       title="暂无打样项目"
       description="点击上方「新建打样」创建第一个项目"
     />
 
-    <div v-else class="cgl-body">
+    <div v-else-if="!loading" class="cgl-body">
       <CustomerMakerPanel
         :groups="groups"
         :is-maker-selected="isMakerSelected"
@@ -55,7 +56,7 @@
 
 <script setup lang="ts">
 import { ref, toRef } from 'vue'
-import UiSpinner from '@/components/ui/UiSpinner.vue'
+import UiLoadingStatus from '@/components/ui/UiLoadingStatus.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import EmptyState from './EmptyState.vue'
 import CustomerGroupSearchBar from './CustomerGroupSearchBar.vue'
@@ -117,15 +118,7 @@ function openImagePreview(url: string) {
   padding: 2px 8px;
   flex-shrink: 0;
 }
-.cgl-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 40px 0;
-  color: var(--color-text-secondary, #9ca3af);
-  font-size: 13px;
-}
+/* 加载态外观由 UiLoadingStatus 自身承载（原先的 .cgl-loading 已移除） */
 .cgl-body {
   flex: 1;
   display: flex;

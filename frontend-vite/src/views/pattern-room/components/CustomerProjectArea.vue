@@ -29,8 +29,7 @@
               :maker-name="selectedGroup?.pattern_maker_name"
               :display-number="projectDisplayNumbers.get(proj.id)"
               :can-manage="canManage"
-              @click="$emit('select-project', proj.id)"
-              @keyup.enter="$emit('select-project', proj.id)"
+              @select="$emit('select-project', $event)"
               @preview="$emit('preview', $event)"
               @edit="$emit('edit-project', $event)"
               @complete="$emit('complete-project', $event)"
@@ -38,10 +37,10 @@
             />
           </template>
         </VirtualList>
-        <div v-else class="cgl-project-empty" aria-live="polite">
-          <UiSpinner size="sm" />
-          <span>加载中...</span>
-        </div>
+        <!-- 该分支只在「容器高度尚未测出」时短暂出现，等价于正在加载。
+             live region 必须常驻：用 v-if 包住会让它变成「新节点出现」，
+             部分读屏器不会播报，正好漏掉首次加载这一场景（审查 A11Y-13 硬契约 1）。 -->
+        <UiLoadingStatus :loading="projectAreaHeight <= 0" label="加载中…" />
       </div>
       <!-- 组内项目分页：分组项目较多时（如单版师上千条）按页加载渲染，避免一次渲染全部 -->
       <UiPagination
@@ -56,7 +55,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import UiSpinner from '@/components/ui/UiSpinner.vue'
+import UiLoadingStatus from '@/components/ui/UiLoadingStatus.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
 import ProjectCardItem from './ProjectCardItem.vue'

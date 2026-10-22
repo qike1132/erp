@@ -7,34 +7,45 @@
   >
     <div class="pjf-body">
       <div class="pjf-grid">
-        <div class="pjf-field">
-          <label class="pjf-label">产品名称 <span class="pjf-required">*</span></label>
+        <UiFormField v-slot="field" label="产品名称" required>
           <input
+            v-bind="field"
             v-model="form.product_name"
             class="pjf-input"
             placeholder="请输入产品名称"
             maxlength="200"
           />
-        </div>
+        </UiFormField>
 
         <div class="pjf-field">
-          <label class="pjf-label">版师</label>
+          <!-- 版师是自绘下拉（非表单控件），用 <span id> + aria-labelledby 建立关联。
+               原来这里是 <label> 却没有 for，属于无效关联。 -->
+          <span id="pjf-maker-label" class="pjf-label">版师</span>
           <DialogMakerSelect
             :pattern-makers="patternMakers"
             :pattern-maker-id="patternMakerId"
+            labelledby="pjf-maker-label"
             @update:pattern-maker-id="$emit('update:patternMakerId', $event)"
             @add-pattern-maker="$emit('add-pattern-maker', $event)"
             @delete-pattern-maker="$emit('delete-pattern-maker', $event)"
           />
         </div>
 
-        <div class="pjf-field pjf-full">
-          <label class="pjf-label">备注</label>
-          <textarea v-model="form.remark" class="pjf-textarea" rows="3" maxlength="2000" placeholder="项目备注..." aria-label="项目备注..." />
-        </div>
+        <UiFormField v-slot="field" label="备注" class="pjf-full">
+          <textarea
+            v-bind="field"
+            v-model="form.remark"
+            class="pjf-textarea"
+            rows="3"
+            maxlength="2000"
+            placeholder="项目备注..."
+          />
+        </UiFormField>
 
         <div ref="imageZoneRef" class="pjf-field pjf-full pjf-image-zone">
-          <label class="pjf-label">产品图片</label>
+          <!-- 复合区域（预览 / 上传 / 移除多个控件），标签只作视觉分组说明，
+               控件自身的可访问名由 DialogImageUpload 内部提供 -->
+          <span class="pjf-label">产品图片</span>
           <DialogImageUpload
             :preview-url="previewUrl"
             :paste-flash="pasteFlash"
@@ -45,10 +56,10 @@
         </div>
 
         <div v-if="!isEditing" class="pjf-field pjf-full">
-          <label class="pjf-label">
+          <span class="pjf-label">
             角色列表
             <span class="pjf-hint">不添加则仅创建"默认"</span>
-          </label>
+          </span>
           <DialogRoleEditor v-model="roleNames" />
         </div>
       </div>
@@ -68,6 +79,7 @@
 import { reactive, ref, computed, watch, onBeforeUnmount } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import UiButton from '@/components/ui/UiButton.vue'
+import UiFormField from '@/components/ui/UiFormField.vue'
 import DialogMakerSelect from './DialogMakerSelect.vue'
 import DialogImageUpload from './DialogImageUpload.vue'
 import DialogRoleEditor from './DialogRoleEditor.vue'
@@ -210,9 +222,7 @@ function handleSubmit() {
   font-weight: 600;
   color: var(--color-text-primary);
 }
-.pjf-required {
-  color: #ef4444;
-}
+/* .pjf-required 已移除：必填 * 由 UiFormField 渲染（带 aria-hidden，避免读屏念「星号」） */
 .pjf-input, .pjf-textarea {
   width: 100%;
   padding: 8px 12px;
@@ -222,11 +232,11 @@ function handleSubmit() {
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
-  outline: none;
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
-.pjf-input:focus, .pjf-textarea:focus {
+/* 不再写 outline: none —— 那会盖掉全局 :focus-visible 焦点环（审查 A11Y-10） */
+.pjf-input:focus-visible, .pjf-textarea:focus-visible {
   border-color: var(--color-primary-500);
 }
 .pjf-textarea {
