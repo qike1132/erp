@@ -31,7 +31,7 @@
 
 ---
 
-## Task A1: 安全降级登记接线（H4）
+## Task 1: 安全降级登记接线（H4）
 
 **Files:**
 - Modify: `fastapi_app/core/middleware.py:53-64`（新增跨 worker 发布/汇总）
@@ -154,7 +154,7 @@ git commit -m "fix(安全): fail-open 降级接入 record_degradation 并支持�
 
 ---
 
-## Task A2: 批量计划导入幂等（M8）
+## Task 2: 批量计划导入幂等（M8）
 
 **Files:**
 - Modify: `fastapi_app/tasks/plan_tasks.py:65-162`
@@ -236,7 +236,7 @@ git commit -m "fix(导入): 批量计划导入按 job_id 派生 batch_id，重�
 
 ---
 
-## Task A3: 采购单撤销批量状态计算（M2）
+## Task 3: 采购单撤销批量状态计算（M2）
 
 **Files:**
 - Modify: `fastapi_app/services/order_utils.py`（新增批量函数）
@@ -339,7 +339,7 @@ git commit -m "perf(采购): 采购单撤销改为批量聚合订单状态，消
 
 ---
 
-## Task A4: 外协状态筛选减少往返（M3）
+## Task 4: 外协状态筛选减少往返（M3）
 
 **Files:**
 - Modify: `fastapi_app/services/outsource/_queries.py:96-112`
@@ -421,7 +421,7 @@ git commit -m "perf(外协): 状态筛选的进度聚合从每页一次降为整
 
 ---
 
-## Task A5: 图片校验下沉线程池（M4）
+## Task 5: 图片校验下沉线程池（M4）
 
 **Files:**
 - Modify: `fastapi_app/api/v1/endpoints/customer_sampling.py:241`
@@ -514,7 +514,7 @@ git commit -m "perf(打样): 图片 PIL 解码校验下沉线程池，避免阻�
 
 ---
 
-## Task A6: token 撤销跨 worker 广播（M9）
+## Task 6: token 撤销跨 worker 广播（M9）
 
 **Files:**
 - Modify: `fastapi_app/core/auth/blacklist.py`
@@ -639,7 +639,7 @@ git commit -m "fix(认证): 登出撤销经 pub/sub 广播到各 worker，消除
 
 ---
 
-## Task A7: 审计日志失败可观测（M10）
+## Task 7: 审计日志失败可观测（M10）
 
 **Files:**
 - Modify: `fastapi_app/core/metrics.py`（新增 Counter）
@@ -736,7 +736,7 @@ git commit -m "fix(审计): 写库失败计数并落本地溢出文件，避免�
 
 ---
 
-## Task A8: 事件发布异常保留堆栈（M11）
+## Task 8: 事件发布异常保留堆栈（M11）
 
 **Files:**
 - Modify: `fastapi_app/core/exception_handler.py:96-101`
@@ -792,7 +792,7 @@ git commit -m "fix(可观测): 事件发布意外异常保留 traceback，避免
 
 ---
 
-## Task A9: 无 Content-Length 上传内存上界（M12）
+## Task 9: 无 Content-Length 上传内存上界（M12）
 
 **Files:**
 - Modify: `fastapi_app/core/middleware.py:461-471`
@@ -867,7 +867,7 @@ git commit -m "fix(上传): 无 Content-Length 的请求体受 64MB 上限约束
 
 ---
 
-## Task A10: 日级 ARQ cron 漏跑补跑（M7）
+## Task 10: 日级 ARQ cron 漏跑补跑（M7）
 
 **Files:**
 - Modify: `fastapi_app/core/arq_app.py`（新增 `catch_up_daily_crons` + cron 注册）
