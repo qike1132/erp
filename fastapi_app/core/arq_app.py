@@ -13,7 +13,7 @@ import logging
 import os
 from datetime import datetime
 from functools import wraps
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from arq import Retry, create_pool, cron
 from arq.connections import RedisSettings
@@ -288,7 +288,7 @@ async def catch_up_daily_crons(ctx, now: datetime | None = None):
             await redis.set(key, today, ex=86400 * 2)
 
 
-cron_schedules = [
+cron_schedules: list[dict[str, Any]] = [
     {
         'name': 'sync-shipment-daily',
         'func': sync_shipment_records_task,
