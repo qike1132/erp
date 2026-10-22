@@ -38,6 +38,7 @@ from fastapi_app.schemas.order import (
 from fastapi_app.services import order_batch_service, order_crud, order_service
 from fastapi_app.services.order.unified import get_unified_records
 from fastapi_app.services.order_service import PermissionDeniedError
+from fastapi_app.shared.factory_scope import assert_product_factory_scoped
 from fastapi_app.shared_models import Order, OrderItem, Product, User
 from fastapi_app.shared_models.order import VALID_ORDER_STATUSES
 
@@ -310,6 +311,8 @@ async def create_order(
         OrderActionResponse: 包含成功标志和提示消息的响应。
     """
     async with db_transaction(db):
+        # 工厂隔离：创建与编辑/删除同口径，厂绑定用户不得跨厂下单
+        await assert_product_factory_scoped(db, data.product_id, user, what="产品")
         await order_service.create_order(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, note=data.note or '', current_user=user,

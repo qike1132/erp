@@ -7,28 +7,22 @@ import { FontAwesomeIconLazy } from './components/icon/FontAwesomeIconLazy'
 import './styles/app.css'
 import App from './App.vue'
 import router from './router'
+import { abortPendingRequests } from './api/request'
 import { isMobileDevice } from './composables/useDevice'
 import { devLog } from './utils/devLog'
 import { initSentry } from './utils/sentry'
 import { markSentryReady, reportError } from './utils/errorReporter'
 
-// 静默 Chrome 扩展导致的 runtime.lastError 噪音
-// 根因：Manifest V3 扩展的 content script 向已休眠的 background service worker
-// 发送消息时，消息端口已被关闭。这不是应用代码的问题。
-{
-  const _origError = console.error.bind(console)
-  const SUPPRESS_PATTERNS = [
-    'message port closed before a response was received',
-    'Could not establish connection. Receiving end does not exist',
-  ]
-  console.error = (...args: unknown[]) => {
-    const firstArg = args[0]
-    if (typeof firstArg === 'string' && SUPPRESS_PATTERNS.some((p) => firstArg.includes(p))) {
-      return
-    }
-    _origError(...args)
-  }
-}
+import { installConsoleErrorFilter } from './utils/consoleFilter'
+
+// 静默 Chrome 扩展导致的 runtime.lastError 噪音（精确匹配，见 consoleFilter）
+installConsoleErrorFilter()
+
+// 路由切换时取消上一路由的未完成 GET，避免旧响应回填新页面
+router.beforeEach(() => {
+  abortPendingRequests()
+  return true
+})
 
 const app = createApp(App)
 const isMobile = isMobileDevice()
@@ -104,8 +98,9 @@ initSentry(app)
   .then((ok) => markSentryReady(ok))
   .catch(() => { /* 遥测初始化失败不得影响启动 */ })
 
-// 尽快挂载应用，不阻塞在 PrimeVue / 图标 / Token 缓存等异步初始化上
-app.mount('#app')
+// 挂载放到 bootstrap() 末尾：PrimeVue 必须在 mount 之前安装，
+// 否则窗口期内挂载的组件拿不到 $primevue 的 pt/zIndex/locale 注入，
+// 表现为偶发弹层被遮罩盖住或样式裸奔。
 
 window.addEventListener('auth:expired', async () => {
   const { useAuthStore } = await import('@/stores/auth')
@@ -116,7 +111,7 @@ window.addEventListener('auth:expired', async () => {
   }
 })
 
-// 异步初始化：设备特定资源，不阻塞首次渲染
+// 初始化设备特定资源；PrimeVue 安装完成后再 mount
 async function bootstrap() {
   if (isMobile) {
     try {
@@ -125,27 +120,27 @@ async function bootstrap() {
       console.warn('[App] mobile-tokens.css 加载失败，使用默认样式', e)
     }
   } else {
-    // PrimeVue 配置在 mount 后异步安装（Vue 3 支持运行时 install plugin）
-    import('primevue/config')
-      .then((PrimeVueMod) =>
-        import('./styles/primevue-pt').then((ptMod) => {
-          app.use(PrimeVueMod.default, {
-            unstyled: true,
-            pt: ptMod.plushCutePT,
-            // PrimeVue 弹层(autocomplete/select/datepicker 面板等)的内联 z-index
-            // 从该起点递增。项目自定义弹窗(pd-overlay 等)硬编码 z-index: 1050,
-            // 默认 overlay 起点 1000 会被弹窗遮罩盖住 —— 弹窗内打开联想下拉
-            // 表现为"面板已渲染但不可见"(BOM 配置联想失效成因,2026-09-11 修复)。
-            zIndex: { modal: 2100, overlay: 2000, menu: 2000, tooltip: 2100 },
-            locale: {
-              emptySearchMessage: '无匹配结果',
-              searchMessage: '{0} 条结果',
-            },
-          })
-        })
-      )
-      .catch((e) => console.error('[App] PrimeVue 加载失败，PC 端组件可能无法正常渲染', e))
+    try {
+      const PrimeVueMod = await import('primevue/config')
+      const ptMod = await import('./styles/primevue-pt')
+      app.use(PrimeVueMod.default, {
+        unstyled: true,
+        pt: ptMod.plushCutePT,
+        // PrimeVue 弹层(autocomplete/select/datepicker 面板等)的内联 z-index
+        // 从该起点递增。项目自定义弹窗(pd-overlay 等)硬编码 z-index: 1050,
+        // 默认 overlay 起点 1000 会被弹窗遮罩盖住 —— 弹窗内打开联想下拉
+        // 表现为"面板已渲染但不可见"(BOM 配置联想失效成因,2026-09-11 修复)。
+        zIndex: { modal: 2100, overlay: 2000, menu: 2000, tooltip: 2100 },
+        locale: {
+          emptySearchMessage: '无匹配结果',
+          searchMessage: '{0} 条结果',
+        },
+      })
+    } catch (e) {
+      console.error('[App] PrimeVue 加载失败，PC 端组件可能无法正常渲染', e)
+    }
   }
+  app.mount('#app')
 }
 
 bootstrap()
