@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 
 describe('UiAutocomplete', () => {
-  it('passes virtualScrollerOptions to PrimeVue AutoComplete', () => {
+  it('passes virtualScrollerOptions for large suggestion lists', () => {
+    const big = Array.from({ length: 100 }, (_, i) => ({ id: i, name: `n${i}` }))
     const wrapper = mount(UiAutocomplete, {
-      props: { modelValue: '', suggestions: [] },
+      props: { modelValue: '', suggestions: big, optionLabel: 'name' },
       global: {
         stubs: {
           AutoComplete: {

@@ -38,7 +38,7 @@
  *     </template>
  *   </UiAutocomplete>
  */
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import AutoComplete from 'primevue/autocomplete'
 import type { AutoCompleteCompleteEvent } from 'primevue'
 
@@ -112,6 +112,12 @@ const emit = defineEmits<{
 const internalSuggestions = ref<T[]>([])
 const loading = ref(false)
 let requestSeq = 0
+
+// 只有大列表才启用虚拟滚动：小列表走普通渲染，避免无谓的
+// ResizeObserver/测量开销（也让 jsdom 下的交互测试保持真实语义）
+const virtualScrollerOptions = computed(() =>
+  internalSuggestions.value.length > 50 ? { itemSize: 40 } : undefined,
+)
 
 // 选中/提交后抑制下拉：编辑已选中的搜索词时不再触发搜索与面板展开，清空输入后自动恢复
 const suppressSearch = ref(false)
@@ -290,7 +296,7 @@ defineExpose({ setSuppressed, focusInput })
     :append-to="(appendTo as string | undefined)"
     :show-empty-message="!suppressSearch"
     :empty-search-message="emptyText"
-    :virtual-scroller-options="{ itemSize: 40 }"
+    :virtual-scroller-options="virtualScrollerOptions"
     :pt="required ? { pcInputText: { root: { 'aria-required': 'true' } } } : undefined"
     @update:model-value="onInputChange"
     @complete="onComplete"
