@@ -55,7 +55,8 @@ redis_settings = _build_redis_settings()
 # ---------------------------------------------------------------------------
 # 任务重放幂等与批提交（P1-7）
 # ---------------------------------------------------------------------------
-# 背景：ARQ 的 ``max_tries=3`` 会**重放**失败任务（``ctx['job_try']`` 递增，``job_id`` 不变）。
+# 背景：ARQ 的 ``max_tries=3`` 只在任务抛 ``Retry``/``RetryJob`` 时重放失败任务
+# （普通异常会立即标记失败，不重放）。重放时 ``ctx['job_try']`` 递增、``job_id`` 不变。
 # 重放会重做已经提交的写入：批量导入重复建单/重复加减库存，调度轮询重复入队并重复回写状态。
 # 端点侧的幂等键（``api/v1/endpoints/purchase_center/order_routes.py:113`` 的 ``X-Idempotency-Key``
 # 透传给 ``services/purchase_order_generate.py:374``）靠业务表的唯一约束 ``uq_po_pending_dedup``
@@ -253,7 +254,8 @@ from fastapi_app.tasks.report_tasks import export_report_task
 # ---------------------------------------------------------------------------
 # cron_schedules 同时供 worker（派生 cron_jobs）与 backup 端点（列出/触发）使用，
 # 避免两处维护。ARQ 的 cron() 支持 hour/minute 为 int 或 set。
-# max_tries=3 对应 Celery max_retries=2（总尝试次数 = 重试次数 + 1）。
+# max_tries=3 对应 Celery max_retries=2（总尝试次数 = 重试次数 + 1）；
+# 注意它只是上限——任务体必须抛 ``Retry`` 才会真正重放（ARQ 0.28 语义）。
 
 # 日级 cron：worker 停机跨越触发点会永久漏跑，由 catch_up_daily_crons 补跑
 _DAILY_CRON_NAMES = {"sync-shipment-daily", "log-maintenance"}
@@ -392,7 +394,13 @@ def _tracked_job(func, max_tries: int = MAX_TRIES):
             ctx['_job_exception'] = exc
             raise
         else:
-            ctx['_job_outcome'] = 'success'
+            # 任务体以 {'status': 'error'} 返回时同样记失败：重试耗尽后的终态
+            # 走的是 return 而不是异常（P1-06），否则回调会把失败写成 success。
+            if isinstance(result, dict) and result.get('status') == 'error':
+                ctx['_job_outcome'] = 'failed'
+                ctx['_job_exception'] = RuntimeError(str(result.get('error', 'task returned error')))
+            else:
+                ctx['_job_outcome'] = 'success'
             return result
 
     return tracked

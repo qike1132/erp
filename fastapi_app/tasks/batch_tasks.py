@@ -3,7 +3,8 @@
 Excel 批量导入耗时操作由 ARQ Worker 执行。行循环使用异步会话
 （numbering_counter 原子取号，spec 2026-09-29 订单号统一 §4.2）。
 
-P1-7：ARQ 的 ``max_tries=3`` 会**重放**失败任务（``ctx["job_try"]`` 递增、``job_id`` 不变），
+P1-7：ARQ 的 ``max_tries=3`` 只在任务抛 ``Retry`` 时**重放**（``ctx["job_try"]`` 递增、``job_id`` 不变；
+普通异常立即失败不重放），
 故入口按 ``job_id + 行业务主键`` 做重放幂等（见 ``core/arq_app.py`` 的 ``job_idempotency``），
 行循环改为经 ``CommitBatcher`` 每批提交一次。
 

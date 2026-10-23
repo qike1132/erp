@@ -11,12 +11,15 @@
 6. 灾难恢复测试
 
 ARQ 任务为原生 async，原先在 Celery 同步 worker 中用 _run_async 包装的协程，
-现在直接 await。重试由 ARQ max_tries 控制（job_try < 3 时 raise 触发重试）。
+现在直接 await。重试必须抛 ``arq.Retry``（普通异常在 ARQ 0.28 下不会重放，
+只会立即标记失败）；``_MAX_TRIES`` 是总尝试次数上限。
 """
 import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
+
+from arq import Retry
 
 from fastapi_app.core.backup_progress import (
     complete_progress,
@@ -156,7 +159,7 @@ async def manual_full_backup_task(
             },
         )
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -313,9 +316,13 @@ async def auto_daily_backup_task(ctx):
             )
 
             if job_try < _MAX_TRIES:
-                raise result if isinstance(result, BaseException) else RuntimeError(str(result))
+                raise Retry(defer=60 * job_try) from None
             return {'status': 'error', 'error': str(result)}
 
+    except Retry:
+        # 重试控制流必须原样上抛：Retry 继承 Exception，若被下面的兜底
+        # except 捕获，会重复发告警并把根因改写成「Retry(...)」。
+        raise
     except Exception as e:  # defensive: background task must log/alert failure instead of propagating
         error_msg = f'每日自动备份失败: {e}'
         logger.error(error_msg)
@@ -335,7 +342,7 @@ async def auto_daily_backup_task(ctx):
         )
 
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -421,7 +428,7 @@ async def backup_integrity_check_task(ctx):
         )
 
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -483,7 +490,7 @@ async def backup_cleanup_task(ctx):
         )
 
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -676,7 +683,7 @@ async def backup_health_check_task(ctx):
         )
 
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -735,7 +742,7 @@ async def apply_backup_policy_task(ctx):
         )
 
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -795,7 +802,7 @@ async def disaster_recovery_test_task(ctx):
         )
 
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
 
 
@@ -857,5 +864,5 @@ async def backup_metrics_report_task(ctx):
         )
 
         if job_try < _MAX_TRIES:
-            raise e
+            raise Retry(defer=60 * job_try) from e
         return {'status': 'error', 'error': str(e)}
