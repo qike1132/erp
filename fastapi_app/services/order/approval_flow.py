@@ -161,7 +161,10 @@ async def cancel_approval(db: AsyncSession, approval_id: int, current_user: User
     if not can_transition(approval_request.status, 'cancel'):
         raise ValueError(f'该审批请求当前状态为"{approval_request.status}"，无法取消')
 
-    order = await db.get(Order, approval_request.order_id)
+    order = (await db.execute(
+        select(Order).where(Order.id == approval_request.order_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
     if order and not order.is_deleted:
         order.is_locked = False
         order.locked_by_id = None

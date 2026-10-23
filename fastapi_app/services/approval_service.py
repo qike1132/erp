@@ -199,6 +199,20 @@ async def approve_request(db: AsyncSession, approval_id: int, current_user: User
     if order.is_deleted:
         raise ValueError("关联订单已被删除，无法审批")
 
+    # 锁序与 update_order / create_stockout_core 对齐（P→O 升序，P1-03）：
+    # 编辑类审批原先只 db.get(Order) 无锁，与并发写出货互逆可成 AB-BA 死锁，
+    # 也会让「读到 → 应用修改」与并发直删构成丢失更新。
+    # 删除类 handler 内部已有同一套预锁，重复调用为 no-op。
+    from fastapi_app.services.order.commands import _prelock_order_products
+    await _prelock_order_products(db, order.id)
+    order = (await db.execute(
+        select(Order).where(Order.id == order.id).with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one()
+    # 锁后复查：db.get 已把旧快照放进身份映射，populate_existing 保证拿到锁后的真实行。
+    if order.is_deleted:
+        raise ValueError("关联订单已被删除，无法审批")
+
     # 注意：_handle_delete_approval 会删除该订单的其他 ApprovalRequest 记录（排除当前审批），
     # 当前审批保留以便设置状态和创建日志。
     handler = _OPERATION_HANDLERS.get(approval.operation_type)
@@ -243,10 +257,14 @@ async def reject_request(db: AsyncSession, approval_id: int, current_user: User,
     approval = await _get_pending_approval(db, approval_id)
     _validate_not_self_approval(approval, current_user)
 
-    order = await db.get(Order, approval.order_id)
+    # 拒绝会写 is_locked/locked_by_id：加 Order 行锁，避免与并发审批/编辑互相覆盖。
+    order = (await db.execute(
+        select(Order).where(Order.id == approval.order_id).with_for_update()
+    )).scalar_one_or_none()
     if order:
         order.is_locked = False
         order.locked_by_id = None
+        order.lock_time = None
 
     approval.status = ApprovalRequest.STATUS_REJECTED
     approval.approver_id = current_user.id

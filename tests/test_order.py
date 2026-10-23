@@ -362,7 +362,7 @@ class TestDeleteOrder:
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
             if call_count['n'] == 2:
                 return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
-            if call_count['n'] in (3, 4):
+            if call_count['n'] in (4, 5):
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
             return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
 
@@ -402,7 +402,7 @@ class TestDeleteOrder:
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
             if call_count['n'] == 2:
                 return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
-            if call_count['n'] in (3, 4):
+            if call_count['n'] in (4, 5):
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
             return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
 
@@ -440,7 +440,10 @@ class TestDeleteOrder:
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order.product_id))
             if call_count['n'] == 2:
                 return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
-            if call_count['n'] in (3, 4):
+            if call_count['n'] == 3:
+                # P1-03：预锁集合新增 OrderItem.product_id 查询
+                return MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+            if call_count['n'] in (4, 5):
                 return MagicMock(scalar_one_or_none=MagicMock(return_value=order))
             res = MagicMock()
             res.scalars.return_value.all.return_value = ['SR-20261006-0001']

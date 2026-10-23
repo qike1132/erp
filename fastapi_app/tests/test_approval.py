@@ -193,6 +193,9 @@ class TestApprovalService:
         mock_order.product_id = 1
         mock_order.note = '旧备注'
         mock_db.get = AsyncMock(return_value=mock_order)
+        # P1-03：approve 现在先预锁产品、再 select(Order).with_for_update()；
+        # 桩让该查询返回同一个 mock_order（生产中是身份映射的同一实例）。
+        mock_result.scalar_one.return_value = mock_order
 
         # handler 内部依赖（预锁产品、明细同步、状态重算、审批日志）全部打桩
         with patch.object(approval_service, 'get_product_for_update', new=AsyncMock()) as m_lock, \

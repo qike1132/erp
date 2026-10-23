@@ -561,7 +561,12 @@ async def _prelock_order_products(
     stockout_pids = (await db.execute(
         select(StockOut.product_id).where(StockOut.order_id == order_id).distinct()
     )).scalars().all()
-    for pid in sorted({p for p in (order_pid, *stockout_pids, *extra_pids) if p is not None}):
+    # 多 SKU：编辑类审批可能改动 OrderItem 的 product_id，也必须纳入预锁集合，
+    # 否则会在持 Order 锁后再锁更小 id 的产品行（O→P 逆序，P1-03）。
+    item_pids = (await db.execute(
+        select(OrderItem.product_id).where(OrderItem.order_id == order_id).distinct()
+    )).scalars().all()
+    for pid in sorted({p for p in (order_pid, *stockout_pids, *item_pids, *extra_pids) if p is not None}):
         await get_product_for_update(db, pid)
 
 

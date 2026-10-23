@@ -108,6 +108,8 @@ async def test_last_item_delete_service_returns_order_id(mock_db, monkeypatch):
     order_pid_result.scalar_one_or_none.return_value = None
     stockout_pids_result = MagicMock()
     stockout_pids_result.scalars.return_value.all.return_value = []
+    item_pids_result = MagicMock()
+    item_pids_result.scalars.return_value.all.return_value = []
     order_result = MagicMock()
     order_result.scalar_one_or_none.return_value = order
     deducted_result = MagicMock()
@@ -117,7 +119,7 @@ async def test_last_item_delete_service_returns_order_id(mock_db, monkeypatch):
 
     mock_db.execute = AsyncMock(
         side_effect=[head_result, order_pid_result, stockout_pids_result,
-                     order_result, deducted_result, siblings_result]
+                     item_pids_result, order_result, deducted_result, siblings_result]
     )
 
     async def _no_lock(*_args, **_kwargs):
