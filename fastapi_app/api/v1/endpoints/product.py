@@ -33,6 +33,7 @@ from fastapi_app.services.product_service import (
     ProductHasRelatedStockOutsError,
     ProductNotFoundError,
 )
+from fastapi_app.shared.factory_scope import assert_product_factory_scoped
 from fastapi_app.shared_models import User
 
 router = APIRouter()
@@ -114,8 +115,11 @@ async def list_products(page: int = Query(1, ge=1), per_page: int = Query(20, ge
 @router.post('/create', response_model=ProductActionResponse)
 async def create_product(data: ProductCreate, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
     """添加产品"""
+    # 工厂隔离（P1-05）：厂绑定用户只能创建本厂产品，归属由登录用户决定，
+    # 不接受客户端传参（与库存/订单写路径同口径）。
+    factory = _user.factory if (_user.factory and not _user.is_super) else data.factory
     async with db_transaction(db):
-        await product_service.create_product(db, name=data.name, barcode=data.barcode, price=data.price, image=data.image, factory=data.factory, initial_stock=data.initial_stock, customer_ids=data.customer_ids)
+        await product_service.create_product(db, name=data.name, barcode=data.barcode, price=data.price, image=data.image, factory=factory, initial_stock=data.initial_stock, customer_ids=data.customer_ids)
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)
     return ProductActionResponse(success=True, message='产品添加成功！')
 
@@ -147,8 +151,17 @@ async def get_product(product_id: int, db: AsyncSession=Depends(get_async_read_d
 @router.put('/edit/{product_id}', response_model=ProductActionResponse)
 async def edit_product(product_id: int, data: ProductUpdate, db: AsyncSession=Depends(get_async_db), _user: User=Depends(require_permission('product_manage'))):
     """编辑产品"""
+    # 工厂隔离（P1-05）：不能改他厂产品，也不能把本厂产品改挂到别的厂。
+    # 仅在客户端显式提交 factory 时强制覆盖；factory=None（不修改归属）保持原值，
+    # 避免厂绑定用户「只改价格」就把未分配工厂的历史产品静默认领。
+    await assert_product_factory_scoped(db, product_id, _user, what='产品')
+    factory = data.factory
+    if _user.factory and not _user.is_super:
+        # 前端编辑弹窗对未分配工厂的产品提交的是空串（不是 None）；falsy 一律视为
+        # 「不改归属」，避免厂绑定用户只改价格就把空工厂历史产品静默认领。
+        factory = _user.factory if data.factory else None
     async with db_transaction(db):
-        await product_service.update_product(db, product_id=product_id, name=data.name, barcode=data.barcode, price=data.price, image=data.image, factory=data.factory, initial_stock=data.initial_stock, customer_ids=data.customer_ids)
+        await product_service.update_product(db, product_id=product_id, name=data.name, barcode=data.barcode, price=data.price, image=data.image, factory=factory, initial_stock=data.initial_stock, customer_ids=data.customer_ids)
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)
     return ProductActionResponse(success=True, message='产品编辑成功！')
 
@@ -162,6 +175,7 @@ async def delete_product(product_id: int, db: AsyncSession=Depends(get_async_db)
     - 403: 权限不足
     """
     try:
+        await assert_product_factory_scoped(db, product_id, _user, what='产品')
         async with db_transaction(db):
             await product_service.delete_product(db, product_id)
     except ProductNotFoundError as e:
