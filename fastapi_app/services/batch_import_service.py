@@ -406,7 +406,7 @@ async def import_orders_service(db: AsyncSession, file: ExcelUpload) -> BatchImp
             if (cust_err := _reject_unknown_customer(customer, customer_names)) is not None:
                 return False, cust_err
             order_no = await generate_order_number(db)
-            order_date = datetime.now()
+            order_date = datetime.now(UTC)
             order = Order(
                 order_no=order_no, customer=customer, order_date=order_date,
                 product_id=product_id, quantity=qty,
@@ -722,7 +722,7 @@ async def import_stockouts_service(
                 return False, f'客户{customer}没有可用的订单支持出货'
             if qty > shipment_info['available_quantity']:
                 return False, f"出货数量{qty}超过可出货量{shipment_info['available_quantity']}"
-            stockout_date = parse_date_value(stockout_date_val) or datetime.now()
+            stockout_date = parse_date_value(stockout_date_val) or datetime.now(UTC)
             # 按订单可用量分配出货，直到出货数量耗尽
             await _allocate_stockout_to_orders(db, product, qty, customer, stockout_date, note, shipment_info)
             # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `product.current_stock -= qty` 直写，改走统一写入口。
