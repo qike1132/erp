@@ -1043,6 +1043,84 @@ async def _allocate_and_write_stockout_rows(
             remaining_qty -= ship_qty
 
 
+async def _resolve_stockout_inputs(
+    db: AsyncSession, deps: ImportDeps, row_data: dict, idx: int,
+    debug_messages: list, scoped_factory: str | None,
+):
+    """校验并解析一条出货导入行；失败时写 debug_messages 并返回 None。"""
+    product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('69码') or row_data.get('条码')
+    quantity = row_data.get('数量') or row_data.get('出货数量')
+    customer = row_data.get('客户名称') or row_data.get('客户')
+    stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
+    note = row_data.get('备注') or ''
+
+    if not product_identifier or not quantity:
+        debug_messages.append(f'行{idx}: 缺少产品名称/条码或数量')
+        return None
+
+    product_identifier = str(product_identifier).strip()
+    customer = str(customer).strip() if customer else ''
+
+    if not customer:
+        debug_messages.append(f'行{idx}: 出货必须选择客户')
+        return None
+
+    # 查找产品：名称/条码精确匹配。barcode 无唯一约束，必须显式识别多命中，
+    # 否则会静默按任意一条建出库行、扣错库存（P1-02 审核 Medium）。
+    rows = (await db.execute(
+        select(Product)
+        .where((Product.name == product_identifier) | (Product.barcode == product_identifier))
+        .order_by(Product.id)
+        .limit(2)
+    )).scalars().all()
+    if not rows:
+        debug_messages.append(f'行{idx}: 产品 {product_identifier} 不存在')
+        return None
+    if len(rows) > 1:
+        debug_messages.append(
+            f'行{idx}: 产品标识 {product_identifier} 命中多条，请使用唯一名称/条码')
+        return None
+    product = rows[0]
+
+    # 工厂闸门（H1）：厂绑定用户不能借导入给他厂产品出仓
+    if _row_factory_rejected(scoped_factory, product.factory):
+        debug_messages.append(
+            f'行{idx}: 产品不在你的工厂范围，已拒绝该行（{product_identifier}）')
+        return None
+
+    try:
+        qty = int(quantity)
+        if qty <= 0:
+            debug_messages.append(f'行{idx}: 出库数量必须大于0')
+            return None
+    except ValueError:
+        logger.warning("出货导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_identifier, customer, quantity)
+        debug_messages.append(f'行{idx}: 出库数量必须是整数')
+        return None
+
+    # 负库存判定统一走统一入口（P1-2b）；策略拒绝时按原行为跳过该行
+    if (reason := check_stock_available(
+        product.current_stock, -qty,
+        message=f'库存不足，当前库存: {product.current_stock}',
+    )) is not None:
+        debug_messages.append(f'行{idx}: {reason}')
+        return None
+
+    shipment_info = await deps.calculate_available_shipment_quantity(
+        db, product.id, customer,
+    )
+    if shipment_info['available_quantity'] <= 0:
+        debug_messages.append(f'行{idx}: 客户{customer}没有可用的订单支持出货')
+        return None
+    if qty > shipment_info['available_quantity']:
+        debug_messages.append(
+            f'行{idx}: 出货数量{qty}超过可出货量{shipment_info["available_quantity"]}')
+        return None
+
+    stockout_date = parse_date_value(stockout_date_val) or datetime.now(UTC)  # aware UTC：stockout_date 列为 timestamptz
+    return product, customer, qty, stockout_date, note, shipment_info
+
+
 async def import_stockouts_from_data(
     db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None,
     scoped_factory: str | None = None,
@@ -1057,59 +1135,11 @@ async def import_stockouts_from_data(
     deps = deps or default_import_deps()
 
     async def _row_handler(db, row_data, idx, context, debug_messages):
-        product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('69码') or row_data.get('条码')
-        quantity = row_data.get('数量') or row_data.get('出货数量')
-        customer = row_data.get('客户名称') or row_data.get('客户')
-        stockout_date_val = row_data.get('时间') or row_data.get('出货时间')
-        note = row_data.get('备注') or ''
-
-        if not product_identifier or not quantity:
+        resolved = await _resolve_stockout_inputs(
+            db, deps, row_data, idx, debug_messages, scoped_factory)
+        if resolved is None:
             return False
-
-        product_identifier = str(product_identifier).strip()
-        customer = str(customer).strip() if customer else ''
-
-        if not customer:
-            return False
-
-        # 查找产品
-        result = await db.execute(
-            select(Product).where(
-                (Product.name == product_identifier) | (Product.barcode == product_identifier)
-            )
-        )
-        product = result.scalar_one_or_none()
-        if not product:
-            return False
-
-        # 工厂闸门（H1）：厂绑定用户不能借导入给他厂产品出仓
-        if _row_factory_rejected(scoped_factory, product.factory):
-            debug_messages.append(
-                f'行{idx}: 产品不在你的工厂范围，已拒绝该行（{product_identifier}）')
-            return False
-
-        try:
-            qty = int(quantity)
-            if qty <= 0:
-                return False
-        except ValueError:
-            logger.warning("出货导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_identifier, customer, quantity)
-            return False
-
-        # 负库存判定统一走统一入口（P1-2b）；策略拒绝时按原行为跳过该行
-        if check_stock_available(product.current_stock, -qty) is not None:
-            return False
-
-        shipment_info = await deps.calculate_available_shipment_quantity(
-            db, product.id, customer,
-        )
-        if shipment_info['available_quantity'] <= 0:
-            return False
-
-        if qty > shipment_info['available_quantity']:
-            return False
-
-        stockout_date = parse_date_value(stockout_date_val) or datetime.now(UTC)  # aware UTC：stockout_date 列为 timestamptz
+        product, customer, qty, stockout_date, note, shipment_info = resolved
 
         await _allocate_and_write_stockout_rows(
             db, deps, product=product, customer=customer, qty=qty,
