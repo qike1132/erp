@@ -20,7 +20,11 @@ from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.bom_service import has_bom as product_has_bom  # noqa: F401
 from fastapi_app.services.product_visibility import unassigned_product, visible_to_customer
 from fastapi_app.services.signed_urls import strip_upload_signature
-from fastapi_app.shared.stock_concurrency import assert_stock_available, get_product_for_update
+from fastapi_app.shared.stock_concurrency import (
+    apply_stock_delta_locked,
+    assert_stock_available,
+    get_product_for_update,
+)
 from fastapi_app.shared_models import (
     Customer,
     InventoryLog,
@@ -394,24 +398,32 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
 
     if initial_stock is not None and initial_stock != product.initial_stock:
         stock_change = initial_stock - product.initial_stock
-        new_current_stock = product.current_stock + stock_change
         # P1-2b（t26-F-02 修复）：负库存判定收口到统一入口，不再内联比较。
         # 缺省（策略关闭）时仍抛 ValueError 且文案逐字不变；ALLOW_NEGATIVE_STOCK 为真值时
         # 与统一入口同样放行，管理员路径不再被无条件硬拒。
         assert_stock_available(product.current_stock, stock_change,
                                message=f'初始库存调整将导致当前库存为负数（当前库存：{product.current_stock}，调整量：{stock_change:+d}）')
         product.initial_stock = initial_stock
-        # 写入侧安全性：:267 的 get_product_for_update 已对该行取 FOR UPDATE 行锁，
-        # 判定与写入在同一事务内完成，不存在 TOCTOU 窗口；库侧另有
-        # ck_product_current_stock_nonneg 作为最后一道防线。
-        product.current_stock = new_current_stock
+        # 统一写入口（P1-20）：持锁 + version 递增 + 原子负库存守卫。
+        # 原实现只改 current_stock 不 bump version，并发乐观锁写方会用旧基数
+        # 覆盖本次调整（丢失更新），且 current_stock 与流水累计分叉。
+        # 注意：ORM-enabled UPDATE 会先 autoflush 本事务已改的 name/barcode 等字段，
+        # 名字唯一冲突可能在此提前抛出——与下方 flush 同样映射为 400 友好文案。
+        try:
+            updated = await apply_stock_delta_locked(db, product, stock_change)
+        except IntegrityError as e:
+            if 'product_name_key' in str(e.orig).lower() or 'uq_product_name' in str(e.orig).lower():
+                raise ValueError(f'产品名称"{name or product.name}"已存在，每个产品名称必须是唯一的！') from e
+            raise
 
         log = InventoryLog(
             product_id=product.id,
             change_type='初始库存调整',
             change_quantity=stock_change,
             related_id=str(product.id),
-            note='初始库存调整'
+            note='初始库存调整',
+            quantity_before=updated.current_stock - stock_change,
+            quantity_after=updated.current_stock,
         )
         db.add(log)
 

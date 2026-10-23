@@ -164,13 +164,9 @@ ALLOWED_RESIDUAL_ORDERING = {
 
 # 普通赋值（ast.Assign）直写 *.current_stock 的静态台账（t42 补齐的漏检类别 ②）。
 # 这些写入本身不是「负库存判定」——判定点已收口到统一入口（assert/check_stock_available），
-# 写入发生在行锁（product_service）或统一入口自身的原子 UPDATE（stock_concurrency）之内。
+# 写入只发生在统一入口自身的原子 UPDATE（stock_concurrency）之内。
+# （product_service 的初始库存调整已于 P1-20 改走统一入口，不再直写。）
 DOCUMENTED_PLAIN_ASSIGN_WRITES = {
-    "fastapi_app/services/product_service.py": [
-        # update_product：:268 get_product_for_update 持 FOR UPDATE 行锁，
-        # 负向判定已收口到 assert_stock_available；此处只把差额落到内存对象。
-        "product.current_stock = new_current_stock",
-    ],
     "fastapi_app/shared/stock_concurrency.py": [
         # apply_stock_delta_locked：原子 UPDATE 成功后同步内存对象（t39 语义未动）
         "product.current_stock = new_stock",
@@ -836,4 +832,23 @@ async def test_update_product_negative_stock_released_when_policy_truthy(monkeyp
     assert product.current_stock == -2
     assert product.initial_stock == 3
     assert result == {"id": 7, "current_stock": -2}
+
+
+async def test_update_product_initial_stock_bumps_version_and_logs_bounds(monkeypatch):
+    """P1-20：初始库存调整必须 bump version，并写正确的流水前后值。"""
+    monkeypatch.setenv("ALLOW_NEGATIVE_STOCK", "1")
+    product = _T42Product(current_stock=5, initial_stock=10)
+    db = _FakeSession()
+    with patch("fastapi_app.services.product_service.get_product_for_update",
+               new_callable=AsyncMock, return_value=product), patch(
+        "fastapi_app.services.product_service.cache_mgr",
+        MagicMock(invalidate=AsyncMock()),
+    ), patch("fastapi_app.services.product_service._schedule_post_commit"):
+        await product_service.update_product(
+            db, product.id, None, None, None, 3,
+        )
+    assert product.version == 1
+    log = next(x for x in db.added if getattr(x, "change_type", None) == "初始库存调整")
+    assert log.quantity_before == 5
+    assert log.quantity_after == -2
 
