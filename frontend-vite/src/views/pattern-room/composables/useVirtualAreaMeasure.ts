@@ -2,17 +2,20 @@
  * useVirtualAreaMeasure — 虚拟滚动容器高度测量 Hook
  *
  * 容器高度初始为 0，模板靠 `v-else-if="height > 0"` 守卫 VirtualList 渲染。
- * 由于父级 flex 链可能在数据加载后才完成布局，单次 onMounted 测量经常得到 0，
- * 这里采用多策略保证最终能拿到正确高度：
- *   1. onMounted 同步测量（best-effort）
- *   2. nextTick 后再次测量（父级 v-if/v-else 切换后）
- *   3. requestAnimationFrame 后测量（最终布局稳定）
- *   4. 监听自身 + 父级尺寸变化（ResizeObserver，仅在变化时触发）
- *   5. 监听 window resize（视口变化）
+ * 容器元素本身是条件渲染的（未选中版师 / 无项目时不渲染），因此测高必须
+ * **跟随元素生命周期**，而不是只在组件挂载那一刻做一次：
+ *   1. 元素出现 → 同步测量 + nextTick/rAF 补测
+ *   2. 元素出现 → 监听自身 + 父级尺寸变化（ResizeObserver）
+ *   3. 元素摘除 → 断开监听；再次出现 → 重新测量
+ *   4. 监听 window resize（视口变化）
  * 性能优化：ResizeObserver / window resize 回调通过 rAF 去抖，
  * 避免高频触发导致连续重排。
+ *
+ * 历史缺陷（2026-10-23）：只在 onMounted 挂监听。切状态筛选后原选中版师不在
+ * 新分组里时容器不存在，用户再点版师使容器「后出现」——此时既没有 onMounted
+ * 也没有 groups 变化，height 永远停在 0，模板恒显「加载中…」。
  */
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 
 export function useVirtualAreaMeasure() {
   /** 被测量的容器元素引用 */
@@ -60,27 +63,44 @@ export function useVirtualAreaMeasure() {
     })
   }
 
-  onMounted(() => {
+  function disconnectObservers() {
+    areaResizeObserver?.disconnect()
+    areaResizeObserver = null
+    parentResizeObserver?.disconnect()
+    parentResizeObserver = null
+  }
+
+  function observeElement(el: HTMLElement) {
+    disconnectObservers()
     tryMeasureWithRetry()
-    if (areaRef.value && typeof ResizeObserver !== 'undefined') {
-      areaResizeObserver = new ResizeObserver(measureRaf)
-      areaResizeObserver.observe(areaRef.value)
-      // 同时监听父级（cgl-body / pr-left-pane）尺寸变化，
-      // 解决父级从 0 → 有数据时自身尺寸可能不变导致漏触发的问题
-      const parent = areaRef.value.parentElement
-      if (parent) {
-        parentResizeObserver = new ResizeObserver(measureRaf)
-        parentResizeObserver.observe(parent)
-      }
+    if (typeof ResizeObserver === 'undefined') return
+    areaResizeObserver = new ResizeObserver(measureRaf)
+    areaResizeObserver.observe(el)
+    // 同时监听父级（cgl-body / pr-left-pane）尺寸变化，
+    // 解决父级从 0 → 有数据时自身尺寸可能不变导致漏触发的问题
+    const parent = el.parentElement
+    if (parent) {
+      parentResizeObserver = new ResizeObserver(measureRaf)
+      parentResizeObserver.observe(parent)
     }
+  }
+
+  // flush: 'post' —— 回调在元素插入 DOM 之后执行，此时才拿得到真实高度
+  watch(areaRef, (el) => {
+    if (el) observeElement(el)
+    else disconnectObservers()
+  }, { flush: 'post' })
+
+  onMounted(() => {
+    // 兜底：元素在 setup 阶段就已存在时 watch 不会触发（无变化），补一次
+    if (areaRef.value) observeElement(areaRef.value)
     // 监听 window resize（窄屏/宽屏切换、抽屉展开/收起等场景）
     windowResizeHandler = measureRaf
     window.addEventListener('resize', windowResizeHandler)
   })
 
   onUnmounted(() => {
-    areaResizeObserver?.disconnect()
-    parentResizeObserver?.disconnect()
+    disconnectObservers()
     if (windowResizeHandler) {
       window.removeEventListener('resize', windowResizeHandler)
       windowResizeHandler = null
