@@ -22,9 +22,11 @@ CONSTRAINT 等），与 `migrations/destructive_ddl_baseline.json` 基线比对�
 
 已知局限
 --------
-仅扫描 AST 字面量（含 `op.execute(text("..."))` 包裹的那一层），不追踪变量/拼接出的
-SQL；把 DDL 先存进变量再传入的写法无法识别。autogenerate 产出的都是字面量
-（`op.drop_index('x', ...)` / `op.execute("DROP ...")`），故主要威胁已被覆盖。
+扫描 AST 字面量与 f-string（`JoinedStr`，插值渲染为 `{表达式}`），支持
+`op.execute(...)` / `op.execute(text(...))` 及其 f-string 形式。
+仍不追踪：先存进变量再传入的 SQL、`%`/`+` 拼接、`str.format()`、列表推导；
+这些写法需人工审阅（存量示例：061 的 `_DROP`、009 的 `DROP_BROKEN`）。
+autogenerate 产出的都是字面量，故主要威胁已被覆盖。
 """
 
 from __future__ import annotations
@@ -66,21 +68,43 @@ def _callee_name(node: ast.Call) -> str | None:
     return None
 
 
+def _render_str_node(node: ast.AST) -> str | None:
+    """把字符串表达式渲染成可判定的文本。
+
+    除字面量外还支持 f-string（``ast.JoinedStr``）：常量片段原样保留，插值
+    位置记为 ``{…}``。迁移里常见 ``op.execute(sa.text(f'DROP INDEX ... {name}'))``，
+    只认 ``ast.Constant`` 会整类漏扫（P1-07）。
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts: list[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            elif isinstance(value, ast.FormattedValue):
+                # 保留变量名/表达式，避免同一迁移里「同模板不同对象」的两条 DROP 折叠
+                parts.append('{' + ast.unparse(value.value) + '}')
+            else:
+                parts.append('{…}')
+        return ''.join(parts)
+    return None
+
+
 def _string_args(node: ast.Call, limit: int = 2) -> list[str]:
     """提取调用的字符串实参；对 `text("...")` / `sa.text("...")` 包裹的再解一层。
 
     裸 SQL 常写作 `op.execute(text("DROP ..."))` —— 字符串在 `text(...)` 调用里，
     不是 `execute` 的直接实参，故需下钻一层，否则会漏掉这类破坏性 DDL。
+    f-string 同样支持（见 :func:`_render_str_node`）。
     """
     out: list[str] = []
     for arg in node.args:
-        value: str | None = None
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            value = arg.value
-        elif isinstance(arg, ast.Call) and _callee_name(arg) == "text":
+        value = _render_str_node(arg)
+        if value is None and isinstance(arg, ast.Call) and _callee_name(arg) == "text":
             for inner in arg.args:
-                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
-                    value = inner.value
+                value = _render_str_node(inner)
+                if value is not None:
                     break
         if value is not None:
             out.append(" ".join(value.split()))

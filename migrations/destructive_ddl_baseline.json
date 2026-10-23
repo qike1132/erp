@@ -163,7 +163,8 @@
     ],
     "migrations/versions/add_updated_at_to_all_tables.py": [
       "drop_column:updated_at",
-      "execute:DROP FUNCTION IF EXISTS trigger_set_updated_at()"
+      "execute:DROP FUNCTION IF EXISTS trigger_set_updated_at()",
+      "execute:DROP TRIGGER IF EXISTS set_updated_at ON \"{table}\""
     ],
     "migrations/versions/add_user_factory_and_notification.py": [
       "drop_column:user|factory",
@@ -365,6 +366,9 @@
       "drop_index:idx_cscl_created_at",
       "drop_index:idx_csfv_project_version"
     ],
+    "migrations/versions/pg_standalone_026_add_search_trgm_indexes.py": [
+      "execute:DROP INDEX CONCURRENTLY IF EXISTS {name}"
+    ],
     "migrations/versions/pg_standalone_027_drop_pattern_room_tables.py": [
       "drop_table:"
     ],
@@ -382,6 +386,9 @@
       "execute:DROP INDEX IF EXISTS idx_csp_part_name",
       "execute:DROP INDEX IF EXISTS idx_csp_part_name_version",
       "execute:DROP INDEX IF EXISTS uq_csfv_project_version"
+    ],
+    "migrations/versions/pg_standalone_030_add_ondelete_to_core_fk.py": [
+      "execute:ALTER TABLE {tbl} DROP CONSTRAINT IF EXISTS {constraint_name}"
     ],
     "migrations/versions/pg_standalone_031_pattern_maker.py": [
       "drop_column:customer_sampling_project|customer_id",
@@ -416,6 +423,9 @@
     "migrations/versions/pg_standalone_038_product_role.py": [
       "execute:ALTER TABLE product_material DROP CONSTRAINT product_material_product_id_key;",
       "execute:ALTER TABLE product_material DROP CONSTRAINT uq_product_material_product_role;",
+      "execute:ALTER TABLE {table} DROP COLUMN role_id;",
+      "execute:ALTER TABLE {table} DROP CONSTRAINT fk_{table}_role;",
+      "execute:DROP INDEX idx_{table}_role_id;",
       "execute:DROP TABLE product_role;"
     ],
     "migrations/versions/pg_standalone_039_product_default_bom_label.py": [
@@ -472,12 +482,16 @@
     "migrations/versions/pg_standalone_059_numbering_audit.py": [
       "drop_table:numbering_audit"
     ],
+    "migrations/versions/pg_standalone_060_fix_updated_at_varchar_columns.py": [
+      "execute:ALTER TABLE \"{table}\" ALTER COLUMN {_COLUMN} DROP DEFAULT"
+    ],
     "migrations/versions/pg_standalone_062_case_management_rebuild.py": [
       "execute:ALTER TABLE \"case\" DROP COLUMN IF EXISTS parent_id",
       "execute:ALTER TABLE \"case\" DROP COLUMN IF EXISTS qty_per_set",
       "execute:ALTER TABLE \"case\" DROP COLUMN IF EXISTS unit",
       "execute:ALTER TABLE \"case\" DROP CONSTRAINT IF EXISTS fk_case_parent",
       "execute:DROP INDEX IF EXISTS idx_case_parent",
+      "execute:DROP TABLE IF EXISTS \"{tbl}\"",
       "execute:DROP TABLE IF EXISTS case_movement"
     ],
     "migrations/versions/pg_standalone_063_fix_order_status_check.py": [
@@ -564,6 +578,10 @@
     ],
     "migrations/versions/pg_standalone_099_finished_stock_remark.py": [
       "drop_table_if_empty:finished_stock_remark"
+    ],
+    "migrations/versions/pg_standalone_100_fs_remark_key.py": [
+      "execute:DROP INDEX IF EXISTS {_NEW_INDEX}",
+      "execute:DROP INDEX IF EXISTS {_OLD_INDEX}"
     ],
     "migrations/versions/pg_standalone_102_purchase_order_status_check.py": [
       "execute:ALTER TABLE purchase_order DROP CONSTRAINT IF EXISTS purchase_order_status_check"

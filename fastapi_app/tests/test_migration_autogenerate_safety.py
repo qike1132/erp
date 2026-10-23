@@ -50,6 +50,15 @@ def test_readme_documents_autogenerate_prohibition():
     )
 
 
+def test_fstring_raw_sql_drop_is_detected():
+    """P1-07：f-string 拼接的裸 SQL DROP 必须被扫描器识别（原实现只认字面量）。"""
+    source = (
+        "def upgrade():\n"
+        "    op.execute(sa.text(f'DROP INDEX IF EXISTS {name}'))\n"
+    )
+    assert scan.scan_source(source) == ["execute:DROP INDEX IF EXISTS {name}"]
+
+
 # ---------------------------------------------------------------------------
 # 2026-10-18 OCR 评审：env.py 的版本表加宽兜底不得吞掉真正的错误
 # ---------------------------------------------------------------------------
