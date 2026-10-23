@@ -85,15 +85,22 @@ export function useVirtualAreaMeasure() {
     }
   }
 
-  // flush: 'post' —— 回调在元素插入 DOM 之后执行，此时才拿得到真实高度
+  // flush: 'post' —— 回调在元素插入 DOM 之后执行，此时才拿得到真实高度。
+  // 模板 ref 从 null 变为元素发生在挂载/切换的那次 patch 里，因此首次挂载
+  // 与「元素后出现」都由这里驱动，无需再在 onMounted 里补一次。
   watch(areaRef, (el) => {
-    if (el) observeElement(el)
-    else disconnectObservers()
+    if (el) {
+      observeElement(el)
+      return
+    }
+    disconnectObservers()
+    // 摘除时归零：否则消费方会拿旧高度先渲染虚拟列表；且 tryMeasureWithRetry
+    // 会因 height > 0 早退，跳过 nextTick/rAF 补测 —— 新容器此刻量得 0 时
+    // （正是父级 flex 链尚未完成布局的场景）会一直沿用上一个容器的高度。
+    height.value = 0
   }, { flush: 'post' })
 
   onMounted(() => {
-    // 兜底：元素在 setup 阶段就已存在时 watch 不会触发（无变化），补一次
-    if (areaRef.value) observeElement(areaRef.value)
     // 监听 window resize（窄屏/宽屏切换、抽屉展开/收起等场景）
     windowResizeHandler = measureRaf
     window.addEventListener('resize', windowResizeHandler)

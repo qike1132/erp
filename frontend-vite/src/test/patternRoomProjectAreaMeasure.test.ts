@@ -18,13 +18,15 @@ import type { PatternMakerGroup, ProjectSummary } from '@/api/patternRoom'
  */
 
 const STUB_HEIGHT = 480
+let stubbedHeight = STUB_HEIGHT
 const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
 
 beforeEach(() => {
+  stubbedHeight = STUB_HEIGHT
   // jsdom 不做布局，offsetHeight 恒为 0；这里伪造「容器有真实高度」的浏览器行为
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
     configurable: true,
-    get: () => STUB_HEIGHT,
+    get: () => stubbedHeight,
   })
 })
 
@@ -65,6 +67,54 @@ describe('useVirtualAreaMeasure：测量容器后出现', () => {
     await settle()
 
     expect(measured!.height.value).toBe(STUB_HEIGHT)
+    wrapper.unmount()
+  })
+
+  it('元素挂载时已存在也会被测高（不依赖 onMounted 兜底）', async () => {
+    let measured: ReturnType<typeof useVirtualAreaMeasure> | null = null
+
+    const Probe = defineComponent({
+      setup() {
+        measured = useVirtualAreaMeasure()
+        return () => h('div', [h('div', { ref: measured!.areaRef, style: 'height:100%' })])
+      },
+    })
+
+    const wrapper = mount(Probe)
+    await settle()
+
+    expect(measured!.height.value).toBe(STUB_HEIGHT)
+    wrapper.unmount()
+  })
+
+  it('元素摘除时高度归零，再次出现按新容器高度重新测量', async () => {
+    const show = ref(true)
+    let measured: ReturnType<typeof useVirtualAreaMeasure> | null = null
+
+    const Probe = defineComponent({
+      setup() {
+        measured = useVirtualAreaMeasure()
+        return () => h('div', [
+          show.value ? h('div', { ref: measured!.areaRef, style: 'height:100%' }) : null,
+        ])
+      },
+    })
+
+    const wrapper = mount(Probe)
+    await settle()
+    expect(measured!.height.value).toBe(STUB_HEIGHT)
+
+    // 摘除：必须归零，否则消费方会先拿旧高度渲染，且补测会被 height > 0 早退跳过
+    show.value = false
+    await settle()
+    expect(measured!.height.value).toBe(0)
+
+    // 再次出现且尺寸已变：必须按新高度重新测量
+    stubbedHeight = 320
+    show.value = true
+    await settle()
+    expect(measured!.height.value).toBe(320)
+
     wrapper.unmount()
   })
 })
