@@ -24,6 +24,11 @@ from fastapi_app.shared.factory_scope import assert_product_factory_scoped
 from fastapi_app.shared_models import Customer, StockIn, StockOut, User
 
 
+def _factory_scope(user: User) -> str:
+    """工厂隔离口径（P0-2）：非超管且绑定工厂时只返回本厂数据，否则空串=不限制。"""
+    return user.factory if (user.factory and not user.is_super) else ''
+
+
 class CacheClearResponse(BaseModel):
     success: bool
     deleted: int = 0
@@ -215,6 +220,7 @@ async def get_inventory_logs(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取产品库存日志（分页）"""
+    await assert_product_factory_scoped(db, product_id, user, what='库存日志')
     total = await count_inventory_logs(db, product_id)
     logs = await get_inventory_logs_page(db, product_id, page, per_page)
 
@@ -240,7 +246,9 @@ async def available_stockins(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """获取可用入库记录（限制返回数量）"""
-    stockins = await get_available_stockins(db, product_id, customer, limit)
+    if product_id is not None:
+        await assert_product_factory_scoped(db, product_id, user, what='备货记录')
+    stockins = await get_available_stockins(db, product_id, customer, limit, factory=_factory_scope(user))
 
     return [{
         'id': s.id, 'product_id': s.product_id,
@@ -261,6 +269,7 @@ async def stockin_info(
     stockin = await get_stockin_by_id(db, stockin_id)
     if not stockin:
         raise HTTPException(status_code=404, detail="入库记录不存在")
+    await assert_product_factory_scoped(db, stockin.product_id, user, what='入库记录')
 
     return {
         'id': stockin.id, 'product_id': stockin.product_id,
@@ -281,6 +290,8 @@ async def available_shipment(
     """获取可出货量（按客户+产品维度）。"""
     if not product_id or not customer.strip():
         return {'order_quantity': 0, 'shipped_quantity': 0, 'available_quantity': 0}
+
+    await assert_product_factory_scoped(db, product_id, user, what='可出货量')
 
     from fastapi_app.services.batch_service import calculate_available_shipment_quantity
     # 本端点会话来自只读副本（get_async_read_db），副本无法执行行锁查询；

@@ -139,8 +139,9 @@ async def test_bar_passes_product_filter_to_both_sources(
     """按产品搜索时，客户列表沿用产品过滤（备货/订单两个来源都过滤）。"""
     captured = {}
 
-    async def _fake(db_, pids):
+    async def _fake(db_, pids, factory=''):
         captured['pids'] = pids
+        captured['factory'] = factory
         return ['X']
 
     monkeypatch.setattr(svc, '_get_all_customers', _fake)
@@ -148,6 +149,7 @@ async def test_bar_passes_product_filter_to_both_sources(
         db, search_product='切栏测试产品', page=1, per_page=200)
     assert result['all_customers'] == ['X']
     assert captured['pids'] == (bar_product.id,)
+    assert captured['factory'] == ''
 
 
 async def test_bar_wiring_uses_customer_query_result(db, monkeypatch):

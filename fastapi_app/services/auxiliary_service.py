@@ -186,6 +186,7 @@ async def get_inventory_logs_page(db: AsyncSession, product_id: int, page: int, 
 
 async def get_available_stockins(
     db: AsyncSession, product_id: int | None, customer: str, limit: int,
+    factory: str = '',
 ) -> list[StockIn]:
     """获取可用入库记录（含出库关联与产品信息，按入库时间升序，限制返回数量）"""
     query = select(StockIn).options(
@@ -196,6 +197,16 @@ async def get_available_stockins(
         query = query.where(StockIn.product_id == product_id)
     if customer:
         query = query.where(StockIn.customer == customer)
+    if factory:
+        # 工厂隔离（P0-2）：未指定产品时同样只能列本厂（含未分配工厂的历史）产品的备货记录。
+        from fastapi_app.shared_models import Product
+        query = query.where(
+            StockIn.product_id.in_(
+                select(Product.id).where(
+                    (Product.factory == factory) | Product.factory.is_(None) | (Product.factory == '')
+                )
+            )
+        )
 
     query = query.order_by(StockIn.stockin_date.asc()).limit(limit)
     result = await db.execute(query)

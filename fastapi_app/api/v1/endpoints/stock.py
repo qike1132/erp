@@ -42,6 +42,15 @@ router = APIRouter()
 MAX_EXPORT_INVENTORY_ROWS = 10000
 
 
+def _factory_scope(user: User) -> str:
+    """工厂隔离口径（P0-2）：非超管且绑定工厂时只返回本厂数据，否则空串=不限制。
+
+    与 report.py::_factory_scope、shared/factory_scope 同口径；读端点不得信任
+    前端传入的工厂参数，一律由登录用户决定。
+    """
+    return user.factory if (user.factory and not user.is_super) else ''
+
+
 def _ensure_row_action_permission(user: User, *, is_deduction: bool, action: str) -> None:
     """报表行内操作的权限裁决（出货 / 备货抵扣各自独立）。
 
@@ -85,7 +94,7 @@ async def list_stockins(
     """
     result = await stock_service.get_stockins(
         db, page=page, per_page=per_page, customer=customer,
-        start_date=start_date, end_date=end_date,
+        start_date=start_date, end_date=end_date, factory=_factory_scope(_user),
     )
     return StockListResponse(
         data=result['items'], total=result['total'],
@@ -225,7 +234,7 @@ async def list_stockouts(
     """
     result = await stock_service.get_stockouts(
         db, page=page, per_page=per_page, customer=customer,
-        start_date=start_date, end_date=end_date,
+        start_date=start_date, end_date=end_date, factory=_factory_scope(_user),
     )
     return StockListResponse(
         data=result['items'], total=result['total'],
@@ -364,7 +373,7 @@ async def list_stockout_records(
     Returns:
         StockListResponse: 匹配的明细行（带 id/数量/客户/日期/备注等）。
     """
-    items = await get_stockout_records(db, kind=kind, nos=nos, product=product)
+    items = await get_stockout_records(db, kind=kind, nos=nos, product=product, factory=_factory_scope(_user))
     return StockListResponse(data=items, total=len(items), page=1, per_page=len(items))
 
 
@@ -397,6 +406,7 @@ async def inventory(
     result = await stock_service.get_inventory_paginated(
         db, search_customer=customer, search_product=product,
         page=page, per_page=per_page, stock_status=stock_status,
+        factory=_factory_scope(_user),
     )
     return InventoryResponse(
         data=result['inventory_data'],
@@ -461,6 +471,7 @@ async def export_inventory(
     result = await stock_service.get_inventory_paginated(
         db, search_customer=customer, search_product=product,
         page=1, per_page=MAX_EXPORT_INVENTORY_ROWS,
+        factory=_factory_scope(_user),
     )
     total_items = result.get('total_items', 0)
     if total_items > MAX_EXPORT_INVENTORY_ROWS:
@@ -495,10 +506,13 @@ class StockStatsResponse(BaseModel):
 
 
 @cache_result(key_prefix="stock:stats", ttl=60, local_ttl=30,
-              key_builder=lambda *args, **kwargs: "global")
-async def _fetch_stock_stats(db: AsyncSession) -> dict:
-    """库存统计数据（60s 缓存）：3 个全量聚合查询，数据变更频率低。"""
-    return await stock_service.get_stock_overview_stats(db)
+              key_builder=lambda *args, **kwargs: kwargs.get('factory') or "global")
+async def _fetch_stock_stats(db: AsyncSession, factory: str = '') -> dict:
+    """库存统计数据（60s 缓存）：3 个全量聚合查询，数据变更频率低。
+
+    缓存键按工厂区分（P0-2）：否则 A 厂的统计会被 B 厂命中。
+    """
+    return await stock_service.get_stock_overview_stats(db, factory=factory)
 
 
 @router.get('/stats', response_model=StockStatsResponse)
@@ -519,7 +533,7 @@ async def get_stock_stats(
     Returns:
         StockStatsResponse: 包含订单和备货数量统计的响应。
     """
-    data = await _fetch_stock_stats(db)
+    data = await _fetch_stock_stats(db, factory=_factory_scope(_user))
     return StockStatsResponse(
         success=True,
         data=StockStatsData(**data),

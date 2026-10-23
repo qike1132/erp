@@ -78,15 +78,21 @@ _OI_OR_O_PID = ' AND (oi.product_id = ANY(:pids) OR (oi.id IS NULL AND o.product
 _O_NOT_DELETED = ' AND o.is_deleted IS NOT TRUE'
 
 
+def _factory_match(factory: str):
+    """读侧工厂条件：本厂产品 + 未分配工厂的历史行（与写侧 factory_scope 放行口径一致）。"""
+    return or_(Product.factory == factory, Product.factory.is_(None), Product.factory == '')
+
+
 @cache_result(
     key_prefix='stockins:list',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
+    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}:f:{kwargs.get('factory','') or ''}",
 )
 async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
                        customer: str | None = None,
-                       start_date: str | None = None, end_date: str | None = None) -> dict:
+                       start_date: str | None = None, end_date: str | None = None,
+                       factory: str | None = None) -> dict:
     """获取入库列表（含关联数据，支持分页和筛选）- SQL子查询优化版"""
     conditions: list[ColumnElement[bool]] = []
     if customer:
@@ -105,6 +111,9 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
             pass  # defensive: 可选 ValueError 静默处理,不影响主流程
 
     base_where = select(StockIn.id)
+    if factory:
+        # 工厂隔离（P0-2）：厂绑定用户只能看本厂产品的备货记录。
+        base_where = base_where.join(Product, Product.id == StockIn.product_id).where(_factory_match(factory))
     for condition in conditions:
         base_where = base_where.where(condition)
 
@@ -154,11 +163,12 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
     key_prefix='stockouts:list',
     ttl=30,
     local_ttl=10,
-    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}",
+    key_builder=lambda *args, **kwargs: f"pg:{kwargs.get('page',1)}:pp:{kwargs.get('per_page',50)}:c:{kwargs.get('customer','') or ''}:sd:{kwargs.get('start_date','') or ''}:ed:{kwargs.get('end_date','') or ''}:f:{kwargs.get('factory','') or ''}",
 )
 async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
                         customer: str | None = None,
-                        start_date: str | None = None, end_date: str | None = None) -> dict:
+                        start_date: str | None = None, end_date: str | None = None,
+                        factory: str | None = None) -> dict:
     """获取出库列表（仅独立出库，非抵扣，支持分页和筛选）
 
     筛选维度：customer（模糊匹配）、start_date/end_date（按 stockout_date 过滤）。
@@ -183,6 +193,9 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
 
     # 先用子查询过滤 + 分页取 ID，再按 ID 批量加载关联数据，避免 joinedload 与过滤 JOIN 冲突
     id_query = select(StockOut.id).where(*conditions)
+    if factory:
+        # 工厂隔离（P0-2）：厂绑定用户只能看本厂产品的出货记录。
+        id_query = id_query.join(Product, Product.id == StockOut.product_id).where(_factory_match(factory))
 
     total = (await db.execute(select(func.count()).select_from(id_query.subquery()))).scalar() or 0
 
@@ -297,7 +310,8 @@ def _parse_nos(raw: str, limit: int = 500) -> list[str]:
     return out
 
 
-async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: str = '', product: str = '') -> list[dict]:
+async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: str = '', product: str = '',
+                               factory: str | None = None) -> list[dict]:
     """按单号还原出货/抵扣明细行（报表聚合行 → 具体记录）。
 
     kind='stockout'：独立出货（stockin_id IS NULL），按 stockout_no 匹配。
@@ -320,6 +334,9 @@ async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: st
     if product:
         # 子查询而非 join：避免与 joinedload(StockOut.product) 形成对 product 的二次 join
         stmt = stmt.where(StockOut.product_id.in_(select(Product.id).where(Product.name == product)))
+    if factory:
+        # 工厂隔离（P0-2）：按单号还原明细同样只能命中本厂产品。
+        stmt = stmt.where(StockOut.product_id.in_(select(Product.id).where(_factory_match(factory))))
     result = await db.execute(
         stmt.options(joinedload(StockOut.product)).order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
     )
@@ -393,10 +410,10 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
 
 
 @cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=60,
-             key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('stock_status','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}")
+             key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('stock_status','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}-f:{kwargs.get('factory','') or ''}")
 async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', search_product: str = '',
                                   page: int = 1, per_page: int = 50,
-                                  stock_status: str = '') -> dict:
+                                  stock_status: str = '', factory: str = '') -> dict:
     """
     库存分页查询 - SQL CTE 优化版
     将4次聚合查询合并为单次 CTE 查询，在数据库层面完成合并、过滤和分页，
@@ -411,7 +428,7 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
         return _empty_inventory_response(page, per_page)
 
     params, clauses, pids_param = _build_inventory_filter_params(
-        search_product, search_customer, product_ids, stock_status,
+        search_product, search_customer, product_ids, stock_status, factory,
     )
     cte_sql = _build_inventory_cte_sql(clauses)
 
@@ -424,7 +441,7 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
     rows = result.all()
 
     # 独立查询所有客户列表（不受客户筛选影响，确保客户栏始终显示全部客户）
-    all_customers = await _get_all_customers(db, pids_param if search_product else None)
+    all_customers = await _get_all_customers(db, pids_param if search_product else None, factory)
 
     if not rows:
         return _empty_inventory_response(page, per_page, all_customers=all_customers)
@@ -478,13 +495,19 @@ async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
 
 def _build_inventory_filter_params(search_product: str, search_customer: str,
                                    product_ids: list[int] | None,
-                                   stock_status: str = '') -> tuple[dict, dict, tuple[int, ...] | None]:
+                                   stock_status: str = '',
+                                   factory: str = '') -> tuple[dict, dict, tuple[int, ...] | None]:
     """构建库存查询的过滤参数和SQL片段。
 
     Returns:
         (params, clauses) - params: 查询参数字典; clauses: SQL片段字典
     """
     params: dict = {'sc_is_empty': not bool(search_customer), 'stock_status': stock_status}
+    # 工厂隔离（P0-2）：值走绑定参数 :factory，SQL 片段为模块内常量。
+    prod_factory = ''
+    if factory:
+        params['factory'] = factory
+        prod_factory = " AND (p.factory = :factory OR p.factory IS NULL OR p.factory = '')"
     pid_clause = ''
     pids_param = None
     if search_product and product_ids:
@@ -515,7 +538,7 @@ def _build_inventory_filter_params(search_product: str, search_customer: str,
         'si_pid': si_pid, 'so_pid': so_pid, 'o_pid': o_pid,
         'oi_or_o_pid': oi_or_o_pid,
         'sub_pid': sub_pid, 'prod_pid': prod_pid, 'pso_pid': pso_pid,
-        'o_not_deleted': _O_NOT_DELETED,
+        'o_not_deleted': _O_NOT_DELETED, 'prod_factory': prod_factory,
     }
     return params, clauses, pids_param
 
@@ -618,7 +641,7 @@ filtered AS (
         -- 库存（结余）= 包装部入库 − 已出货（2026-10-07 业务裁定，口径见快照）
         COALESCE(pa.packaging_qty, 0) + COALESCE(ship.shipped_net, 0) AS inventory_balance
     FROM inventory_calc ic
-    JOIN product p ON p.id = ic.product_id
+    JOIN product p ON p.id = ic.product_id{c.get('prod_factory', '')}
     LEFT JOIN production_agg pa ON pa.product_id = ic.product_id
     LEFT JOIN product_stockout_total pst ON pst.product_id = ic.product_id
     LEFT JOIN (
@@ -715,8 +738,8 @@ def _empty_inventory_response(page: int = 1, per_page: int = 50, all_customers: 
 
 
 @cache_result(key_prefix="customers:all", ttl=120, local_ttl=60,
-              key_builder=lambda **kwargs: f"pids{hashlib.sha256(str(kwargs.get('pids', '')).encode()).hexdigest()[:16] if kwargs.get('pids') else 'all'}")
-async def _get_all_customers(db: AsyncSession, pids: tuple | None) -> list[str]:
+              key_builder=lambda **kwargs: f"pids{hashlib.sha256(str(kwargs.get('pids', '')).encode()).hexdigest()[:16] if kwargs.get('pids') else 'all'}-f:{kwargs.get('factory', '') or ''}")
+async def _get_all_customers(db: AsyncSession, pids: tuple | None, factory: str = '') -> list[str]:
     """获取客户快捷切换栏客户列表：成员 = 库存表格里可能出现的客户，按最近活动排序。
 
     成员规则（2026-09-30 修正）：必须与库存表格行的来源口径一致。表格行来自
@@ -740,16 +763,18 @@ async def _get_all_customers(db: AsyncSession, pids: tuple | None) -> list[str]:
     # pid_clause 为常量 SQL 片段（ANY(:pids)），备货/订单两个来源共用，
     # 不拼接用户输入，安全
     pid_clause = ' AND product_id = ANY(:pids)' if pids else ''
+    # 工厂隔离（P0-2）：客户快捷栏同样只列本厂产品涉及的客户。
+    factory_clause = " AND product_id IN (SELECT id FROM product WHERE factory = :factory OR factory IS NULL OR factory = '')" if factory else ''
     sql = text(f"""
         WITH activity AS (
             SELECT customer, MAX(order_date) AS last_activity, COUNT(*) AS activity_cnt
             FROM "order"
-            WHERE customer IS NOT NULL AND is_deleted IS NOT TRUE AND quantity > 0{pid_clause}
+            WHERE customer IS NOT NULL AND is_deleted IS NOT TRUE AND quantity > 0{pid_clause}{factory_clause}
             GROUP BY customer
             UNION ALL
             SELECT customer, MAX(stockin_date) AS last_activity, COUNT(*) AS activity_cnt
             FROM stock_in
-            WHERE customer IS NOT NULL{pid_clause}
+            WHERE customer IS NOT NULL{pid_clause}{factory_clause}
             GROUP BY customer
         )
         SELECT customer, MAX(last_activity) AS last_activity,
@@ -758,10 +783,12 @@ async def _get_all_customers(db: AsyncSession, pids: tuple | None) -> list[str]:
         GROUP BY customer
         ORDER BY last_activity DESC NULLS LAST, activity_cnt DESC, customer ASC
     """)
+    bind_params: dict = {}
     if pids:
-        result = await db.execute(sql, {'pids': pids})
-    else:
-        result = await db.execute(sql)
+        bind_params['pids'] = pids
+    if factory:
+        bind_params['factory'] = factory
+    result = await db.execute(sql, bind_params) if bind_params else await db.execute(sql)
     return [row[0] for row in result.all()]
 
 
@@ -777,7 +804,7 @@ async def _resolve_products(db: AsyncSession, search: str) -> list[int] | None:
     return [row[0] for row in result.all()]
 
 
-async def get_stock_overview_stats(db: AsyncSession) -> dict:
+async def get_stock_overview_stats(db: AsyncSession, factory: str = '') -> dict:
     """库存统计聚合（自 stock.py 端点下沉）：订单数量与备货数量。
 
     多 SKU：按 OrderItem 维度统计；无明细订单（批量导入兼容路径）回退
@@ -790,11 +817,21 @@ async def get_stock_overview_stats(db: AsyncSession) -> dict:
         .outerjoin(OrderItem, OrderItem.order_id == Order.id)
         .where(Order.is_deleted.isnot(True))
     )
-    order_quantity = int((await db.execute(base)).scalar() or 0)
+    order_quantity_stmt = base
+    stockin_quantity_stmt = select(func.coalesce(func.sum(StockIn.quantity), 0))
+    if factory:
+        # 工厂隔离（P0-2）：订单按明细产品（兼容路径回退订单级产品）归属工厂。
+        order_quantity_stmt = order_quantity_stmt.where(
+            func.coalesce(OrderItem.product_id, Order.product_id).in_(
+                select(Product.id).where(_factory_match(factory))
+            )
+        )
+        stockin_quantity_stmt = stockin_quantity_stmt.join(
+            Product, Product.id == StockIn.product_id
+        ).where(_factory_match(factory))
+    order_quantity = int((await db.execute(order_quantity_stmt)).scalar() or 0)
 
-    stockin_quantity = int((await db.execute(
-        select(func.coalesce(func.sum(StockIn.quantity), 0))
-    )).scalar() or 0)
+    stockin_quantity = int((await db.execute(stockin_quantity_stmt)).scalar() or 0)
 
     return {
         'order_quantity': order_quantity,
