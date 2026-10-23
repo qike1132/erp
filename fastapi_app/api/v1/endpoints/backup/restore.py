@@ -633,7 +633,7 @@ async def _run_async_file_restore(
     allow_missing_pre_restore_backup: bool = False,
 ):
     """异步恢复后台执行"""
-    from fastapi_app.core.backup_progress import fail_progress, update_progress
+    from fastapi_app.core.backup_progress import fail_progress, touch_progress, update_progress
     from fastapi_app.core.database import get_async_db_context
 
     # B1 修复：锁续期 watchdog——还原超 TTL(3600s) 时锁会被 Redis 回收，
@@ -643,6 +643,9 @@ async def _run_async_file_restore(
             await asyncio.sleep(600)
             if not await backup_service.renew_restore_lock(task_id):
                 logger.warning(f'还原任务 {task_id} 恢复锁续期失败（锁已易主或 Redis 不可用）')
+            # 长阶段（restore_db）可能数十分钟不调用 update_progress；
+            # 心跳必须由 watchdog 续期，否则会被 is_stale_restore_lock 误判为崩溃残留。
+            await touch_progress(task_id)
 
     watchdog = asyncio.create_task(_lock_watchdog())
     try:

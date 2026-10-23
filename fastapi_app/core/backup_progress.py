@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -278,6 +279,7 @@ async def create_progress(
         "phase": "init",
         "phase_label": "初始化",
         "started_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        "heartbeat": time.time(),
         "completed_at": None,
         "result": None,
         "error": None,
@@ -323,7 +325,22 @@ async def update_progress(
     data["progress"] = progress
     data["phase"] = phase
     data["phase_label"] = phase_label
+    # 心跳：进程崩溃后不再更新，供 is_stale_restore_lock 判定锁是否残留（P1-04）
+    data["heartbeat"] = time.time()
 
+    await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
+
+
+async def touch_progress(task_id: str) -> None:
+    """只刷新心跳，不改变阶段/进度（供长阶段 watchdog 续期，P1-04）。"""
+    client = await _get_redis()
+    if client is None:
+        return
+    found = await _load_progress(task_id, client)
+    if found is None:
+        return
+    key, _progress_type, data = found
+    data["heartbeat"] = time.time()
     await client.set(key, json.dumps(data, ensure_ascii=False), ex=PROGRESS_TTL)
 
 

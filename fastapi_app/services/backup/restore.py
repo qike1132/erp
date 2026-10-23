@@ -15,6 +15,7 @@ import functools
 import io
 import json
 import logging
+import time
 import zipfile
 from typing import Any, ClassVar
 
@@ -490,7 +491,15 @@ async def is_stale_restore_lock(holder: str | None) -> bool:
         return False
     if progress is None:
         return False
-    return progress.get('status') in _RESTORE_TERMINAL_STATUSES
+    if progress.get('status') in _RESTORE_TERMINAL_STATUSES:
+        return True
+    # 心跳陈旧：进程崩溃时进度停在 running，但 heartbeat 不再更新。
+    # 30 分钟阈值与维护模式 TTL 对齐，避免长阶段误判（P1-04）。
+    heartbeat = progress.get('heartbeat')
+    if isinstance(heartbeat, (int, float)) and (time.time() - heartbeat) > 1800:
+        logger.warning(f'还原锁持有者 {holder} 心跳已陈旧，按残留锁处理')
+        return True
+    return False
 
 
 async def clear_stale_restore_lock(holder: str) -> bool:
