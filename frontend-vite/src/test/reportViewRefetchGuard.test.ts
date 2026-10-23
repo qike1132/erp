@@ -78,6 +78,13 @@ vi.mock('@/utils/queryKeys', () => ({
   invalidateOrderDerivedQueries: vi.fn(),
 }))
 
+// 上报通道单独 mock：断言 refreshReport 的留痕真的走了 reportError
+// （生产构建会 drop 掉 console，只断言 console 等于没断言生产行为）
+const { reportErrorMock } = vi.hoisted(() => ({ reportErrorMock: vi.fn() }))
+vi.mock('@/utils/errorReporter', () => ({
+  reportError: reportErrorMock,
+}))
+
 import { showToast } from '@/composables/useToast'
 import ReportView from '@/views/report/ReportView.vue'
 
@@ -157,8 +164,8 @@ describe('ReportView — refetch 拒绝防御契约（R22-L1）', () => {
     }))
   })
 
-  it('提交搜索触发 refetch 拒绝：.catch 必须以「报表刷新失败」留痕 console.warn，且零 unhandled rejection', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  it('提交搜索触发 refetch 拒绝：就地消化 + reportError 上报 + 零 unhandled rejection', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const unhandled: unknown[] = []
     const onUnhandled = (r: unknown) => { unhandled.push(r) }
     process.on('unhandledRejection', onUnhandled)
@@ -176,13 +183,19 @@ describe('ReportView — refetch 拒绝防御契约（R22-L1）', () => {
       expect(mocks.refetch).toHaveBeenCalledTimes(1)
       expect(mocks.refetch).toHaveBeenCalledWith({ cancelRefetch: false })
       // 防御契约：拒绝被 .catch 消化并留痕，而非悬空
-      expect(warnSpy).toHaveBeenCalledWith('报表刷新失败', expect.any(Error))
+      expect(errSpy).toHaveBeenCalledWith('报表刷新失败', expect.any(Error))
+      // 生产可用性：console 会被生产构建 drop 掉（vite.config.ts drop:['console']），
+      // 留痕必须同时走 reportError 才能真正落到 Sentry
+      expect(reportErrorMock).toHaveBeenCalledWith(
+        expect.any(Error),
+        expect.objectContaining({ scope: 'report.refreshReport' }),
+      )
       // 悬空 rejection 必须为零（防御 .catch 存在时 promise 已被就地消化）
       expect(unhandled).toHaveLength(0)
       wrapper.unmount()
     } finally {
       process.off('unhandledRejection', onUnhandled)
-      warnSpy.mockRestore()
+      errSpy.mockRestore()
     }
   })
 })

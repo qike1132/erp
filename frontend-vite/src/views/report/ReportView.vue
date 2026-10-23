@@ -116,6 +116,7 @@ import EditStockoutModal from './components/EditStockoutModal.vue'
 import EditReturnModal from './components/EditReturnModal.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import UiAlert from '@/components/ui/UiAlert.vue'
+import { reportError } from '@/utils/errorReporter'
 import { useReportConfig, type TabType } from './composables/useReportConfig'
 import { useReportRowActions, TAB_ROW_PERMISSIONS, type ReportActionTab } from './composables/useReportRowActions'
 
@@ -196,7 +197,9 @@ function onRowDelete(row: Record<string, unknown>) {
   void rowActions.onRowAction(activeTab.value as ReportActionTab, 'delete', row)
 }
 
-const { data: reportData, isLoading, isFetching, error: reportError, refetch } = useQuery({
+// 解构名为 queryError 而非 reportError：后者是 utils/errorReporter 导出的上报函数，
+// 同名会让本文件将来一旦 import 它就变成「局部 ref 遮蔽函数」，静默丢掉上报能力。
+const { data: reportData, isLoading, isFetching, error: queryError, refetch } = useQuery({
   queryKey: ['report-data', activeTab, page, perPage, appliedFilters],
   queryFn: async () => {
     const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
@@ -211,7 +214,7 @@ const { data: reportData, isLoading, isFetching, error: reportError, refetch } =
 
 /** 查询错误的用户面文案（R40）：Error 取 message，其余 String() 化兜底 */
 const reportErrorMessage = computed(() => {
-  const err = reportError?.value
+  const err = queryError?.value
   if (!err) return ''
   if (err instanceof Error) return err.message || '查询失败'
   return String((err as { message?: unknown }).message ?? err)
@@ -258,7 +261,8 @@ function refreshReport() {
   // 不假设 refetch() 一定返回 Promise：测试替身与非标准实现可能返回 undefined，
   // 直接 .catch 会抛 TypeError（并成为 unhandled rejection）。用 Promise.resolve 归一。
   void Promise.resolve(refetch({ cancelRefetch: false })).catch((e: unknown) => {
-    console.warn('报表刷新失败', e)
+    console.error('报表刷新失败', e)
+    reportError(e, { scope: 'report.refreshReport' })
   })
 }
 
