@@ -87,7 +87,13 @@ def subscribe(event_type: DomainEventType, handler: Callable):
 
 
 async def _dispatch_in_process(event: DomainEvent) -> None:
-    """进程内同步通知所有订阅者（单个 handler 失败不影响其它 handler）。"""
+    """进程内同步通知所有订阅者（单个 handler 失败不影响其它 handler）。
+
+    handler 失败**必须落死信**：订阅侧多为"联动清理"（如删客户订单后撤销其 pending
+    采购单），失败时调用方请求照常 200、页面无提示，只表现为该联动静默没发生——
+    2026-10-22 PO-20261010-0001 事故正是 ORDER_DELETED handler 连续 ImportError 8 次，
+    直到用户发现「我没有这订单」才暴露。故除日志外追加 deadletter，供重放/巡检。
+    """
     for handler in list(_subscribers.get(event.event_type, [])):
         try:
             result = handler(event)
@@ -98,6 +104,7 @@ async def _dispatch_in_process(event: DomainEvent) -> None:
                 '领域事件处理失败: event=%s handler=%s error=%s',
                 event.event_type.value, handler.__name__, e,
             )
+            _append_deadletter_handler(event, handler, e)
 
 
 async def _broadcast(event: DomainEvent) -> bool:
@@ -243,6 +250,30 @@ def _append_deadletter(event: DomainEvent, error: Exception | None) -> None:
     }
     with open(log_dir / 'domain_events_deadletter.jsonl', 'a', encoding='utf-8') as f:
         f.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
+
+
+def _append_deadletter_handler(event: DomainEvent, handler: Callable, error: Exception) -> None:
+    """订阅 handler 执行失败也落死信（与发布失败同文件，用 `stage` 区分）。
+
+    写文件失败不得影响主流程：这里已是异常处理路径，再抛会盖掉原始错误。
+    """
+    from pathlib import Path as _Path
+    try:
+        log_dir = _Path(__file__).resolve().parents[2] / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        record = {
+            'ts': datetime.now(UTC).isoformat(),
+            'stage': 'handler',
+            'handler': getattr(handler, '__name__', repr(handler)),
+            'event_type': event.event_type.value,
+            'payload': event.payload,
+            'error': str(error),
+            'error_type': type(error).__name__,
+        }
+        with open(log_dir / 'domain_events_deadletter.jsonl', 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
+    except Exception:  # defensive: 死信写入失败不覆盖原始异常
+        logger.warning('handler 死信写入失败: event=%s', event.event_type.value, exc_info=True)
 
 
 async def start_event_listener():
