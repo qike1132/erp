@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vite'
 import { readFileSync } from 'node:fs'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
@@ -21,7 +21,8 @@ const fontAwesomeIconIncludes = [
 ].map((m) => `@fortawesome/free-solid-svg-icons/${m[1]}`)
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  // P2（2026-10-24）：删除未使用的 loadEnv 调用（原 `const env = loadEnv(...)` 赋值后
+  // 从未使用，且第三参 '' 是「加载全部 env 含非 VITE_ 前缀」的宽口径）。
   const isCapacitor = mode === 'capacitor'
 
   return {

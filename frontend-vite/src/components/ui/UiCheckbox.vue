@@ -1,6 +1,5 @@
 <template>
   <CheckboxRoot
-    as="div"
     :model-value="checked"
     :disabled="disabled"
     :aria-label="ariaLabel"

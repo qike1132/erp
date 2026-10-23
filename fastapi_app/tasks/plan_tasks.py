@@ -81,8 +81,15 @@ async def sync_shipment_records_task(ctx):
 
 
 def _batch_id_for_job(job_id: str) -> str:
-    """同一 ARQ job 在重试间 job_id 不变，用它派生 batch_id 才能幂等重放。"""
-    return f"job-{job_id[:8]}"
+    """同一 ARQ job 在重试间 job_id 不变，用它派生 batch_id 才能幂等重放。
+
+    P1（2026-10-24）：用完整 job_id，不再截前 8 位。8 位十六进制只有 32 bit，
+    约 7.7 万个导入任务后碰撞概率达 50%；一旦命中，新任务开跑时的
+    `DELETE ... WHERE upload_batch_id='job-xxxxxxxx'` 会删掉另一次（可能正在确认中的）
+    导入的暂存行，用户侧表现为「刚上传的计划凭空消失」。
+    upload_batch_id 是字符串列，改长度不影响存量数据。
+    """
+    return f"job-{job_id}"
 
 
 def _clear_batch_rows(session, batch_id: str) -> None:

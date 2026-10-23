@@ -56,15 +56,33 @@ def test_override_allows_feature_branch(repo, monkeypatch):
     assert '覆盖' in msg
 
 
-def test_dirty_main_is_warning_not_block(repo, monkeypatch):
+def test_dirty_main_blocks_by_default(repo, monkeypatch):
+    """2026-10-24（P1）：脏工作区必须阻断。
+
+    原行为是「警告后放行」，形态即 2026-10-22 事故（一个文件改了 import 而提供者
+    未提交 → 撤销链路 ImportError 连崩 8 次）。AGENTS §6.1-9 要求 porcelain 为空。
+    """
     monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    monkeypatch.delenv(git_guard.DIRTY_OVERRIDE_ENV, raising=False)
+    _git(repo, 'checkout', '-q', '-b', 'main')
+    (repo / 'a.txt').write_text('changed', encoding='utf-8')
+
+    ok, msg = git_guard.check_production_branch(repo)
+
+    assert ok is False
+    assert '未提交改动' in msg
+
+
+def test_dirty_main_allows_with_override(repo, monkeypatch):
+    monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    monkeypatch.setenv(git_guard.DIRTY_OVERRIDE_ENV, '1')
     _git(repo, 'checkout', '-q', '-b', 'main')
     (repo / 'a.txt').write_text('changed', encoding='utf-8')
 
     ok, msg = git_guard.check_production_branch(repo)
 
     assert ok is True
-    assert msg.startswith('警告')
+    assert git_guard.DIRTY_OVERRIDE_ENV in msg
 
 
 def test_non_git_directory_does_not_block(tmp_path, monkeypatch):

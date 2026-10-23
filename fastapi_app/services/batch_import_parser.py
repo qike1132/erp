@@ -256,6 +256,11 @@ def _parse_import_row(
         qty = int(quantity)
     except (ValueError, TypeError):
         return None, qty_invalid_msg
+    # P1（2026-10-24）：数量下界。综合导入走 batch_import_core._parse_positive_quantity
+    # （qty>0 才收），单 Sheet 这条链原先漏了同一个下界 → 负数/0 数量订单直接落库，
+    # 报表与 order_agg 被负数抵减。此处与 core 同口径。
+    if qty <= 0:
+        return None, qty_invalid_msg
     return str(customer), product.id, qty
 
 

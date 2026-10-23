@@ -4,7 +4,11 @@ import logging
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+from fastapi_app.core.cache_invalidation import (
+    InvalidationStrategy,
+    cache_mgr,
+    schedule_post_commit_invalidation,
+)
 from fastapi_app.shared_models import (
     CaseMovement,
     Customer,
@@ -105,6 +109,7 @@ async def create_customer(db: AsyncSession, name: str, contact: str | None, phon
     await db.flush()
     await db.refresh(customer)
     await _invalidate_customer_cache()
+    _schedule_customer_cache_invalidation(db)
     return customer
 
 
@@ -138,6 +143,7 @@ async def update_customer(db: AsyncSession, customer_id: int, name: str | None, 
     await db.flush()
     await db.refresh(customer)
     await _invalidate_customer_cache()
+    _schedule_customer_cache_invalidation(db)
     return customer
 
 
@@ -151,6 +157,7 @@ async def toggle_customer_status(db: AsyncSession, customer_id: int) -> Customer
     await db.flush()
     await db.refresh(customer)
     await _invalidate_customer_cache()
+    _schedule_customer_cache_invalidation(db)
     return customer
 
 
@@ -214,8 +221,19 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
     await db.delete(customer)
     await db.flush()
     await _invalidate_customer_cache()
+    _schedule_customer_cache_invalidation(db)
 
 
 async def _invalidate_customer_cache():
     """清除客户名称缓存"""
     await cache_mgr.invalidate(InvalidationStrategy.KEYS, [_ACTIVE_CUSTOMER_CACHE_KEY])
+
+
+def _schedule_customer_cache_invalidation(db: AsyncSession) -> None:
+    """提交后再失效一次（P2，2026-10-24）。
+
+    客户写路径原先只在 flush 后、commit 前删 key：窗口内的并发读查不到未提交行，
+    会把旧名单回填并锁 300 秒，之后新建的客户在下拉里缺失、导入订单被判「客户不存在」。
+    保留提交前失效做广覆盖，另挂 post-commit 回调消掉这个竞态窗口。
+    """
+    schedule_post_commit_invalidation(db, _invalidate_customer_cache)

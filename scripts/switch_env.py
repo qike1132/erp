@@ -14,10 +14,11 @@ def switch_environment(env_type):
     Args:
         env_type: 'development' 或 'production'
     """
-    project_root = Path(__file__).parent
+    # P2（2026-10-24）：仓库根的 .env* 才在项目根，本文件在 scripts/ 下，
+    # 原先 parent 指到 scripts/ → 永远找不到配置文件（切换动作实际是空操作）。
+    project_root = Path(__file__).resolve().parent.parent
     env_file = project_root / '.env'
     env_dev = project_root / '.env.development'
-    env_prod = project_root / '.env.production'
 
     if env_type == 'development':
         source_file = env_dev
@@ -70,7 +71,7 @@ def switch_environment(env_type):
 
 def show_current_env():
     """显示当前环境配置"""
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parent.parent
     env_file = project_root / '.env'
 
     if not env_file.exists():

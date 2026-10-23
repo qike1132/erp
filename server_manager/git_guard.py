@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_BRANCHES = frozenset({'main'})
 OVERRIDE_ENV = 'ERP_ALLOW_NON_MAIN'
+# 脏工作区覆盖开关（与分支覆盖分开：两者的风险面不同，运维通常只需临时放行其一）
+DIRTY_OVERRIDE_ENV = 'ERP_ALLOW_DIRTY'
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # 「放行但需警告」的消息前缀（2026-10-18 OCR 复评：调用方不再靠嗅探中文字串）
 WARNING_PREFIX = '警告：'
@@ -66,19 +68,27 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
         return True, f'分支闸门已被 {OVERRIDE_ENV}=1 覆盖，当前分支 {branch}'
 
     # 2026-10-18 OCR 评审：detached HEAD 时 abbrev-ref 返回字面量 'HEAD'。
-    # 若 HEAD 与 origin/main 同一提交（CI/发布 checkout 常见），按 main 放行；
+    # 若 HEAD 与 main 同一提交（CI/发布 checkout 常见），按 main 放行；
     # 否则仍拒绝（无法确定运行的是哪条线的代码）。
+    # 2026-10-24 修复：main 引用按候选列表解析——本机远端名是 erp（AGENTS §4），
+    # 原先写死 refs/remotes/origin/main 在本机永远不存在，导致按 SHA checkout 时
+    # 即使 HEAD 就是 main 顶点也被拒。
     if branch == 'HEAD':
         c_head, head_sha, _ = _git(['rev-parse', 'HEAD'], base)
-        c_main, main_sha, _ = _git(['rev-parse', 'refs/remotes/origin/main'], base)
-        if c_head == 0 and c_main == 0 and head_sha and head_sha == main_sha:
+        main_sha = None
+        for ref in ('refs/remotes/origin/main', 'refs/remotes/erp/main', 'refs/heads/main'):
+            c_ref, ref_sha, _ = _git(['rev-parse', ref], base)
+            if c_ref == 0 and ref_sha:
+                main_sha = ref_sha
+                break
+        if c_head == 0 and main_sha and head_sha == main_sha:
             # 2026-10-18 OCR 评审：必须把 branch 归一成真正的允许值，
             # 否则后续 `branch not in ALLOWED_BRANCHES` 会立刻拒绝。
             branch = 'main'
         else:
             _, head_short, _ = _git(['rev-parse', '--short', 'HEAD'], base)
             return False, (
-                f'当前处于 detached HEAD（HEAD {head_short}）且不指向 origin/main，'
+                f'当前处于 detached HEAD（HEAD {head_short}）且不指向 main，'
                 f'生产启停只允许 main。请切回 main；确需用该提交请设置 {OVERRIDE_ENV}=1'
             )
 
@@ -89,8 +99,24 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
             f'请切回 main 后重试；确需用该分支代码请设置 {OVERRIDE_ENV}=1'
         )
 
-    code, status, _ = _git(['status', '--porcelain'], base)
-    if code == 0 and status:
-        return True, '警告：工作区有未提交改动，生产将加载工作区当前源码'
+    # 2026-10-24（P1）：脏工作区必须阻断，不能只告警。
+    # 生产直接吃工作区源码，2026-10-22 事故即「一个文件改了 import 而提供者未提交」，
+    # 撤销链路 ImportError 连崩 8 次、采购单静默未撤销。AGENTS §6.1-9 要求
+    # `git status --porcelain` 为空；本闸门此前只把「分支必须 main」机器化。
+    code, status, status_err = _git(['status', '--porcelain'], base)
+    if code != 0:
+        # 查不出来按不可放行处理（并发提交的 index.lock 窗口也会走到这里）
+        return False, (
+            f'无法读取工作区状态（{status_err or "git status 失败"}），按不可放行处理。'
+            f'确需继续请设置 {DIRTY_OVERRIDE_ENV}=1'
+        )
+    if status:
+        if os.environ.get(DIRTY_OVERRIDE_ENV) == '1':
+            return True, f'警告：工作区有未提交改动，已被 {DIRTY_OVERRIDE_ENV}=1 放行'
+        changed = [ln for ln in status.splitlines() if ln.strip()][:5]
+        return False, (
+            '工作区有未提交改动，生产将加载半改代码（AGENTS §6.1-9）。'
+            f'请先提交或 stash；确需继续请设置 {DIRTY_OVERRIDE_ENV}=1。改动示例：{changed}'
+        )
 
     return True, f'分支校验通过（{branch}）'

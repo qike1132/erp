@@ -535,7 +535,7 @@ def _build_unprocessed_unified_query():
     ).where(
         CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
         CustomerOrder.is_deleted == False,  # noqa: E712
-        _build_not_processed_filter(CustomerOrder.id),
+        _build_not_processed_filter(CustomerOrder.id, 'order'),
     )
     # StockIn 部分：NOT EXISTS 排除已被采购单 source_order_ids 关联的 ID
     # （source_order_ids 中可能同时包含 Order ID 和 StockIn ID）
@@ -545,7 +545,7 @@ def _build_unprocessed_unified_query():
         StockIn.stockin_no.label('order_no'),
         StockIn.customer.label('customer'),
         StockIn.stockin_date.label('sort_date'),
-    ).where(_build_not_processed_filter(StockIn.id))
+    ).where(_build_not_processed_filter(StockIn.id, 'stockin'))
     return union_all(order_part, stockin_part).subquery()
 
 

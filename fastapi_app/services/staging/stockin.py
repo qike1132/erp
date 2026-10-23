@@ -169,6 +169,9 @@ async def confirm_staging_stockins(
             errors.append(f'备货{staging.customer}-{staging.product_name}确认失败: {_row_failure_message(e)}')
             staging.status = staging_machine.transition(staging.status, StagingAction.REJECT)
 
+    # P2（2026-10-24）：DELETE 前必须 flush（session 为 autoflush=False，
+    # 上面改的 status 尚未落库，Core DELETE 不会触发 autoflush → 匹配 0 行）
+    await db.flush()
     await db.execute(
         delete(StagingStockIn).where(
             StagingStockIn.session_id == session_id,

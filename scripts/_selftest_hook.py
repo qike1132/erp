@@ -25,7 +25,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PWD_PATTERN = re.compile(
     r"([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]"
     r"|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_]?[Kk][Ee][Yy]|[Rr][Ee][Qq][Uu][Ii][Rr][Ee][Pp][Aa][Ss][Ss])"
-    r"[ \t]*[:=][ \t]*[A-Za-z]{0,3}[\"']?[A-Za-z0-9+/=_.:@!#%^&*-]{12,}"
+    # 2026-10-24（P1）：关键词允许后缀（SECRET_KEY / API_KEY_ID 等），
+    # 右值改为「非空白非引号」字符类 —— 原先写死 [A-Za-z0-9+/=_.:@!#%^&*-]，
+    # 含 $ ? ~ ( ) { } | \ 的真口令（如 "Abc$123456789xyz"）整条漏判。
+    r"[A-Za-z0-9_]*[ \t]*[:=][ \t]*[A-Za-z]{0,3}[\"']?[^\s\"']{12,}"
 )
 SECRET_PATTERN = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----"

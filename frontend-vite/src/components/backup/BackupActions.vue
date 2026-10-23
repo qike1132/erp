@@ -54,6 +54,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { showToast } from '@/composables/useToast'
 import type { BackupTaskState, BackupTaskStatus } from './composables/useBackupTask'
 
 /** 全量备份附加选项（P1-2 表级范围 + P2 加密密码输入） */
@@ -84,6 +85,15 @@ function parseTables(text: string): string[] {
 
 function handleFull() {
   const tables = parseTables(tablesText.value)
+  // P2（2026-10-24）：选了「仅指定表 / 排除指定表」但表名留空时，不能静默降级成整库备份
+  // （运维以为在限定范围，实际按整库跑）。直接拦下并提示。
+  if (scopeMode.value !== 'all' && tables.length === 0) {
+    showToast(
+      scopeMode.value === 'include' ? '请填写要备份的表名' : '请填写要排除的表名',
+      'warning',
+    )
+    return
+  }
   props.onFull({
     password: password.value || undefined,
     tables: scopeMode.value === 'include' && tables.length ? tables : undefined,

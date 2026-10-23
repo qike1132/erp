@@ -22,10 +22,12 @@ async def optimized_count(db: AsyncSession, base_query: Select, table_name: str 
     与筛选后的实际行数可能相差极大，导致分页信息完全错误。
     """
     # 检测查询是否包含 WHERE 条件（兼容 SQLAlchemy 2.0）。
-    # SQLAlchemy 表达式不支持 bool()，需使用 is not None 判断。
+    # P2（2026-10-24）：`_where_criteria` 在 SQLAlchemy 2.0 里恒为 tuple（无条件时是 `()`），
+    # 原先用 `is not None` 判断 → has_where 恒真 → 近似计数分支是死代码，
+    # 「无筛选快速计数」从未生效（order/queries 的大表计数始终走精确 COUNT(*)）。
     whereclause = getattr(base_query, 'whereclause', None)
     where_criteria = getattr(base_query, '_where_criteria', None)
-    has_where = whereclause is not None or where_criteria is not None
+    has_where = whereclause is not None or bool(where_criteria)
 
     # 仅当无筛选条件时才尝试近似计数
     if table_name and not has_where:

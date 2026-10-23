@@ -522,6 +522,10 @@ async def _restore_tables_from_json(db, tables_to_restore, backup_data, _report,
         # 自引用外键（如 permission.parent_id）需父行先于子行插入，
         # 否则主键行序导致子行先插触发外键违规。整表排序后再切分批。
         rows = _topo_sort_self_referencing(table, rows)
+        # P2（2026-10-24）：主键列必须在批次循环外算好。原先在行循环内赋值，
+        # 若某批第一行在 deserialize_value 就抛错，except 分支引用未绑定的 pk_cols
+        # 会以 UnboundLocalError 顶掉真实错误（降级重试拿不到主键列）。
+        pk_cols = [c.name for c in table.primary_key.columns]
         for batch_start in range(0, len(rows), BATCH_SIZE):
             batch = rows[batch_start:batch_start + BATCH_SIZE]
             nested = await db.begin_nested()
@@ -541,7 +545,6 @@ async def _restore_tables_from_json(db, tables_to_restore, backup_data, _report,
                         col_type = type_map.get(c)
                         deserialized = deserialize_value(raw_val, col_type) if col_type else raw_val
                         params[f'{c}__row{idx}'] = deserialized
-                    pk_cols = [c.name for c in table.primary_key.columns]
                     update_cols = [c for c in valid_cols if c not in pk_cols]
                     if pk_cols and update_cols:
                         update_str = ', '.join(f'"{c}" = EXCLUDED."{c}"' for c in update_cols)

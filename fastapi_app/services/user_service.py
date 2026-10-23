@@ -202,8 +202,18 @@ async def update_user_permissions(db: AsyncSession, user_id: int, permission_ids
     if not user:
         raise ValueError("用户不存在")
 
-    # 清空现有权限
+    # P1（2026-10-24）：清空前先留住用户已持有的敏感权限。
+    # 原实现 clear() 之后在加回阶段无条件 `continue` 跳过敏感权限，于是超管只要点一次
+    # 「保存权限」（哪怕没改任何勾选），该用户的 user_manage 就被永久删除；而
+    # endpoints/user.py 的 _HIDDEN_PERMISSION_CODES 又不把 user_manage 下发给权限树，
+    # 界面上再也勾不回来，只能改库。
+    # 语义修正为「禁止**新增**敏感权限」，而不是「新增 + 清空后丢失」。
+    kept_sensitive = [p for p in user.permissions if p.code in SENSITIVE_PERMISSIONS]
+
+    # 清空现有权限（敏感权限随后原样加回）
     user.permissions.clear()
+    for permission in kept_sensitive:
+        user.permissions.append(permission)
 
     # 批量获取权限
     # 注：变量名不用 `result` —— 上方 `result` 已被推断为 Result[User]，

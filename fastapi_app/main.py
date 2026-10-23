@@ -221,6 +221,14 @@ async def lifespan(application: FastAPI):
 
     await _setup_database()
 
+    # P0-5：上一次还原是否在「DROP 之后、导入完成之前」中断（只告警，不阻断启动）。
+    # 有标记 = 数据库可能是空壳，必须让运维在日志里一眼看到回滚点。
+    try:
+        from fastapi_app.services.backup.restore_guard import check_interrupted_restore
+        check_interrupted_restore()
+    except Exception as e:  # defensive: 标记检查失败不得阻断启动
+        logger.warning('恢复中断标记检查失败: %s', e)
+
     # 编号水位对账（spec 2026-09-29 §5）：GREATEST 只升不降，幂等，失败不阻断启动
     try:
         from fastapi_app.core.database import require_async_session_local

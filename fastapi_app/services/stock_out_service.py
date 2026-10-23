@@ -143,6 +143,16 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
         old_net - (new_quantity - stockout.returned_quantity),
         message='库存不足！',
     )
+    # P1（2026-10-24）：结余闸门。此前本入口只按 current_stock 判（含备货/期初/非包装部
+    # 生产，恒 ≥ 结余），于是「备货不得直接出货」这条规则只对新建出货生效，编辑出货可以
+    # 把结余扣成负数。抵扣行不走此闸门：抵扣不动结余，其上限由
+    # _assert_deduction_within_stockin 按所属备货可用量约束。
+    if not is_deduction:
+        _net_increase = (new_quantity - stockout.returned_quantity) - old_net
+        if _net_increase > 0:
+            await _assert_inventory_balance(
+                db, stockout.product_id, product.name, customer, _net_increase,
+            )
     if is_deduction:
         # 抵扣行：客户不可改（改客户会与订单/备货脱钩），并校验不超过所属备货可用量
         customer = stockout.customer or ''
@@ -181,7 +191,12 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
         delta = -(new_quantity - old_quantity)
         updated = await update_stock_with_optimistic_lock(db, stockout.product_id, delta)
         before, after = inventory_balance_bounds(updated.current_stock, delta)
-        stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='出库修改', change_quantity=delta, related_id=str(stockout.id), note=f'出库修改ID：{stockout.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
+        # 流水类型必须与「建立抵扣」一侧对称（P0-1）：订单抵扣建立时写 '订单抵扣'，
+        # 而结余公式只统计 ('出库','出库修改','出库删除','退货','退货取消')。
+        # 抵扣行若也写 '出库修改'，则建立时不进结余、修改/删除时进结余 → 结余凭空虚增。
+        # 故抵扣行改用 '抵扣修改'，与 '订单抵扣/取消抵扣/抵扣回滚' 同属不进结余的抵扣三型。
+        _change_type = '抵扣修改' if is_deduction else '出库修改'
+        stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type=_change_type, change_quantity=delta, related_id=str(stockout.id), note=f'{_change_type}ID：{stockout.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
     await db.flush()
     return stockout
 
@@ -198,7 +213,11 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut, operator_id
     await stock_service.get_product_for_update(db, stockout.product_id)
     updated = await update_stock_with_optimistic_lock(db, stockout.product_id, stockout.quantity)
     before, after = inventory_balance_bounds(updated.current_stock, stockout.quantity)
-    stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type='出库删除', change_quantity=stockout.quantity, related_id=str(stockout.id), note=f'出库删除ID：{stockout.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
+    # 同 update_stockout_core：抵扣行删除写 '抵扣删除'，与建立时的 '订单抵扣' 同属不进结余的
+    # 抵扣类型；若写 '出库删除'，结余会凭空虚增该抵扣量（P0-1）。
+    _is_deduction = stockout.stockin_id is not None
+    _change_type = '抵扣删除' if _is_deduction else '出库删除'
+    stock_service.log_inventory_change(db, product_id=stockout.product_id, change_type=_change_type, change_quantity=stockout.quantity, related_id=str(stockout.id), note=f'{_change_type}ID：{stockout.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
     await db.delete(stockout)
     await db.flush()
 

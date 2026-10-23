@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 async def warmup_cache() -> int:
     """缓存预热 - 应用启动时加载热点数据到Redis
 
-    优先级: 权限 > 产品列表 > 仪表盘 > 库存统计
+    优先级: 产品列表 > 仪表盘 > 库存统计（权限缓存不预热：见下方说明，
+    权限判定读进程内 5s 缓存，Redis 侧无读取方）
     """
     # 延迟 import：与 main.py 的启动序一致（本模块被 import 时引擎尚未就绪）
     from fastapi_app.core.database import get_async_db_context
@@ -29,28 +30,13 @@ async def warmup_cache() -> int:
             from sqlalchemy import func as sa_func
             from sqlalchemy import select
 
-            from fastapi_app.shared_models import Permission, Product, User, user_permission
+            from fastapi_app.shared_models import Product
 
-            try:
-                # 批量 JOIN 查询：一次获取所有活跃用户及其权限，消除 N+1 问题
-                result = await db.execute(
-                    select(User.id, Permission.code)
-                    .join(user_permission, User.id == user_permission.c.user_id)
-                    .join(Permission, Permission.id == user_permission.c.permission_id)
-                    .where(User.status.is_(True))  # SQLAlchemy 表达式，语义为 SQL 布尔比较
-                )
-                user_perms: dict[int, list[str]] = {}
-                for uid, code in result.all():
-                    user_perms.setdefault(uid, []).append(code)
-                for uid, codes in user_perms.items():
-                    await redis_cache.set(
-                        f'user:permissions:uid_{uid}',
-                        codes,
-                        3600,
-                    )
-                    warmed += 1
-            except Exception as e:  # defensive: 预热是启动加速项，单域失败不得阻断其余预热
-                logger.warning('权限缓存预热失败: %s', e)
+            # P1（2026-10-24）：删除 user:permissions:uid_* 预热。
+            # 权限判定走 core/deps.py 的进程内 _PERMISSION_CACHE（TTL 5s），
+            # 全仓没有任何读取 user:permissions:uid_* 的调用点 —— 这段预热只做 N 次
+            # 无效 Redis 写；更实质的问题是它是一份 TTL 1 小时的权限快照，将来任何人
+            # 接上读侧，撤权最长 1h 不生效，与 deps.py 承诺的「最坏 5s」直接冲突。
 
             try:
                 count_result = await db.execute(select(sa_func.count()).select_from(Product))

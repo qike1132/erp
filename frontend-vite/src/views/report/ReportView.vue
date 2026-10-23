@@ -105,6 +105,8 @@ import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { reportApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
 import { useAuthStore } from '@/stores/auth'
+import { showToast } from '@/composables/useToast'
+import { getErrorMessage } from '@/types/errors'
 import ReportTabGroup from './components/ReportTabGroup.vue'
 import ReportFilterBar from './components/ReportFilterBar.vue'
 import ReportTable from './components/ReportTable.vue'
@@ -173,7 +175,11 @@ const canManageRowActions = computed(() => canEditRowActions.value || canDeleteR
 const { currentCfg, currentTabEndpoint, reportColumns } = useReportConfig(activeTab, canManageRowActions)
 
 const catalogStore = useCatalogStore()
-catalogStore.ensureActiveCustomerNames().catch(() => {})
+// P1（2026-10-24）：客户目录加载失败不能静默吞掉。该请求决定下方 customerOptions，
+// 失败后下拉为空、用户会以为「没有客户数据」。同页报表查询失败有横幅，只有这一处无声。
+catalogStore.ensureActiveCustomerNames().catch((e) => {
+  showToast(getErrorMessage(e, '客户列表加载失败，请刷新页面重试'), 'error')
+})
 
 const customerOptions = computed(() =>
   catalogStore.activeCustomerNames.map((c) => ({ value: c.name, label: c.name })),

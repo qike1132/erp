@@ -442,6 +442,12 @@ async def _delete_removed_bom_items(db: AsyncSession, product_id: int, data: dic
         ('accessories', ProductAccessory),
     ]
     for category, model_cls in delete_targets:
+        # P2（2026-10-24）：键缺失 ≠ 显式提交空列表。原先 data.get(category, []) 把
+        # 「客户端没带这个字段」当成「要删光」，而调用侧门控只看 'roles' 是否存在 ——
+        # 任何带 roles 但不带 fabrics/accessories 的调用（旧页面、脚本、部分字段 PATCH）
+        # 都会静默清空该产品全部面料/辅料 BOM 行。
+        if category not in data:
+            continue
         existing_ids = {item['id'] for item in data.get(category, []) if item.get('id')}
         result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
             select(model_cls).where(
@@ -543,7 +549,8 @@ async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str)
     accessories_data = data.get('accessories', [])
     await _save_material_bom_items(db, product_id, accessories_data, 'accessory', ProductAccessory, username, temp_role_map)
 
-    # 角色感知客户端才执行"payload 外删除"（与角色全量替换同门控，避免旧客户端误删角色物料）
+    # 角色感知客户端才执行"payload 外删除"（与角色全量替换同门控，避免旧客户端误删角色物料）。
+    # 各物料类别是否参与删除由 _delete_removed_bom_items 内部按「键是否存在」判定。
     if 'roles' in data:
         await _delete_removed_bom_items(db, product_id, data, fillings_data, username)
 

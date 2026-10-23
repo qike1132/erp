@@ -25,7 +25,7 @@ from fastapi_app.services.staging.stockin import _validate_stockin_customer
 from fastapi_app.shared.stock_concurrency import check_stock_available
 from fastapi_app.shared_models import InventoryLog, Order, Product, StagingStockOut, StockOut
 from fastapi_app.shared_models.order import ORDER_STATUS_SHIPPED
-from fastapi_app.utils import parse_date_value
+from fastapi_app.utils import inventory_balance_bounds, parse_date_value
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +139,14 @@ class _NegativeQuantityError(Exception):
 
 
 async def _allocate_ship_fifo(db: AsyncSession, staging, product_id,
-                              shipment_info: dict) -> set[int]:
-    """按订单 FIFO 分摊出库数量，生成 StockOut 行。返回受影响订单 id 集。"""
+                              shipment_info: dict) -> tuple[set[int], list[StockOut]]:
+    """按订单 FIFO 分摊出库数量，生成 StockOut 行。
+
+    返回 (受影响订单 id 集, 新建的 StockOut 列表)。列表用于回填库存流水的
+    related_id（P2，2026-10-24：原先 related_id 恒为空，出货行↔流水的唯一关联断掉）。
+    """
     affected_order_ids: set[int] = set()
+    created: list[StockOut] = []
     remaining_qty = staging.quantity
     for order_detail in shipment_info['orders']:
         if remaining_qty <= 0:
@@ -159,9 +164,10 @@ async def _allocate_ship_fifo(db: AsyncSession, staging, product_id,
                 note=staging.note,
             )
             db.add(stockout)
+            created.append(stockout)
             affected_order_ids.add(order_detail['order_id'])
             remaining_qty -= ship_qty
-    return affected_order_ids
+    return affected_order_ids, created
 
 
 async def _confirm_one_staging_stockout(db: AsyncSession, staging,
@@ -203,6 +209,18 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
         message=f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足',
     )
 
+    # P1（2026-10-24）：结余闸门，与手工出货/批量出货同口径。
+    # 此前导入确认只看 current_stock（含备货/期初/非包装部生产，恒 ≥ 结余），
+    # 于是「备货不得直接出货」对导入路径完全失效：手工出货 100 被拒，同页导入 100 却成功，
+    # /stock 结余被扣成负数。放在 FIFO 分配之前，避免产生半成品出货行。
+    from fastapi_app.services.stock_inventory_service import get_inventory_balance
+    _balance = await get_inventory_balance(db, product_id)
+    if staging.quantity > _balance:
+        raise ValueError(
+            f'出货{staging.customer}-{staging.product_name}确认失败: '
+            f'库存不足（可用 {_balance}，本次 {staging.quantity}）'
+        )
+
     shipment_info = await calculate_available_shipment_quantity(
         db, product_id, staging.customer
     )
@@ -215,11 +233,11 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
             f'出货数量{staging.quantity}超过可出货量{shipment_info["available_quantity"]}'
         )
 
-    affected_order_ids = await _allocate_ship_fifo(db, staging, product_id, shipment_info)
+    affected_order_ids, created_stockouts = await _allocate_ship_fifo(db, staging, product_id, shipment_info)
 
     # 统一写入口：带 version 守卫并递增 version（原先直写两者都不做，
     # 与走乐观锁的写入口并发时会丢失更新）。
-    await apply_stock_delta_locked(db, product, -staging.quantity)
+    updated_product = await apply_stock_delta_locked(db, product, -staging.quantity)
 
     # 批量查询受影响的订单，避免N+1
     if affected_order_ids:
@@ -242,15 +260,25 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
                     'customer': order.customer,
                 })
 
+    # P2（2026-10-24）：流水补齐 quantity_before/after 与 related_id。
+    # 原先手写 InventoryLog 时三列全空，/stock 流水与 inventory_reconcile 的
+    # 「结存 vs 流水」追溯在这批行上只剩变动量，且 related_id='' 断开了出货行↔流水关联。
+    # 必须先 flush 拿到新建 StockOut 的 id（同 stock_out_service 的 ','.join 口径）。
+    await db.flush()
+    before, after = inventory_balance_bounds(updated_product.current_stock, -staging.quantity)
     log = InventoryLog(
         product_id=staging.product_id,
         change_type='出库',
         change_quantity=-staging.quantity,
-        related_id='',
+        related_id=','.join(str(s.id) for s in created_stockouts),
         idem_key=_import_idem_key(
             'stockout', staging.customer, product_id, staging.quantity,
             staging.stockout_date or datetime.now(UTC),
         ),
+        customer=staging.customer,
+        quantity_before=before,
+        quantity_after=after,
+        product_name=updated_product.name,
         note=f'批量导入出货：客户{staging.customer}，数量{staging.quantity}',
     )
     db.add(log)

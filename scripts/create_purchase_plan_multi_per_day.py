@@ -21,7 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import UTC, date, datetime
+from datetime import date
 
 from sqlalchemy import delete, select
 
@@ -103,7 +103,6 @@ def seed() -> None:
     try:
         _assert_target_month_empty(session)
         seq = _next_plan_seq(session)
-        now = datetime.now(UTC)
         plan_count = 0
         detail_count = 0
 
@@ -184,9 +183,18 @@ async def refresh_cache() -> None:
 
 
 def main() -> None:
+    # P1（2026-10-24）：本脚本往生产业务表写 13 条假计划，必须与同目录的
+    # create_test_orders.py / seed_pattern_room.py 一样过生产写授权。
+    from _prod_write_guard import require_prod_write_consent
+
     if '--cleanup' in sys.argv:
+        require_prod_write_consent('清理测试采购计划（删除 SEED_TAG 数据）')
         cleanup()
     else:
+        require_prod_write_consent(
+            '写入 13 条测试采购计划到 purchase_plans / purchase_plan_details',
+            hint='本机即生产：跑完请用 --cleanup 回收，否则采购员会当成真实需求排产。',
+        )
         seed()
     asyncio.run(refresh_cache())
 

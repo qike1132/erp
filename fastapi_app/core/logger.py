@@ -51,6 +51,14 @@ def setup_logging():
         handler.close()
         root_logger.removeHandler(handler)
 
+    # P1（2026-10-24）：脱敏过滤器必须真正挂到 handler 上。
+    # 此前 SanitizingFilter 只有定义、全仓零 addFilter，于是 slow_query 打印的 SQL、
+    # 各处 logger.error("...: %s", e) 的异常原文（可能含 DSN user / SQL 片段 / 参数）
+    # 不脱敏直进日志与 Loki —— 存在「以为有脱敏」的错觉。
+    from fastapi_app.core.sanitizer import SanitizingFilter
+
+    _sanitize = SanitizingFilter()
+
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
@@ -58,6 +66,7 @@ def setup_logging():
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     ))
+    console_handler.addFilter(_sanitize)
     root_logger.addHandler(console_handler)
 
     # 文件处理器（JSON 格式）。
@@ -71,6 +80,7 @@ def setup_logging():
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(message)s"))  # structlog 已格式化
+    file_handler.addFilter(_sanitize)
     root_logger.addHandler(file_handler)
 
     # 设置特定模块的日志级别

@@ -724,8 +724,13 @@ def evaluate(gate: Gate, outcome: GateOutcome, base: int | None) -> Judgement:
 
     count = outcome.count
     if base is None:
-        return Judgement("NEW", f"  {'NEW':>8}  {gate.title}: {count} 处（无基线，本次建立）",
-                         base=None, count=count)
+        # P1（2026-10-24）：无基线不再等于「本次建立」放行。只有 --probe-dir 模式
+        # 会显式传 base=0（见调用方），其余情况出现 None 意味着基线缺键/缺失，
+        # 保守判 ERROR（失败），避免「删掉基线键」成为关闭单条门禁的开关。
+        return Judgement(
+            "ERROR",
+            f"  {'ERROR':>8}  {gate.title}: {count} 处（基线缺少该键，拒绝按 NEW 放行）",
+        )
     if count > base:
         return Judgement(
             "REGRESS",
@@ -745,13 +750,16 @@ def evaluate(gate: Gate, outcome: GateOutcome, base: int | None) -> Judgement:
 
 
 def load_baseline() -> dict[str, int] | None:
-    """读取基线；文件缺失返回空基线，**解析失败返回 None（调用方必须失败退出）**。
+    """读取基线；文件缺失或解析失败一律返回 None（调用方必须失败退出）。
 
     2026-10-17 审计 AUD-24：此前解析失败静默返回 {} → 所有门禁判 NEW（不失败）
     → 门禁静默全绿。基线损坏必须保守失败。
+    2026-10-24（P1）：文件缺失同样返回 None。此前缺失返回 {} —— 删文件比改坏文件
+    更容易，反而更宽松：`git rm scripts/gate_baseline.json` 就让 14 项棘轮全部判 NEW
+    并退出 0，本地第 3 层与 CI lint job 同时放行。
     """
     if not BASELINE_PATH.exists():
-        return {}
+        return None
     try:
         with BASELINE_PATH.open(encoding="utf-8") as fh:
             data = json.load(fh)
@@ -909,6 +917,12 @@ def detect_baseline_raises(
         label, ceiling = min(limits, key=lambda item: item[1])
         if working[key] > ceiling:
             violations.append((key, ceiling, working[key], label))
+    # 反向（2026-10-24 P1）：参考侧有、工作区没有 = 有人删掉了基线键。
+    # 只遍历工作区侧键时，删掉的键永远不会被判为「上调」，等于给了单条门禁的关闭开关。
+    for label, counts in references:
+        for key in sorted(counts):
+            if key not in working:
+                violations.append((key, counts[key], -1, f'{label}（基线键被删除）'))
     return violations
 
 
@@ -926,7 +940,10 @@ def check_baseline_ratchet(args, working: dict[str, int]) -> int:
     for label, _counts in refs:
         print(f"  · {label}")
     for key, ceiling, new, label in violations:
-        print(f"  {key}: {ceiling} → {new}（上限来自 {label}，基线被上调）")
+        if new < 0:
+            print(f"  {key}: 基线键被删除（上限来自 {label}）")
+        else:
+            print(f"  {key}: {ceiling} → {new}（上限来自 {label}，基线被上调）")
 
     if (
         getattr(args, "allow_baseline_raise", False)

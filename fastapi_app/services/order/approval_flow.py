@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from fastapi_app.core.cache import CacheDomain, cache_result
-from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+from fastapi_app.core.cache_invalidation import (
+    InvalidationStrategy,
+    cache_mgr,
+    schedule_post_commit_invalidation,
+)
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
 from fastapi_app.core.state_machine import can_transition
@@ -99,9 +103,20 @@ async def _submit_edit_approval(
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
     await db.flush()
+    # P2（2026-10-24）：提交前失效 + 提交后再失效一次（广覆盖 + 消竞态）。
+    # 只做提交前失效时，窗口内的并发读会把旧列表回填并锁到 TTL；而只挂 post-commit
+    # 又会让不经 db_transaction 提交的调用方彻底失去失效（见 schedule_post_commit_invalidation
+    # 的 docstring），故两者并存。
     await cache_mgr.invalidate(
         InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
     await cache_mgr.invalidate_dashboard()
+
+    async def _invalidate_after_commit() -> None:
+        await cache_mgr.invalidate(
+            InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
+        await cache_mgr.invalidate_dashboard()
+
+    schedule_post_commit_invalidation(db, _invalidate_after_commit)
     logger.info(f'订单编辑审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交编辑审批请求，请等待管理员审批！', 'requires_approval': True}
 
@@ -136,9 +151,17 @@ async def _submit_delete_approval(
     await _create_approval_log_obj(approval_request, ApprovalLog.ACTION_CREATE, current_user, {'operation_data': operation_data})
 
     await db.flush()
+    # 同 _submit_edit_approval：提交前失效 + 提交后再失效（P2，2026-10-24）
     await cache_mgr.invalidate(
         InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
     await cache_mgr.invalidate_dashboard()
+
+    async def _invalidate_after_commit() -> None:
+        await cache_mgr.invalidate(
+            InvalidationStrategy.DOMAIN, CacheDomain.ORDER | CacheDomain.REPORT)
+        await cache_mgr.invalidate_dashboard()
+
+    schedule_post_commit_invalidation(db, _invalidate_after_commit)
     logger.info(f'订单删除审批请求已提交：{order.order_no}，申请人：{current_user.username}')
     return {'success': True, 'message': '已提交删除审批请求，请等待管理员审批！', 'requires_approval': True}
 
@@ -178,8 +201,11 @@ async def cancel_approval(db: AsyncSession, approval_id: int, current_user: User
 
 async def _check_order_lock(db: AsyncSession, order_id: int, order: Order,
                              current_user: User, action: str) -> None:
-    if not (order.is_locked and order.locked_by_id != current_user.id):
-        return
+    # P1（2026-10-24）：审批中一律拒绝，与「锁主是不是自己」无关。
+    # 原实现 `if not (order.is_locked and order.locked_by_id != current_user.id): return`
+    # 在锁主就是申请人时直接早退 —— 而提交编辑/删除审批时锁主正是申请人本人，
+    # 于是本人 pending 期间可直改明细/抵扣量，管理员批准时又按 operation_data 再改一次，
+    # 数量被二次覆盖。update_order_item 的 docstring 明写「审批中的订单不可改」。
     result = await db.execute(
         select(ApprovalRequest).options(
             joinedload(ApprovalRequest.requester)
@@ -191,7 +217,8 @@ async def _check_order_lock(db: AsyncSession, order_id: int, order: Order,
     pending = result.unique().scalar_one_or_none()
     if pending:
         raise ValueError(f'该订单正在等待审批（申请人：{pending.requester.username}），暂时无法{action}！')
-    raise ValueError(f'该订单已被其他用户锁定，暂时无法{action}！')
+    if order.is_locked and order.locked_by_id != current_user.id:
+        raise ValueError(f'该订单已被其他用户锁定，暂时无法{action}！')
 
 async def _ensure_no_pending_request(db: AsyncSession, order_id: int,
                                       current_user: User, action: str) -> None:

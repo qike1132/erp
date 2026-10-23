@@ -7,38 +7,57 @@
 """
 import logging
 
-from sqlalchemy import cast, desc, exists, func, literal, select, union_all
+from sqlalchemy import and_, cast, desc, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.services.business_time import fmt_business
 from fastapi_app.shared_models import (
+    Order,
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
     PurchaseOrder,
+    PurchaseOrderSku,
+    StockIn,
 )
 from fastapi_app.utils import calc_total_pages
 
 logger = logging.getLogger(__name__)
 
 
-def _build_not_processed_filter(id_column):
+def _build_not_processed_filter(id_column, record_type: str):
     """构建 NOT EXISTS 子查询：排除已被采购订单关联的记录。
 
     P-6 优化：用 JSONB @> 操作符在数据库层检查 ID 是否出现在
     purchase_order.source_order_ids 中，替代预查询 + .notin_() 方案。
 
     优势：
-    - 无 SQL 参数上限风险（PostgreSQL IN 列表上限约 32767）
+    - 无 SQL 参数上限风险（PostgreSQL IN 列表约 32767）
     - 无需预查询 + 30s 缓存，结果实时准确
     - GIN 表达式索引 (source_order_ids::jsonb) 保证性能
 
     正则预过滤防御无效 JSON，与 P-7 的 CASE 策略等价但表达式不变
     （WHERE 条件不影响 GIN 表达式索引匹配）。
+
+    P1（2026-10-24）：来源 id 必须带类型。`order.id` 与 `stockin.id` 是两套自增序列，
+    必然撞号；原先只用裸 id 的 JSONB @> 判断「已处理」，任一类型的采购单引用过该数字
+    就把另一类型记录判为已处理 → 该备货/订单从「待审核」列表消失且永不自动生成。
+    现在：
+    1. 权威判定走 purchase_order_sku.(source_record_type, source_order_id)；
+    2. 老数据（无 sku 快照）仍看 JSON，但**仅当该 id 不同时存在于 order 与 stockin**——
+       两侧都存在的 id 一律不采信裸 id 命中（宁可重列，不静默漏单）。
     """
-    return ~exists(
+    sku_exists = exists(
+        select(literal('1'))
+        .select_from(PurchaseOrderSku)
+        .where(
+            PurchaseOrderSku.source_record_type == record_type,
+            PurchaseOrderSku.source_order_id == id_column,
+        )
+    )
+    legacy_json_exists = exists(
         select(literal('1'))
         .select_from(PurchaseOrder)
         .where(PurchaseOrder.source_order_ids.isnot(None))
@@ -47,6 +66,16 @@ def _build_not_processed_filter(id_column):
             cast(PurchaseOrder.source_order_ids, JSONB).op('@>')(
                 func.jsonb_build_array(id_column)
             )
+        )
+    )
+    id_in_both_tables = and_(
+        exists(select(literal('1')).select_from(Order).where(Order.id == id_column)),
+        exists(select(literal('1')).select_from(StockIn).where(StockIn.id == id_column)),
+    )
+    return not_(
+        or_(
+            sku_exists,
+            and_(legacy_json_exists, not_(id_in_both_tables)),
         )
     )
 
@@ -146,7 +175,7 @@ def _build_unprocessed_union():
     ).where(
         CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
         CustomerOrder.is_deleted == False,  # noqa: E712
-        _build_not_processed_filter(CustomerOrder.id),
+        _build_not_processed_filter(CustomerOrder.id, 'order'),
     )
 
     stockin_part = select(
@@ -155,7 +184,7 @@ def _build_unprocessed_union():
         StockIn.stockin_no.label('order_no'),
         StockIn.customer.label('customer'),
         StockIn.stockin_date.label('sort_date'),
-    ).where(_build_not_processed_filter(StockIn.id))
+    ).where(_build_not_processed_filter(StockIn.id, 'stockin'))
 
     return union_all(order_part, stockin_part).subquery()
 

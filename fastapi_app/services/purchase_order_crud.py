@@ -76,7 +76,10 @@ async def _create_material_registration(
 
 
 async def create_purchase_order(db: AsyncSession, data: dict, include_summary: bool = False) -> dict:
-    items = data.get('items', [])
+    # P1（2026-10-24）：端点 schema 的字段名是 materials/remark（purchase_center/schemas.py），
+    # 而本函数原先只读 items/note，pydantic 忽略多余字段 → POST /purchase-center/orders
+    # 恒 400「至少需要一条明细」。两种键名都接受，兼容脚本/旧调用方。
+    items = data.get('materials') or data.get('items') or []
     if not items:
         raise ValueError('采购订单至少需要一条明细')
 
@@ -91,7 +94,7 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
         supplier_id=supplier_id,
         customer_name=customer_name,
         status=PurchaseOrderStatus.PENDING,
-        remark=data.get('note', ''),
+        remark=data.get('remark') or data.get('note', ''),
         source_order_ids=data.get('source_order_ids'),
         product_name=data.get('product_name'),
         product_quantity=data.get('product_quantity'),
@@ -297,7 +300,13 @@ async def _update_item_prices(
 
 
 async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
-    order = await db.get(PurchaseOrder, order_id)
+    # P1（2026-10-24）：加行锁。原先 db.get 无锁，两个并发请求各自读到「对方未提交前」
+    # 的明细快照，各自用本事务内可见的行价求和后覆盖写 total_amount，后提交者把先提交者的
+    # 行价漏掉，且 DB 无约束校验总和 → total_amount ≠ Σ 明细，且不会自愈。
+    # 与 complete/save 路径一致：锁内再读明细重算。
+    order = (await db.execute(
+        select(PurchaseOrder).where(PurchaseOrder.id == order_id).with_for_update()
+    )).scalar_one_or_none()
     if not order:
         raise ValueError('采购订单不存在')
 
@@ -643,6 +652,31 @@ async def _build_order_summary(db: AsyncSession, order) -> dict:
     }
 
 
+async def _legacy_source_ids(db: AsyncSession, source_ids: list[int]) -> list[int]:
+    """裸 id 兜底匹配的可用 id 集：剔除「order 与 stockin 同时存在」的歧义 id。
+
+    撞号时裸 id 无法判断来源类型，宁可漏删（交给 purchase_order_sku 的类型匹配）
+    也不可错删另一类型的 pending 采购单。
+    """
+    if not source_ids:
+        return []
+    from fastapi_app.shared_models import Order, StockIn
+
+    order_hit = {
+        row[0] for row in (await db.execute(select(Order.id).where(Order.id.in_(source_ids)))).all()
+    }
+    stockin_hit = {
+        row[0] for row in (await db.execute(select(StockIn.id).where(StockIn.id.in_(source_ids)))).all()
+    }
+    ambiguous = order_hit & stockin_hit
+    if ambiguous:
+        logger.warning(
+            'cleanup_orphan_pending_purchase_orders: 来源 id %s 同时存在于 order 与 stockin，'
+            '跳过裸 id 兜底匹配（改由 purchase_order_sku 类型匹配）', sorted(ambiguous),
+        )
+    return [i for i in source_ids if i not in ambiguous]
+
+
 async def cleanup_orphan_pending_purchase_orders(
     db: AsyncSession, order_ids: list[int] | None = None,
     stockin_ids: list[int] | None = None,
@@ -653,10 +687,11 @@ async def cleanup_orphan_pending_purchase_orders(
     同时处理 source_order_id（单 ID 列）和 source_order_ids（JSON 数组）两个字段。
     返回被删除的采购订单数量，供调用方判断是否触发了清理。
 
-    修复点：
-    - 接受 order_ids + stockin_ids 两个来源，确保"一键审核"对两类来源都能去重
-    - 仅依赖 JSON 解析后的命中列表，不再使用未消费的 all_ids 变量
-    - 移除原先同时处理 customer / source_order_id 时的语义混淆
+    P0（2026-10-24）：来源 id 必须带类型匹配。`order.id` 与 `stockin.id` 是两套自增
+    序列、必然撞号；原先两类 id 合并成无类型数组去命中 source_order_id(s)，删订单 N
+    会连带删掉「由备货 N 生成」的 pending 单（含已录单价与全部明细）。现在权威匹配走
+    purchase_order_sku 的 (source_record_type, source_order_id)，老数据兜底见
+    _legacy_source_ids（歧义 id 直接跳过，宁可漏删不可错删）。
     """
     source_ids: list[int] = []
     if order_ids:
@@ -668,31 +703,58 @@ async def cleanup_orphan_pending_purchase_orders(
 
     _exclude = set(exclude_ids or [])
 
-    # 1) 找出所有 source_order_ids JSON 数组中包含任一目标 ID 的 PurchaseOrder.id
+    from sqlalchemy import and_, or_
+
+    # 0) 类型感知匹配（权威）：经 sku 快照按 (source_record_type, source_order_id) 命中
+
+    typed_pairs: list[tuple[str, int]] = []
+    typed_pairs.extend(('order', int(i)) for i in (order_ids or []))
+    typed_pairs.extend(('stockin', int(i)) for i in (stockin_ids or []))
+    typed_po_ids: set[int] = set()
+    if typed_pairs:
+        typed_rows = await db.execute(
+            select(PurchaseOrderSku.po_id).where(
+                or_(*[
+                    and_(
+                        PurchaseOrderSku.source_record_type == rtype,
+                        PurchaseOrderSku.source_order_id == rid,
+                    )
+                    for rtype, rid in typed_pairs
+                ])
+            )
+        )
+        typed_po_ids = {row[0] for row in typed_rows.all()}
+
+    # 1) 老数据兜底：先排除「两侧表都存在」的歧义 id
+    legacy_ids = await _legacy_source_ids(db, sorted({int(i) for i in source_ids}))
+
+    # 2) 找出所有 source_order_ids JSON 数组中包含任一目标 ID 的 PurchaseOrder.id
     # 用 PostgreSQL JSONB @> 下推过滤，避免全表拉取 pending 单后在 Python 里逐条 json.loads。
     from sqlalchemy import cast as sa_cast
-    from sqlalchemy import or_
     from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 
-    jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
-    contain_conds = [jsonb_col.contains([sid]) for sid in source_ids]
-    result2 = await db.execute(
-        select(PurchaseOrder.id, PurchaseOrder.source_order_ids).where(
-            PurchaseOrder.source_order_ids.isnot(None),
-            PurchaseOrder.status == PurchaseOrderStatus.PENDING,
-            or_(*contain_conds),
+    json_match_ids: list[int] = []
+    if legacy_ids:
+        jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
+        contain_conds = [jsonb_col.contains([sid]) for sid in legacy_ids]
+        result2 = await db.execute(
+            select(PurchaseOrder.id, PurchaseOrder.source_order_ids).where(
+                PurchaseOrder.source_order_ids.isnot(None),
+                PurchaseOrder.status == PurchaseOrderStatus.PENDING,
+                or_(*contain_conds),
+            )
         )
-    )
-    json_match_ids: list[int] = [row.id for row in result2.all()]
+        json_match_ids = [row.id for row in result2.all()]
 
-    # 2) 合并匹配：source_order_id 列直接命中 + JSON 数组命中
+    # 3) 合并匹配：sku 类型命中 ∪ JSON 数组命中 ∪ source_order_id 列命中（仅非歧义 id）
+    match_ids = typed_po_ids | set(json_match_ids)
     result = await db.execute(
         select(PurchaseOrder).where(
             PurchaseOrder.status == PurchaseOrderStatus.PENDING,
             (
-                PurchaseOrder.source_order_id.in_(source_ids)
+                PurchaseOrder.source_order_id.in_(legacy_ids)
             ) | (
-                PurchaseOrder.id.in_(json_match_ids)
+                PurchaseOrder.id.in_(match_ids)
             ),
         )
     )

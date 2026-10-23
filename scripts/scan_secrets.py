@@ -248,17 +248,51 @@ def scan_tracked(
             abs_path = root / rel
             try:
                 if abs_path.stat().st_size <= MAX_FILE_BYTES:
-                    reason = content_secret_reason(
-                        abs_path.read_text(encoding='utf-8'),
-                        require_quoted_rhs=rel.endswith(_QUOTED_RHS_REQUIRED_SUFFIXES),
-                    )
-            except (OSError, UnicodeDecodeError):
-                # 读不了 / 非 UTF-8 文本 → 视为二进制，跳过内容层（路径层已判过）
+                    raw = abs_path.read_bytes()
+                    # P1（2026-10-24）：不能把「UTF-8 解码失败」当成二进制整篇跳过。
+                    # 本机 locale 是 cp936，中文注释的 .sql/.log/.txt/.ini 天然非 UTF-8，
+                    # 于是即使里面有一行 DB_PASSWORD=真口令 也 0 命中；而本地钩子按字节
+                    # grep 能扫到 ⇒ CI 这道「第二防线」在 GBK 上比本地还弱。
+                    # 依次尝试 utf-8 / gbk / utf-16，最后用 latin-1（无损逐字节）兜底；
+                    # 仅当出现 NUL 且无 BOM 时按二进制跳过。
+                    text = _decode_for_scan(raw)
+                    if text is not None:
+                        reason = content_secret_reason(
+                            text,
+                            require_quoted_rhs=rel.endswith(_QUOTED_RHS_REQUIRED_SUFFIXES),
+                        )
+            except OSError:
+                # 读不了 → 跳过内容层（路径层已判过）
                 reason = None
 
         if reason:
             findings.append((rel, reason))
     return findings
+
+
+def _decode_for_scan(raw: bytes) -> str | None:
+    """把文件字节解成可扫描文本；判定为二进制时返回 None。
+
+    顺序：UTF-8 → UTF-16（有 BOM 或大量 NUL）→ GBK → latin-1（无损逐字节）。
+    只用「是否出现 NUL」判二进制，不再用「UTF-8 能否解码」代替。
+    """
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        try:
+            return raw.decode('utf-16')
+        except UnicodeDecodeError:
+            return None
+    if b'\x00' in raw:
+        # 无 BOM 的 UTF-16LE/BE 常见形态：ASCII 字符间夹 NUL
+        try:
+            return raw.decode('utf-16-le' if raw[1:2] == b'\x00' else 'utf-16-be')
+        except UnicodeDecodeError:
+            return None
+    for enc in ('utf-8', 'gbk'):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode('latin-1')
 
 
 def main(argv: list[str] | None = None) -> int:

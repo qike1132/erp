@@ -41,6 +41,7 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import AutoComplete from 'primevue/autocomplete'
 import type { AutoCompleteCompleteEvent } from 'primevue'
+import { showToast } from '@/composables/useToast'
 
 const props = withDefaults(
   defineProps<{
@@ -218,6 +219,9 @@ function triggerSearch(query: string) {
         if (listSeq === requestSeq) {
           internalSuggestions.value = []
           loading.value = false
+          // P2（2026-10-24）：搜索失败不能显示成「无匹配结果」——用户会以为产品不存在
+          // 而转去手工建重复产品。与 useOcrPaste 的口径对齐，明确提示失败。
+          showToast('搜索失败，请重试', 'error')
         }
       })
     emit('search', q)
@@ -244,6 +248,8 @@ function triggerSearch(query: string) {
       if (seq === requestSeq) {
         internalSuggestions.value = []
         loading.value = false
+        // P2：同上，远程搜索失败要明确提示（否则空态文案会被当成「没搜到」）
+        showToast('搜索失败，请重试', 'error')
       }
     })
 

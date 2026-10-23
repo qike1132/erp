@@ -327,10 +327,16 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
             # _MAX_EXPORT_ROWS 截断，len(logs) 恒 ≤10000，原 `len(logs) > 10000`
             # 永不触发（Round16：截断标记是死代码，超量被静默截断且无告警）
             total_count = int(stats.get('total_count', 0) or 0)
-            truncated = total_count > 10000
-            if truncated:
-                logger.warning(f"报表导出截断：共{total_count}条，仅导出前10000条")
-                logs = logs[:10000]
+            # P1（2026-10-24）：超限改为明确拒绝，不再静默截断。
+            # 原实现只写 logger.warning 就把 logs 截到 10000，用户拿到少数据的 Excel
+            # 且页面无任何提示，对账缺行无法察觉；同仓 export_limits 对超限是抛错
+            # （端点转 4xx），两套口径并存。这里对齐 export_limits：拒绝并告知实际条数。
+            if total_count > 10000:
+                logger.warning(f"报表导出超限：共{total_count}条，上限10000条，已拒绝导出")
+                raise ValueError(
+                    f'导出数据量 {total_count} 条超过单次上限 10000 条，'
+                    f'请缩小日期范围或增加筛选条件后重试'
+                )
 
             exporter = ReportExporter()
             export_methods = {

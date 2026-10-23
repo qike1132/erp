@@ -97,8 +97,10 @@ async def _generic_import_staging_from_excel(
     required_fields: list[str],
     extra_row_validations: Callable[[dict[str, Any], int], Awaitable[list[str]]] | None = None,
 ) -> tuple[int, str, list[str]]:
-    await clear_func(db, session_id)
-
+    # P1（2026-10-24）：清空必须放在「目标 Sheet 解析成功之后」。
+    # 原先一进函数就 clear_func + flush，而读取/解析失败只 return 不抛异常，
+    # 调用方的 db_transaction 照常提交 → 用户误传一个缺 Sheet 的文件就把上一次
+    # 已导入（含手工修正）的暂存行全部删掉并提交，属用户数据丢失。
     temp_path = None
     try:
         temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
@@ -116,6 +118,9 @@ async def _generic_import_staging_from_excel(
         success, data_list, err = await parse_excel_file_async(temp_path, target_sheet)
         if not success:
             return 0, f'数据解析失败: {err}', []
+
+        # 解析成功后才清空旧暂存：失败路径不再破坏上一次导入结果。
+        await clear_func(db, session_id)
 
         product_map = await _build_product_map(db)
         imported = 0

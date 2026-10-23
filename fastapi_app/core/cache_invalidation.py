@@ -90,6 +90,11 @@ class CacheInvalidationManager:
         # **不是重复**：本函数直连 _invalidate_by_pattern，不经过 _DOMAIN_PATTERN_MAP。
         # 两者覆盖不同入口，请勿删除其一。
         count += await self._invalidate_by_pattern('product:list:*')
+        # P2（2026-10-24）：客户切换栏的成员取自 order / stock_in，写入方只清自己的前缀，
+        # 没人清 customers:all（stock_inventory_service 里 ttl=120/local=60）。结果新客户
+        # 首单/首次备货后 60–120 秒内打开 /stock，客户 chips 里看不到该客户（表格里已有其行，
+        # 点不到筛选）。
+        count += await self._invalidate_by_pattern('customers:*')
         count += await self.invalidate_dashboard()
         return count
 

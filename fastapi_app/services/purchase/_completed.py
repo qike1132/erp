@@ -11,6 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.purchase._list import _serialize_po_item
+from fastapi_app.services.purchase_utils import (
+    magnified_purchase_qty,
+    normalize_spare_rate,
+    resolve_item_loss_rate,
+)
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -139,13 +144,24 @@ async def _fetch_completed_items_and_arrived(db: AsyncSession, order_ids: list[i
     }
     return items_by_order, arrived_map
 
-def _serialize_completed_item(item, arrived_map: dict) -> dict:
+def _serialize_completed_item(item, arrived_map: dict, order=None) -> dict:
     required = int(item.quantity or 0)
     # 与 arrived_map 构建侧同构归一（material_code 可空 → ''），否则 NULL 明细永远查不中
     key = (item.material_name, item.material_code or '')
     arrived = arrived_map.get(key, 0)
+    data = _serialize_po_item(item)
+    # P1（2026-10-24）：数量与金额必须同源。金额（item.total_price）按「加放损耗后的
+    # 计价数量」计算，而列表原先下发落库原值 → spare_rate>0 时页面必现
+    # 「数量 × 单价 ≠ 金额」，同一行导出却是相等的（导出侧已改用 magnified_purchase_qty）。
+    # 这里改用同一函数，并下发 loss_rate/spare_rate 供前端自行核对。
+    if order is not None:
+        loss_rate = resolve_item_loss_rate(item.loss_rate, order.spare_rate)
+        data['quantity'] = float(magnified_purchase_qty(item.quantity or 0, loss_rate))
+        data['loss_rate'] = float(loss_rate or 0)
+        data['spare_rate'] = float(normalize_spare_rate(order.spare_rate) or 0)
     return {
-        **_serialize_po_item(item),
+        **data,
+        # 到货判定仍用落库原值：material_registration.ordered_quantity 也是原值口径
         'is_arrived': required > 0 and arrived >= required,
         'deficit': max(0, required - arrived) if required > 0 else 0,
     }
@@ -167,6 +183,6 @@ def _serialize_completed_order(order, items, arrived_map: dict, source_order_no:
         'note': order.remark or '',
         'create_time': order.create_time.strftime('%Y-%m-%d %H:%M') if order.create_time else '',
         'completed_at': order.completed_at.strftime('%Y-%m-%d %H:%M') if order.completed_at else '',
-        'items': [_serialize_completed_item(item, arrived_map) for item in items],
+        'items': [_serialize_completed_item(item, arrived_map, order) for item in items],
         'sku_items': sku_items or [],
     }
