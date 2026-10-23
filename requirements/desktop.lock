@@ -17,7 +17,7 @@ argon2-cffi-bindings==26.1.0
     # via argon2-cffi
 arq==0.28.0
     # via -r requirements/base.txt
-asgiref==3.12.1
+asgiref==3.13.0
     # via opentelemetry-instrumentation-asgi
 asyncpg==0.31.0
     # via -r requirements/base.txt

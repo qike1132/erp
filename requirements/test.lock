@@ -27,7 +27,7 @@ arq==0.28.0
     # via -r requirements/base.txt
 arrow==1.4.0
     # via -r requirements/test.txt
-asgiref==3.12.1
+asgiref==3.13.0
     # via opentelemetry-instrumentation-asgi
 asyncpg==0.31.0
     # via -r requirements/base.txt
