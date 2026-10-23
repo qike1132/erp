@@ -20,6 +20,20 @@
         />
       </div>
 
+      <!--
+        错误反馈单通道（R40）：查询失败只在这里呈现，queryFn 内不再 toast。
+        横幅常驻而非 toast，原因有两点：
+          1. toast 会自行消失，用户回看时已无从得知上次查询为什么没数据；
+          2. TanStack 的 queryKey 隔离让「过时请求」的 error 属于旧 query，当前 observer
+             只读新 query 的 error——所以改筛选重搜后，旧请求失败不会串到这条横幅上。
+      -->
+      <UiAlert
+        v-if="reportErrorMessage"
+        class="rp-error-banner"
+        variant="danger"
+        :title="reportErrorMessage"
+      />
+
       <ReportTable
         :logs="sortedLogs"
         :columns="reportColumns"
@@ -101,6 +115,7 @@ import EditStockinModal from './components/EditStockinModal.vue'
 import EditStockoutModal from './components/EditStockoutModal.vue'
 import EditReturnModal from './components/EditReturnModal.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
+import UiAlert from '@/components/ui/UiAlert.vue'
 import { useReportConfig, type TabType } from './composables/useReportConfig'
 import { useReportRowActions, TAB_ROW_PERMISSIONS, type ReportActionTab } from './composables/useReportRowActions'
 
@@ -181,7 +196,7 @@ function onRowDelete(row: Record<string, unknown>) {
   void rowActions.onRowAction(activeTab.value as ReportActionTab, 'delete', row)
 }
 
-const { data: reportData, isLoading, isFetching, refetch } = useQuery({
+const { data: reportData, isLoading, isFetching, error: reportError, refetch } = useQuery({
   queryKey: ['report-data', activeTab, page, perPage, appliedFilters],
   queryFn: async () => {
     const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
@@ -192,6 +207,14 @@ const { data: reportData, isLoading, isFetching, refetch } = useQuery({
   enabled: searched,
   staleTime: 30_000,
   placeholderData: keepPreviousData,
+})
+
+/** 查询错误的用户面文案（R40）：Error 取 message，其余 String() 化兜底 */
+const reportErrorMessage = computed(() => {
+  const err = reportError?.value
+  if (!err) return ''
+  if (err instanceof Error) return err.message || '查询失败'
+  return String((err as { message?: unknown }).message ?? err)
 })
 
 /**
@@ -220,6 +243,25 @@ function onSort(event: { field: string; order: number }) {
   sort.value = event.order ? { field: event.field, order: event.order } : null
 }
 
+/**
+ * 触发一次查询刷新，并就地消化 rejection（R22-L1 防御契约）。
+ *
+ * cancelRefetch: false —— refetch 由用户点击触发、与组件生命周期无关，不该被
+ * 「切换 queryKey」取消；被取消的 refetch 在 query-core 里会以 Cancel 错误 reject。
+ *
+ * .catch 留痕是**防御**：当前 query-core 的 QueryObserver 未开 throwOnError 时用
+ * catch(noop) 吞掉 rejection，该分支今天不可达。但 query-core 一旦升级到不再吞错，
+ * 没有 .catch 的 refetch 就变成 unhandled rejection——控制台报错、Sentry 噪音，
+ * 而用户侧毫无反馈。错误对用户的呈现统一走错误横幅（R40 单通道），这里只留痕。
+ */
+function refreshReport() {
+  // 不假设 refetch() 一定返回 Promise：测试替身与非标准实现可能返回 undefined，
+  // 直接 .catch 会抛 TypeError（并成为 unhandled rejection）。用 Promise.resolve 归一。
+  void Promise.resolve(refetch({ cancelRefetch: false })).catch((e: unknown) => {
+    console.warn('报表刷新失败', e)
+  })
+}
+
 function doSearch() {
   // 显式提交：同步生效不等防抖；挂起的防抖到期时快照未变 → 不再提交（M5）。
   // 条件未变也必须真的发一次请求（OCR-3 M6）：unchanged 刻意不含 page 条件——
@@ -232,8 +274,11 @@ function doSearch() {
   if (unchanged) {
     // 页码可能从 ≥2 归 1：等 observer 切到新 key 再 refetch，
     // 避免对旧 key（page≥2）强制重查后又被 key 切换丢弃、白查一次
-    void nextTick(() => { void refetch() })
+    void nextTick(refreshReport)
+    return
   }
+  // 筛选已变：queryKey 变化让 observer 重新定位并发起新查询，无需手动 refetch
+  refreshReport()
 }
 
 function doReset() {

@@ -91,6 +91,9 @@ vi.mock('@tanstack/vue-query', async () => {
       data: dataRef,
       isLoading: ref(false),
       isFetching: ref(false),
+      // ReportView 的 R40 错误横幅读 error（reportErrorMessage computed）——缺字段即
+      // TypeError（该文件实测），mock 必须覆盖组件解构的全部字段
+      error: ref(undefined),
       refetch: vi.fn(),
     }),
     // ReportView setup 链路（useReportRowActions → useOrderDetailEdit /
