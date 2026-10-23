@@ -62,11 +62,7 @@ coverage==7.17.0
 cryptography==50.0.1
     # via -r requirements/base.txt
 deprecated==3.0.0
-    # via
-    #   limits
-    #   opentelemetry-api
-    #   opentelemetry-exporter-otlp-proto-grpc
-    #   opentelemetry-semantic-conventions
+    # via limits
 et-xmlfile==2.0.0
     # via openpyxl
 execnet==2.1.2
@@ -83,7 +79,7 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-googleapis-common-protos==1.75.0
+googleapis-common-protos==1.76.0
     # via opentelemetry-exporter-otlp-proto-grpc
 greenlet==3.5.6
     # via sqlalchemy
@@ -108,8 +104,6 @@ idna==3.20
     #   httpx
     #   trio
     #   yarl
-importlib-metadata==8.5.0
-    # via opentelemetry-api
 iniconfig==2.3.1
     # via pytest
 jinja2==3.1.6
@@ -130,7 +124,7 @@ multidict==6.9.1
     #   yarl
 openpyxl==3.1.5
     # via -r requirements/base.txt
-opentelemetry-api==1.30.0
+opentelemetry-api==1.45.1
     # via
     #   -r requirements/base.txt
     #   opentelemetry-exporter-otlp-proto-grpc
@@ -142,36 +136,39 @@ opentelemetry-api==1.30.0
     #   opentelemetry-instrumentation-sqlalchemy
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-exporter-otlp-proto-common==1.30.0
+opentelemetry-exporter-otlp-common==0.66b1
     # via opentelemetry-exporter-otlp-proto-grpc
-opentelemetry-exporter-otlp-proto-grpc==1.30.0
+opentelemetry-exporter-otlp-proto-common==1.45.1
+    # via opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-exporter-otlp-proto-grpc==1.45.1
     # via -r requirements/base.txt
-opentelemetry-instrumentation==0.51b0
+opentelemetry-instrumentation==0.66b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-fastapi
     #   opentelemetry-instrumentation-redis
     #   opentelemetry-instrumentation-requests
     #   opentelemetry-instrumentation-sqlalchemy
-opentelemetry-instrumentation-asgi==0.51b0
+opentelemetry-instrumentation-asgi==0.66b1
     # via opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-fastapi==0.51b0
+opentelemetry-instrumentation-fastapi==0.66b1
     # via -r requirements/base.txt
-opentelemetry-instrumentation-redis==0.51b0
+opentelemetry-instrumentation-redis==0.66b1
     # via -r requirements/base.txt
-opentelemetry-instrumentation-requests==0.51b0
+opentelemetry-instrumentation-requests==0.66b1
     # via -r requirements/base.txt
-opentelemetry-instrumentation-sqlalchemy==0.51b0
+opentelemetry-instrumentation-sqlalchemy==0.66b1
     # via -r requirements/base.txt
-opentelemetry-proto==1.30.0
+opentelemetry-proto==1.45.1
     # via
     #   opentelemetry-exporter-otlp-proto-common
     #   opentelemetry-exporter-otlp-proto-grpc
-opentelemetry-sdk==1.30.0
+opentelemetry-sdk==1.45.1
     # via
     #   -r requirements/base.txt
+    #   opentelemetry-exporter-otlp-common
     #   opentelemetry-exporter-otlp-proto-grpc
-opentelemetry-semantic-conventions==0.51b0
+opentelemetry-semantic-conventions==0.66b1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-asgi
@@ -180,7 +177,7 @@ opentelemetry-semantic-conventions==0.51b0
     #   opentelemetry-instrumentation-requests
     #   opentelemetry-instrumentation-sqlalchemy
     #   opentelemetry-sdk
-opentelemetry-util-http==0.51b0
+opentelemetry-util-http==0.66b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-fastapi
@@ -212,7 +209,7 @@ propcache==0.5.4
     # via
     #   aiohttp
     #   yarl
-protobuf==5.29.6
+protobuf==7.36.2
     # via
     #   googleapis-common-protos
     #   opentelemetry-proto
@@ -319,7 +316,10 @@ typing-extensions==4.16.0
     #   fastapi
     #   grpcio
     #   limits
+    #   opentelemetry-api
+    #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-sdk
+    #   opentelemetry-semantic-conventions
     #   pydantic
     #   pydantic-core
     #   selenium
@@ -349,7 +349,7 @@ websocket-client==1.9.2
     # via selenium
 websockets==17.3
     # via uvicorn
-wrapt==1.17.3
+wrapt==2.5.1
     # via
     #   deprecated
     #   opentelemetry-instrumentation
@@ -361,5 +361,3 @@ xlsxwriter==3.2.2
     # via -r requirements/base.txt
 yarl==1.25.1
     # via aiohttp
-zipp==4.1.2
-    # via importlib-metadata
