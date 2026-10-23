@@ -241,12 +241,14 @@ export const patternRoomApi = {
     ),
 
   // ---------- 2. 打样项目列表 ----------
+  // 详情类读请求被 keep-alive 的 PatternRoomView 持有：走默认路由取消会在
+  // 切路由后让 finally 永不执行、loading 永久为 true（P1-10），故固定不取消。
   listProjects: (params?: ProjectListParams) =>
-    get<ProjectListResponse>('/pattern-room/projects', params as Record<string, unknown>),
+    get<ProjectListResponse>('/pattern-room/projects', params as Record<string, unknown>, { routeCancel: false }),
 
   // ---------- 3. 打样项目详情 ----------
   getProject: (id: number) =>
-    get<ProjectDetailResponse>(`/pattern-room/projects/${id}`),
+    get<ProjectDetailResponse>(`/pattern-room/projects/${id}`, undefined, { routeCancel: false }),
 
   // ---------- 4. 新增打样项目 ----------
   createProject: (data: ProjectCreateRequest) =>
@@ -273,7 +275,7 @@ export const patternRoomApi = {
 
   // ---------- 8. 部位列表 ----------
   listParts: (projectId: number, roleId?: number) =>
-    get<PartListResponse>(`/pattern-room/projects/${projectId}/parts`, roleId != null ? { role_id: roleId } : undefined),
+    get<PartListResponse>(`/pattern-room/projects/${projectId}/parts`, roleId != null ? { role_id: roleId } : undefined, { routeCancel: false }),
 
   // ---------- 9. 新增部位 ----------
   createPart: (projectId: number, data: PartCreateRequest) =>
@@ -289,11 +291,11 @@ export const patternRoomApi = {
 
   // ---------- 12. 版本列表 ----------
   listVersions: (projectId: number) =>
-    get<VersionListResponse>(`/pattern-room/projects/${projectId}/versions`),
+    get<VersionListResponse>(`/pattern-room/projects/${projectId}/versions`, undefined, { routeCancel: false }),
 
   // ---------- 13. 版本详情 ----------
   getVersionDetail: (versionId: number) =>
-    get<VersionDetailResponse>(`/pattern-room/versions/${versionId}`),
+    get<VersionDetailResponse>(`/pattern-room/versions/${versionId}`, undefined, { routeCancel: false }),
 
   // ---------- 14. 变更日志列表 ----------
   listChangeLogs: (projectId: number, params?: ChangeLogListParams) =>
@@ -312,6 +314,7 @@ export const patternRoomApi = {
             ...(finalOnly ? { final_only: true } : {}),
           }
         : undefined) as Record<string, unknown>,
+      { routeCancel: false },
     ),
 
   // ---------- 16. 批量新增部位 ----------
@@ -327,7 +330,7 @@ export const patternRoomApi = {
 
   // ---------- 18. 角色列表 ----------
   listRoles: (projectId: number) =>
-    get<RoleListResponse>(`/pattern-room/projects/${projectId}/roles`),
+    get<RoleListResponse>(`/pattern-room/projects/${projectId}/roles`, undefined, { routeCancel: false }),
 
   // ---------- 19. 新增角色 ----------
   createRole: (projectId: number, data: RoleCreateRequest) =>
@@ -346,5 +349,6 @@ export const patternRoomApi = {
     get<PartFieldCandidatesResponse>(
       '/pattern-room/part-field-candidates',
       params as Record<string, unknown> | undefined,
+      { routeCancel: false },
     ),
 }

@@ -246,7 +246,7 @@ export function useMaterialRegistrations(activeTab: Ref<string>) {
     staleTime: 60_000,
   })
   const stats = computed<ProgressStats>(() => {
-    const o = overviewQuery.data.value
+    const o = overviewQuery.data.value?.overview
     const dist = distributionQuery.data.value?.distribution || []
     return {
       inProgress: o?.partial ?? 0,

@@ -71,7 +71,7 @@ const activeTab = ref('overview')
 const tabChips = [{ label: '概览', value: 'overview' }, { label: '记录', value: 'records' }]
 const keyword = ref('')
 // 概览/记录响应类型由 API 层签名推导，移动端不再自行声明后端 DTO（2026-10-17 审计 F1-3）
-type IncomingOverview = Awaited<ReturnType<typeof materialApi.overview>>
+type IncomingOverview = Awaited<ReturnType<typeof materialApi.overview>>['overview']
 type IncomingRecords = Awaited<ReturnType<typeof materialApi.registrations>>
 const overview = ref<IncomingOverview | null>(null)
 const loading = ref(false)
@@ -94,7 +94,7 @@ async function loadOverview() {
   loading.value = true
   overviewError.value = ''
   try {
-    overview.value = await materialApi.overview()
+    overview.value = (await materialApi.overview()).overview
   } catch (e) {
     overview.value = null
     overviewError.value = errorText(e, '概览加载失败，请点击重试')

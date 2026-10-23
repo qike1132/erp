@@ -55,6 +55,12 @@ export interface MaterialStatsOverview {
   recent_registrations?: number
 }
 
+/** 后端 stats/overview 的完整信封（schemas/material_registration.py:49-51） */
+export interface MaterialStatsOverviewResponse {
+  success: boolean
+  overview: MaterialStatsOverview
+}
+
 /** 后端 stats/distribution 响应（对齐 StatsDistributionResponse.distribution） */
 export interface MaterialStatsDistribution {
   distribution?: Array<{ status: string; count: number }>
@@ -84,7 +90,7 @@ export interface SupplierDetailApiResponse {
 }
 
 export const materialApi = {
-  overview: () => get<MaterialStatsOverview>('/material-registrations/stats/overview'),
+  overview: () => get<MaterialStatsOverviewResponse>('/material-registrations/stats/overview'),
   trend: (days: number) => get<Record<string, unknown>>('/material-registrations/stats/trend', { days }),
   distribution: () => get<MaterialStatsDistribution>('/material-registrations/stats/distribution'),
   registrations: (params?: QueryParams) => get<{ registrations: Registration[]; pages?: number; total_pages?: number; total?: number }>('/material-registrations/registrations', params),

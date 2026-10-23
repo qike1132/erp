@@ -46,8 +46,11 @@ export function getNotificationTypeLabel(type: string): string {
 }
 
 export const notificationApi = {
-  unreadCount: () => get<{ count: number }>('/notifications/unread-count'),
-  list: (params?: NotificationListParams) => get<NotificationListResponse>('/notifications', params),
+  // 通知中心跨路由存活（不是任何路由的从属数据）：必须 routeCancel:false，
+  // 否则切路由 abort 后 _silenceCanceled 让 Promise 永不 settle，
+  // notificationMemoryCache 的 inflight 死条目永不清理（P1-09）。
+  unreadCount: () => get<{ count: number }>('/notifications/unread-count', undefined, { routeCancel: false }),
+  list: (params?: NotificationListParams) => get<NotificationListResponse>('/notifications', params, { routeCancel: false }),
   markAsRead: (id: number) => post<{ success: boolean; message: string }>(`/notifications/${id}/read`),
   /** 批量标记已读（逐条调用，带并发控制） */
   markBatchAsRead: async (ids: number[]): Promise<{ success: boolean; marked_count: number }> => {

@@ -200,8 +200,10 @@ export function _silenceCanceled<T>(promise: Promise<T>): Promise<T> {
   })
 }
 
-function _dedupeKey(url: string, params?: Record<string, unknown>): string {
-  return `${url}?${params ? JSON.stringify(params) : ''}`
+function _dedupeKey(url: string, params?: Record<string, unknown>, routeCancel = true): string {
+  // routeCancel 决定 Promise 被 abort 后是否永不 settle，两种语义不能共用去重条目
+  // （P2-72）：同一 url+params 的 tracked 与 untracked 调用必须各自单飞。
+  return `${url}?${params ? JSON.stringify(params) : ''}#rc:${routeCancel}`
 }
 
 export function get<T>(
@@ -209,12 +211,12 @@ export function get<T>(
   params?: Record<string, unknown>,
   options?: { signal?: AbortSignal; routeCancel?: boolean },
 ): Promise<T> {
-  const key = _dedupeKey(url, params)
+  const routeCancel = options?.routeCancel !== false
+  const key = _dedupeKey(url, params, routeCancel)
   const existing = _inflightGet.get(key)
   if (existing) return existing as Promise<T>
   // 读接口快速失败：单次请求（axios 15s 超时即抛错），不做网络重试。
   // 叠加重试会让 UI 的"加载中"最长挂约 48s；失败后由前端错误态 + 重试按钮兜底。
-  const routeCancel = options?.routeCancel !== false
   // routeCancel=false：请求归「长生命周期缓存/单飞」所有（Vue Query 查询、store 预取），
   // 不属于任何路由。这类请求若被 abortPendingRequests() 取消，_silenceCanceled 会把取消
   // 变成永不 settle 的 Promise → 查询永久停在 fetching、单飞表残留死条目，用户侧表现是

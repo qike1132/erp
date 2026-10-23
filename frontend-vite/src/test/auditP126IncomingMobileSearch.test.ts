@@ -17,6 +17,7 @@ vi.mock('@/api', () => ({ materialApi: mocks.materialApi }))
 
 import MIncomingView from '@/mobile/views/incoming/MIncomingView.vue'
 import MSearchBar from '@/mobile/components/MSearchBar.vue'
+import MStatCard from '@/mobile/components/MStatCard.vue'
 
 function makeRouter() {
   return createRouter({
@@ -48,9 +49,17 @@ async function mountOnRecordsTab() {
 }
 
 describe('P1-26/P1-30 来料移动端搜索与分页', () => {
+  it('概览 KPI 读取响应信封内层 overview（P1-08）', async () => {
+    const wrapper = mount(MIncomingView, opts())
+    await flushPromises()
+    const cards = wrapper.findAllComponents(MStatCard)
+    expect(cards).toHaveLength(2)
+    expect(cards[0]!.props('value')).toBe(1)
+    expect(cards[1]!.props('value')).toBe(1)
+  })
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.materialApi.overview.mockResolvedValue({ total: 1, pending: 1 })
+    mocks.materialApi.overview.mockResolvedValue({ success: true, overview: { total: 1, pending: 1 } })
     mocks.materialApi.registrations.mockResolvedValue({
       registrations: [registration(1, 'PO-1')],
       total: 1,

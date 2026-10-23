@@ -92,6 +92,22 @@ describe('get 请求去重', () => {
     getSpy.mockRestore()
   })
 
+  it('routeCancel 不同的同参请求不共享去重条目（P2-72）', async () => {
+    vi.resetModules()
+    const request = await import('@/api/request')
+    const service = (await import('@/api/request')).default
+
+    const getSpy = vi.spyOn(service, 'get').mockResolvedValue({} as never)
+
+    await Promise.all([
+      request.get('/products', { page: 1 }),
+      request.get('/products', { page: 1 }, { routeCancel: false }),
+    ])
+
+    expect(getSpy).toHaveBeenCalledTimes(2)
+    getSpy.mockRestore()
+  })
+
   it('请求完成后清除去重记录（后续同参请求可再次发起）', async () => {
     vi.resetModules()
     const request = await import('@/api/request')
