@@ -55,12 +55,17 @@ import { buildStockoutStagedItems } from '../composables/useStockoutOcrStaging'
 import type { OcrDraftItem, OcrStagingContext } from '@/components/ocr/types'
 import { showToast } from '@/composables/useToast'
 
-defineProps<{
+const props = defineProps<{
   /** 表单当前选中的客户：识别结果缺客户时的兜底 */
   customer: string
   /** 表单当前选中的出货时间 */
   date: string
   searchProducts: (q: string) => Promise<Product[]>
+  /**
+   * 父级冻结（表单正在提交等）：此时不接受换选文件。
+   * 与组件自身的 importing 共同构成文件入口冻结谓词，见 rejectIfFrozen。
+   */
+  disabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -81,7 +86,12 @@ const excelDragOver = ref(false)
 function onExcelFileSelect(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
+  // 先清后读：浏览器对同一路径重选不触发 change，读完不重置会让「导入失败修正表格后
+  // 重选同一文件」彻底无反馈（无文件名、无 toast、按钮保持禁用）。必须在守卫**之前**
+  // 无条件清，否则冻结拒绝/格式不符的早退路径会把 value 留着（R30-L10）。
+  input.value = ''
   if (!file) return
+  if (rejectIfFrozen()) return
   if (!(file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
     showToast('请上传 Excel 文件（.xlsx 或 .xls）', 'error')
     return
@@ -93,11 +103,24 @@ function onExcelDrop(event: DragEvent) {
   excelDragOver.value = false
   const file = event.dataTransfer?.files?.[0]
   if (!file) return
+  if (rejectIfFrozen()) return
   if (!(file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
     showToast('请上传 Excel 文件（.xlsx 或 .xls）', 'error')
     return
   }
   excelFile.value = file
+}
+
+/**
+ * 文件入口冻结谓词（R36 L-j）：父级冻结（props.disabled）与自身导入在途
+ * （importing）都必须拒绝换选。只看 props.disabled 时，导入窗口内换选的文件会被
+ * 接受，待导入成功后 handleImportExcel 把 excelFile 置 null 又把它静默丢弃——
+ * 用户看到文件名直接消失、没有任何提示。两个入口（input / drop）同口径。
+ */
+function rejectIfFrozen(): boolean {
+  if (!props.disabled && !importing.value) return false
+  showToast('正在处理，请稍后再导入', 'warning')
+  return true
 }
 
 async function handleDownloadTemplate() {
