@@ -174,7 +174,7 @@
 | 风险 | 处置 |
 |---|---|
 | 删 `incremental.py` 后残留调用点（如 `_do_auto_backup` else 分支）→ `AttributeError` | 按 §4.1 全量清单逐点删；`__init__.py` 导出与 import 同删 |
-| 误删共享 helper | **保留** `normalize_backup_ts`、`_delete_backup_sidecars`、`quote_table`（另有活跃调用方）；只删增量专用 |
+| 误删共享 helper | **保留** `normalize_backup_ts`、`_delete_backup_sidecars`、`quote_table`（另有活跃调用方）；只删增量专用。（注：`normalize_backup_ts` 已于 2026-10-23 P2-26 删除——复核确认生产零调用，真正的毫秒容忍在 `verify/query_service` 正则） |
 | 权限码 `restore_incremental_backup` | 实为通用码映射（`_deps.py:65`→`backup_restore`），**无独立权限码**，前端无 navAccess/路由引用 → **保留 RBAC 不动** |
 | 历史 `backup_record.type='incremental'` | 已决定随 §5 删除（保留无用：列表以文件系统为准、启动同步会自动清、metrics 反而更干净） |
 | 7 天误删过多 | `_enforce_keep_floor` 兜底至少留 1；回归测试钉住 |

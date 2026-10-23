@@ -34,9 +34,7 @@ _background_tasks: set[asyncio.Task] = set()
 _BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_incremental_', 'erp_auto_')
 _BACKUP_FILE_SUFFIXES = ('.zip', '.json', '.zip.enc')
 
-# 文件名时间戳格式：'YYYYMMDD_HHMMSS'（见 normalize_backup_ts 与 _extract_timestamp）
-_TS_FILENAME_LEN = 15
-_TS_FILENAME_SEP_INDEX = 8
+# 文件名时间戳格式：'YYYYMMDD_HHMMSS'（解析见 verify/query_service._parse_timestamp_from_filename）
 
 
 def _is_backup_file(f: Path) -> bool:  # log-context: internal helper 无请求上下文
@@ -346,42 +344,6 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                     entry['error'] = str(e)
             backups.append(entry)
     return backups
-
-
-def normalize_backup_ts(ts: str | None) -> str:
-    """把备份时间戳统一为 'YYYY-MM-DD HH:MM:SS'。
-
-    备份系统里时间戳有两种来源、两种格式：
-      - 文件名中的时间戳：'YYYYMMDD_HHMMSS'，第十四轮起还可能是
-        'YYYYMMDD_HHMMSSmmm'（同秒双全量同名互覆，加 3 位毫秒后缀保证唯一）
-      - manifest 的 base_timestamp：'YYYY-MM-DD HH:MM:SS'
-
-    二者格式不一致时直接做字符串比较恒为 False，曾导致清理逻辑把所有增量备份
-    判定为"不属于任何全量链"而无条件删除（数据丢失）。本函数是该修复的核心，
-    必须保证幂等：已是标准格式的输入原样返回。
-
-    ⚠️ 毫秒后缀必须在此**一并容忍**：只认 15 位时，毫秒级的新全量既解析不出时间，
-    又会在清理时被判成"不属于任何全量链"而连带删掉依赖它的增量链（第十四轮回归）。
-
-    Args:
-        ts: 待归一化的时间戳，允许 None / 空串 / 非法格式。
-
-    Returns:
-        规范化后的 'YYYY-MM-DD HH:MM:SS'；无法识别或为空时返回 ''（空输入）
-        或原样去空格后的字符串（非空但格式未知，交由调用方判断）。
-    """
-    if not ts:
-        return ''
-    ts = str(ts).strip()
-    base, tail = ts[:15], ts[15:]
-    tail_ok = tail == '' or (len(tail) == 3 and tail.isdigit())
-    if (tail_ok
-            and len(base) == _TS_FILENAME_LEN
-            and base[_TS_FILENAME_SEP_INDEX] == '_'
-            and base[:8].isdigit()
-            and base[9:].isdigit()):
-        return f'{base[:4]}-{base[4:6]}-{base[6:8]} {base[9:11]}:{base[11:13]}:{base[13:15]}'
-    return ts
 
 
 def get_backup_status() -> dict:  # log-context: internal helper 无请求上下文

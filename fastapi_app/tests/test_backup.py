@@ -261,54 +261,21 @@ class TestListBackupFiles:
 
 
 # ---------------------------------------------------------------------------
-# 时间戳归一化测试（修复增量备份级联误删 bug）
+# 文件名时间戳解析（毫秒后缀）
 # ---------------------------------------------------------------------------
 
-class TestNormalizeBackupTs:
-    """normalize_backup_ts：统一文件名时间戳与 manifest base_timestamp 格式。
+def test_filename_timestamp_regex_tolerates_milliseconds():
+    """真实消费点 verify/query_service 必须容忍 3 位毫秒后缀。
 
-    文件名时间戳为 'YYYYMMDD_HHMMSS'，manifest base_timestamp 为
-    'YYYY-MM-DD HH:MM:SS'。二者格式不一致时字符串比较恒为 False，曾导致
-    所有增量备份被无条件误删（数据丢失）。此测试锁死该修复。
-
-    函数位置：fastapi_app/services/backup/records.py 的**模块级纯函数**
-    （2026-09-14 由 BackupCleanupService 的实例方法提升而来——它不依赖 self，
-    放在类里导致测试必须实例化整个 Service 才能覆盖，且与 records 的
-    文件名/时间戳约定分离）。
+    第十四轮回归：同秒双全量加毫秒后缀，只认 15 位会把新全量判成孤儿并连带
+    删除依赖它的增量链。原 normalize_backup_ts 是生产零调用的死代码（已删除），
+    这里锁真正在用的正则。
     """
+    from fastapi_app.services.backup.verify.query_service import _FILENAME_TIMESTAMP_RE
 
-    def test_filename_format_is_normalized(self):
-        from fastapi_app.services.backup.records import normalize_backup_ts
-        assert normalize_backup_ts('20260913_010000') == '2026-09-13 01:00:00'
-
-    def test_manifest_format_is_unchanged(self):
-        from fastapi_app.services.backup.records import normalize_backup_ts
-        assert normalize_backup_ts('2026-09-13 01:00:00') == '2026-09-13 01:00:00'
-
-    def test_empty_and_none(self):
-        from fastapi_app.services.backup.records import normalize_backup_ts
-        assert normalize_backup_ts('') == ''
-        assert normalize_backup_ts(None) == ''
-
-    def test_two_formats_compare_equal(self):
-        """归一化后，文件名时间戳 <= manifest base_timestamp 应成立（修复前恒 False）"""
-        from fastapi_app.services.backup.records import normalize_backup_ts
-        filename_ts = normalize_backup_ts('20260913_010000')
-        base_ts = normalize_backup_ts('2026-09-13 01:00:00')
-        assert filename_ts == base_ts
-        assert filename_ts <= base_ts
-
-    def test_idempotent(self):
-        """幂等性：归一化结果再归一化应不变（防重复调用产生二次破坏）"""
-        from fastapi_app.services.backup.records import normalize_backup_ts
-        once = normalize_backup_ts('20260913_010000')
-        assert normalize_backup_ts(once) == once
-
-    def test_non_timestamp_passthrough(self):
-        """非法格式原样返回（去空格），不抛异常、不臆造格式"""
-        from fastapi_app.services.backup.records import normalize_backup_ts
-        assert normalize_backup_ts('not-a-ts') == 'not-a-ts'
-        assert normalize_backup_ts('  2026-09-13 01:00:00  ') == '2026-09-13 01:00:00'
+    assert _FILENAME_TIMESTAMP_RE.search('erp_backup_20260913_010000.zip')
+    assert _FILENAME_TIMESTAMP_RE.search('erp_backup_20260913_010000123.zip')
+    assert _FILENAME_TIMESTAMP_RE.search('erp_backup_20260913_010000123.zip.enc')
 
 
 class TestExceptions:

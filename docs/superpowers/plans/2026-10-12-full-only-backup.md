@@ -19,7 +19,7 @@
 - **临时文件任务结束必须清理**（`logs/` 下自建脚本/输出）。
 - **只提交自己的路径**：本仓常有并发会话写工作区，`git status` 见陌生改动先问、别 stash。
 - **保留策略唯一真源**：`_constants.retention_days()`（env `BACKUP_RETENTION_DAYS`，默认改为 **7**）。
-- **保留的共享 helper（勿删）**：`normalize_backup_ts`、`_delete_backup_sidecars`、`quote_table`、`ensure_backup_dir`。
+- **保留的共享 helper（勿删）**：`normalize_backup_ts`（注：已于 2026-10-23 P2-26 删除，生产零调用）、`_delete_backup_sidecars`、`quote_table`、`ensure_backup_dir`。
 
 ## Review Focus
 
@@ -438,7 +438,7 @@ git commit -m "refactor(backup): 清理服务重写为全量-only 单规则（�
 - Test: `fastapi_app/tests/test_backup_retention_policy.py`（删相关用例）、`fastapi_app/tests/test_backup.py`（`:273-434` 段）
 
 **Interfaces:**
-- 保留：`_delete_backup_sidecars`、`_backup_created_time`、`normalize_backup_ts`、`sync_backup_records`、`write_backup_record`。
+- 保留：`_delete_backup_sidecars`、`_backup_created_time`、`normalize_backup_ts`（注：已于 2026-10-23 P2-26 删除，生产零调用）、`sync_backup_records`、`write_backup_record`。
 
 - [ ] **Step 1: 删代码**
 
