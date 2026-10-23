@@ -102,7 +102,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick } from 'vue'
-import { useQuery, keepPreviousData } from '@tanstack/vue-query'
+import { useQuery, keepPreviousData, isCancelledError } from '@tanstack/vue-query'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { reportApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
@@ -261,6 +261,14 @@ function refreshReport() {
   // 不假设 refetch() 一定返回 Promise：测试替身与非标准实现可能返回 undefined，
   // 直接 .catch 会抛 TypeError（并成为 unhandled rejection）。用 Promise.resolve 归一。
   void Promise.resolve(refetch({ cancelRefetch: false })).catch((e: unknown) => {
+    // 取消不是应用错误：登出时 auth.ts 的 queryClient.clear() 会取消在途查询，
+    // refetch 随之以 CancelledError reject。上报它会污染 Sentry，更糟的是
+    // reportError 的 MAX_REPORTS=10 是与全局错误处理器共享的会话级配额——
+    // 反复登出会把真正的渲染错误遥测额度挤光。故取消类只留 console，不上报。
+    if (isCancelledError(e)) {
+      console.error('报表刷新已取消', e)
+      return
+    }
     console.error('报表刷新失败', e)
     reportError(e, { scope: 'report.refreshReport' })
   })

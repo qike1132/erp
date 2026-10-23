@@ -16,7 +16,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
-import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
+import { QueryClient, VueQueryPlugin, CancelledError } from '@tanstack/vue-query'
 
 const mocks = vi.hoisted(() => ({
   orderLogs: vi.fn(),
@@ -197,6 +197,40 @@ describe('ReportView — refetch 拒绝防御契约（R22-L1）', () => {
       process.off('unhandledRejection', onUnhandled)
       errSpy.mockRestore()
     }
+  })
+
+  it('取消类 rejection 不得上报 Sentry（登出 clear 会取消在途查询，非应用错误）', async () => {
+    // auth.ts:63 登出时 queryClient.clear() 会取消在途查询 → refetch 以 CancelledError
+    // reject。这不是应用错误，上报它会污染 Sentry，更糟的是 reportError 的
+    // MAX_REPORTS=10 是与全局错误处理器共享的会话级配额——反复登出会把真正的
+    // 渲染错误遥测额度挤光。
+    mocks.refetch.mockReset()
+    mocks.refetch.mockImplementation(() => Promise.reject(new CancelledError({ revert: true })))
+    // 本 describe 的 beforeEach 只 reset mocks.refetch，不清 reportErrorMock——
+    // 上一个用例的调用记录会残留，故在此显式清空
+    reportErrorMock.mockClear()
+    mocks.useQueryImpl.mockReset()
+    mocks.useQueryImpl.mockImplementation(() => ({
+      data: ref({ logs: [], pagination: { pages: 3, total: 40 } }),
+      error: ref(undefined),
+      isLoading: ref(false),
+      isFetching: ref(false),
+      isPaused: ref(false),
+      refetch: mocks.refetch,
+    }))
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('.f-product').setValue('保温杯')
+    await wrapper.find('.f-search').trigger('click')
+    await flushPromises()
+    await sleep(50)
+    await flushPromises()
+
+    expect(reportErrorMock).not.toHaveBeenCalled()
+    errSpy.mockRestore()
+    wrapper.unmount()
   })
 })
 
