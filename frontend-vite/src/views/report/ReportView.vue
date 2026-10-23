@@ -13,7 +13,6 @@
         <ReportFilterBar
           :filters="filters"
           :customer-options="customerOptions"
-          :searched="searched"
           @search="doSearch"
           @reset="doReset"
           @export="exportReport"
@@ -39,7 +38,6 @@
         :columns="reportColumns"
         :is-loading="isLoading"
         :is-fetching="isFetching"
-        :searched="searched"
         :per-page="perPage"
         :pagination="pagination"
         :current-cfg="currentCfg"
@@ -123,11 +121,6 @@ import { useReportRowActions, TAB_ROW_PERMISSIONS, type ReportActionTab } from '
 const activeTab = ref<TabType>('order')
 const page = ref(1)
 const perPage = ref(15)
-/**
- * 查询门槛（P1-24）：初始关闭——挂载/切 tab 不自动查；提交（显式点「查询」
- * 或筛选 300ms 防抖静默提交）后才开启。原先恒为 true，门槛形同虚设。
- */
-const searched = ref(false)
 /** 当前排序（服务端分页不变，这是当前页内的客户端排序） */
 const sort = ref<{ field: string; order: number } | null>(null)
 
@@ -139,10 +132,9 @@ const filters = reactive({ customer: '', product: '' })
  */
 const appliedFilters = ref({ customer: '', product: '' })
 
-/** 提交当前筛选：快照入 key、开查询门槛、回第 1 页（新筛选从第一页看起） */
+/** 提交当前筛选：快照入 key、回第 1 页（新筛选从第一页看起） */
 function commitFilters() {
   appliedFilters.value = { customer: filters.customer, product: filters.product }
-  searched.value = true
   page.value = 1
 }
 
@@ -199,6 +191,7 @@ function onRowDelete(row: Record<string, unknown>) {
 
 // 解构名为 queryError 而非 reportError：后者是 utils/errorReporter 导出的上报函数，
 // 同名会让本文件将来一旦 import 它就变成「局部 ref 遮蔽函数」，静默丢掉上报能力。
+// 进路由即查询（2026-10-23 owner 要求）：不设 enabled 门槛，挂载/切 tab 直接取数。
 const { data: reportData, isLoading, isFetching, error: queryError, refetch } = useQuery({
   queryKey: ['report-data', activeTab, page, perPage, appliedFilters],
   queryFn: async () => {
@@ -207,7 +200,6 @@ const { data: reportData, isLoading, isFetching, error: queryError, refetch } = 
     if (appliedFilters.value.product) params.product = appliedFilters.value.product
     return await reportApi[currentTabEndpoint()](params)
   },
-  enabled: searched,
   staleTime: 30_000,
   placeholderData: keepPreviousData,
 })
@@ -221,13 +213,11 @@ const reportErrorMessage = computed(() => {
 })
 
 /**
- * 渲染数据 gate（OCR-4 M:129）：report-data 查询经 persistQueryClient 持久化到
- * sessionStorage，F5 后 disabled 的 useQuery 仍会暴露恢复的缓存快照——用户没点
- * 查询就看到旧数据行且无任何刷新指示。故未查询（searched=false）时一概不渲染
- * 行与分页（分页同样来自缓存，只 gate logs 会出现「0 行 + 分页条显示旧总数」）。
+ * F5 恢复的持久化缓存（persistQueryClient → sessionStorage）若已过期（> staleTime），
+ * TanStack 会在挂载时自动重查；30s 内的快照本身仍新鲜，直接呈现即可。
  */
-const logs = computed(() => (searched.value ? reportData.value?.logs : undefined) ?? [])
-const pagination = computed(() => (searched.value ? reportData.value?.pagination : undefined))
+const logs = computed(() => reportData.value?.logs ?? [])
+const pagination = computed(() => reportData.value?.pagination)
 
 /** 排序取值：非数值列按 0，避免 NaN 让整列排序失效 */
 function sortValue(row: Record<string, unknown>, field: string): number {

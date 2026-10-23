@@ -18,7 +18,6 @@
     <UiButton variant="primary" class="rp-query" aria-label="查询" @click="emit('search')">查询</UiButton>
     <UiButton variant="outline" aria-label="重置" @click="emit('reset')">重置</UiButton>
     <UiButton
-      v-if="searched"
       variant="success"
       aria-label="导出"
       @click="emit('export')"
@@ -42,7 +41,6 @@ import UiButton from '@/components/ui/UiButton.vue'
 
 defineProps<{
   customerOptions: { value: string; label: string }[]
-  searched: boolean
 }>()
 
 // 显式双向绑定：父组件 v-model:filters 传入，筛选条件就地编辑

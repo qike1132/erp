@@ -136,13 +136,11 @@ function mountView() {
 }
 
 /**
- * P1-24 起查询门槛初始关闭：searched=false 时 ReportView 不渲染数据行/分页
- * （F5 恢复的持久化缓存也不渲染，OCR-4 M:129）。断言数据渲染的用例须先显式
- * 点一次「查询」进入已查询态——与生产里用户先查询再看表的真实路径一致。
+ * 2026-10-23 起 /report 进页面自动查询（searched 门槛已移除）：挂载后表格即有数据，
+ * 不再需要先点一次「查询」。
  */
-async function mountViewSearched() {
+async function mountViewWithData() {
   const wrapper = mountView()
-  await wrapper.find('.rp-query').trigger('click')
   await nextTick()
   return wrapper
 }
@@ -182,7 +180,6 @@ function mountTable(
       columns: TABLE_COLUMNS,
       isLoading: false,
       isFetching: false,
-      searched: true,
       perPage: 15,
       pagination: { total: logs.length, pages: 1 },
       currentCfg: activeTab === 'order' ? ORDER_CFG : STOCKIN_CFG,
@@ -203,7 +200,6 @@ function mountFilterBar(over: Record<string, unknown> = {}) {
     props: {
       filters: { customer: '', product: '' },
       customerOptions: [{ value: 'MINISO国际', label: 'MINISO国际' }],
-      searched: true,
       ...over,
     },
     global: { plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]] },
@@ -308,9 +304,7 @@ describe('ReportView —— 单行工具条', () => {
 
   it('tab 组、筛选、导出在同一行（同一工具条容器内）', async () => {
     const w = mountView()
-    // P1-24 修复后导出按钮受查询门槛控制（searched 初始 false，提交后才渲染）；
-    // 本用例锁的是「三元素同容器」的布局结构，故先点查询提交再断言。
-    await w.find('.rp-toolbar [aria-label="查询"]').trigger('click')
+    // 2026-10-23 起导出按钮常驻（查询门槛已移除），不再需要先点查询
     await flushPromises()
 
     expect(w.find('.rp-toolbar .rp-tab-group').exists()).toBe(true)
@@ -339,20 +333,20 @@ describe('ReportView —— 表格与数字格式', () => {
   })
 
   it('数量走千分位并加粗', async () => {
-    const cells = (await mountViewSearched()).findAll('tbody tr')[0]!.findAll('td')
+    const cells = (await mountViewWithData()).findAll('tbody tr')[0]!.findAll('td')
 
     expect(cells[5]?.text()).toContain('15,000')
     expect(cells[5]?.find('.rp-qty').exists()).toBe(true)
   })
 
   it('空值留白，不显示「-」占位符', async () => {
-    const cells = (await mountViewSearched()).findAll('tbody tr')[1]!.findAll('td')
+    const cells = (await mountViewWithData()).findAll('tbody tr')[1]!.findAll('td')
 
     expect(cells[6]?.text()).toBe('')
   })
 
   it('数量列可排序（当前页客户端重排）', async () => {
-    const w = await mountViewSearched()
+    const w = await mountViewWithData()
 
     await emitSort(w, 'quantity', 1)
     expect(w.findAll('tbody tr')[0]?.text()).toContain('5,000')

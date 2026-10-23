@@ -1,15 +1,16 @@
 /**
- * ReportView 筛选防抖与提交门槛回归（2026-10-19 审计 P1-24）。
+ * ReportView 筛选防抖回归（2026-10-19 审计 P1-24；2026-10-23 owner 改为进页面自动查询）。
  *
- * 缺陷：`searched = ref(true)` 门槛恒真（挂载即查、切 tab 即查），
- * 且 reactive `filters` 直接放进 queryKey——子组件（ReportFilterBar 经
+ * 缺陷：reactive `filters` 直接放进 queryKey——子组件（ReportFilterBar 经
  * defineModel）就地 mutate filters 对象，用户在筛选框每敲一个字符
- * queryKey 就变一次 → 每键触发一次后端查询。「查询」按钮形同虚设。
+ * queryKey 就变一次 → 每键触发一次后端查询。
  *
  * 修复（照仓内既有模式：useDebouncedSearch 统一防抖 composable +
- * PurchasePlanView 的「防抖快照」口径）：
- *   - searched 初始 false，提交（显式点查询 / 300ms 防抖静默）后才 true；
- *   - queryKey 改用「已提交」的筛选快照 appliedFilters，而非 reactive 原对象。
+ * PurchasePlanView 的「防抖快照」口径）：queryKey 改用「已提交」的筛选快照
+ * appliedFilters，而非 reactive 原对象。
+ *
+ * 2026-10-23：owner 要求进路由即见流水数据，故移除 P1-24 的 searched 查询门槛
+ * （挂载即查）。防抖快照仍在——挂载只发一次，不存在逐键请求。
  *
  * 注意：用真实定时器而非 fake timers——@tanstack/query-core 的调度在
  * fake timers 下会被冻结，挂载请求根本发不出，会制造「未请求」假绿。
@@ -74,7 +75,6 @@ const FilterBarStub = defineComponent({
   props: {
     filters: { type: Object, required: true },
     customerOptions: { type: Array, default: () => [] },
-    searched: { type: Boolean, default: false },
   },
   emits: ['update:filters', 'search', 'reset', 'export'],
   template: `
@@ -82,7 +82,7 @@ const FilterBarStub = defineComponent({
       <input class="f-product" :value="filters.product" @input="filters.product = $event.target.value" />
       <button class="f-search" @click="$emit('search')">查询</button>
       <button class="f-reset" @click="$emit('reset')">重置</button>
-      <button v-if="searched" class="f-export" @click="$emit('export')">导出</button>
+      <button class="f-export" @click="$emit('export')">导出</button>
     </div>
   `,
 })
@@ -92,7 +92,6 @@ const TableStub = defineComponent({
   name: 'TableStub',
   props: {
     logs: { type: Array, default: () => [] },
-    searched: { type: Boolean, default: false },
     pagination: { type: Object, default: undefined },
   },
   emits: ['page'],
@@ -123,21 +122,32 @@ function mountView() {
   })
 }
 
-describe('ReportView — 筛选防抖与提交门槛（P1-24）', () => {
+/**
+ * 挂载并消费首屏自动查询，再清空调用记录——后续用例只计
+ * 「防抖 / 显式提交」触发的请求，首屏那次由专门的用例锁定。
+ */
+async function mountSettled() {
+  const wrapper = mountView()
+  await flushPromises()
+  mocks.orderLogs.mockClear()
+  return wrapper
+}
+
+describe('ReportView — 筛选防抖与提交语义', () => {
   beforeEach(() => {
     mocks.orderLogs.mockReset()
     mocks.orderLogs.mockResolvedValue({ logs: [], pagination: { pages: 3, total: 40 } })
   })
 
-  it('进入页面不发请求：查询门槛初始关闭（enabled=false）', async () => {
+  it('进入页面自动查询一次（不需要先点「查询」）', async () => {
     mountView()
     await flushPromises()
-    expect(mocks.orderLogs).not.toHaveBeenCalled()
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
+    expect(mocks.orderLogs).toHaveBeenCalledWith({ page: 1, per_page: 15 })
   })
 
   it('连续键入三个字符：防抖窗口内零请求，停顿 300ms 后只发 1 次（不逐键请求）', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     const input = wrapper.find('.f-product')
     await input.setValue('保')
@@ -154,8 +164,7 @@ describe('ReportView — 筛选防抖与提交门槛（P1-24）', () => {
   })
 
   it('键入中途继续打字：防抖窗口重置，只应用最终输入', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温')
     await sleep(150) // 未停满 300ms
@@ -171,8 +180,7 @@ describe('ReportView — 筛选防抖与提交门槛（P1-24）', () => {
   })
 
   it('点「查询」立即提交（不等防抖），且之后防抖到期不重复请求', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click')
@@ -187,8 +195,7 @@ describe('ReportView — 筛选防抖与提交门槛（P1-24）', () => {
   })
 
   it('提交后翻到第 2 页，再改筛选并防抖提交：回到第 1 页（新筛选从第一页看起）', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click')
@@ -207,9 +214,8 @@ describe('ReportView — 筛选防抖与提交门槛（P1-24）', () => {
     expect(mocks.orderLogs).toHaveBeenLastCalledWith({ page: 1, per_page: 15, product: '杯' })
   })
 
-  it('重置：清空筛选并回到第 1 页', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+  it('重置：清空筛选并回到第 1 页（命中首屏缓存时不重复请求）', async () => {
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click')
@@ -218,17 +224,14 @@ describe('ReportView — 筛选防抖与提交门槛（P1-24）', () => {
 
     await wrapper.find('.f-reset').trigger('click')
     await flushPromises()
-    expect(mocks.orderLogs).toHaveBeenLastCalledWith({ page: 1, per_page: 15 })
+    // 空筛选 key 在进页面自动查询时已取过数且仍在 staleTime 内 → 直接复用，不再发请求
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
+    expect((wrapper.vm as unknown as { page: number }).page).toBe(1)
   })
 
-  it('导出按钮跟随查询门槛：未提交不渲染，提交后出现', async () => {
-    const wrapper = mountView()
-    await flushPromises()
-    expect(wrapper.find('.f-export').exists()).toBe(false)
+  it('导出按钮常驻：进页面即可导出（不再依赖查询门槛）', async () => {
+    const wrapper = await mountSettled()
 
-    await wrapper.find('.f-product').setValue('保温杯')
-    await wrapper.find('.f-search').trigger('click')
-    await flushPromises()
     expect(wrapper.find('.f-export').exists()).toBe(true)
   })
 })
@@ -239,8 +242,7 @@ describe('ReportView — OCR-3 修复（防抖回跳 M5 / 查询空操作 M6）'
   })
 
   it('M5: 显式提交后 300ms 内翻页：挂起的防抖到期不得把页码打回第 1 页', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click') // 显式提交：page=1，立即请求
@@ -261,8 +263,7 @@ describe('ReportView — OCR-3 修复（防抖回跳 M5 / 查询空操作 M6）'
   })
 
   it('M6: 条件与页码都未变时重复点「查询」：必须真的再发一次请求', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click')
@@ -290,8 +291,7 @@ describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一�
   })
 
   it('M:223: 第 2 页 + 条件未变时点「查询」：必须真的再发一次请求（不许静默吃缓存）', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click')
@@ -314,8 +314,7 @@ describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一�
   })
 
   it('Low:247: 草稿与已提交快照不一致时点「导出」：导出口径必须等于输入框当前所见', async () => {
-    const wrapper = mountView()
-    await flushPromises()
+    const wrapper = await mountSettled()
 
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click') // 提交「保温杯」

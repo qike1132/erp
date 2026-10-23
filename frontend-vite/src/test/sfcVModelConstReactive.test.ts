@@ -126,7 +126,7 @@ describe('单向 :prop 绑定的运行期等价性', () => {
   it('ReportFilterBar 无 update:filters 监听时，嵌套写仍落到父侧 reactive', async () => {
     const filters = reactive({ customer: '', product: '' })
     const wrapper = mount(ReportFilterBar, {
-      props: { filters, customerOptions: [], searched: false },
+      props: { filters, customerOptions: [] },
       global: { stubs: { FontAwesomeIcon: true } },
     })
     // 走 UiInput 那条（v-model="filters.product"）；UiSelect 的 onInput 只更新组件内的

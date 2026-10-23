@@ -97,7 +97,6 @@ const FilterBarStub = defineComponent({
   props: {
     filters: { type: Object, required: true },
     customerOptions: { type: Array, default: () => [] },
-    searched: { type: Boolean, default: false },
   },
   emits: ['update:filters', 'search', 'reset', 'export'],
   template: `
@@ -113,7 +112,6 @@ const TableStub = defineComponent({
   name: 'TableStub',
   props: {
     logs: { type: Array, default: () => [] },
-    searched: { type: Boolean, default: false },
   },
   template: `<div class="table-stub" />`,
 })
@@ -256,31 +254,32 @@ describe('ReportView — R40 错误反馈单通道（queryFn 零 toast，error �
     )
     const wrapper = mountView()
     await flushPromises()
-    expect(mocks.orderLogs).not.toHaveBeenCalled() // 前置：查询门槛初始关闭（P1-24）
+    // 进页面自动查询（2026-10-23）：首屏请求在途且永不 resolve，作为背景请求
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
 
     // 查询 A（在途）：提交筛选「保温杯」
     await wrapper.find('.f-product').setValue('保温杯')
     await wrapper.find('.f-search').trigger('click')
     await flushPromises()
-    expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(2)
     expect(mocks.orderLogs).toHaveBeenLastCalledWith(expect.objectContaining({ product: '保温杯' }))
 
     // 查询 B：改筛选「马甲」重搜——queryKey 变化只重新定位 observer，A 继续在途不被取消
     await wrapper.find('.f-product').setValue('马甲')
     await wrapper.find('.f-search').trigger('click')
     await flushPromises()
-    expect(mocks.orderLogs).toHaveBeenCalledTimes(2)
+    expect(mocks.orderLogs).toHaveBeenCalledTimes(3)
     expect(mocks.orderLogs).toHaveBeenLastCalledWith(expect.objectContaining({ product: '马甲' }))
 
     // 被放弃的 A 稍后失败：零 toast（错误归旧 query 的 error，不进当前 observer 横幅）
-    rejecters[0]!(new Error('查询A失败'))
+    rejecters[1]!(new Error('查询A失败'))
     await flushPromises()
     await flushPromises()
     expect(showToast).not.toHaveBeenCalled()
 
     // 当前的 B 失败：同样零 toast（R40 单通道），error 正常上抛 → 横幅渲染 B 的错误
     // （Red：旧代码 queryFn catch 内就地 toast「查询B失败」）
-    rejecters[1]!(new Error('查询B失败'))
+    rejecters[2]!(new Error('查询B失败'))
     await flushPromises()
     await flushPromises()
     expect(showToast).not.toHaveBeenCalled()
