@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services import stock_common, stock_out_service, stock_service
+from fastapi_app.shared_models import StockOut
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +94,10 @@ class TestBatchCreateStockoutsNormal:
         assert product.current_stock == 90
         # 验证 db.add 被调用（StockOut + InventoryLog）
         assert mock_db.add.call_count >= 2
+        # 端到端接线：StockOut 收到的是 aware datetime（不是原始字符串）
+        stockout_rows = [call.args[0] for call in mock_db.add.call_args_list
+                         if call.args and isinstance(call.args[0], StockOut)]
+        assert stockout_rows and stockout_rows[0].stockout_date.tzinfo is not None
         # 验证 flush 被调用
         mock_db.flush.assert_awaited()
 
@@ -163,29 +168,58 @@ class TestBatchCreateStockoutsInsufficientStock:
     async def test_insufficient_stock(self, mock_db):
         """库存不足，出库失败（2026-10-06 校准：准入为客户+产品订单口径，负库存由写入守卫拒绝）"""
         product = _make_product(current_stock=5)
-        shipment_info = _make_shipment_info(available_quantity=10, order_quantity=10, shipped_quantity=0, orders=[])
+        # 非空 orders：修复前会先建 StockOut 行，修复后扣减失败时不得写任何行（P0-1 回归锁）
+        shipment_info = _make_shipment_info(available_quantity=10, order_quantity=10, shipped_quantity=0, orders=[
+            {'order_id': 1, 'available': 10, 'quantity': 10},
+        ])
 
         with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
              patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
+             patch('fastapi_app.services.stock_service.generate_stockout_number', new_callable=AsyncMock, return_value='SO-20260603-0001'), \
              patch('fastapi_app.services.stock_out_service.apply_stock_delta_locked', side_effect=ValueError('库存不足！当前库存: 5，需要: 10')):
             result = await stock_service.batch_create_stockouts(mock_db, [_make_stockout_data(quantity=10)])
 
         assert result['results'][0]['success'] is False
         assert '库存不足' in result['results'][0]['error']
         assert '5' in result['results'][0]['error']
+        # P0-1 回归锁：扣减失败时不得留下任何 StockOut / InventoryLog 行（幽灵出货行）
+        mock_db.add.assert_not_called()
 
     async def test_zero_stock(self, mock_db):
         """零库存出库：客户+产品订单口径准入通过后，由写入守卫拒绝"""
         product = _make_product(current_stock=0)
-        shipment_info = _make_shipment_info(available_quantity=10, order_quantity=10, shipped_quantity=0, orders=[])
+        shipment_info = _make_shipment_info(available_quantity=10, order_quantity=10, shipped_quantity=0, orders=[
+            {'order_id': 1, 'available': 10, 'quantity': 10},
+        ])
 
         with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
              patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
+             patch('fastapi_app.services.stock_service.generate_stockout_number', new_callable=AsyncMock, return_value='SO-20260603-0002'), \
              patch('fastapi_app.services.stock_out_service.apply_stock_delta_locked', side_effect=ValueError('库存不足！当前库存: 0，需要: 1')):
             result = await stock_service.batch_create_stockouts(mock_db, [_make_stockout_data(quantity=1)])
 
         assert result['results'][0]['success'] is False
         assert '库存不足' in result['results'][0]['error']
+        mock_db.add.assert_not_called()
+
+    async def test_invalid_stockout_date_does_not_deduct(self, mock_db):
+        """非法出货日期必须在扣减库存之前失败：不得产生任何库存副作用。"""
+        product = _make_product(current_stock=100)
+        shipment_info = _make_shipment_info(available_quantity=10, order_quantity=10, shipped_quantity=0, orders=[
+            {'order_id': 1, 'available': 10, 'quantity': 10},
+        ])
+        item = _make_stockout_data(quantity=5)
+        item['stockout_date'] = '2026/10/01'  # 非 YYYY-MM-DD
+
+        with patch('fastapi_app.services.stock_service.get_product_for_update', new_callable=AsyncMock, return_value=product), \
+             patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
+             patch('fastapi_app.services.stock_out_service.apply_stock_delta_locked', new_callable=AsyncMock) as deduct:
+            result = await stock_service.batch_create_stockouts(mock_db, [item])
+
+        assert result['results'][0]['success'] is False
+        assert '日期格式不正确' in result['results'][0]['error']
+        deduct.assert_not_awaited()
+        mock_db.add.assert_not_called()
 
 
 # ==================== 订单数量异常 ====================
@@ -491,9 +525,10 @@ class TestBatchStockoutDateTimezone:
             AsyncMock(return_value='SO-20261001-0001'),
         )
 
+        resolved = stock_out_service._resolve_stockout_datetime('2026-10-01')
         created = await stock_out_service._create_stockout_records(
             mock_db, product_id=1, customer='客户A', note='',
-            stockout_date_str='2026-10-01', quantity=5,
+            stockout_date=resolved, quantity=5,
             orders=[{'order_id': 1, 'available': 5}],
         )
 

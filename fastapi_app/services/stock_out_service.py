@@ -375,7 +375,7 @@ def _resolve_stockout_datetime(date_str: str) -> datetime:
 
 
 async def _create_stockout_records(db: AsyncSession, product_id: int, customer: str,
-                                   note: str, stockout_date_str: str, quantity: int,
+                                   note: str, stockout_date: datetime, quantity: int,
                                    orders: list, batch_no: str | None = None) -> list[StockOut]:
     """按 FIFO 分配订单，创建出库记录。
 
@@ -393,7 +393,7 @@ async def _create_stockout_records(db: AsyncSession, product_id: int, customer: 
         stockout_no = await stock_service.generate_stockout_number(db)
         stockout = StockOut(
             stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
-            stockout_date=(_resolve_stockout_datetime(stockout_date_str) if stockout_date_str else datetime.now(UTC)),
+            stockout_date=stockout_date,
             customer=customer, order_id=order_detail['order_id'], note=note,
             batch_no=batch_no or None,
         )
@@ -447,15 +447,20 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
         if quantity > shipment_info['available_quantity']:
             return {'success': False, 'error': f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，已出货：{shipment_info['shipped_quantity']}，可出货：{shipment_info['available_quantity']}", 'id': item_id}
 
-        created_stockouts = await _create_stockout_records(db, product_id, customer, note, stockout_date_str, quantity, shipment_info['orders'], batch_no=batch_no or None)
-        # 上面已 get_product_for_update 持行锁：走统一写入口的持锁单次路径
-        # （不开 savepoint —— 批量路径的既有不变式是"自包含、无嵌套事务"）。
-        # apply_stock_delta_locked 自带原子负库存守卫，写时仍受保护。
+        # 日期解析必须放在扣减之前：非法日期会抛 ValueError，被本函数外层 except
+        # 转成逐条失败而不回滚；若此时库存已扣，就会静默丢库存（审核 High）。
+        resolved_stockout_date = (
+            _resolve_stockout_datetime(stockout_date_str) if stockout_date_str else datetime.now(UTC)
+        )
+        # 先扣库存再建出货行：扣减被负库存守卫拒绝时（ValueError）此时尚未写入任何
+        # stock_out 行，失败分支直接 return 不会留下幽灵出货行（P0-1）。
+        # 建行/写流水若抛 DB 异常则向上冒泡，外层事务整体回滚，同样不会半写。
         try:
             updated = await apply_stock_delta_locked(db, product, -quantity)
         except ValueError as stock_denied:
             # 与历史「库存不足，当前库存: X」同形态返回，避免前端单条错误解析变化
             return {'success': False, 'error': str(stock_denied), 'id': item_id}
+        created_stockouts = await _create_stockout_records(db, product_id, customer, note, resolved_stockout_date, quantity, shipment_info['orders'], batch_no=batch_no or None)
         before, after = inventory_balance_bounds(updated.current_stock, -quantity)
         stock_service.log_inventory_change(db, product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(stockout.id) for stockout in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
         await db.flush()
