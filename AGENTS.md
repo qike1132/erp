@@ -121,6 +121,7 @@ npm run check:types               # 类型对齐
 6. **重启后端 = 把「工作区当前签出的代码」跑进生产。**`erp-prod` 是 `python -m fastapi_app.core.prod_runner --no-arq`，**直接吃 `D:\erp_system` 工作区的源码**，不是打包产物也不是固定 commit——**工作区不在 main 时重启，就把那条分支的代码跑进了生产**（2026-10-14：工作区在 `claude/mystifying-*` 分支期间重启了后端，生产 API 08:26–09:43 一直返回旧字段 `order_nos`/日期-only，而前端已是新版 → 页面「订单号」整列空白、跨行合并不生效；前端新+后端旧这种"半坏"状态最容易只往前端查）。重启前先 `git rev-parse --abbrev-ref HEAD` 确认在 main；重启后核实**到底加载了哪份代码**——**主判据是字段指纹**：`grep` `fastapi_app/**/__pycache__/*.pyc` 里的字段名（如 `order_no` vs `order_nos`）即可判定新旧。**pyc 的 mtime 只能说明「导入不早于该时刻」**（CPython 只在源码比 pyc 新时才重编译，同一份代码重复导入**不会**刷新它——实测两次导入 mtime 不变、改源码后才变），它给的是「这份代码被编译的时刻」，不是「本次进程的导入时刻」；`prod_runner.json` 的 `started_at` 会骗人，别信（§6.1-7 同理）。
 7. **验证过"真的做了"吗？**NSSM 非提权调用**静默失败且退出码仍 0**；重启是否生效只看 PID CreationDate，不看命令回显。
 8. **结论记档**：按 §8 回写。
+9. **改到一半的后端代码别留着过夜/别在这期间重启。**第 6 条管「工作区在别的分支」，本条管**同一分支内未提交的半改代码**——`erp-prod` 吃的是 `D:\erp_system` 工作区源码，**未提交改动同样会跑进生产**。实例（2026-10-22 05:47）：`94194d2d` 的 `purchase_order_revoke.py`（改成 `from fastapi_app.services.order_utils import compute_order_statuses_batch`）已在工作区，而同提交里的 `order_utils.py`（新增该函数）尚未就位 → 后端重启后 `ORDER_DELETED` 处理器每次删除订单都 `ImportError`，**连崩 8 次**（日志 `ORDER_DELETED 处理失败 ... cannot import name`）→ 该订单的 pending 采购单没被撤销 → 客户订单 10-22 已删，采购中心 `/purchase` 仍挂着 `PO-20261010-0001`。**比第 6 条更阴**：接口不报错、页面不提示，只是该联动的清理静默没发生，直到用户发现"我没有这订单"才暴露。判据：**后端重启后先 `grep` 一遍日志里的 `处理失败` / `ImportError`**；半改代码跨文件（一个文件改了 import、提供者还没改）时，**两个文件一起提交或一起回退，别只提交一半**。
 
 ### 6.2 分析方法与历史踩坑（外置）
 
