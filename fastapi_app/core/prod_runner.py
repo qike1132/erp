@@ -825,6 +825,22 @@ def main(argv: list[str] | None = None) -> int:
     if "--check" in argv:
         return check(api_port, workers)
 
+    # 分支闸门（P2-101）：NSSM 崩溃自愈直接重启本进程、不经过 server_manager，
+    # 若工作区不在 main，会把分支代码跑进生产（AGENTS §6.1-6 事故）。
+    # git 不可用/非 git 目录时 guard 自身 fail-open 并留痕；导入失败也不阻断启动。
+    try:
+        from server_manager.git_guard import check_production_branch, is_warning
+        allowed, gate_message = check_production_branch()
+        if not allowed:
+            print(f'[prod_runner] 生产启动被分支闸门拒绝：{gate_message}', file=sys.stderr)
+            return 3
+        if is_warning(gate_message):
+            print(f'[prod_runner] {gate_message}')
+        else:
+            print(f'[prod_runner] {gate_message}')
+    except Exception as gate_err:  # broad-except: 闸门不可用不得打死生产启动
+        print(f'[prod_runner] 分支闸门不可用，已放行：{gate_err}', file=sys.stderr)
+
     with_arq = should_start_internal_arq(argv, os.environ)
     sup = Supervisor(workers, api_port, web_port, with_arq=with_arq)
     _install_signal_handlers(sup)
