@@ -207,14 +207,21 @@ function _dedupeKey(url: string, params?: Record<string, unknown>): string {
 export function get<T>(
   url: string,
   params?: Record<string, unknown>,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; routeCancel?: boolean },
 ): Promise<T> {
   const key = _dedupeKey(url, params)
   const existing = _inflightGet.get(key)
   if (existing) return existing as Promise<T>
   // 读接口快速失败：单次请求（axios 15s 超时即抛错），不做网络重试。
   // 叠加重试会让 UI 的"加载中"最长挂约 48s；失败后由前端错误态 + 重试按钮兜底。
-  const controller = createTrackedController()
+  const routeCancel = options?.routeCancel !== false
+  // routeCancel=false：请求归「长生命周期缓存/单飞」所有（Vue Query 查询、store 预取），
+  // 不属于任何路由。这类请求若被 abortPendingRequests() 取消，_silenceCanceled 会把取消
+  // 变成永不 settle 的 Promise → 查询永久停在 fetching、单飞表残留死条目，用户侧表现是
+  // 「页面一直加载中且刷新无法自愈」（2026-10-22 登录后仪表盘/板房无数据事故）。
+  // 故不注册到 _pendingControllers，但**仍保留 GET 去重**——这正是逐端点绕开
+  // service.get() 会丢掉的东西。
+  const controller = routeCancel ? createTrackedController() : new AbortController()
   if (options?.signal) {
     if (options.signal.aborted) controller.abort()
     else options.signal.addEventListener('abort', () => controller.abort(), { once: true })
@@ -226,7 +233,7 @@ export function get<T>(
   // 必须 catch 这个派生 Promise，否则每次失败 GET 都会产生一次未处理的 Promise 拒绝（Uncaught (in promise) AxiosError）
   raw.finally(() => {
     _inflightGet.delete(key)
-    _pendingControllers.delete(controller)
+    if (routeCancel) _pendingControllers.delete(controller)
   }).catch(() => { /* 错误已由调用方处理 */ })
   return p
 }

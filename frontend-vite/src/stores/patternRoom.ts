@@ -192,7 +192,11 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
     if (status) params.status = status
     if (page) params.page = page
 
-    const p = patternRoomApi.getGroupedList(params)
+    // routeCancel: false —— fetchGrouped 的结果归 store 缓存与单飞表所有，不属于
+    // 任何路由。登录预取后紧跟 router.push，若参与路由取消，_silenceCanceled 会让
+    // 这个 Promise 永不 settle：下面 .finally 永不执行 → _inflightGrouped 残留死
+    // 条目 → 之后进 /pattern-room 复用同一死 Promise，页面永久停在「加载中」。
+    const p = patternRoomApi.getGroupedList(params, { routeCancel: false })
       .then((res) => {
         groupedCache = { ...groupedCache, [key]: { data: res, loadedAt: Date.now() } }
         persist()

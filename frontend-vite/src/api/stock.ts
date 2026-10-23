@@ -1,9 +1,9 @@
-import service, { get, post, put, del, upload, download } from './request'
+import { get, post, put, del, upload, download } from './request'
 import type {
   Product, StagingListResponse, StagingRow, StagingImportResult,
   InventoryResponse, StockInRecord, ShipmentInfo, ApiResponse, QueryParams,
 } from '@/types'
-import type { StockStatsData } from '@/types/api'
+import type { StockStatsData, StockStatsResponse } from '@/types/api'
 
 /**
  * `/aux/batch-submit-orders` / `-stockins` / `-stockouts` 的批量提交响应。
@@ -61,10 +61,14 @@ export interface StockFlowRecord {
 
 export const stockApi = {
   stats: async (): Promise<StockStatsData> => {
-    // 同 dashboardApi.stats：该请求归 Vue Query 缓存所有，不能被路由级取消
+    // 同 dashboardApi.stats：该请求归 Vue Query 缓存所有，不能参与路由级取消
     // （取消会让查询永久卡在 fetching，首次登录仪表盘因此无数据）。
-    const resp = await service.get<unknown, { success?: boolean; data?: StockStatsData }>('/stock/stats')
-    return resp.data ?? (resp as StockStatsData)
+    const resp = await get<StockStatsResponse>('/stock/stats', undefined, { routeCancel: false })
+    // 信封异常必须显式失败：此前 `resp.data ?? (resp as StockStatsData)` 会把整个
+    // 信封对象当数据返回，order_quantity/stockin_quantity 全为 undefined，
+    // 仪表盘静默渲染坏值（与 useDashboardStats.fetchStats 的口径对齐）。
+    if (!resp?.data) throw new Error('API 返回数据格式异常：data 字段缺失')
+    return resp.data
   },
   stockins: (params?: QueryParams) => get<StockInRecord[]>('/stock/in/list', params),
   inventory: (params?: QueryParams) => get<InventoryResponse>('/stock/inventory', params),

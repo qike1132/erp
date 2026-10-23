@@ -57,7 +57,12 @@ export function useEnhancedList<T>(opts: Options) {
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: qk,
-    queryFn: async () => { const r = await get<PaginatedResponse<T>>(url, qp.value); total.value = r.total ?? 0; return r },
+    // routeCancel: false —— 查询请求归 Vue Query 缓存所有，不属于任何路由。
+    // 默认参与路由取消时，请求在途中切走页面会被 abort，而 _silenceCanceled 把取消
+    // 变成永不 settle 的 Promise → 该 queryKey 永久停在 fetchStatus='fetching'，
+    // 用户再切回来时 useQuery 不复用/不重取，页面永远显示「加载中」且刷新也救不回
+    // （2026-10-22 登录后仪表盘无数据是同源事故，这里覆盖全部列表页）。
+    queryFn: async () => { const r = await get<PaginatedResponse<T>>(url, qp.value, { routeCancel: false }); total.value = r.total ?? 0; return r },
     staleTime,
     placeholderData: (prev) => prev,
   })
@@ -69,7 +74,7 @@ export function useEnhancedList<T>(opts: Options) {
       if (np * perPage.value < total.value + perPage.value) {
         qc.prefetchQuery({
           queryKey: [key, np, perPage.value, dSearch.value, sortBy.value, sortOrder.value, undefined, extraParams?.() ?? {}],
-          queryFn: () => get<PaginatedResponse<T>>(url, { ...qp.value, page: np, keyset_cursor: undefined }),
+          queryFn: () => get<PaginatedResponse<T>>(url, { ...qp.value, page: np, keyset_cursor: undefined }, { routeCancel: false }),
           staleTime,
         })
       }

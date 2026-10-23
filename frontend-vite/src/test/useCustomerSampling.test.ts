@@ -55,7 +55,12 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     await hook.loadGrouped()
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ per_page: 20 })
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith(
+      { per_page: 20 },
+      // 分组列表请求归 store 缓存所有，不参与路由取消（否则单飞表会残留
+      // 永不 settle 的死 Promise，进 /pattern-room 后永久停在加载中）
+      { routeCancel: false },
+    )
     expect(hook.groups.value).toHaveLength(1)
     expect(hook.groups.value[0]!.pattern_maker_name).toBe('版师A')
     expect(hook.totalProjects.value).toBe(2)
@@ -69,7 +74,7 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     await hook.loadGrouped('毛绒玩具')
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ keyword: '毛绒玩具', per_page: 20 })
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ keyword: '毛绒玩具', per_page: 20 }, { routeCancel: false })
   })
 
   it('loadGrouped 空白 keyword：不传递参数', async () => {
@@ -78,7 +83,7 @@ describe('useCustomerSampling', () => {
     const hook = useCustomerSampling()
     await hook.loadGrouped('   ')
 
-    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ per_page: 20 })
+    expect(patternRoomApi.getGroupedList).toHaveBeenCalledWith({ per_page: 20 }, { routeCancel: false })
   })
 
   it('loadGrouped 失败：设置 error 并清空数据', async () => {

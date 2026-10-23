@@ -46,6 +46,8 @@ export function useVirtualScrollList<T>(opts: Options) {
     fetchNextPage,
   } = useInfiniteQuery({
     queryKey: qk,
+    // routeCancel: false —— 同 useEnhancedList：无限查询的请求归 Vue Query 所有，
+    // 被路由取消会让该 queryKey 永久停在 fetching，滚回本页时永远「加载中」。
     queryFn: async ({ pageParam }) => {
       const r = await get<PaginatedResponse<T>>(url, {
         page: pageParam,
@@ -54,7 +56,7 @@ export function useVirtualScrollList<T>(opts: Options) {
         sort_by: sortBy.value || undefined,
         sort_order: sortOrder.value || undefined,
         ...extraParams?.(),
-      })
+      }, { routeCancel: false })
       return r
     },
     initialPageParam: 1,

@@ -228,8 +228,17 @@ export interface ChangeLogListParams {
  */
 export const patternRoomApi = {
   // ---------- 1. 按客户分组聚合查询 ----------
-  getGroupedList: (params?: GroupedListParams) =>
-    get<GroupedListResponse>('/pattern-room/grouped-list', params as Record<string, unknown>),
+  // routeCancel: false —— 登录预取（patternRoomStore.prefetch）会调用它，随后紧跟
+  // router.push。默认参与路由取消会让 store 的单飞表 _inflightGrouped 残留一个
+  // 永不 settle 的死 Promise（.finally 永不执行），用户之后进 /pattern-room
+  // 复用到同一个死 Promise，页面永久停在「加载中」且刷新无法自愈。
+  // store 的缓存读取（getGroupedSnapshot）另走 get 的其他调用点，保持可取消。
+  getGroupedList: (params?: GroupedListParams, opts?: { routeCancel?: boolean }) =>
+    get<GroupedListResponse>(
+      '/pattern-room/grouped-list',
+      params as Record<string, unknown>,
+      { routeCancel: opts?.routeCancel },
+    ),
 
   // ---------- 2. 打样项目列表 ----------
   listProjects: (params?: ProjectListParams) =>

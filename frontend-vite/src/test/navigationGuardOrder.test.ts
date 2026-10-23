@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { CanceledError } from 'axios'
 import { installNavigationGuards } from '@/router/guards'
-import { abortPendingRequests, createTrackedController, default as service } from '@/api/request'
+import { abortPendingRequests, createTrackedController, get as requestGet, default as service } from '@/api/request'
 import { dashboardApi } from '@/api/dashboard'
 import type { NavAccessStore } from '@/router/navAccess'
 
@@ -97,5 +97,41 @@ describe('导航数据请求生命周期', () => {
     // 被 abort 的 tracked GET 会被 _silenceCanceled 变成永不 settle 的 Promise，
     // 导航数据将永远填不上（登录后侧边栏空白）。
     expect(settled).toBe('resolved')
+  })
+})
+
+describe('routeCancel 选项契约', () => {
+  it('routeCancel: false 的请求不注册到待取消集合，abortPendingRequests 不影响它', async () => {
+    const spy = vi.spyOn(service, 'get').mockImplementation(((_url: string) => {
+      return new Promise<unknown>((resolve) => setTimeout(() => resolve({ ok: true }), 30))
+    }) as typeof service.get)
+
+    const tracked = createTrackedController()
+    const pending = requestGet<{ ok: boolean }>('/untracked', undefined, { routeCancel: false })
+    await new Promise((r) => setTimeout(r, 0))
+
+    abortPendingRequests()
+
+    expect(tracked.signal.aborted).toBe(true)   // 守卫仍取消普通请求
+    const settled = await Promise.race([
+      pending.then(() => 'settled'),
+      new Promise((r) => setTimeout(() => r('stuck'), 300)),
+    ])
+    spy.mockRestore()
+
+    expect(settled).toBe('settled')
+  })
+
+  it('routeCancel: false 仍保留 GET 去重（这是逐端点绕开 service.get 会丢的东西）', async () => {
+    const s = vi.spyOn(service, 'get').mockImplementation(((_url: string) => {
+      return new Promise<unknown>((resolve) => setTimeout(() => resolve({ ok: true }), 20))
+    }) as typeof service.get)
+
+    const a = requestGet<{ ok: boolean }>('/deduped', undefined, { routeCancel: false })
+    const b = requestGet<{ ok: boolean }>('/deduped', undefined, { routeCancel: false })
+    expect(a).toBe(b)          // 同一 Promise → 只发一次请求
+    await Promise.all([a, b])
+    expect(s).toHaveBeenCalledTimes(1)
+    s.mockRestore()
   })
 })
