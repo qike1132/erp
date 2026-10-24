@@ -69,9 +69,9 @@ def _ensure_row_action_permission(user: User, *, is_deduction: bool, action: str
 async def list_stockins(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=500, description='每页数量'),
-    customer: str | None = Query(None, description='客户'),
-    start_date: str | None = Query(None, description='开始日期'),
-    end_date: str | None = Query(None, description='结束日期'),
+    customer: str | None = Query(None, max_length=100, description='客户'),
+    start_date: str | None = Query(None, max_length=10, description='开始日期'),
+    end_date: str | None = Query(None, max_length=10, description='结束日期'),
     db: AsyncSession = Depends(get_async_read_db),
     # 备货写路径（/in/list|create|edit|delete）与 /aux/batch-submit-stockins、
     # /aux/stockin/{id} 同口径：备货是「客户订单」页录入流程的一环，
@@ -212,9 +212,9 @@ async def delete_stockin(
 async def list_stockouts(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=500, description='每页数量'),
-    customer: str | None = Query(None, description='客户'),
-    start_date: str | None = Query(None, description='开始日期'),
-    end_date: str | None = Query(None, description='结束日期'),
+    customer: str | None = Query(None, max_length=100, description='客户'),
+    start_date: str | None = Query(None, max_length=10, description='开始日期'),
+    end_date: str | None = Query(None, max_length=10, description='结束日期'),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('stockout_manage')),
 ) -> StockListResponse:

@@ -728,6 +728,15 @@ async def validate_backup_integrity(
 
                 # 尝试读取文件
                 try:
+                    # B2-06（2026-10-24 审计）：与 GET /validate 的单文件上限对称——
+                    # 超大备份整读进内存会让巡检打挂 worker（超限记 skipped）。
+                    if filepath.stat().st_size > backup_service.MAX_BACKUP_FILE_SIZE:
+                        details.append({
+                            'filename': filepath.name,
+                            'status': 'skipped',
+                            'message': f'文件超过单文件上限（{backup_service.MAX_BACKUP_FILE_SIZE // (1024 * 1024)}MB），跳过深度验证',
+                        })
+                        continue
                     content = await asyncio.to_thread(filepath.read_bytes)
 
                     # 检查是否为加密文件

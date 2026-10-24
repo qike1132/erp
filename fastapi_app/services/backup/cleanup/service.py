@@ -20,7 +20,7 @@ import psutil
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.services.backup._constants import BACKUP_DIR, retention_days
+from fastapi_app.services.backup._constants import BACKUP_DIR, retention_count, retention_days
 from fastapi_app.services.backup.metrics.alert_service import alert_service
 from fastapi_app.services.backup.records import _delete_backup_sidecars
 from fastapi_app.shared_models.backup_record import BackupRecord
@@ -88,6 +88,7 @@ class BackupCleanupService:
             files_to_delete = {f['name'] for f in backup_files if f['name'] not in files_to_keep}
             files_to_delete = self._enforce_keep_floor(backup_files, files_to_delete)
             files_to_keep = {f['name'] for f in backup_files} - files_to_delete
+            files_to_delete = self._enforce_count_ceiling(backup_files, files_to_keep)
 
             cleanup_result = await self._execute_cleanup(files_to_delete)
             report = await self._generate_cleanup_report(
@@ -144,6 +145,33 @@ class BackupCleanupService:
         except OSError as e:
             logger.error('获取备份文件信息失败: %s', e)
             return []
+
+    def _enforce_count_ceiling(self, backup_files: list[dict[str, Any]],
+                               files_to_keep: set[str]) -> set[str]:
+        """B2-05（2026-10-24 审计）：count/hybrid 策略的份数上限落地。
+
+        BACKUP_RETENTION_COUNT 此前是死配置（policy_service 声称「外部会处理
+        计数」而外部处理从未存在）——保留份数无上限，备份可吃满磁盘。此处按
+        mtime 倒序保留最新 retention_count 份，超额部分进删除集。
+        """
+        from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
+
+        policy = BackupPolicyService()._load_policy_config()
+        strategy = policy.get('strategy', 'days')
+        if strategy not in ('count', 'hybrid'):
+            return files_to_keep
+        ceiling = retention_count()
+        if ceiling <= 0 or len(backup_files) <= ceiling:
+            return files_to_keep
+        # mtime 倒序（backup_files 已按 mtime 倒序，防御式再排一次）
+        ordered = sorted(backup_files, key=lambda f: f['mtime'], reverse=True)
+        over_quota = [f['name'] for f in ordered[ceiling:]]
+        # 只把「本会话打算保留」的超额者转为删除——已被天数判定删除的不重复处理
+        excess = {name for name in over_quota if name in files_to_keep}
+        if not excess:
+            return files_to_keep
+        logger.info('count 策略份数截断：保留最新 %d 份，超额删除 %d 份', ceiling, len(excess))
+        return files_to_keep - excess
 
     def _enforce_keep_floor(self, backup_files: list[dict[str, Any]],
                             files_to_delete: set[str]) -> set[str]:

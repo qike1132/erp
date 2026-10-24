@@ -96,7 +96,9 @@ def create_pre_restore_backup(
     out_dir = out_dir or PRE_RESTORE_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    out = out_dir / f'restore_pre_{stamp}.dump'
+    # B2-04（2026-10-24 审计）：统一为 pre_restore_ 前缀——web 侧清理
+    # （records.py cleanup_pre_restore_backups）只认该前缀，原名会无限累积明文整库 dump。
+    out = out_dir / f'pre_restore_{stamp}.dump'
     try:
         result = subprocess.run(
             ['pg_dump', '-h', config['host'], '-p', config['port'], '-U', config['user'],
@@ -144,6 +146,19 @@ def drop_and_recreate_db(
     config = config or db_config()
     env = _psql_env(config)
     base = ['psql', '-h', config['host'], '-p', config['port'], '-U', config['user'], '-d', 'postgres']
+    # B2-03（2026-10-24 审计）：DROP 前预检应用角色是否有 CREATEDB 权限——
+    # 无预检时「DROP 成功、CREATE 失败」会把库停在已删未建状态（app 侧
+    # dump.py:233-261 已修的同型 P0，此处是 scripts 侧的同一防线）。
+    probe = subprocess.run(
+        [*base, '-tAc',
+         "SELECT rolcreatedb FROM pg_roles WHERE rolname = '" + config['user'] + "';"],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    if probe.stdout.strip().lower() != 't':
+        raise SystemExit(
+            f'角色 {config["user"]} 无 CREATEDB 权限，DROP 后将无法重建库'
+            f'（空库窗口=丢库）。请先用超级用户执行：'
+            f'ALTER ROLE {config["user"]} CREATEDB;')
     try:
         subprocess.run(
             [*base, '-c', f'DROP DATABASE IF EXISTS "{config["database"]}" WITH (FORCE);'],

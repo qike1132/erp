@@ -435,6 +435,16 @@ class _Managed:
     def start(self) -> None:
         if self.proc and self.proc.poll() is None:
             return
+        # B4-F4（2026-10-24 审计）：崩溃重启循环每次 start() 覆写 _logf/proc——
+        # 旧日志句柄不 close、死 Popen 不 wait，一天最多泄漏 ~288 组句柄。
+        old_logf = getattr(self, '_logf', None)
+        if old_logf is not None:
+            with contextlib.suppress(OSError):
+                old_logf.close()
+            self._logf = None
+        old_proc = getattr(self, 'proc', None)
+        if old_proc is not None and old_proc.poll() is not None:
+            old_proc.wait()
         env = dict(os.environ)
         env.update({"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         LOGS_DIR.mkdir(exist_ok=True)

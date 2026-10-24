@@ -432,8 +432,10 @@ class BackupPolicyService:
             return True
 
         elif strategy == 'count':
-            # 基于数量保留 - 这个逻辑需要在外部处理
-            return True  # 外部会处理计数
+            # B2-05（2026-10-24 审计）：原注释「外部会处理计数」所指的外部处理
+            # 从未存在——BACKUP_RETENTION_COUNT 是死配置。现在 count/hybrid 的
+            # 份数截断由 cleanup/service.py 的 smart_cleanup 按本策略值执行。
+            return True
 
         elif strategy == 'hybrid':
             # 混合策略 - 外部处理

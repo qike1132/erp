@@ -9,7 +9,7 @@ import tempfile
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.logger import logger
@@ -66,7 +66,7 @@ async def _job_status(job) -> tuple[str, dict | None]:
         if info is not None:
             if info.success:
                 return external_status, info.result
-            return "FAILURE", {"error": repr(info.result) if isinstance(info.result, Exception) else info.result}
+            return "FAILURE", {"error": str(info.result)[:200] if isinstance(info.result, Exception) else info.result}  # B3-04: 脱敏+截断
 
     return external_status, None
 
@@ -118,11 +118,12 @@ ASYNC_EXPORT_REPORT_TYPES = ('order', 'stockin', 'stockout', 'deduction', 'retur
 
 class ReportExportRequest(BaseModel):
     report_type: str  # 见 ASYNC_EXPORT_REPORT_TYPES
-    customer: str = ""
-    product: str = ""
-    status: str = ""
-    start_date: str = ""
-    end_date: str = ""
+    # B3-07（2026-10-24 审计）：字符串字段补界（筛选词 100、日期 10、状态 20）
+    customer: str = Field("", max_length=100)
+    product: str = Field("", max_length=100)
+    status: str = Field("", max_length=20)
+    start_date: str = Field("", max_length=10)
+    end_date: str = Field("", max_length=10)
 
 
 class AsyncTaskSubmitResponse(BaseModel):
