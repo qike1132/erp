@@ -1,17 +1,26 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import ProductionTrendPanel from '@/views/production/components/ProductionTrendPanel.vue'
-// CI flake（2026-10-24 PR#12）：组件挂载时经 ensureEcharts 的动态 import 跨越
-// jsdom 环境拆除（EnvironmentTeardownError: Cannot load echarts/core.js）。
-// beforeAll 显式预热，把整条 echarts 导入链绑进本文件自己的生命周期，
-// 拆除时不可能再有在途模块加载。
-import { ensureEcharts } from '@/utils/echartsPreload'
 import type { TrendResponse } from '@/types'
 
-beforeAll(async () => {
-  await ensureEcharts()
-})
+// CI flake（2026-10-24 PR#12 两轮实测）：真 echarts 链路在 jsdom 下有两个死法——
+// ① 挂载时动态 import 跨越环境拆除（EnvironmentTeardownError: Cannot load
+//    echarts/core.js，CI 慢速 FS 竞态）；
+// ② 预热后 echarts.init 真跑 zrender，jsdom 无 canvas → Layer.initContext
+//    null context → 6 个 unhandled rejection。
+// 本测试只断言 DOM 结构（空态/容器/骨架/标题），init 一个 stub 图表即可，
+// 彻底脱离真 echarts 导入链与画布实现。
+vi.mock('@/utils/echartsPreload', () => ({
+  ensureEcharts: async () => ({
+    init: () => ({
+      isDisposed: () => false,
+      dispose: () => undefined,
+      setOption: () => undefined,
+      resize: () => undefined,
+    }),
+  }),
+}))
 
 function trend(days: TrendResponse['days'], departments = ['filling', 'handcraft', 'packaging']): TrendResponse {
   return { success: true, start_date: '2026-09-01', end_date: '2026-09-30', departments, days }
