@@ -273,8 +273,9 @@ def scan_tracked(
 def _decode_for_scan(raw: bytes) -> str | None:
     """把文件字节解成可扫描文本；判定为二进制时返回 None。
 
-    顺序：UTF-8 → UTF-16（有 BOM 或大量 NUL）→ GBK → latin-1（无损逐字节）。
-    只用「是否出现 NUL」判二进制，不再用「UTF-8 能否解码」代替。
+    顺序：UTF-16（仅认 BOM）→ UTF-8 → GBK → latin-1（无损逐字节）。
+    含 NUL 且无 BOM 一律按二进制跳过（PNG/PDF/编译产物），避免把二进制解成
+    乱码文本后产生误报把 CI 卡死。
     """
     if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
         try:
@@ -282,11 +283,7 @@ def _decode_for_scan(raw: bytes) -> str | None:
         except UnicodeDecodeError:
             return None
     if b'\x00' in raw:
-        # 无 BOM 的 UTF-16LE/BE 常见形态：ASCII 字符间夹 NUL
-        try:
-            return raw.decode('utf-16-le' if raw[1:2] == b'\x00' else 'utf-16-be')
-        except UnicodeDecodeError:
-            return None
+        return None
     for enc in ('utf-8', 'gbk'):
         try:
             return raw.decode(enc)

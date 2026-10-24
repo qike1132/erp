@@ -517,7 +517,7 @@ async def export_completed_orders(
 # local_ttl=0：禁用 L1，仅走 L2（同 orders:beile:list）。客户订单删除后「待审核订单」
 # 由 ORDER_DELETED 订阅清理 pending 采购单，若 L1 未跨 worker 失效，其余 worker
 # 会在 10s 内继续返回已删订单，表现为「采购-待审核页不实时更新」。
-def _build_unprocessed_unified_query():
+def _build_unprocessed_unified_query(sku_available: bool = True):
     """构建「未处理订单」的 UNION ALL 子查询（Order 待备货 + StockIn）。
 
     P-1：数据库层完成排序/分页（轻量列）；P-6：NOT EXISTS + JSONB @> 替代预查询。
@@ -535,7 +535,7 @@ def _build_unprocessed_unified_query():
     ).where(
         CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
         CustomerOrder.is_deleted == False,  # noqa: E712
-        _build_not_processed_filter(CustomerOrder.id, 'order'),
+        _build_not_processed_filter(CustomerOrder.id, 'order', sku_available),
     )
     # StockIn 部分：NOT EXISTS 排除已被采购单 source_order_ids 关联的 ID
     # （source_order_ids 中可能同时包含 Order ID 和 StockIn ID）
@@ -545,7 +545,7 @@ def _build_unprocessed_unified_query():
         StockIn.stockin_no.label('order_no'),
         StockIn.customer.label('customer'),
         StockIn.stockin_date.label('sort_date'),
-    ).where(_build_not_processed_filter(StockIn.id, 'stockin'))
+    ).where(_build_not_processed_filter(StockIn.id, 'stockin', sku_available))
     return union_all(order_part, stockin_part).subquery()
 
 
@@ -669,7 +669,9 @@ async def get_unprocessed_orders(
     消除 SQL 参数上限风险，结果实时准确，无需 30s 缓存。
     """
     # ---- 构建 UNION ALL 子查询（轻量列，数据库层排序+分页）----
-    unified = _build_unprocessed_unified_query()
+    from fastapi_app.services.purchase_order_sku import po_sku_available
+
+    unified = _build_unprocessed_unified_query(await po_sku_available(db))
 
     # ---- 1. COUNT 总数（单次查询）----
     count_result = await db.execute(select(func.count()).select_from(unified))

@@ -389,7 +389,14 @@ async def test_list_candidates_filters_out_orders_without_bom(monkeypatch):
     """候选过滤：只保留「全部 SKU 都有 BOM」的记录；缺 BOM 的不生成。"""
     from fastapi_app.services.purchase import _unprocessed as up
 
-    monkeypatch.setattr(up, '_build_unprocessed_union', lambda: MagicMock())
+    # 2026-10-24：_build_unprocessed_union 现在接收 sku_available（purchase_order_sku
+    # 表可用性），桩要能吞掉位置参数；同时把探测本身桩掉，避免在 AsyncMock 会话上
+    # 触发 begin_nested。
+    monkeypatch.setattr(up, '_build_unprocessed_union', lambda *a, **k: MagicMock())
+    monkeypatch.setattr(
+        'fastapi_app.services.purchase_order_sku.po_sku_available',
+        AsyncMock(return_value=False),
+    )
     # select(...) 仅为构造 SQL，本用例不跑 SQL —— 桩掉它，让 unified.c.* 的取值不被 SQLAlchemy 解析。
     monkeypatch.setattr(up, 'select', lambda *a, **k: object())
 

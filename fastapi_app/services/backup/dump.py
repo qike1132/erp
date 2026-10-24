@@ -649,6 +649,8 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             db_user=db_user, db_name=db_name,
         )
         if rebuild_err is not None:
+            # 重建失败直接返回时不会进入下面的导入 try/finally，显式关流避免句柄泄漏
+            gz_stream.close()
             return rebuild_err
 
         psql_start_time = time_mod.monotonic()

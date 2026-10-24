@@ -1280,7 +1280,10 @@ def main() -> int:
     thresholds = load_thresholds()
     baseline = load_baseline()
     if baseline is None:
-        print("[ERROR] 基线文件损坏，拒绝继续（保守失败，避免静默全绿）。")
+        print(
+            "[ERROR] 基线文件缺失或损坏，拒绝继续（保守失败，避免静默全绿）。"
+            f"期望路径：{BASELINE_PATH}"
+        )
         return 2
 
     selected = tuple(g for g in GATES if not args.only or g.key == args.only)

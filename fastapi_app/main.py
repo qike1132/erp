@@ -219,15 +219,17 @@ async def lifespan(application: FastAPI):
     setup_logging()
     logger.info(f"{settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
 
-    await _setup_database()
-
     # P0-5：上一次还原是否在「DROP 之后、导入完成之前」中断（只告警，不阻断启动）。
     # 有标记 = 数据库可能是空壳，必须让运维在日志里一眼看到回滚点。
+    # 必须放在 _setup_database() **之前**：空壳库上建连/初始化可能先抛异常，
+    # 那时这条 CRITICAL 就永远打不出来（检查只读文件，不依赖数据库）。
     try:
         from fastapi_app.services.backup.restore_guard import check_interrupted_restore
         check_interrupted_restore()
     except Exception as e:  # defensive: 标记检查失败不得阻断启动
         logger.warning('恢复中断标记检查失败: %s', e)
+
+    await _setup_database()
 
     # 编号水位对账（spec 2026-09-29 §5）：GREATEST 只升不降，幂等，失败不阻断启动
     try:

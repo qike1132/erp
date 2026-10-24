@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
-from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
+from fastapi_app.services.purchase_order_sku import po_sku_available, resync_po_sku_spare
 from fastapi_app.services.purchase_utils import (
     calc_spare_quantity,
     magnified_purchase_qty,
@@ -711,7 +711,9 @@ async def cleanup_orphan_pending_purchase_orders(
     typed_pairs.extend(('order', int(i)) for i in (order_ids or []))
     typed_pairs.extend(('stockin', int(i)) for i in (stockin_ids or []))
     typed_po_ids: set[int] = set()
-    if typed_pairs:
+    # 表不存在（迁移未执行）时不能引用 purchase_order_sku，否则删单直接 500；
+    # 与 fetch_po_sku_map 的「优雅降级、绝不能 500」同口径，此时只用裸 id 兜底。
+    if typed_pairs and await po_sku_available(db):
         typed_rows = await db.execute(
             select(PurchaseOrderSku.po_id).where(
                 or_(*[
