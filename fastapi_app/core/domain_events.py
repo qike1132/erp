@@ -252,9 +252,12 @@ def _append_deadletter(event: DomainEvent, error: Exception | None) -> None:
         f.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
 
 
-def _append_deadletter_handler(event: DomainEvent, handler: Callable, error: Exception) -> None:
+def _append_deadletter_handler(
+    event: DomainEvent, handler: Callable, error: Exception, stage: str = 'handler',
+) -> None:
     """订阅 handler 执行失败也落死信（与发布失败同文件，用 `stage` 区分）。
 
+    stage: 'handler'（进程内）/ 'handler_cross_process'（Redis 监听器）。
     写文件失败不得影响主流程：这里已是异常处理路径，再抛会盖掉原始错误。
     """
     from pathlib import Path as _Path
@@ -263,7 +266,7 @@ def _append_deadletter_handler(event: DomainEvent, handler: Callable, error: Exc
         log_dir.mkdir(exist_ok=True)
         record = {
             'ts': datetime.now(UTC).isoformat(),
-            'stage': 'handler',
+            'stage': stage,
             'handler': getattr(handler, '__name__', repr(handler)),
             'event_type': event.event_type.value,
             'payload': event.payload,
@@ -315,7 +318,11 @@ async def start_event_listener():
                             if hasattr(result, '__await__'):
                                 await result
                         except Exception as e:  # defensive: 单个 handler 失败不能影响其他 handler
+                            # P1（2026-10-24）：跨进程失败也要落死信，与进程内 _dispatch_in_process
+                            # 同口径。原先只 logger.error，多 worker 下「非发布进程」那一份失败不留
+                            # 证据，按 domain_events_deadletter.jsonl 巡检重放会漏。
                             logger.error('跨进程领域事件处理失败: %s', e)
+                            _append_deadletter_handler(event, handler, e, stage='handler_cross_process')
                 except Exception as e:  # defensive: 单条消息解析失败不能中断监听器
                     logger.error('领域事件消息解析失败: %s', e)
         except Exception as e:  # defensive: 监听器异常后自动重连

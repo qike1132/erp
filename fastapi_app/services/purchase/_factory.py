@@ -268,6 +268,13 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
         group = group_map[key]
         if po.id not in group['_order_ids']:
             group['_order_ids'].append(po.id)
+            # P2（2026-10-24）：同客户同产品名的多张采购单汇总时，订单数量必须累加。
+            # 原先只在首次创建时写入 product_quantity/order_quantity，而 _sku_lines 是
+            # 跨单累加的 —— 结果「订单数量」只等于第一张单，与 skus 合计、物料量自相矛盾。
+            # 仅在首次入组时不重复加（上面 group_map[key] 的初始化已含本单数量）。
+            if len(group['_order_ids']) > 1:
+                group['product_quantity'] = int(group['product_quantity'] or 0) + int(order_qty or 0)
+                group['order_quantity'] = int(group['order_quantity'] or 0) + int(order_qty or 0)
 
         # 逐 SKU 展示明细：优先取逐 SKU 快照，缺失时回退订单级单行
         sku_lines = (po_sku_map or {}).get(po.id) or []

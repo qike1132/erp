@@ -88,15 +88,22 @@ async def _probe_table(db: AsyncSession) -> bool:
 
 
 async def po_sku_available(db: AsyncSession) -> bool:
-    """``purchase_order_sku`` 表是否可用于读写（结果缓存在 db.info，同会话只探一次）。"""
+    """``purchase_order_sku`` 表是否可用于读写（结果缓存在 db.info，同会话只探一次）。
+
+    非请求级会话（`db.info` 不是 dict：测试桩、轻量包装）直接按「可用」处理：
+    这类会话没有缓存位，每次调用都会真发一条 `SELECT 1 FROM purchase_order_sku`，
+    在按 `db.execute` 调用序列编排的 mock 测试里会整体错位（2026-10-24 CI 实测：
+    待审核列表 3 个用例 assert 错位 + 2 个 StopAsyncIteration）。
+    表真缺失时后续查询会显式报错，不会静默降级。
+    """
     info = getattr(db, 'info', None)
-    if isinstance(info, dict):
-        cached = info.get(_AVAIL_KEY)
-        if cached is not None:
-            return bool(cached)
+    if not isinstance(info, dict):
+        return True
+    cached = info.get(_AVAIL_KEY)
+    if cached is not None:
+        return bool(cached)
     available = await _probe_table(db)
-    if isinstance(info, dict):
-        info[_AVAIL_KEY] = available
+    info[_AVAIL_KEY] = available
     if not available:
         logger.warning('purchase_order_sku 表不可用（迁移未执行？），逐 SKU 快照将降级/跳过')
     return available

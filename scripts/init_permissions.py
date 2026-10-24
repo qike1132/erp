@@ -125,7 +125,18 @@ PERMISSIONS_CONFIG = {
 }
 
 
-def init_permissions(assume_yes: bool = False):
+def _builtin_codes() -> set[str]:
+    """内置清单覆盖的全部权限码（父 + 子）。"""
+    codes: set[str] = set()
+    for cfg in PERMISSIONS_CONFIG.values():
+        codes.add(cfg['parent']['code'])
+        for child in cfg.get('children') or []:
+            if child.get('code'):
+                codes.add(child['code'])
+    return codes
+
+
+def init_permissions(assume_yes: bool = False, force_wipe: bool = False):
     """初始化权限数据"""
     session = SyncSessionLocal()
     try:
@@ -149,6 +160,21 @@ def init_permissions(assume_yes: bool = False):
                 '重新初始化权限（清空 user_permission 并重建权限字典）',
                 hint='会影响所有用户的权限关联；请先备份',
             )
+            # P1（2026-10-24）：只允许在「权限字典与内置清单一致」的库上重建。
+            # 本脚本的清单只有 12 个父模块，而 outsource_manage / pattern_room_manage /
+            # production_plan_manage / supplier_manage 及其子码是由 pg_standalone_019/042/043
+            # 等迁移种入的 —— 一旦 --yes 全删再按内置清单重建，这四个模块的权限码永久消失
+            # （迁移已 applied 不会自动补回），这些模块对所有人 403，只能人工重建。
+            existing_codes = {code for (code,) in session.query(Permission.code).all()}
+            unknown = sorted(existing_codes - _builtin_codes())
+            if unknown and not force_wipe:
+                print(
+                    f"❌ 检测到 {len(unknown)} 个不在内置清单中的权限码（例：{unknown[:6]}），"
+                    "说明该库的权限字典包含迁移种入的模块。\n"
+                    "   继续重建会让这些权限码永久消失（迁移已 applied 不会补回）。\n"
+                    "   如确认要清空，请加 --force-wipe 并先备份 permission / user_permission 两张表。"
+                )
+                return
             session.execute(text("DELETE FROM user_permission"))
             session.commit()
             print("已清除用户权限关联")
@@ -216,5 +242,9 @@ def init_permissions(assume_yes: bool = False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="权限体系初始化")
     parser.add_argument('--yes', action='store_true', help="已存在数据时跳过交互确认，直接重新初始化")
+    parser.add_argument(
+        '--force-wipe', action='store_true',
+        help="即使库中存在内置清单以外的权限码（迁移种入的模块）也强制清空重建；会永久丢失这些权限码",
+    )
     args = parser.parse_args()
-    init_permissions(assume_yes=args.yes)
+    init_permissions(assume_yes=args.yes, force_wipe=args.force_wipe)

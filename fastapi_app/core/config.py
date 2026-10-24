@@ -471,6 +471,19 @@ class Settings(BaseSettings):
             _production_config_warnings.extend(_warnings)
             for _message in _warnings:
                 logger.warning("生产配置告警：%s", _message)
+        else:
+            # P0-4（2026-10-24）：备份加密红线不能依赖 APP_ENV 判定。
+            # 历史事故：NSSM 的 AppEnvironmentExtra 被写成单元素、APP_ENV 拼在长串里，
+            # 导致 _is_production_env() 返回 False，整段生产闸门被跳过；此时
+            # BACKUP_ENCRYPTION_ENABLED=true 但密码为空仍能启动，之后所有备份静默落明文。
+            # 因此在「非 production 判定」下同样执行备份/监控校验：函数内部已有
+            # _is_test_process() 与 STRICT_CONFIG_CHECK 两道豁免，测试进程与显式关闭
+            # 严格校验的机器不受影响。生产分支保持原顺序（既有测试依赖该报错次序）。
+            _warnings = _validate_production_backup_config()
+            _production_config_warnings.clear()
+            _production_config_warnings.extend(_warnings)
+            for _message in _warnings:
+                logger.warning("配置告警（APP_ENV 未判定为生产）：%s", _message)
 
     @property
     def is_production(self) -> bool:

@@ -51,7 +51,8 @@ jobs:
       # 派生会把 DB_NAME=erp_test 拼成 erp_test_test，而本 job 的 postgres 只创建了
       # erp_test（POSTGRES_DB），派生库不存在 → tests/ 整棵树的 fixtures 报错。
       TEST_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test_pass@localhost:5432/erp_test  # secret-scan:allow CI 测试库口令，仅 Actions 内部网络
-      SECRET_KEY: "ci-test-secret-key-with-sufficient-length-for-validation-checks"
+      # CI 专用固定密钥：仅供 test job 启动校验，不连任何真实环境
+      SECRET_KEY: "ci-test-secret-key-with-sufficient-length-for-validation-checks"  # secret-scan:allow CI 固定值
       COVERAGE_MIN: "40"
 
     steps:

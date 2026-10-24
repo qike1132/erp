@@ -506,7 +506,11 @@ def cleanup_pre_restore_backups():  # log-context: internal helper 无请求上�
     if not PRE_RESTORE_DIR.exists():
         return
     backups = sorted(
-        [f for f in PRE_RESTORE_DIR.iterdir() if f.is_file() and f.name.startswith('pre_restore_') and f.name.endswith('.zip')],
+        # 兼容两种命名：明文 .zip 与加密 .zip.enc（create_pre_restore_backup 会跟随
+        # 加密总开关，加密时用 .zip.enc 命名）
+        [f for f in PRE_RESTORE_DIR.iterdir()
+         if f.is_file() and f.name.startswith('pre_restore_')
+         and (f.name.endswith('.zip') or f.name.endswith('.zip.enc'))],
         key=lambda f: f.name, reverse=True
     )
     for old_backup in backups[_MAX_PRE_RESTORE_BACKUPS:]:

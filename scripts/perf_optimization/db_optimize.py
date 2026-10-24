@@ -110,6 +110,18 @@ def main():
     apply = "--apply" in sys.argv
     url = settings.ASYNC_DATABASE_URL.replace("+asyncpg", "+psycopg")
 
+    # P2（2026-10-24）：DDL 落生产必须显式授权，并与同目录 perf_add_indexes.py 同口径；
+    # 同时累计失败数，非 0 时以非 0 退出（原先只 print("[错误]") 仍 exit 0，
+    # 调用方会误判「索引已建」）。
+    if apply:
+        from _prod_write_guard import require_prod_write_consent
+
+        require_prod_write_consent(
+            f'创建 {len(INDEXES)} 个生产索引（CREATE INDEX / CREATE EXTENSION）',
+            hint='CREATE EXTENSION pg_trgm 需要超级用户；普通 erp_app 会失败并计入失败数。',
+        )
+    failures = 0
+
     print("=" * 80)
     print("  ERP 数据库性能优化")
     print(f"  模式: {'执行' if apply else '干跑(仅输出SQL)'}")
@@ -137,6 +149,7 @@ def main():
                         cur.execute(idx["sql"])
                         print("    [OK] 创建成功")
                     except Exception as e:
+                        failures += 1
                         print(f"    [错误] {e}")
                 else:
                     print("    [干跑] 未执行")
@@ -148,6 +161,9 @@ def main():
 
     if not apply:
         print("\n提示: 添加 --apply 参数执行索引创建")
+    if failures:
+        print(f"\n[FAIL] {failures} 个索引创建失败，请检查上方错误后重试")
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()

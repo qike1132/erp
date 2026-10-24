@@ -22,8 +22,14 @@ def setup_telemetry(app=None):
     """
     global _tracer, _meter
 
-    env = os.getenv("APP_ENV", "development")
-    default_enabled = "true" if env == "production" else "false"
+    # P1（2026-10-24）：环境判定必须走统一入口。原先 `env == "production"` 精确比较，
+    # 而 config._is_production_env() 明确接受 prod/大小写/含空白（NSSM 把 APP_ENV 拼进
+    # 长串的历史事故）；APP_ENV=prod 时 OTel 默认不启用，即便显式 OTEL_ENABLED=true，
+    # exporter 默认也落到 console（span 打进 stdout 而非 OTLP），与生产可观测口径分叉。
+    from fastapi_app.core.config import _is_production_env
+
+    is_prod = _is_production_env()
+    default_enabled = "true" if is_prod else "false"
     if os.getenv("OTEL_ENABLED", default_enabled).lower() != "true":
         logger.info("OpenTelemetry 未启用（设置 OTEL_ENABLED=true 启用）")
         return
@@ -48,7 +54,7 @@ def setup_telemetry(app=None):
         _tracer = trace.get_tracer(service_name)
 
         # Exporter: OTLP (生产默认) 或 Console
-        default_exporter = "otlp" if env == "production" else "console"
+        default_exporter = "otlp" if is_prod else "console"
         exporter_type = os.getenv("OTEL_EXPORTER_TYPE", default_exporter)
         # 显式标注：两个分支分别赋 OTLPSpanExporter / ConsoleSpanExporter，
         # 不标注时 mypy 会按首个赋值推断类型并对第二处赋本报 assignment 错误。

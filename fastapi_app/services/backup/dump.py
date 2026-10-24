@@ -634,36 +634,50 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
 
     await _report(0.14, '重建数据库')
     await asyncio.sleep(0)
-    rebuild_err = await _rebuild_database_with_admin(
-        db_host=db_host, db_port=db_port, admin_user=cfg['admin_user'], admin_env=cfg['admin_env'],
-        db_user=db_user, db_name=db_name,
+    # P0-5：DROP 之前落中断标记。导入结束（无论成败）在 finally 里清除；
+    # 若进程在两者之间被杀，标记会留到下次启动，由 main.lifespan 打 CRITICAL
+    # 并给出 pre_restore 回滚指引（见 restore_guard）。
+    from fastapi_app.services.backup.restore_guard import (
+        mark_restore_finished,
+        mark_restore_started,
     )
-    if rebuild_err is not None:
-        return rebuild_err
 
-    psql_start_time = time_mod.monotonic()
+    mark_restore_started(db_name, task_id)
     try:
-        await _report(0.20, '开始导入数据库数据')
-        await asyncio.sleep(0)
-        # P0-5: 单事务导入 + 遇错即停——任一语句失败则整体回滚，不再产生
-        # 半还原态数据库（旧实现 ON_ERROR_STOP=0 会吞错继续，残留部分表数据）。
-        psql_args = [
-            resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
-            '--single-transaction',
-            '-v', 'ON_ERROR_STOP=1',
-        ]
-        state: dict = {'written': 0, 'stream_done': False}
-        result: dict = {}
-        worker = threading.Thread(
-            target=_psql_import_worker,
-            args=(psql_args, cfg['env'], gz_stream, first_chunk, state, result),
-            daemon=True,
+        rebuild_err = await _rebuild_database_with_admin(
+            db_host=db_host, db_port=db_port, admin_user=cfg['admin_user'], admin_env=cfg['admin_env'],
+            db_user=db_user, db_name=db_name,
         )
-        worker.start()
-        try:
-            await _await_psql_progress(worker, state, counter, total_compressed, psql_start_time, _report)
-        finally:
+        if rebuild_err is not None:
+            # 重建失败直接返回时不会进入下面的导入 try/finally，显式关流避免句柄泄漏
             gz_stream.close()
-        return await _interpret_psql_result(result, _report)
-    except (TimeoutError, OSError, ValueError) as e:
-        return {'status': 'error', 'error': f'数据库恢复失败: {e}'}
+            return rebuild_err
+
+        psql_start_time = time_mod.monotonic()
+        try:
+            await _report(0.20, '开始导入数据库数据')
+            await asyncio.sleep(0)
+            # P0-5: 单事务导入 + 遇错即停——任一语句失败则整体回滚，不再产生
+            # 半还原态数据库（旧实现 ON_ERROR_STOP=0 会吞错继续，残留部分表数据）。
+            psql_args = [
+                resolve_pg_tool('psql'), '-h', db_host, '-p', db_port, '-U', db_user, '-d', db_name,
+                '--single-transaction',
+                '-v', 'ON_ERROR_STOP=1',
+            ]
+            state: dict = {'written': 0, 'stream_done': False}
+            result: dict = {}
+            worker = threading.Thread(
+                target=_psql_import_worker,
+                args=(psql_args, cfg['env'], gz_stream, first_chunk, state, result),
+                daemon=True,
+            )
+            worker.start()
+            try:
+                await _await_psql_progress(worker, state, counter, total_compressed, psql_start_time, _report)
+            finally:
+                gz_stream.close()
+            return await _interpret_psql_result(result, _report)
+        except (TimeoutError, OSError, ValueError) as e:
+            return {'status': 'error', 'error': f'数据库恢复失败: {e}'}
+    finally:
+        mark_restore_finished()

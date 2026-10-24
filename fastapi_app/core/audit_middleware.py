@@ -182,14 +182,18 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
 
         audit_entry = {
             'user_id': user_id,
-            'username': username,
+            # P1（2026-10-24）：按列宽截断。落库列是 varchar(36)/(50)/(100)，
+            # 客户端可控的 request_id 与未登记前缀回落出的 resource_type 一旦超长，
+            # 整批多行 INSERT 会以 22001 失败 → 本请求全部审计条目丢失
+            # （只剩 audit_overflow.log，等于给了一条「关闭本人审计」的开关）。
+            'username': (username or None) and str(username)[:50],
             'action': action,
-            'resource_type': resource_type,
-            'resource_id': resource_id,
+            'resource_type': resource_type[:50] if resource_type else resource_type,
+            'resource_id': resource_id[:100] if resource_id else resource_id,
             'detail': json.dumps(detail_data, ensure_ascii=False) if detail_data else None,
-            'ip_address': client_ip,
+            'ip_address': client_ip[:64] if client_ip else client_ip,
             'user_agent': user_agent,
-            'request_id': request_id,
+            'request_id': str(request_id)[:36],
             'status_code': response.status_code,
             'created_at': datetime.now(UTC),
         }

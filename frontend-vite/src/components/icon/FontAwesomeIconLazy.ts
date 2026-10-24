@@ -56,6 +56,9 @@ export const FontAwesomeIconLazy = defineComponent({
           ready.value = true
         })
         .catch(() => {
+          // P2（2026-10-24）：加载失败时回退到兜底图标，而不是用原值渲染（页面静默空白）。
+          // 与 layouts/composables/useSidebarNav.ts 的 resolveIcon 兜底口径一致。
+          resolvedIcon = ['fas', 'circle']
           ready.value = true
         })
     }

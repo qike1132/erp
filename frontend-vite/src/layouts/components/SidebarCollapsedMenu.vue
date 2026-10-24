@@ -4,6 +4,8 @@
       v-for="item in section.items"
       :key="item.path"
       :to="item.path"
+      :aria-label="item.title"
+      :title="item.title"
       :class="['sb-nav-item', 'sb-nav-item-icon-only', { active: isActive(item.path) }]"
       @pointerenter="prefetchRoute(item.path)"
     >

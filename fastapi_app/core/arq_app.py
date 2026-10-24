@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import time
 from datetime import datetime
 from functools import wraps
 from typing import Any, ClassVar
@@ -375,6 +376,7 @@ def _tracked_job(func, max_tries: int = MAX_TRIES):
         ctx['_max_tries'] = max_tries
         ctx['_job_args'] = args
         ctx['_job_kwargs'] = kwargs
+        ctx['_start_monotonic'] = time.monotonic()
         try:
             result = await func(ctx, *args, **kwargs)
         except Retry as exc:
@@ -385,9 +387,22 @@ def _tracked_job(func, max_tries: int = MAX_TRIES):
             else:
                 ctx['_job_outcome'] = 'retrying'
             raise
-        except asyncio.CancelledError:
-            # 取消可能是 worker 停机的重放路径，交给 ARQ 的 retry/abort 语义收尾。
-            ctx['_job_outcome'] = 'retrying'
+        except asyncio.CancelledError as exc:
+            # P1（2026-10-24）：取消要区分「超时」与「worker 停机重放」。
+            # ARQ 的 job_timeout 用 asyncio.wait_for 实现，超时会取消正在跑的协程，
+            # 原先一律记 retrying；随后 worker 判 failed 时 on_job_end 走 retrying 分支，
+            # 于是死信/失败指标/backup_schedule.last_status 全部不更新，调度永久停在 running。
+            elapsed = time.monotonic() - float(ctx.get('_start_monotonic') or time.monotonic())
+            timeout_s = float(getattr(WorkerSettings, 'job_timeout', 1800) or 1800)
+            if elapsed >= timeout_s - 2:
+                ctx['_job_outcome'] = 'failed'
+                ctx['_job_exception'] = TimeoutError(
+                    f'任务超时：已运行 {elapsed:.0f}s，上限 {timeout_s:.0f}s'
+                )
+            else:
+                # 停机/abort 的取消：交给 ARQ 的重放语义收尾，不算失败。
+                ctx['_job_outcome'] = 'retrying'
+                ctx['_job_exception'] = exc
             raise
         except Exception as exc:  # defensive: 任务体任意异常都要记录成败后原样抛出，交由 ARQ 收尾
             ctx['_job_outcome'] = 'failed'

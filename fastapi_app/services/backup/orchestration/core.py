@@ -666,17 +666,28 @@ async def create_pre_restore_backup(db: AsyncSession, skip_restore_check: bool =
     """
     ensure_pre_restore_dir()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'pre_restore_{timestamp}.zip'
-    filepath = PRE_RESTORE_DIR / filename
     try:
         from fastapi_app.shared_models import User as UserModel
         dummy_user = UserModel()
         dummy_user.username = 'system'
         dummy_user.id = 0
-        zip_bytes, _manifest = await create_full_backup(db, dummy_user, '恢复前自动安全备份', encrypt=False, skip_restore_check=skip_restore_check)
+        # P1（2026-10-24）：安全备份不再硬编码 encrypt=False。
+        # 原实现绕过加密总开关，加密部署下每次还原（含失败的那次）都会在
+        # pre_restore/ 落一份明文整库（含全部附件），且该目录不在保留期扫描内，
+        # 最多 5 份长期驻留。encrypt=None 表示继承 is_encryption_enabled()，
+        # 与手动/自动全量同口径；口令丢失时回滚点不可用属可接受取舍（加密是红线）。
+        zip_bytes, _manifest = await create_full_backup(
+            db, dummy_user, '恢复前自动安全备份',
+            encrypt=None, skip_restore_check=skip_restore_check,
+        )
+        # 加密产物用 .zip.enc 命名，避免运维在灾难现场拿 unzip 打不开而误判文件损坏
+        # （恢复侧按内容头识别加密，不依赖后缀）。
+        _encrypted = bool(_manifest.get('encrypted'))
+        filename = f'pre_restore_{timestamp}.zip.enc' if _encrypted else f'pre_restore_{timestamp}.zip'
+        filepath = PRE_RESTORE_DIR / filename
         filepath.write_bytes(zip_bytes)
         cleanup_pre_restore_backups()
-        return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes)}
+        return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes), 'encrypted': _encrypted}
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断
         logger.warning(f'创建恢复前安全备份失败（不阻塞恢复）: {e}')
         return {'success': False, 'error': str(e)}

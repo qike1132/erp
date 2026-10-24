@@ -7,38 +7,62 @@
 """
 import logging
 
-from sqlalchemy import cast, desc, exists, func, literal, select, union_all
+from sqlalchemy import and_, cast, desc, exists, func, literal, not_, or_, select, union_all
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.services.business_time import fmt_business
 from fastapi_app.shared_models import (
+    Order,
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
     PurchaseOrder,
+    PurchaseOrderSku,
+    StockIn,
 )
 from fastapi_app.utils import calc_total_pages
 
 logger = logging.getLogger(__name__)
 
 
-def _build_not_processed_filter(id_column):
+def _build_not_processed_filter(id_column, record_type: str, sku_available: bool = True):
     """构建 NOT EXISTS 子查询：排除已被采购订单关联的记录。
 
     P-6 优化：用 JSONB @> 操作符在数据库层检查 ID 是否出现在
     purchase_order.source_order_ids 中，替代预查询 + .notin_() 方案。
 
     优势：
-    - 无 SQL 参数上限风险（PostgreSQL IN 列表上限约 32767）
+    - 无 SQL 参数上限风险（PostgreSQL IN 列表约 32767）
     - 无需预查询 + 30s 缓存，结果实时准确
     - GIN 表达式索引 (source_order_ids::jsonb) 保证性能
 
     正则预过滤防御无效 JSON，与 P-7 的 CASE 策略等价但表达式不变
     （WHERE 条件不影响 GIN 表达式索引匹配）。
+
+    P1（2026-10-24）：来源 id 必须带类型。`order.id` 与 `stockin.id` 是两套自增序列，
+    必然撞号；原先只用裸 id 的 JSONB @> 判断「已处理」，任一类型的采购单引用过该数字
+    就把另一类型记录判为已处理 → 该备货/订单从「待审核」列表消失且永不自动生成。
+    现在：
+    1. 权威判定走 purchase_order_sku.(source_record_type, source_order_id)；
+    2. 老数据（无 sku 快照）仍看 JSON，但**仅当该 id 不同时存在于 order 与 stockin**——
+       两侧都存在的 id 一律不采信裸 id 命中（宁可重列，不静默漏单）。
+    sku_available：`purchase_order_sku` 是否存在（调用方用 `po_sku_available(db)` 探测）。
+    表缺失时（迁移未执行）不能引用它，否则整条待审核列表 500 —— 与
+    `fetch_po_sku_map` 的「绝不能因此 500」同口径，此时只保留 JSON 兜底。
     """
-    return ~exists(
+    sku_exists = None
+    if sku_available:
+        sku_exists = exists(
+            select(literal('1'))
+            .select_from(PurchaseOrderSku)
+            .where(
+                PurchaseOrderSku.source_record_type == record_type,
+                PurchaseOrderSku.source_order_id == id_column,
+            )
+        )
+    legacy_json_exists = exists(
         select(literal('1'))
         .select_from(PurchaseOrder)
         .where(PurchaseOrder.source_order_ids.isnot(None))
@@ -49,6 +73,15 @@ def _build_not_processed_filter(id_column):
             )
         )
     )
+    id_in_both_tables = and_(
+        exists(select(literal('1')).select_from(Order).where(Order.id == id_column)),
+        exists(select(literal('1')).select_from(StockIn).where(StockIn.id == id_column)),
+    )
+    legacy_match = and_(legacy_json_exists, not_(id_in_both_tables))
+    if sku_exists is None:
+        # 表不可用：只保留老数据兜底（歧义 id 仍按「不采信裸 id」处理）
+        return not_(legacy_match)
+    return not_(or_(sku_exists, legacy_match))
 
 def _build_unprocessed_order_record(order) -> dict:
     # 多 SKU 模型：返回所有 OrderItem，前端按 SKU 行展示。
@@ -124,7 +157,7 @@ async def _fetch_bom_product_ids(db: AsyncSession, product_ids: list) -> set[int
     return {row[0] for row in result}
 
 
-def _build_unprocessed_union():
+def _build_unprocessed_union(sku_available: bool = True):
     """构建 Order + StockIn 的 UNION ALL 子查询（轻量列，数据库层排序+分页）。
 
     P-1：UNION ALL 将 Order + StockIn 合并为单次 SQL，数据库层完成排序 +
@@ -146,7 +179,7 @@ def _build_unprocessed_union():
     ).where(
         CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
         CustomerOrder.is_deleted == False,  # noqa: E712
-        _build_not_processed_filter(CustomerOrder.id),
+        _build_not_processed_filter(CustomerOrder.id, 'order', sku_available),
     )
 
     stockin_part = select(
@@ -155,7 +188,7 @@ def _build_unprocessed_union():
         StockIn.stockin_no.label('order_no'),
         StockIn.customer.label('customer'),
         StockIn.stockin_date.label('sort_date'),
-    ).where(_build_not_processed_filter(StockIn.id))
+    ).where(_build_not_processed_filter(StockIn.id, 'stockin', sku_available))
 
     return union_all(order_part, stockin_part).subquery()
 
@@ -299,7 +332,9 @@ async def list_auto_generate_candidates(db: AsyncSession) -> list[dict]:
     Returns:
         list[dict]: 每项含 composite_id / customer / order_no / record_type / source_id。
     """
-    unified = _build_unprocessed_union()
+    from fastapi_app.services.purchase_order_sku import po_sku_available
+
+    unified = _build_unprocessed_union(await po_sku_available(db))
     result = await db.execute(
         select(unified.c.record_type, unified.c.source_id, unified.c.customer)
     )

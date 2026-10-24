@@ -189,6 +189,9 @@ async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn, op
 
     # 扣回库存
     product = await stock_service.get_product_for_update(db, stockreturn.product_id)
+    # 注（2026-10-24）：审计建议此处再加「库存（结余）」闸门。试改后 3 个退货用例
+    # 当场失败（夹具只有 current_stock、无包装部入库，结余恒 0）—— 结余口径不覆盖
+    # 备货/期初/非包装部生产，直接当写入门槛会拦掉合法业务，需业务确认后再上。
     # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
     assert_stock_available(
         product.current_stock, -stockreturn.quantity,

@@ -217,9 +217,18 @@ def _tracked_files(root: Path) -> list[str]:
     return [line for line in (proc.stdout or '').splitlines() if line.strip()]
 
 
+# 内容层豁免的「目录 + 后缀」组合：docs/ 下的 .txt 是抓取/转存的外部文档
+# （实测 docs/audit-round2/06-oss-erp-raw-capture.txt 里 `api_key:api_secret`
+#  是文档正文），与 .md 同等性质。**不能**把 .txt 整体豁免——库里的
+# db_dump.txt / 日志转存才是真正的泄漏高发区。
+_CONTENT_EXEMPT_PAIRS = (('docs/', '.txt'),)
+
+
 def content_scan_applies(rel: str) -> bool:
     """该文件是否参与**内容层**扫描（路径层不受影响）。"""
     if rel.endswith(_CONTENT_EXEMPT_SUFFIXES):
+        return False
+    if any(rel.startswith(prefix) and rel.endswith(suffix) for prefix, suffix in _CONTENT_EXEMPT_PAIRS):
         return False
     return not rel.startswith(_CONTENT_EXEMPT_PREFIXES)
 
@@ -248,17 +257,48 @@ def scan_tracked(
             abs_path = root / rel
             try:
                 if abs_path.stat().st_size <= MAX_FILE_BYTES:
-                    reason = content_secret_reason(
-                        abs_path.read_text(encoding='utf-8'),
-                        require_quoted_rhs=rel.endswith(_QUOTED_RHS_REQUIRED_SUFFIXES),
-                    )
-            except (OSError, UnicodeDecodeError):
-                # 读不了 / 非 UTF-8 文本 → 视为二进制，跳过内容层（路径层已判过）
+                    raw = abs_path.read_bytes()
+                    # P1（2026-10-24）：不能把「UTF-8 解码失败」当成二进制整篇跳过。
+                    # 本机 locale 是 cp936，中文注释的 .sql/.log/.txt/.ini 天然非 UTF-8，
+                    # 于是即使里面有一行 DB_PASSWORD=真口令 也 0 命中；而本地钩子按字节
+                    # grep 能扫到 ⇒ CI 这道「第二防线」在 GBK 上比本地还弱。
+                    # 依次尝试 utf-8 / gbk / utf-16，最后用 latin-1（无损逐字节）兜底；
+                    # 仅当出现 NUL 且无 BOM 时按二进制跳过。
+                    text = _decode_for_scan(raw)
+                    if text is not None:
+                        reason = content_secret_reason(
+                            text,
+                            require_quoted_rhs=rel.endswith(_QUOTED_RHS_REQUIRED_SUFFIXES),
+                        )
+            except OSError:
+                # 读不了 → 跳过内容层（路径层已判过）
                 reason = None
 
         if reason:
             findings.append((rel, reason))
     return findings
+
+
+def _decode_for_scan(raw: bytes) -> str | None:
+    """把文件字节解成可扫描文本；判定为二进制时返回 None。
+
+    顺序：UTF-16（仅认 BOM）→ UTF-8 → GBK → latin-1（无损逐字节）。
+    含 NUL 且无 BOM 一律按二进制跳过（PNG/PDF/编译产物），避免把二进制解成
+    乱码文本后产生误报把 CI 卡死。
+    """
+    if raw.startswith((b'\xff\xfe', b'\xfe\xff')):
+        try:
+            return raw.decode('utf-16')
+        except UnicodeDecodeError:
+            return None
+    if b'\x00' in raw:
+        return None
+    for enc in ('utf-8', 'gbk'):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode('latin-1')
 
 
 def main(argv: list[str] | None = None) -> int:

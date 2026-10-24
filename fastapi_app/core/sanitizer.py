@@ -107,13 +107,22 @@ class SanitizingFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            if isinstance(record.msg, str):
-                record.msg = sanitize_for_log(record.msg)
+            # ⚠️ 不能直接对「含 %s 的模板」做脱敏：sanitize_for_log 命中 `token=` /
+            # `password:` 等字样时会把字符串**截断**在命中处（见 sanitize_for_log），
+            # 模板里的 %s 随之消失，随后 %-格式化抛
+            # TypeError: not all arguments converted during string formatting，
+            # 整条日志丢失（2026-10-24 CI 实测：/api/v1/auth/refresh 全线报此错）。
+            # 因此：有 args 时先按 logging 语义格式化，再对成品脱敏并清空 args。
             if record.args:
-                record.args = tuple(
-                    sanitize_for_log(arg) if isinstance(arg, (str, Mapping, list, tuple)) else arg
-                    for arg in record.args
-                )
+                try:
+                    record.msg = sanitize_for_log(record.getMessage())
+                    record.args = ()
+                except (TypeError, ValueError, KeyError):
+                    # 模板与参数不匹配（既有日志写法问题）：保持原样交给 logging 自己报错，
+                    # 这里不做二次破坏。
+                    return True
+            elif isinstance(record.msg, str):
+                record.msg = sanitize_for_log(record.msg)
         except (TypeError, ValueError, AttributeError):
             return True
         return True

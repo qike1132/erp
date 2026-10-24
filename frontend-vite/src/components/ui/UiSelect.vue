@@ -139,7 +139,7 @@ function onOpenChange(open: boolean) {
 }
 </script>
 
-<style>
+<style scoped>
 .ui-select-wrapper {
   position: relative;
 }

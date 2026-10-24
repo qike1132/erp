@@ -39,6 +39,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from fastapi_app.core.config import settings
 
+# 允许透传的 X-Request-ID 形态：仅安全字符且不超过 audit_log.request_id 的列宽（36）
+_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,36}")
+
 logger = logging.getLogger(__name__)
 
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
@@ -178,6 +181,12 @@ def _setup_request_id(app: FastAPI) -> None:
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
         incoming_rid = request.headers.get("X-Request-ID")
+        # P1（2026-10-24）：客户端请求头必须校验后再采用。原先原样透传任意长度/字符，
+        # 而 audit_log.request_id 是 varchar(36) —— 带 37+ 字符的 X-Request-ID 会让
+        # 审计批量 INSERT 以 22001 失败，整批审计条目丢失（可主动规避本人操作审计）。
+        # 只接受 [A-Za-z0-9_-] 且 ≤36 字符，其余回退为服务端生成。
+        if incoming_rid and not _REQUEST_ID_RE.fullmatch(incoming_rid):
+            incoming_rid = None
         request_id = incoming_rid or str(uuid.uuid4())[:8]
         request.state.request_id = request_id
 

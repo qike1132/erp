@@ -121,10 +121,26 @@ async def update_staging_order(db: AsyncSession, order_id: int, data: dict,
         session_scope=session_scope,
     )
 
+async def _purge_rejected_rows(db: AsyncSession, session_id: str) -> None:
+    """删除本次确认中被拒的暂存行。
+
+    DELETE 前必须 flush：session 为 autoflush=False，上面改的 status 尚未落库，
+    Core DELETE 不会触发 autoflush → WHERE status='rejected' 匹配 0 行（被拒行永留表里）。
+    """
+    await db.flush()
+    await db.execute(
+        delete(StagingOrder).where(
+            StagingOrder.session_id == session_id,
+            StagingOrder.status == StagingStatus.REJECTED,
+        )
+    )
+    await db.flush()
+
+
 async def confirm_staging_orders(
     db: AsyncSession, session_id: str
 ) -> tuple[int, list[str]]:
-    from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, get_product_for_update
+    from fastapi_app.shared.stock_concurrency import get_product_for_update
 
     result = await db.execute(
         select(StagingOrder).where(
@@ -169,12 +185,8 @@ async def confirm_staging_orders(
                     product = await get_product_for_update(db, staging_product_id)
                     if not product:
                         raise ValueError(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
-                    # 统一写入口（带 version 守卫并递增 version，原先直写两者都不做）。
-                    # ⚠️ 待业务确认：此处「确认订单暂存即增加物理库存」与 order/commands.py
-                    # 的 create_order（docstring 明确「不影响物理库存」）、order_batch_create
-                    # 三条路径口径相反。本次只统一**怎么写**，**该不该写**另议。
-                    await apply_stock_delta_locked(db, product, staging.quantity)
-
+                    # 订单不改物理库存（2026-10-24 修复 P0）：原先此处
+                    # apply_stock_delta_locked(+quantity) 与 create_order 等三条路径口径相反。
                     log = InventoryLog(
                         product_id=staging.product_id,
                         change_type='订单',
@@ -209,13 +221,7 @@ async def confirm_staging_orders(
                 errors.append(f'订单{staging.customer}-{staging.product_name}确认失败: {_row_failure_message(e)}')
                 staging.status = staging_machine.transition(staging.status, StagingAction.REJECT)
 
-        await db.execute(
-            delete(StagingOrder).where(
-                StagingOrder.session_id == session_id,
-                StagingOrder.status == StagingStatus.REJECTED,
-            )
-        )
-        await db.flush()
+        await _purge_rejected_rows(db, session_id)
 
     except (SQLAlchemyError, RuntimeError, OSError, ValueError) as e:
         logger.error(f'确认暂存订单时发生错误: {e!s}', exc_info=True)

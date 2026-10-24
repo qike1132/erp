@@ -16,6 +16,11 @@ from ._constants import (
 
 logger = logging.getLogger(__name__)
 
+# P2（2026-10-24）：ZIP 成员解压上限。恢复侧原先直接 zf.read(name) 把整个成员读进内存，
+# 只有成员名做了穿越校验；构造一个高压缩比成员（几 KB 压成几 GB）即可让 API 进程 OOM。
+# 单成员 512MB 上限，超限跳过该成员并记入 errors。
+_MAX_MEMBER_BYTES = 512 * 1024 * 1024
+
 
 def _path_variants(archive_path: str) -> tuple[str, ...]:
     """同一份配置的两种写法：归档名（带 config/ 或 root/ 命名空间）与 config 内相对名。
@@ -95,9 +100,14 @@ def restore_filestore(zf: zipfile.ZipFile) -> dict:  # log-context: internal hel
             continue
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
+            # P2：先按 ZIP 目录里的未压缩大小判上限，再解压（防高压缩比 OOM）
+            _info = zf.getinfo(name)
+            if _info.file_size > _MAX_MEMBER_BYTES:
+                errors.append(f'{rel_path}: 成员过大（{_info.file_size} B），已跳过')
+                continue
             target.write_bytes(zf.read(name))
             restored += 1
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, KeyError) as e:
             errors.append(f'{rel_path}: {e}')
     return {'status': 'ok' if not errors else 'partial', 'restored': restored, 'errors': errors}
 
@@ -146,9 +156,14 @@ def restore_config(zf: zipfile.ZipFile, confirm_sensitive: bool = False) -> dict
             continue
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
+            # P2：同 _restore_filestore，先判未压缩大小再解压
+            _info = zf.getinfo(name)
+            if _info.file_size > _MAX_MEMBER_BYTES:
+                errors.append(f'{rel_path}: 成员过大（{_info.file_size} B），已跳过')
+                continue
             target.write_bytes(zf.read(name))
             restored.append(rel_path)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, KeyError) as e:
             errors.append(f'{rel_path}: {e}')
     result = {'status': 'ok' if not errors else 'partial', 'restored': restored, 'errors': errors}
     if skipped_sensitive:

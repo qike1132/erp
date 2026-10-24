@@ -576,6 +576,20 @@ def main():
             hint='脚本会先自动备份到 backups/ 再改写；预览请加 --dry-run。',
         )
 
+    # 硬停（P0，2026-10-24 审计）：本脚本没有原始明文密码，所谓"迁移"只能写入
+    # MIGRATION_PLACEHOLDER_{user_id}_{epoch} 这类可枚举占位符 —— 跑一次即让全部
+    # 非 argon2id 用户永久无法登录，且占位符可离线爆破。而登录链路
+    # （services/auth_service.py 的 needs_migration 分支）本已用用户当场输入的明文
+    # 透明重哈希，本脚本没有任何存在必要。
+    # 只保留两条安全路径：--dry-run（只读报告）与 --restore（回灌历史备份救急）。
+    if not args.dry_run and not args.restore:
+        print(
+            "❌ 已停用：本脚本会用占位符覆盖全部用户密码，导致全站无法登录。\n"
+            "   登录链路已支持 Argon2id 透明迁移（用户下次登录时自动重哈希），无需本脚本。\n"
+            "   如需查看待迁移清单：加 --dry-run（只读）；如需回灌旧密码：用 --restore <备份文件>。",
+        )
+        return 2
+
     # 初始化数据库管理器
     db = DatabaseManager()
 

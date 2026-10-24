@@ -25,7 +25,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PWD_PATTERN = re.compile(
     r"([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]"
     r"|[Tt][Oo][Kk][Ee][Nn]|[Aa][Pp][Ii][_]?[Kk][Ee][Yy]|[Rr][Ee][Qq][Uu][Ii][Rr][Ee][Pp][Aa][Ss][Ss])"
-    r"[ \t]*[:=][ \t]*[A-Za-z]{0,3}[\"']?[A-Za-z0-9+/=_.:@!#%^&*-]{12,}"
+    # 2026-10-24（P1）：关键词允许后缀（SECRET_KEY / API_KEY_ID 等），
+    # 右值改为「非空白非引号」字符类 —— 原先写死 [A-Za-z0-9+/=_.:@!#%^&*-]，
+    # 含 $ ? ~ ( ) { } | \ 的真口令（如 "Abc$123456789xyz"）整条漏判。
+    r"[A-Za-z0-9_]*[ \t]*[:=][ \t]*[A-Za-z]{0,3}[\"']?[^ \t\"']{12,}"
 )
 SECRET_PATTERN = re.compile(
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----"
@@ -42,6 +45,34 @@ EXPRESSION = re.compile(
 )
 # ④ 2026-09-24 新增：.py 专属收窄 —— 匹配片段的右值必须带引号
 PY_QUOTED_RHS = re.compile(r"[:=][ \t]*[A-Za-z]{0,3}[\"']")
+# ⑤ 2026-10-24：右值是变量/插值/命令替换，而不是字面量。
+#    $VAR / ${VAR} / $($cmd) / %VAR% / {{ expr }} / <占位> 都不是硬编码凭据。
+#    实测误报：`PASSWORD="${POSTGRES_PASSWORD}"`、`PASSWORD = $PgSuperPassword`、
+#    `Password = (Read-EnvFile ...)`、`PASSWORD="${REPL_PASSWORD:-$(openssl ...)}"`。
+#    注意不能用「右值含 $ 就跳过」——`"Abc$123456789xyz"` 是真口令，只判首字符。
+_VARIABLE_RHS = re.compile(r"[:=][ \t]*[A-Za-z]{0,3}[\"']?[\$%{<]")
+# ⑥ 2026-10-24：关键词本身是**配置项名**而非凭据值。
+#    实测误报：`PASSWORD_PREFIX = "erp:backup_task_pwd:`（Redis key 前缀）。
+_CONFIG_NAME_KEYWORD = re.compile(
+    r"^[A-Za-z0-9_]*(?:_PREFIX|_SUFFIX|_LEN|_MIN|_MAX|_FIELD|_HEADER|_POLICY"
+    r"|_PATTERN|_REGEX|_HINT|_LABEL|_TITLE|_TYPE|_NAME)[ \t]*[:=]",
+    re.IGNORECASE,
+)
+# ⑦ 2026-10-24：右值以非 ASCII 开头 = 中文说明文字，不是字面量凭据。
+#    实测误报：`password_string: 测试/配置默认值，真实密码走环境变量`、
+#    `password: 加密密码（请求头，H3：已移除`。只判首字符，`"密码Abc123456"`
+#    这类以中文开头的真口令仍会被漏掉——属可接受取舍（本仓无此形态）。
+_NON_ASCII_RHS = re.compile(r"[:=][ \t]*[A-Za-z]{0,3}[\"']?[^\x00-\x7f]")
+# ⑧ 2026-10-24：shell 参数展开 `${VAR:?msg}` / `:-` / `:=` / `:+` 不是字面量。
+#    实测误报：`init-replica.sh` 的
+#    `: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be provided via environment}"`
+#    被切成 `PASSWORD:?POSTGRES_PASSWORD` 而命中。
+_SHELL_EXPANSION_RHS = re.compile(r"[:=][?:+\-]")
+# ⑨ 2026-10-24：右值不含任何字母数字 = 装饰性分隔线/注释横幅，不是凭据。
+#    实测误报：HTML 里的 `/* ===== 1. 设计令牌 Design Tokens ===== */`
+#    被切成 `Tokens =====================` 而命中。
+_ALNUM = re.compile(r"[A-Za-z0-9]")
+_SEP_RE = re.compile(r"[:=]")
 
 
 def password_rule_hits(line: str, is_py: bool) -> bool:
@@ -56,6 +87,17 @@ def password_rule_hits(line: str, is_py: bool) -> bool:
         if PLACEHOLDER.search(seg):                 # ① 占位符
             continue
         if EXPRESSION.search(seg):                  # ② / ③ 表达式
+            continue
+        if _VARIABLE_RHS.search(seg):                # ⑤ 变量/插值
+            continue
+        if _CONFIG_NAME_KEYWORD.search(seg):         # ⑥ 配置项名（PASSWORD_PREFIX 等）
+            continue
+        if _NON_ASCII_RHS.search(seg):               # ⑦ 中文说明文字
+            continue
+        if _SHELL_EXPANSION_RHS.search(seg):         # ⑧ shell 参数展开
+            continue
+        _sep = _SEP_RE.search(seg)
+        if _sep and not _ALNUM.search(seg[_sep.end():]):  # ⑨ 纯分隔线/横幅
             continue
         if is_py and not PY_QUOTED_RHS.search(seg):  # ④ .py 右值必须带引号
             continue

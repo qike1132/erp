@@ -230,10 +230,17 @@ async def export_report(
     if report_type not in ALLOWED_REPORT_TYPES:
         raise HTTPException(status_code=400, detail=f'不支持的报表类型: {report_type}')
 
-    buffer = await report_service.export_report_to_excel(
-        db, report_type, customer, product, status, start_date, end_date,
-        factory=_factory_scope(user),
-    )
+    try:
+        buffer = await report_service.export_report_to_excel(
+            db, report_type, customer, product, status, start_date, end_date,
+            factory=_factory_scope(user),
+        )
+    except ValueError as e:
+        # P1（2026-10-24）：导出超限/类型不支持属业务拒绝，必须映射 4xx。
+        # 全库没有 ValueError→400 的全局 handler（INFRA_EXCEPTIONS 也明确移除了
+        # ValueError），不在这里转换就会变成 500「服务器内部错误」，
+        # 用户看不到「超过 10000 条，请缩小范围」这句可操作提示。
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     filename = f'{report_type}_report.xlsx'
     # StreamingResponse 会迭代 content，bytes 会被按 int 迭代（AttributeError）；此处统一为 chunk 序列

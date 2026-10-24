@@ -129,11 +129,19 @@ async def _calc_all_shipped_qty(db: AsyncSession, year: int, month: int) -> dict
     查询 stock_out 全表（含独立出货和订单抵扣）
     返回: {(customer_name, product_name): total_shipped_qty}
     """
-    end = last_day_of_month(year, month)
-    # 用范围条件而非 func.date()，使 stockout_date 上的索引可被命中
-    start_dt = datetime(year, month, 1)
-    end_dt = datetime.combine(end, datetime.max.time())
-    result = await db.execute(select(StockOut.customer, Product.name.label('product_name'), func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0).label('total_qty')).join(Product, StockOut.product_id == Product.id).where(and_(StockOut.stockout_date >= start_dt, StockOut.stockout_date <= end_dt, StockOut.customer.isnot(None), StockOut.customer != '')).group_by(StockOut.customer, Product.name))
+    # 用范围条件而非 func.date()，使 stockout_date 上的索引可被命中。
+    # P2（2026-10-24）：边界必须带业务时区（北京时间）。stockout_date 是 timestamptz，
+    # 原先传 naive datetime，按 UTC 解释后月度窗口整体偏 −8h：每月 1 日 00:00–07:59
+    # （北京）的出货漏计、次月 1 日同窗口误计，排产页 shipped_qty/进度跟着错。
+    from fastapi_app.core.business_time import _BUSINESS_TZ
+
+    start_dt = datetime(year, month, 1, tzinfo=_BUSINESS_TZ).astimezone(UTC)
+    if month == 12:
+        next_month_start = datetime(year + 1, 1, 1, tzinfo=_BUSINESS_TZ).astimezone(UTC)
+    else:
+        next_month_start = datetime(year, month + 1, 1, tzinfo=_BUSINESS_TZ).astimezone(UTC)
+    end_dt = next_month_start
+    result = await db.execute(select(StockOut.customer, Product.name.label('product_name'), func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0).label('total_qty')).join(Product, StockOut.product_id == Product.id).where(and_(StockOut.stockout_date >= start_dt, StockOut.stockout_date < end_dt, StockOut.customer.isnot(None), StockOut.customer != '')).group_by(StockOut.customer, Product.name))
     return {(row.customer, row.product_name): row.total_qty for row in result.all()}
 
 def _calc_stock_status(plan_qty: int, inventory_qty: int) -> str:

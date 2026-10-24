@@ -253,6 +253,17 @@ watch(() => props.items.length, (newLen, oldLen) => {
   }
 })
 
+// P2（2026-10-24）：变高模式的高度缓存按 index 存，列表被过滤/换页成另一批时旧
+// index→高度仍然生效，被写进 _prefixSums 当占位高度 → 行被 min-height 撑大、
+// 总高与实际不符（滚动条跳变），要逐行滚动重测才自愈。
+// 引用变化即视为换批，清空缓存并重算前缀和。
+watch(() => props.items, () => {
+  if (!props.dynamicHeight) return
+  _heightMap.clear()
+  itemRefs.clear()
+  _heightVersion.value++
+})
+
 watch([startIndex, endIndex], ([s, e]) => {
   emit('visibleChange', s, e)
 })

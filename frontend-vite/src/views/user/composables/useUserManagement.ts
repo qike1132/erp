@@ -319,7 +319,10 @@ export function useUserManagement() {
       // 若 navSections 为空或缺少 key 字段（如 HMR 前的旧数据残留），重新加载
       const needReloadNav = authStore.navSections.length === 0 || !authStore.navSections[0]?.key
       if (needReloadNav) {
-        await authStore.fetchNavSections().catch(() => {})
+        // P1（2026-10-24）：静默吞掉会让权限分区缺 key、勾选状态错乱，必须提示
+        await authStore.fetchNavSections().catch(() => {
+          showToast('导航数据加载失败，权限分区可能不完整', 'warning')
+        })
       }
       const [permRes, userPermRes] = await Promise.all([
         permissionApi.tree(),
@@ -340,7 +343,11 @@ export function useUserManagement() {
       errorMsg: '保存失败',
       onSuccess: () => {
         // 权限变更可能影响导航栏结构，异步刷新以保持同步
-        authStore.fetchNavSections().catch(() => {})
+        // P1（2026-10-24）：刷新失败不能静默——否则提示「保存成功」但菜单不变，
+        // 管理员会重复保存或怀疑没生效。
+        authStore.fetchNavSections().catch(() => {
+          showToast('权限已保存，但菜单刷新失败，请手动刷新页面', 'warning')
+        })
         permDialogVisible.value = false
       },
     },
