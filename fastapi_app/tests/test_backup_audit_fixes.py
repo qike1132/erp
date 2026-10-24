@@ -20,6 +20,8 @@ class _FakeUpload:
     def __init__(self, filename: str, data: bytes):
         self.filename = filename
         self._data = data
+        # B2-08（2026-10-24 审计）：_read_backup_file 按声明值预检，须带 size
+        self.size = len(data)
 
     async def read(self) -> bytes:
         return self._data

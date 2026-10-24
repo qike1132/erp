@@ -88,7 +88,9 @@ class BackupCleanupService:
             files_to_delete = {f['name'] for f in backup_files if f['name'] not in files_to_keep}
             files_to_delete = self._enforce_keep_floor(backup_files, files_to_delete)
             files_to_keep = {f['name'] for f in backup_files} - files_to_delete
-            files_to_delete = self._enforce_count_ceiling(backup_files, files_to_keep)
+            # B2-05：count/hybrid 的份数截断作用于**保留集**（超额者转删除）
+            files_to_keep = self._enforce_count_ceiling(backup_files, files_to_keep)
+            files_to_delete = {f['name'] for f in backup_files} - files_to_keep
 
             cleanup_result = await self._execute_cleanup(files_to_delete)
             report = await self._generate_cleanup_report(
@@ -156,7 +158,7 @@ class BackupCleanupService:
         """
         from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
 
-        policy = BackupPolicyService()._load_policy_config()
+        policy = BackupPolicyService()._load_policy_config().get('retention', {})
         strategy = policy.get('strategy', 'days')
         if strategy not in ('count', 'hybrid'):
             return files_to_keep
@@ -166,11 +168,11 @@ class BackupCleanupService:
         # mtime 倒序（backup_files 已按 mtime 倒序，防御式再排一次）
         ordered = sorted(backup_files, key=lambda f: f['mtime'], reverse=True)
         over_quota = [f['name'] for f in ordered[ceiling:]]
-        # 只把「本会话打算保留」的超额者转为删除——已被天数判定删除的不重复处理
+        # 只把「本会话打算保留」的超额者移出保留集（转由外层统一删除）
         excess = {name for name in over_quota if name in files_to_keep}
         if not excess:
             return files_to_keep
-        logger.info('count 策略份数截断：保留最新 %d 份，超额删除 %d 份', ceiling, len(excess))
+        logger.info('count 策略份数截断：保留最新 %d 份，超额移出 %d 份', ceiling, len(excess))
         return files_to_keep - excess
 
     def _enforce_keep_floor(self, backup_files: list[dict[str, Any]],
