@@ -1106,6 +1106,17 @@ async def _resolve_stockout_inputs(
         debug_messages.append(f'行{idx}: {reason}')
         return None
 
+    # 结余闸门（AUD-01，2026-10-24 审计）：口径与报错构成同手工出货
+    # （stock_out_service._assert_inventory_balance）。current_stock 是备货口径、
+    # 恒 ≥ 结余——综合导入的出货 Sheet 不能只判它而绕过结余闸门。
+    from fastapi_app.services.stock_out_service import _assert_inventory_balance
+
+    try:
+        await _assert_inventory_balance(db, product.id, product.name, customer, qty)
+    except ValueError as exc:
+        debug_messages.append(f'行{idx}: {exc}')
+        return None
+
     shipment_info = await deps.calculate_available_shipment_quantity(
         db, product.id, customer,
     )

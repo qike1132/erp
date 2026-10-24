@@ -58,6 +58,9 @@ export function usePatternRoomPatternMakers(
       if (data) patternMakers.value = data
     } catch (e) {
       console.error('[PatternRoomView] 加载版师列表失败:', e)
+      // F1b-06（2026-10-24 审计）：静默吞错会让有管理权限的用户误判「还没建过
+      // 版师」而重复新建——失败必须可感知（全局拦截器对非 401/403 无兜底）。
+      showToast('版师列表加载失败，请刷新重试', 'error')
     }
   }
 

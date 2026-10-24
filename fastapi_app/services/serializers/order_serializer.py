@@ -274,7 +274,12 @@ class OrderSerializer:
             return ""
 
         if field == OrderField.ORDER_DATE:
-            return value.strftime("%Y-%m-%d %H:%M")
+            # AUD-02（2026-10-24 审计）：order_date 是 timestamptz（aware-UTC），
+            # 裸 strftime 按 UTC 墙钟渲染恒慢 8 小时、北京 0–8 点订单显示前一天，
+            # 且与移动端仪表盘 business_day_range 的「今日订单」口径自相矛盾。
+            # 统一走业务时区（双端受益）。
+            from fastapi_app.core.business_time import fmt_business
+            return fmt_business(value)
 
         if field == OrderField.BATCH_COMPLETED_AT:
             return value.isoformat()

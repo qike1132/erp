@@ -97,4 +97,7 @@ def main():
 
 
 if __name__ == '__main__':
+    # AUD-18（2026-10-24 审计）：与 add_*_nav 族同款写守卫（打目标库+显式授权）
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('写入导航/权限种子数据（生产库）')
     main()

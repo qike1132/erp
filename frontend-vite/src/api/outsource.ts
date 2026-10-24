@@ -120,6 +120,9 @@ export const outsourceApi = {
   productSearch: (q: string) => get<HubeiProductSearchItem[]>('/outsource/products/search', { q }),
   /** 跨全部湖北订单聚合未发完工序明细（导出/打印未到货清单） */
   unshipped: () => get<UnshippedProcessItem[]>('/outsource/unshipped'),
+  /** F1a-05：页头「未到货 N 件」专用聚合口径（只回一条合计行），不再全量拉明细 */
+  unshippedSummary: () =>
+    get<UnshippedProcessItem[]>('/outsource/unshipped', { summary: true }),
   /** SKU 工序预设 */
   processTypes: (params?: QueryParams) => get<ProcessTypeListResponse>('/outsource/process-types', params),
   /** 为一个 SKU 批量添加多个工序预设（自由输入工序名称） */

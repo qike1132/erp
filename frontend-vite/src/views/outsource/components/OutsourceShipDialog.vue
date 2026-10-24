@@ -110,7 +110,9 @@
  * 右栏清单编辑 = OutsourceShipCartPanel，聚合/拆分/校验 = shipCartModel.ts。
  * 本组件持有全部状态（rows/cartProducts/mergedInputs），经 props 下发、事件回收；
  * 底栏实时合计与提交（按订单分组 payload）在此编排。
- * 数据源 GET /outsource/processes/shippable；提交 POST /outsource/processes/ship-multi（每订单一张发货单，单事务原子）。
+ * 数据源 GET /outsource/processes/shippable；提交 POST /outsource/processes/ship
+ * （合并单张发货单，整批原子回滚）——F1a-10（2026-10-24 审计）：原注释写的是
+ * 已废弃的 ship-multi 每订单一张，与实现（createMergedShipment）漂移。
  */
 import { computed, ref, watch } from 'vue'
 import { outsourceApi, type ShippableProcessItem } from '@/api/outsource'

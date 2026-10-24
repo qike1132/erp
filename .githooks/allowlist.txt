@@ -30,3 +30,5 @@ scripts/_selftest_hook.py
 # 扫描器测试：断言用例内使用 PEM 私钥头格式串与云厂商公开文档示例密钥，
 # 用于验证扫描器确实能命中；非真实凭据。
 scripts/prod_audit/tests/test_scan_secrets.py
+# 2026-10-24 审计修复（I2-04 BOM）曾登记两安装脚本；同日把示例占位串改为
+# <...> 尖括号形式后命中归零，条目按「冗余即删」原则移除（allowlist_effectiveness 锁）。

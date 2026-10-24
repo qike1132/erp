@@ -90,6 +90,21 @@ async def _apply_production_stock(
             product.current_stock, delta,
             message=f'生产记录变动将导致库存为负数（当前库存：{product.current_stock}，变化：{delta:+d}）',
         )
+        # B1-03（2026-10-24 审计）：结余闸门——本记录是包装部口径（进结余公式）
+        # 时，净减量会把「包装部入库 − 已出货」打穿成负数，后续一切出货被闸门
+        # 拦死。语义与 cancel_stockreturn_core（stock_return_service.py:197-201）
+        # 对齐：quantity > balance 即拒。改小/换产品回退/删除三个路径都经过这里。
+        if (record.department or '') == 'packaging':
+            from fastapi_app.services.stock_inventory_service import get_inventory_balance
+
+            balance = await get_inventory_balance(db, pid)
+            if -delta > balance:
+                raise ValueError(
+                    f'生产记录变动将导致库存（结余）为负数：'
+                    f'结余 {balance}，本次减少 {-delta}。'
+                    f'该记录是包装部口径（计入结余），其数量可能已被出货消耗，'
+                    f'请先核对出货记录或改为冲销方式处理。'
+                )
     # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `product.current_stock += delta` 直写，
     # 不递增 version，与走乐观锁的写入口并发时丢失更新。改走统一写入口
     # （调用方已持行锁，apply_stock_delta_locked 内置 WHERE version 守卫与原子非负守卫）。
@@ -502,6 +517,7 @@ async def update_record(
 
     # 库存联动基线（2026-10-06 生产即入库）：变更前快照
     old_product_id, old_quantity = record.product_id, record.quantity
+    old_department = record.department  # B1-03：改部门进出包装部口径需校验结余
     if 'customer_id' in kwargs:
         record.customer_id = kwargs['customer_id']
         record.customer_name = await _resolve_customer_name(db, kwargs['customer_id'])
@@ -514,6 +530,25 @@ async def update_record(
                 setattr(record, field, kwargs[field].strip() or None)
             else:
                 setattr(record, field, kwargs[field])
+    # B1-03（2026-10-24 审计）：旧行离开「包装部口径」时校验结余——department
+    # 移出或换产品都会让**旧产品**的包装部入库合计减少 old_quantity（OCR-F1
+    # 评审指正：合并编辑时 setattr 循环已把 record.* 更新为新值，基准必须取
+    # 变更前的 old_product_id/old_quantity，且部门移出+换产品同次编辑时结余要
+    # 查旧产品——balance 此刻仍含旧行贡献，old_quantity > balance 即拒）；
+    # 此前的库存联动对 department 变更是零校验。仅改数量（部门/产品不变）的
+    # 负向路径由 _apply_production_stock 内的结余闸门覆盖，不在此重复。
+    if (old_department == 'packaging' and old_product_id is not None and old_quantity > 0
+            and (record.department != 'packaging' or record.product_id != old_product_id)):
+        from fastapi_app.services.stock_inventory_service import get_inventory_balance
+
+        balance = await get_inventory_balance(db, old_product_id)
+        if old_quantity > balance:
+            raise ValueError(
+                f'该变更将导致库存（结余）为负数：'
+                f'结余 {balance}，此行此前计入产品#{old_product_id}包装部入库的数量 '
+                f'{old_quantity} 将移出。'
+                f'包装部口径计入结余，其数量可能已被出货消耗。'
+            )
     if 'production_date' in kwargs and kwargs['production_date'] is not None:
         new_date = parse_date_with_fallback(kwargs['production_date'])
         if new_date > date.today():

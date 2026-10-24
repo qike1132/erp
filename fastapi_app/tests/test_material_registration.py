@@ -29,11 +29,40 @@ class TestMaterialRegistrationModels:
         assert MaterialRegistrationItem.__tablename__ == 'material_registration_item'
 
     def test_computed_status_pending(self):
-        from fastapi_app.shared_models.material_registration import MaterialRegistration
-        reg = MagicMock()
+        """computed_status 三分支（AUD-16，2026-10-24 审计）。
+
+        原实现零断言（死 MagicMock + 丢弃的 __new__），来料登记单状态推导——
+        页面状态列与按状态筛选的依据——全区零覆盖。用 __new__ 绕过 ORM 初始化、
+        SimpleNamespace 造 items（_calc_items_stats 只读 ordered/received_quantity），
+        手工推导期望值断言三分支。
+        """
+        from fastapi_app.shared_models.material_registration import (
+            MaterialRegistration,
+            MaterialRegistrationItem,
+        )
+
+        def _item(ordered, received):
+            # 未挂 session 的纯内存 ORM 实例（relationship 赋值要求成员类型匹配）
+            return MaterialRegistrationItem(ordered_quantity=ordered,
+                                            received_quantity=received)
+
+        reg = MaterialRegistration()
+
+        # 空明细 → pending
         reg.items = []
-        MaterialRegistration.__new__(MaterialRegistration)
-        # Just verify it can be imported and instantiated conceptually
+        assert reg.computed_status == 'pending'
+
+        # 有明细、全部收齐 → completed（期望值手工推导：3>=3 且 2>=2）
+        reg.items = [_item(3, 3), _item(2, 2)]
+        assert reg.computed_status == 'completed'
+
+        # 部分收货（received>0 但未收齐）→ partial（1 of 5）
+        reg.items = [_item(5, 1)]
+        assert reg.computed_status == 'partial'
+
+        # 有明细但一件未收 → pending（received=0）
+        reg.items = [_item(5, 0)]
+        assert reg.computed_status == 'pending'
 
 
 class TestMaterialRegistrationService:

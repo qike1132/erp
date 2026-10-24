@@ -55,7 +55,11 @@ const showPreview = ref(false)
 const previewResult = ref<ProductImportPreviewResult | null>(null)
 
 function onExcelSelect(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  // F1b-04（2026-10-24 审计）：清值，同 BackupView 修法——否则导入后重传
+  // 同一文件第二次点击无反应。
+  input.value = ''
   if (file) handleExcelFile(file)
 }
 function onExcelDrop(e: DragEvent) {
@@ -124,7 +128,11 @@ async function handleConfirmImport() {
 }
 
 function downloadTemplate() {
-  void batchApi.downloadTemplate('产品导入模板.xlsx')
+  // F1b-05（2026-10-24 审计）：补 catch——失败此前静默 + unhandled rejection
+  // （对照 useCaseStockWorkbench.ts:249 的同款处理）。
+  batchApi.downloadTemplate('产品导入模板.xlsx').catch(() => {
+    showToast('模板下载失败，请稍后重试', 'error')
+  })
 }
 </script>
 

@@ -488,6 +488,14 @@ class WorkerSettings:
             ensure_readonly_grants_task,
             numbering_audit_task,
             inventory_reconcile_task,
+            # 以下三个原本只在 cron_jobs 里（cron 由 worker 内部直调、不经按名派发），
+            # 但 catch_up_daily_crons 与 /backup/schedule/trigger 端点会按 __name__
+            # 入队它们——缺注册时 worker 侧 KeyError "function not found" 永久失败
+            # 且不触发 on_job_end（无重试、无死信、无终态回写）。
+            # 守卫测试：tests/test_arq_functions_registry.py（AUD-06，2026-10-24 审计）。
+            maintain_logs_task,
+            replica_lag_task,
+            catch_up_daily_crons,
         )
     ]
     cron_jobs = cron_jobs

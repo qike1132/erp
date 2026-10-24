@@ -1,0 +1,279 @@
+/* ===== 模态框遮罩 ===== */
+.pd-overlay {
+  position: fixed; inset: 0; z-index: var(--z-page-modal); background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+
+.pd-input-wrap { position: relative; }
+.autocomplete-wrapper { position: relative; }
+
+/* ===== BOM模态框 =====
+   尺寸契约（勿改回 height:auto）：弹窗**恒定高度**，不随物料条数变化。
+   历史问题：max-height:90vh + 默认 height:auto + body 仅 min-height:500px，
+   导致物料 1 条时弹窗 ~663px、20 条时 ~810px，视觉上「一会大一会小」。
+   现在：dialog 固定 height:90vh（带 min/max 兜底），body 内部滚动，
+   物料多少只影响 body 的滚动位置，弹窗外框尺寸始终一致。 */
+.bom-modal-content {
+  border-radius: 18px; border: none; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  overflow: hidden; background: white;
+}
+.bom-modal-dialog {
+  max-width: 1400px; width: 95vw;
+  /* 固定高度：三种写法叠加，避免 90vh 在小屏/大屏下越界后又被内容撑开 */
+  height: 90vh; min-height: 680px; max-height: 90vh;
+  display: flex; flex-direction: column;
+}
+.bom-modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 20px 28px; background: transparent;
+  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+  flex: 0 0 auto;
+}
+.bom-modal-header-left { flex: 1; }
+.bom-modal-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 16px; font-weight: 700; color: var(--color-text); margin: 0;
+}
+.bom-modal-title i { color: var(--color-primary-500); }
+.bom-modal-close {
+  width: 36px; height: 36px; border: none; background: var(--color-surface, #f8fafc);
+  border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-secondary); font-size: 16px; transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
+}
+.bom-modal-close:hover { background: var(--color-border-light, #e2e8f0); color: var(--color-text); transform: rotate(90deg); }
+/* body：占满 dialog 剩余高度并内部滚动；min-height 取消（改为 flex:1 + min-height:0，
+   否则内容少时 min-height 会反向撑高外框，又变成"尺寸随内容变"） */
+.bom-modal-body {
+  padding: 0; background: var(--color-surface, #f8fafc);
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+}
+.bom-tabs-container {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+}
+.bom-tab-v2 {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bom-tab-v2:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+.bom-tab-v2.active {
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  color: var(--color-primary-700);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91, 141, 239, 0.2);
+  transform: translateY(-1px);
+}
+.bom-main-content { padding: 20px 28px 28px; }
+.bom-summary-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 20px; background: white; border-radius: 12px;
+  border: 1px solid var(--color-primary-200); margin-bottom: 20px; gap: 12px; flex-wrap: wrap;
+}
+.bom-summary-left { display: flex; align-items: center; gap: 20px; }
+.bom-summary-text { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--color-text); }
+.bom-summary-text i { color: var(--color-primary-500); }
+.bom-summary-count { font-size: 13px; color: var(--color-text-secondary); }
+.count-value { font-size: 18px; font-weight: 700; color: var(--color-primary-600); }
+.bom-summary-center { flex: 1; max-width: 360px; margin: 0 16px; position: relative; }
+.bom-summary-right { display: flex; gap: 8px; }
+.bom-btn-add-v2 {
+  padding: 10px 20px; background: var(--color-success-50); color: var(--color-success-600);
+  border: 2px solid var(--color-success-200); border-radius: 10px; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; align-items: center; gap: 6px;
+}
+.bom-btn-add-v2:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(34,197,94,0.2); }
+.bom-btn-copy-v2 {
+  padding: 10px 20px; background: var(--color-primary-50); color: var(--color-primary-600);
+  border: 2px solid var(--color-primary-200); border-radius: 10px; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; align-items: center; gap: 6px;
+}
+.bom-btn-copy-v2:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.2); }
+.bom-btn-copy-v2:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* ===== 角色页签（点 tab 切换 BOM，⋯ 菜单管理） ===== */
+.bom-role-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: white; border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 12px;
+  padding: 10px 14px; margin-bottom: 16px;
+}
+.bom-role-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 700; color: var(--color-text); white-space: nowrap;
+}
+.bom-role-label i { color: var(--color-primary-500); }
+.bom-role-tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1; }
+/* 角色页签外观与 pattern-room RoleTabs 的 .role-tab 逐条同规范
+   （用户反馈 m00132：选中/未选中颜色要与参照页一致；默认BOM 不再有独立的虚线灰底） */
+.bom-role-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-light, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 13px; font-family: inherit; font-weight: 500;
+  cursor: pointer; transition: all 0.15s ease; user-select: none;
+}
+.bom-role-tab:hover {
+  border-color: var(--color-primary-300, #93c5fd);
+  color: var(--color-primary-600, #3b82f6);
+  background: var(--color-primary-50, #eff6ff);
+}
+.bom-role-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-500, #3b82f6), var(--color-primary-600, #2563eb));
+  border-color: var(--color-primary-600, #2563eb);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
+}
+.bom-role-tab.active:hover {
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-600, #2563eb), var(--color-primary-700, #1d4ed8));
+}
+/* 键盘聚焦时的焦点环（页签可 Tab 聚焦，便于键盘打开右键菜单） */
+.bom-role-tab:focus-visible { outline: 2px solid var(--color-primary-400, #60a5fa); outline-offset: 1px; }
+.bom-role-name { white-space: nowrap; }
+.bom-role-edit-input {
+  width: 96px; padding: 2px 8px; border: 1px solid var(--color-primary-400); border-radius: 6px;
+  font-size: 13px; font-weight: 600; outline: none; user-select: text;
+}
+/* 右键菜单：与 pattern-room RoleTabs 的 .role-tab-menu 同规范（遮罩负责点击/滚轮/再次右键关闭） */
+.bom-role-menu-mask { position: fixed; inset: 0; z-index: 1000; }
+.bom-role-menu {
+  position: fixed; z-index: 1001; min-width: 140px; padding: 5px;
+  border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
+  background: #fff; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  animation: role-tab-menu-pop 0.15s ease;
+}
+/* 与参照页同名：Vue 会把 scoped 样式里的 keyframes 重写为带组件 hash 的名字，跨组件不会互相覆盖 */
+@keyframes role-tab-menu-pop { from { transform: scale(0.96) translateY(-4px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+.bom-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px;
+  border: none; border-radius: 7px; background: transparent;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  color: var(--color-text-primary); text-align: left; cursor: pointer;
+  transition: background 0.14s ease;
+}
+/* 参照页菜单只有「删除角色」（自带 hover）；这里多了「重命名」，补一条非危险项的 hover */
+.bom-menu-item:not(.danger):hover { background: var(--color-primary-50, #eff6ff); }
+.bom-menu-item.danger { color: var(--color-danger-600, #d44042); }
+.bom-menu-item.danger:hover { background: var(--color-danger-50, #fde8e8); }
+/* 菜单项由键盘聚焦时（打开即聚焦）给出可见焦点 */
+.bom-menu-item:focus-visible { outline: 2px solid var(--color-primary-400, #60a5fa); outline-offset: -2px; }
+.bom-menu-divider { height: 1px; background: var(--color-border-lighter, #f1f5f9); margin: 4px 0; }
+.bom-role-empty { font-size: 13px; color: var(--color-text-secondary); }
+/* 添加角色：与 pattern-room RoleTabs 的 .role-tab-add / .role-tab-input 同规范 */
+.bom-role-add-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.bom-role-add-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  border: 1px dashed var(--color-border-light, #e5e7eb); border-radius: 8px;
+  background: transparent; color: var(--color-text-secondary, #6b7280);
+  cursor: pointer; font-size: 11px; transition: all 0.15s ease;
+}
+.bom-role-add-btn:hover {
+  border-color: var(--color-primary-400, #60a5fa);
+  color: var(--color-primary-600, #3b82f6);
+  background: var(--color-primary-50, #eff6ff);
+}
+.bom-role-add-input {
+  width: 120px; padding: 6px 10px;
+  border: 1px solid var(--color-primary-400, #60a5fa); border-radius: 8px;
+  font-size: 13px; font-family: inherit;
+  box-shadow: 0 0 0 2px var(--color-primary-100, #dbeafe);
+}
+/* P1-04：当前作用域常驻徽标 */
+.bom-scope-badge {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 6px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  color: var(--color-primary-700);
+  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
+  border: 1px solid var(--color-primary-200);
+}
+.bom-scope-badge strong { font-weight: 700; }
+
+/* BOM内容区：给一个稳定的最小高度，保证「0 条(空态) / 1 条 / 多条」时
+   内容区下沿位置一致，不会因为只有 1 行而显得弹窗塌陷 */
+.bom-content-area {
+  background: white; border-radius: 12px;
+  border: 1px solid var(--color-border-light, #e2e8f0);
+  overflow: hidden;
+  min-height: 300px;
+}
+.bom-table-container-v2 { display: block; }
+.bom-table-wrapper-v2 { overflow-x: auto; }
+.bom-table-v2 { width: 100%; border-collapse: collapse; min-width: 1100px; }
+.bom-table-header-v2 { background: var(--color-surface, #f8fafc); }
+.bom-table-header-v2 th {
+  padding: 12px 16px; text-align: left; font-size: 12px; font-weight: 600;
+  color: var(--color-text); border-bottom: 2px solid var(--color-primary-200); white-space: nowrap;
+}
+.bom-table-header-v2 th .required { color: var(--color-danger-500); font-weight: 700; }
+.bom-table-v2 tbody tr { transition: background-color 0.2s ease; }
+.bom-table-v2 tbody tr:hover { background-color: var(--color-primary-50); }
+.bom-table-v2 tbody td { padding: 10px 16px; border-bottom: 1px solid var(--color-border-light, #f1f5f9); vertical-align: middle; }
+.bom-table-input {
+  width: 100%; padding: 6px 10px; border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 8px; font-size: 13px; transition: border-color 0.2s ease, box-shadow 0.2s ease; outline: none;
+}
+.bom-table-input:focus { border-color: var(--color-primary-400); box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1); }
+.bom-table-select {
+  width: 100%; padding: 6px 10px; border: 1px solid var(--color-border-light, #e2e8f0);
+  border-radius: 8px; font-size: 13px; background: white; cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease; outline: none;
+}
+.bom-table-select:focus { border-color: var(--color-primary-400); box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1); }
+.bom-table-action-btn { padding: 5px 8px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.bom-table-action-btn.delete { background: var(--color-danger-50); color: var(--color-danger-600); }
+.bom-table-action-btn.delete:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(229,115,115,0.3); }
+.bom-empty-state-v2 { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; text-align: center; }
+.bom-empty-icon { margin-bottom: 16px; }
+.bom-empty-icon i { font-size: 48px; color: var(--color-text-secondary); opacity: 0.4; }
+.bom-empty-text { display: flex; flex-direction: column; gap: 6px; }
+.bom-empty-title { font-size: 16px; font-weight: 600; color: var(--color-text); margin: 0; }
+.bom-empty-hint { font-size: 13px; color: var(--color-text-secondary); margin: 0; }
+
+/* BOM底部按钮 */
+.bom-modal-footer {
+  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
+  padding: 20px 28px; background: white;
+  border-top: 1px solid var(--color-border-light, #e2e8f0);
+  flex: 0 0 auto;
+}
+.bom-btn-cancel {
+  padding: 10px 20px; background: white; color: var(--color-text);
+  border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
+}
+.bom-btn-cancel:hover { background: var(--color-surface, #f8fafc); transform: translateY(-1px); }
+.bom-btn-save {
+  padding: 10px 20px; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
+  color: white; border: 2px solid var(--color-primary-500); border-radius: 10px;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
+  display: flex; align-items: center; gap: 6px;
+}
+.bom-btn-save:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+.bom-btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 进度条 */
+.pd-progress { height: 16px; border-radius: 8px; background: var(--color-border-light, #e2e8f0); overflow: hidden; }
+.pd-progress-bar { height: 100%; background: linear-gradient(135deg, var(--color-warning-400), var(--color-warning-600)); border-radius: 8px; transition: width 0.3s ease; }
+.pd-progress-text { margin-top: 6px; font-size: 12px; color: var(--color-text-secondary); text-align: center; }

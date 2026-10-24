@@ -32,7 +32,7 @@ class SupplierExportQuantityItem(BaseModel):
     material_name: str = Field(..., max_length=200, description="物料名称")
     specification: str = Field('', max_length=200, description="规格型号")
     unit: str = Field('', max_length=50, description="单位")
-    quantity: float = Field(..., description="页面展示数量（已按损耗率加放）")
+    quantity: float = Field(..., ge=0, le=9999999999.99, description="页面展示数量（已按损耗率加放）；下限/上限与落库列 Numeric(12,2) 一致，越界应在入口拦成 422 而非 flush 期 500")
 
 class SupplierSummaryExportRequest(OrderIdsRequest):
     """供应商汇总导出请求。
@@ -126,7 +126,7 @@ class PurchaseOrderMaterialItem(BaseModel):
 
 class PurchaseOrderCreateRequest(BaseModel):
     """创建采购订单请求"""
-    materials: list[PurchaseOrderMaterialItem] = Field(..., min_length=1, description="物料列表")
+    materials: list[PurchaseOrderMaterialItem] = Field(..., min_length=1, max_length=500, description="物料列表（上限对齐 purchase_center 请求列表口径）")
     customer_id: int | None = None
     customer_name: str = ''
     customer_code: str = ''
@@ -191,9 +191,12 @@ class FactorySummaryEditItem(BaseModel):
     允许额外字段以兼容前端未声明的扩展字段。
     """
     model_config = {"extra": "allow"}
-    item_ids: list[int] = []
-    quantity: float | None = None
-    loss_rate: float | None = None
+    item_ids: list[int] = Field(default_factory=list, max_length=500, description="明细行ID列表")
+    # 数量界与同文件 PurchaseOrderMaterialItem.quantity 一致（落库列
+    # purchase_order_item.quantity Numeric(12,2)）：负数会落库并参与金额重算为负
+    # （AUD-05，2026-10-24 审计）；NaN/Inf 被 ge/le 连带拒绝，否则 flush 期才炸 500。
+    quantity: float | None = Field(None, ge=0, le=9999999999.99, description="新数量；None=不改数量")
+    loss_rate: float | None = Field(None, description="损耗率(千分之几)；服务层 normalize_spare_rate 收口")
 
 
 class FactorySummarySaveRequest(BaseModel):
@@ -204,8 +207,8 @@ class FactorySummarySaveRequest(BaseModel):
     - `order_ids`：本次汇总涉及的采购单 ID 列表，用于在无编辑项时定位要写入备品的采购单。
     - `spare_rate`：对该次涉及的所有采购单覆盖写的损耗率（千分之几）；`None` 表示不覆盖。
     """
-    edits: list[FactorySummaryEditItem] = Field(default_factory=list, description="编辑列表（可为空）")
-    order_ids: list[int] = Field(default_factory=list, description="本次涉及的采购单ID列表")
+    edits: list[FactorySummaryEditItem] = Field(default_factory=list, max_length=500, description="编辑列表（可为空）")
+    order_ids: list[int] = Field(default_factory=list, max_length=500, description="本次涉及的采购单ID列表")
     spare_rate: float | None = Field(None, description="损耗率(千分之几)，None=不覆盖已存值")
 
 class SummaryPrintRequest(BaseModel):

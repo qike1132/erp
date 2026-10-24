@@ -3,6 +3,15 @@
 
 为 Vue/Vite 前端提供仪表盘统计数据和最近活动数据。
 从 pages.py:index_page 的服务端渲染逻辑提取而来。
+
+权限分级（AUD-04，2026-10-24 审计）：
+- stats / activities / todos / nav-sections / system-status / mobile：
+  登录即可读——它们是「全员首页」的运营聚合数字（今日备货/出货/待办数等），
+  前端首屏依赖，收紧会让无业务权限码的账号首屏 403。若 owner 决定进一步
+  收紧，在对应端点补 require_any_permission 即可。
+- customer-out-details / customer-order-details：逐客户营收金额明细（敏感），
+  前端零调用（服务端渲染时代遗留），已收紧为 report_view + 工厂隔离，
+  与 /reports/* 同口径。
 """
 
 import logging
@@ -12,7 +21,11 @@ from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_read_db
-from fastapi_app.core.deps import get_current_user_id, get_current_user_with_permissions
+from fastapi_app.core.deps import (
+    get_current_user_id,
+    get_current_user_with_permissions,
+    require_permission,
+)
 from fastapi_app.core.production_scope import production_scope_of
 from fastapi_app.services.dashboard_service import (
     Activity,
@@ -37,6 +50,16 @@ from fastapi_app.shared_models import User
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _dashboard_factory_scope(user: User) -> str:
+    """工厂隔离口径：非超管且绑定工厂时只看本厂（product.factory）。
+
+    与 report.py 的 _factory_scope 同口径逐字一致（AUD-04，2026-10-24 审计：
+    客户金额明细从「登录即可读两厂」收敛到报表权限 + 工厂隔离）。放在本文件
+    而非 import report 的私有函数——端点间不互引私有实现。
+    """
+    return user.factory if (user.factory and not user.is_super) else ''
 
 
 @router.get("/stats", response_model=DashboardResponse)
@@ -112,20 +135,22 @@ async def get_mobile_dashboard(
 async def get_customer_out_details(
     period: str = "today",
     query_date: str | None = None,
-    user_id: int = Depends(get_current_user_id),
+    user: User = Depends(require_permission('report_view')),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """获取客户出库详情"""
-    return await fetch_customer_out_details(period, query_date, db)
+    """获取客户出库详情（逐客户营收金额，AUD-04 收口：report_view + 工厂隔离）。"""
+    return await fetch_customer_out_details(
+        period, query_date, db, factory=_dashboard_factory_scope(user))
 
 
 @router.get("/customer-order-details", response_model=CustomerOutDetailResponse)
 async def get_customer_order_details(
     period: str = "today",
     date_param: str | None = None,
-    user_id: int = Depends(get_current_user_id),
+    user: User = Depends(require_permission('report_view')),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """获取客户订单详情"""
-    return await fetch_customer_order_details(period, date_param, db)
+    """获取客户订单详情（逐客户营收金额，AUD-04 收口：report_view + 工厂隔离）。"""
+    return await fetch_customer_order_details(
+        period, date_param, db, factory=_dashboard_factory_scope(user))
 

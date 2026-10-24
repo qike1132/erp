@@ -341,7 +341,9 @@ async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, use
 
 
 async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
-    order = await db.get(PurchaseOrder, order_id)
+    # B1-05（2026-10-24 审计）：删除与 complete 一样先读后写，无行锁时并发
+    # 删除/完成同单可同时通过状态校验（update 已于 2026-10-24 接行锁）。
+    order = await db.get(PurchaseOrder, order_id, with_for_update=True)
     if not order:
         raise ValueError('采购订单不存在')
 
@@ -412,7 +414,10 @@ async def _write_spare_rate_to_orders(
 async def complete_purchase_order(
     db: AsyncSession, order_id: int, username: str = 'unknown', spare_rate: float | None = None,
 ) -> dict:
-    order = await db.get(PurchaseOrder, order_id)
+    # B1-05（2026-10-24 审计）：完成是「读状态→写状态→建来料登记」的先读后写，
+    # material_registration.purchase_order_id 无唯一约束——并发/双击重复完成会
+    # 重复登记来料（到货判定 SUM 翻倍）。与 update 同款行锁先锁后校验。
+    order = await db.get(PurchaseOrder, order_id, with_for_update=True)
     if not order:
         raise ValueError('采购订单不存在')
     if order.status not in (PurchaseOrderStatus.PENDING, PurchaseOrderStatus.CONFIRMED):
@@ -465,8 +470,9 @@ async def batch_complete_purchase_orders(
     if not order_ids:
         raise ValueError('请选择要完成的订单')
 
+    # B1-05（2026-10-24 审计）：批量完成逐单行锁（FOR UPDATE），语义同单条完成。
     result = await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
+        select(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids)).with_for_update()
     )
     orders = {o.id: o for o in result.scalars().all()}
 
@@ -560,9 +566,19 @@ async def save_factory_summary_edits(
                 original_total = sum(float(it.quantity or 0) for it in items)
                 if original_total > 0:
                     ratio = float(new_quantity) / original_total
+                    # B1-06（2026-10-24 审计）：逐行 2 位舍入的残差回填最后一行，
+                    # 否则 Σ分摊 ≠ 用户输入的目标数量（3 行拆 100 得 99.99），
+                    # 行金额按偏移后的数量重算，对账时出现无解释零头。
                     for it in items:
                         it.quantity = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
-                        updated += 1
+                    residual = round_qty(
+                        float(new_quantity)
+                        - sum(float(it.quantity or 0) for it in items)
+                    )
+                    if residual:
+                        items[-1].quantity = Decimal(str(round_qty(
+                            float(items[-1].quantity or 0) + residual)))
+                    updated += len(items)
                 else:
                     per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
                     for it in items:

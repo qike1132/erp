@@ -166,18 +166,29 @@ def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
     """由备份产物描述推导 (status, 问题说明) 二元组。
 
     - 产物自述有缺失/失败表，或 coverage.complete 为 False → ('partial', 说明)
+    - dump_format 为 json（pg_dump 不可用的降级产物）→ ('partial', 说明)。
+      AUD-03（2026-10-24 审计）：JSON 降级包不含 schema、无法在空库/新机恢复，
+      若仍判 success，灾难恢复能力会静默失效且 7 天保留期后可用的 pg_dump 包
+      被清理光。旧产物无 dump_format 字段不回溯改判（保持其历史状态）。
     - 其余情况 → ('success', '')
 
     本函数只做「产物自述」判定：没有自述信息的旧产物仍判 success，无法凭空
     推断内容完整性（那类情况见 sync_backup_records 的 unknown 分支）。
     """
     problems = _collect_problem_tables(info)
-    incomplete = bool(problems)
+    degraded_json = isinstance(info, dict) and info.get('dump_format') == 'json'
+    incomplete = bool(problems) or degraded_json
     coverage = info.get('coverage') if isinstance(info, dict) else None
     if isinstance(coverage, dict) and coverage.get('complete') is False:
         incomplete = True
     if not incomplete:
         return STATUS_SUCCESS, ''
+    if degraded_json:
+        detail = 'pg_dump 不可用，本次为 JSON 降级备份（不含 schema，无法在空库恢复）'
+        if problems:
+            shown = problems[:_MAX_REPORTED_TABLES]
+            detail += f'；缺失/失败表: {", ".join(shown)}'
+        return STATUS_PARTIAL, detail
     if problems:
         shown = problems[:_MAX_REPORTED_TABLES]
         detail = f'缺失/失败表: {", ".join(shown)}'

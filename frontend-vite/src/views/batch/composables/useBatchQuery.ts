@@ -24,6 +24,11 @@ export interface CustomerGroup {
   products: ProductGroup[]
 }
 
+/** 列表端点单页上限（后端 per_page le=500）——与 OutsourcePresetTab 同口径 */
+const BATCH_PAGE_SIZE = 500
+/** 分页护栏：最多 20 页，防异常响应（恒满页）死循环（照 P1-23 模式） */
+const BATCH_MAX_PAGES = 20
+
 /** 批次查询：主查询 + 白名单 + 分组 + 完成批次 */
 export function useBatchQuery() {
   const perPage = ref(500)
@@ -64,12 +69,26 @@ export function useBatchQuery() {
   } = useQuery({
     queryKey: ['batch-query', perPage, filters],
     queryFn: async () => {
-      const params: Record<string, unknown> = { per_page: perPage.value }
-      if (filters.batch_no) params.batch_no = filters.batch_no
-      if (filters.customer) params.customer = filters.customer
-      if (filters.status) params.status = filters.status
-      if (filters.keyword) params.keyword = filters.keyword
-      return await batchApi.list(params)
+      const base: Record<string, unknown> = {}
+      if (filters.batch_no) base.batch_no = filters.batch_no
+      if (filters.customer) base.customer = filters.customer
+      if (filters.status) base.status = filters.status
+      if (filters.keyword) base.keyword = filters.keyword
+      // F1a-04（2026-10-24 审计）：分页拉全部——原先单页 500 不翻页不校验
+      // total，记录超 500 静默截断，「完成批次」决策基于残缺列表（同类问题
+      // 已在 OutsourcePresetTab P1-23 修复，本页漏修）。
+      const all: BatchQueryItem[] = []
+      let total = 0
+      for (let page = 1; page <= BATCH_MAX_PAGES; page += 1) {
+        const res = await batchApi.list({ ...base, page, per_page: BATCH_PAGE_SIZE })
+        const pageItems = (res.data ?? []) as BatchQueryItem[]
+        total = (res as { total?: number }).total ?? total
+        all.push(...pageItems)
+        if (pageItems.length < BATCH_PAGE_SIZE || (total > 0 && all.length >= total)) {
+          return { ...res, data: all, total: all.length }
+        }
+      }
+      return { data: all, total: all.length }
     },
     staleTime: 30_000,
     placeholderData: keepPreviousData,

@@ -130,15 +130,28 @@ class TestTransactionIntegrity:
 
     @pytest.mark.asyncio
     async def test_insert_rollback(self, db):
-        get_before = await db.execute(text("SELECT COUNT(*) FROM product"))
-        get_before.scalar()
+        """T1-02（AUD-16 批次，2026-10-24）：补上回滚与行数断言。
 
-        await db.execute(text(
+        原实现 INSERT+flush 后直接 print「操作已回滚」——既没有 rollback 调用
+        也没有行数比对，控制台假成功。外层是 begin() 事务上下文，整段 rollback
+        会把后续操作关死，故照 test_nested_transaction 用 SAVEPOINT 局部回滚。
+        """
+        get_before = await db.execute(text("SELECT COUNT(*) FROM product"))
+        before = get_before.scalar()
+
+        insert_sql = (
             "INSERT INTO product (name, barcode, price, initial_stock, current_stock) "
             "VALUES ('回滚测试', 'TXN_ROLLBACK_001', 0.01, 0, 0)"
-        ))
-        await db.flush()
-        print("\n  插入回滚: 操作已回滚")
+        )
+        async with db.begin_nested() as nested:
+            await db.execute(text(insert_sql))
+            await db.flush()
+            await nested.rollback()
+
+        get_after = await db.execute(text("SELECT COUNT(*) FROM product"))
+        after = get_after.scalar()
+        assert after == before, f"回滚后行数必须还原: {before} vs {after}"
+        print(f"{chr(10)}  插入回滚: 行数已还原 ({before})")
 
     @pytest.mark.asyncio
     async def test_nested_transaction(self, db):

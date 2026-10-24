@@ -129,9 +129,9 @@ async def list_orders(
 async def list_beile_orders(
     page: int = Query(1, ge=1, description="页码"),
     per_page: int = Query(50, ge=1, le=500, description="每页数量"),
-    customer: str | None = Query(None, description="客户名筛选"),
-    confirm_status: str | None = Query(None, description="湖北订单确认状态筛选：unconfirmed=未确认 / confirmed=已确认"),
-    product: str | None = Query(None, description="产品关键字筛选（匹配产品名称或条码）"),
+    customer: str | None = Query(None, max_length=100, description="客户名筛选"),  # B3-07
+    confirm_status: str | None = Query(None, max_length=20, description="湖北订单确认状态筛选：unconfirmed=未确认 / confirmed=已确认"),  # B3-07
+    product: str | None = Query(None, max_length=100, description="产品关键字筛选（匹配产品名称或条码）"),  # B3-07
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("beile_order_view")),
 ) -> OrderListResponse:
@@ -216,14 +216,14 @@ async def list_unified_records(
     per_page: int = Query(50, ge=1, le=500, description="每页数量"),
     record_type: Literal['all', 'order', 'stockin'] = Query(
         'all', description="记录类型：all=全部 / order=订单 / stockin=备货"),
-    product: str | None = Query(None, description="产品关键字（匹配名称或条码）"),
-    order_no: str | None = Query(None, description="单号关键字"),
-    customer: str | None = Query(None, description="客户名筛选"),
-    status: str | None = Query(None, description="订单状态筛选"),
-    factory: str | None = Query(None, description="工厂筛选：东莞/湖北"),
-    start_date: str | None = Query(None, description="开始日期筛选(YYYY-MM-DD)"),
-    end_date: str | None = Query(None, description="结束日期筛选(YYYY-MM-DD)"),
-    keyword: str | None = Query(None, description="搜索框 OR 关键字：单号/客户/产品名/条码"),
+    product: str | None = Query(None, max_length=100, description="产品关键字（匹配名称或条码）"),  # B3-07
+    order_no: str | None = Query(None, max_length=100, description="单号关键字"),  # B3-07
+    customer: str | None = Query(None, max_length=100, description="客户名筛选"),  # B3-07
+    status: str | None = Query(None, max_length=20, description="订单状态筛选"),  # B3-07
+    factory: str | None = Query(None, max_length=20, description="工厂筛选：东莞/湖北"),  # B3-07
+    start_date: str | None = Query(None, max_length=10, description="开始日期筛选(YYYY-MM-DD)"),  # B3-07
+    end_date: str | None = Query(None, max_length=10, description="结束日期筛选(YYYY-MM-DD)"),  # B3-07
+    keyword: str | None = Query(None, max_length=100, description="搜索框 OR 关键字：单号/客户/产品名/条码"),  # B3-07
     db: AsyncSession = Depends(get_async_read_db),
     # 报表流水行内编辑/删除（迁移 075 的 order_*、091 的 stockin_*）也要用本接口还原聚合行
     user: User = Depends(require_any_permission("order_manage", "order_edit", "order_delete", "stockin_edit", "stockin_delete")),

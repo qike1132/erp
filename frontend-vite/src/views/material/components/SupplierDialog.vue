@@ -1,5 +1,5 @@
 <template>
-  <UiDialog :open="open" :title="`来料详情 - ${supplierDetailOrderNo}`" title-icon="" max-width-class="max-w-[1000px]" @update:open="$emit('update:open', $event)">
+  <UiDialog :open="open" :title="`来料详情 - ${supplierDetailOrderNo}`" max-width-class="max-w-[1000px]" @update:open="$emit('update:open', $event)">
     <template #title-icon><FontAwesomeIcon icon="clipboard-list" style="color:var(--color-primary-500);" /></template>
     <div v-if="supplierDetail">
       <div v-for="g in supplierDetail.supplierGroups" :key="g.supplierName" class="mr-source-card" style="margin-bottom:16px;">

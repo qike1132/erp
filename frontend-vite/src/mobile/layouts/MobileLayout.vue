@@ -95,7 +95,8 @@ const _tabToItem = (t: TabDef) => ({ name: t.name, label: t.label, to: t.path, i
 const tabs = computed(() => [
   ..._tabDefs.slice(0, 2).map(_tabToItem),
   { name: 'quick', label: '快捷', center: true, icon: createSvgIcon(_quickSvg) },
-  ..._tabDefs.slice(2).map(_tabToItem),
+  // F3-06：「订单」tab 同样按白名单过滤（无 customer_order 权限不再显示）
+  ..._tabDefs.slice(2).filter((t) => pathAllowed(t.path)).map(_tabToItem),
 ])
 
 interface QuickAction {
@@ -115,14 +116,36 @@ const _quickDefs = [
   { name: 'case', label: '皮套管理', path: '/case', color: '#5AC8FA', template: `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>` },
 ]
 
+/** F3-06（2026-10-24 审计）：导航白名单路径扁平集（非超管时来自后端下发）。
+ * 快捷面板与 TabBar 据此过滤——此前固定渲染全部入口，无权限用户点了被守卫
+ * 静默弹回首页、零反馈（像「点了没反应」）。后端接口层 fail-closed 无越权。 */
+const allowedPaths = computed<Set<string>>(() => {
+  const paths = new Set<string>()
+  for (const section of authStore.filteredNavSections) {
+    for (const item of section.items) {
+      if (item.path) paths.add(item.path)
+    }
+  }
+  return paths
+})
+
+function pathAllowed(path: string): boolean {
+  // 超管/白名单未加载时放行（后端接口层 fail-closed 兜底）；已加载则按白名单
+  if (!authStore.isLoggedIn || !authStore.loaded) return true
+  if (allowedPaths.value.size === 0) return true
+  return allowedPaths.value.has(path)
+}
+
 const quickActions = computed<QuickAction[]>(() =>
-  _quickDefs.map((d) => ({
-    name: d.name,
-    label: d.label,
-    color: d.color,
-    to: d.path,
-    icon: createSvgIcon(d.template),
-  })),
+  _quickDefs
+    .filter((d) => pathAllowed(d.path))
+    .map((d) => ({
+      name: d.name,
+      label: d.label,
+      color: d.color,
+      to: d.path,
+      icon: createSvgIcon(d.template),
+    })),
 )
 
 function handleTabAction(name: string) {

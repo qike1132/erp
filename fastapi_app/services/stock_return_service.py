@@ -144,7 +144,9 @@ async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int
         .where(
             StockOut.stockin_id.is_(None),
             StockOut.quantity > StockOut.returned_quantity,
-            Product.name.like(name_filter),
+            # B1-07（2026-10-24 审计）：PG 的 like 大小写敏感，混合大小写产品名
+            # 搜不到（m01 搜不到 M01）——与库存域 _resolve_products 的 ilike 同口径。
+            Product.name.ilike(name_filter),
         )
         .order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
         .limit(limit)

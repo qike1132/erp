@@ -489,7 +489,9 @@ export function useBeileOrders() {
   }
 
   /** 确认中订单 id 集合（防止重复点击，按钮禁用态依赖） */
-  const confirmingIds = ref<Set<number>>(new Set())
+  // F1a-09（2026-10-24 审计）：与 rowKey 同款复合键——裸 id 会让订单/备货
+  // 撞号时互相误禁用/误拦截（rowKey 注释自证 id 可能撞号）。
+  const confirmingIds = ref<Set<string>>(new Set())
 
   const queryClient = useQueryClient()
 
@@ -515,8 +517,9 @@ export function useBeileOrders() {
       toast.error(NOT_ORDERED_TOAST)
       return
     }
-    if (confirmingIds.value.has(item.id)) return
-    confirmingIds.value.add(item.id)
+    const confirmKey = rowKey(item)
+    if (confirmingIds.value.has(confirmKey)) return
+    confirmingIds.value.add(confirmKey)
     try {
       const isStockin = item.record_type === 'stockin'
       const res = isStockin
@@ -546,7 +549,7 @@ export function useBeileOrders() {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       toast.error(msg || '确认失败')
     } finally {
-      confirmingIds.value.delete(item.id)
+      confirmingIds.value.delete(confirmKey)
     }
   }
 
@@ -639,7 +642,10 @@ export function useBeileOrders() {
       const statusLabel = confirmStatus.value === 'unconfirmed' ? '未确认' : '已确认'
       const title = `湖北订单汇总（${statusLabel}${picked > 0 ? `·已选 ${picked} 条` : ''}）`
       const html = `<div style="text-align:center;margin-bottom:20px;"><h2>${title}</h2></div><table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`
-      const date = new Date().toISOString().slice(0, 10)
+      // F1a-08（2026-10-24 审计）：toISOString 恒为 UTC——北京 08:00 前导出
+      // 文件名差一天；本地日期拼接与 useOrderForm.ts:88 的既有修法一致。
+      const now = new Date()
+      const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
       downloadXls(html, `湖北订单_${statusLabel}_${date}.xls`)
     })
   }

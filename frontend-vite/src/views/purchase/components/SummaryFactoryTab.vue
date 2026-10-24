@@ -53,11 +53,14 @@
         >
           <FontAwesomeIcon icon="times" aria-hidden="true" /> 取消编辑
         </button>
+        <!-- F1a-02（2026-10-24 审计）：加在途禁用——接口幂等不致错账，但双击
+             会交错改写基线并发多一次写；lossRateSaveState 由 useSummaryModal 维护。 -->
         <button
-          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
+          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600 disabled:opacity-60 disabled:cursor-not-allowed"
+          :disabled="lossRateSaveState === 'saving'"
           @click="$emit('saveEdits')"
         >
-          <FontAwesomeIcon icon="save" aria-hidden="true" /> 保存修改
+          <FontAwesomeIcon icon="save" aria-hidden="true" /> {{ lossRateSaveState === 'saving' ? '保存中…' : '保存修改' }}
         </button>
       </template>
     </div>

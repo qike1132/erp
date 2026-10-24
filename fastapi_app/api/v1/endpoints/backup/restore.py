@@ -159,6 +159,11 @@ async def _read_backup_file(
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ('.zip', '.json', '.gz', '.enc'):
         raise HTTPException(status_code=400, detail=f'不支持的文件类型: {ext}，仅支持 .zip / .zip.enc / .json / .gz')
+    # B2-08（2026-10-24 审计）：先按声明值预检再读内容（对齐 /validate 的
+    # Z05-R7 口径）——>1MB 的 UploadFile 落盘 spool，整读进内存后才拒绝会让
+    # 单请求内存尖峰打到上限值。
+    if file.size is not None and file.size > backup_service.MAX_BACKUP_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f'备份文件超过大小限制({backup_service.MAX_BACKUP_FILE_SIZE // 1024 // 1024}MB)')
     try:
         content = await file.read()
         if len(content) > backup_service.MAX_BACKUP_FILE_SIZE:
