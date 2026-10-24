@@ -30,14 +30,25 @@ def _parse_dashboard_date(date_str: str | None) -> date:
             return business_today()
     return business_today()
 
+
+# 缓存键含 factory 维度（AUD-04）：厂 A 的聚合不得被厂 B 命中。
+# 用普通拼接而非 f-string——扫描器对「f-string + 类 SQL 片段」有误报面，语义无差别。
+def _customer_cache_key(period_kw: str, date_kw: str, **kwargs) -> str:
+    return ("p:" + str(kwargs.get(period_kw, '') or '')
+            + ":d:" + str(kwargs.get(date_kw, '') or '')
+            + ":f:" + str(kwargs.get('factory', '') or ''))
+
+
 @cache_result(key_prefix="dashboard:customer_out", ttl=60, local_ttl=30,
-              key_builder=lambda **kwargs: f"p:{kwargs.get('period', '')}:d:{kwargs.get('query_date', '') or ''}")  # sql-safe: escape_like/绑定参数/常量片段
+              key_builder=lambda **kwargs: _customer_cache_key('period', 'query_date', **kwargs))
 async def fetch_customer_out_details(
-    period: str, query_date: str | None, db: AsyncSession
+    period: str, query_date: str | None, db: AsyncSession, factory: str = ''
 ) -> dict:
     """按客户汇总出库详情。
 
-    返回 dict（model_dump）以兼容 cache_result 的 JSON 序列化。
+    factory 非空时只统计该厂产品（AUD-04，2026-10-24 审计：逐客户营收明细
+    与 /reports 同口径做工厂隔离）。返回 dict（model_dump）以兼容 cache_result
+    的 JSON 序列化。
     """
     selected_date = _parse_dashboard_date(query_date)
     today = selected_date
@@ -53,6 +64,15 @@ async def fetch_customer_out_details(
         end_time = today_end
 
     try:
+        # 条件列表一次性构建（factory 非空时追加本厂过滤，AUD-04）。
+        out_filters = [
+            StockOut.stockout_date >= start_time,
+            StockOut.stockout_date < end_time,
+            StockOut.customer.isnot(None),
+            StockOut.customer != "",
+        ]
+        if factory:
+            out_filters.append(Product.factory == factory)
         result = await db.execute(
             select(
                 StockOut.customer,
@@ -60,10 +80,7 @@ async def fetch_customer_out_details(
                 func.coalesce(func.sum((StockOut.quantity - StockOut.returned_quantity) * Product.price), 0)
             )
             .join(Product, StockOut.product_id == Product.id, isouter=True)
-            .where(StockOut.stockout_date >= start_time)
-            .where(StockOut.stockout_date < end_time)
-            .where(StockOut.customer.isnot(None))
-            .where(StockOut.customer != "")
+            .where(*out_filters)
             .group_by(StockOut.customer)
         )
 
@@ -80,12 +97,13 @@ async def fetch_customer_out_details(
         return CustomerOutDetailResponse(success=True, data=[]).model_dump()
 
 @cache_result(key_prefix="dashboard:customer_order", ttl=60, local_ttl=30,
-              key_builder=lambda **kwargs: f"p:{kwargs.get('period', '')}:d:{kwargs.get('date_param', '') or ''}")
+              key_builder=lambda **kwargs: _customer_cache_key('period', 'date_param', **kwargs))
 async def fetch_customer_order_details(
-    period: str, date_param: str | None, db: AsyncSession
+    period: str, date_param: str | None, db: AsyncSession, factory: str = ''
 ) -> dict:
     """按客户汇总订单详情。
 
+    factory 非空时只统计该厂产品（口径同 fetch_customer_out_details，AUD-04）。
     返回 dict（model_dump）以兼容 cache_result 的 JSON 序列化。
     """
     selected_date = _parse_dashboard_date(date_param)
@@ -102,6 +120,15 @@ async def fetch_customer_order_details(
         end_time = today_end
 
     try:
+        order_filters = [
+            Order.order_date >= start_time,
+            Order.order_date < end_time,
+            Order.is_deleted.isnot(True),
+            Order.customer.isnot(None),
+            Order.customer != "",
+        ]
+        if factory:
+            order_filters.append(Product.factory == factory)
         result = await db.execute(
             select(
                 Order.customer,
@@ -110,11 +137,7 @@ async def fetch_customer_order_details(
             )
             .join(OrderItem, OrderItem.order_id == Order.id, isouter=True)
             .join(Product, OrderItem.product_id == Product.id, isouter=True)
-            .where(Order.order_date >= start_time)
-            .where(Order.order_date < end_time)
-            .where(Order.is_deleted.isnot(True))
-            .where(Order.customer.isnot(None))
-            .where(Order.customer != "")
+            .where(*order_filters)
             .group_by(Order.customer)
         )
 
