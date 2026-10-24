@@ -283,6 +283,16 @@ def _iso_now() -> str:
 _RESTART_MIN_CONSECUTIVE = 3
 _RESTART_MIN_WINDOW_S = 90.0
 
+# AUD-08（2026-10-24 审计）：D7 的三条件闸门挡住了误杀，也挡住了真故障——
+# uvicorn --workers>1 时 master 会无限 respawn 崩溃 worker 而自身长存
+# （supervisors/multiprocess.py），proc_alive 恒 True、三条件永差一个：
+# worker 启动即崩（如 2026-10-22 site-packages 批量损坏）时 5002 永不监听，
+# 而 status 停在 ready → prod_runner.json 持续 ready:true，「总宕机显示绿」。
+# 补一条**远高于探针抖动**的降级阈值：进程存活且不健康窗口超过 10 分钟也强制
+# 重启（探针偶发超时是秒级，10 分钟窗口不会误杀）；同时不健康期间 status
+# 降级为 "degraded"（ready:false），状态文件如实反映。
+_DEGRADED_RESTART_MIN_WINDOW_S = 600.0
+
 # 退避上限阶梯：反复失败/重启时上限依次抬升（30 → 60 → 120 → 300，封顶），
 # 替代原先写死的 min(delay*2, 30.0)，避免崩溃风暴期间过于频繁的重启。
 _BACKOFF_CAPS = (30.0, 60.0, 120.0, 300.0)
@@ -305,6 +315,20 @@ def _should_restart(consecutive_failures: int, fail_window_s: float, proc_alive:
         consecutive_failures >= _RESTART_MIN_CONSECUTIVE
         and fail_window_s >= _RESTART_MIN_WINDOW_S
         and not proc_alive
+    )
+
+
+def _should_force_restart_degraded(consecutive_failures: int, fail_window_s: float) -> bool:
+    """进程存活但健康持续失败的兜底重启判据（AUD-08，纯函数）。
+
+    与 _should_restart 的关系：那条要求 proc_alive is False（防误杀）；本条处理
+    「master 长存 + worker 崩溃循环」——proc 恒活、探针恒败。窗口阈值放大到
+    _DEGRADED_RESTART_MIN_WINDOW_S（10 分钟），探针抖动（秒级）达不到；
+    连续失败次数门槛与 _should_restart 相同。
+    """
+    return (
+        consecutive_failures >= _RESTART_MIN_CONSECUTIVE
+        and fail_window_s >= _DEGRADED_RESTART_MIN_WINDOW_S
     )
 
 
@@ -565,7 +589,25 @@ class _Managed:
             self.consecutive_health_fail = 0
             self._mark_crashed()
             return
-        # 进程仍存活，仅探针失败：只告警 + 放宽退避，绝不误杀进程树（消掉大部分误杀）
+        # AUD-08：master 长存 + worker 崩溃循环（proc 恒活、探针恒败）——uvicorn
+        # 多 worker 下 master 无限 respawn 崩溃 worker 而自身不退，上面的三条件
+        # 闸门永差一个 proc_alive。窗口超 10 分钟时强制重启整棵树（探针抖动是
+        # 秒级，不会误杀）。
+        if _should_force_restart_degraded(self.consecutive_health_fail, window):
+            print(f"[prod_runner] {self.name} 进程存活但健康检查持续失败超过 "
+                  f"{int(_DEGRADED_RESTART_MIN_WINDOW_S)}s"
+                  f"(连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s)，"
+                  f"判定 worker 崩溃循环，强制重启进程树")
+            self.kill_tree()
+            self.health_fail_start = None
+            self.consecutive_health_fail = 0
+            self._mark_crashed()
+            return
+        # 进程仍存活，仅探针失败：状态降级（ready:false 如实反映），只告警 +
+        # 放宽退避，绝不误杀进程树（消掉大部分误杀）。crashed/failed/starting
+        # 语义不动（maybe_restart 依赖），只把「曾经 ready/running」改为 degraded。
+        if self.status in ("ready", "running"):
+            self.status = "degraded"
         print(f"[prod_runner] {self.name} 健康检查失败但进程存活，暂不重启"
               f"(连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s / "
               f"最近探针 {elapsed:.1f}s / proc_alive={proc_alive} / workers={self.workers})")
