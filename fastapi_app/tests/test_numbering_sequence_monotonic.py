@@ -40,15 +40,23 @@ DATE = '20991231'
 def _test_db_url() -> str:
     override = os.getenv('TEST_DATABASE_URL')
     if override:
-        return override
-    from fastapi_app.core.config import settings
-    db_name = os.getenv('DB_NAME', 'erp_system')
-    parsed = urlparse(settings.ASYNC_DATABASE_URL)
-    # 幂等：conftest 的 session 级 app_on_test_db 可能已把 URL 指向 *_test
-    if parsed.path.rstrip('/').endswith('_test'):
-        return settings.ASYNC_DATABASE_URL
-    new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
-    return urlunparse(parsed._replace(path=new_path))
+        url = override
+    else:
+        from fastapi_app.core.config import settings
+        db_name = os.getenv('DB_NAME', 'erp_system')
+        parsed = urlparse(settings.ASYNC_DATABASE_URL)
+        # 幂等：conftest 的 session 级 app_on_test_db 可能已把 URL 指向 *_test
+        if parsed.path.rstrip('/').endswith('_test'):
+            url = settings.ASYNC_DATABASE_URL
+        else:
+            new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
+            url = urlunparse(parsed._replace(path=new_path))
+    # AUD-14（2026-10-24 审计）：聚焦跑 pytest fastapi_app/tests/... 不加载根树
+    # tests/conftest 的硬闸——环境变量误指生产或 str.replace no-op 失败模式会让
+    # 本夹具对生产库 create_all + DELETE。两个来路在此统一收口。
+    from fastapi_app.tests._test_db_guard import assert_is_test_database
+    assert_is_test_database(url)
+    return url
 
 
 @pytest_asyncio.fixture
