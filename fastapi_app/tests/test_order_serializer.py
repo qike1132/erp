@@ -3,7 +3,7 @@
 
 验证 OrderSerializer 的正确性和一致性。
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -42,7 +42,10 @@ class TestOrderSerializer:
         order.id = 1
         order.order_no = "PO-20260101-0001"
         order.customer = "测试客户"
-        order.order_date = datetime(2026, 1, 1, 10, 30)
+        # AUD-02 后 ORDER_DATE 走北京时区换算；生产中 timestamptz 经 asyncpg
+        # 返回 aware-UTC，夹具显式 aware（02:30 UTC = 北京 10:30）保证断言
+        # 与服务器本地时区无关（CI 在 UTC，本地在 UTC+8）。
+        order.order_date = datetime(2026, 1, 1, 2, 30, tzinfo=UTC)
         order.product_id = 1
         order.product = mock_product
         order.quantity = 50

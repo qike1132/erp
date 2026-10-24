@@ -118,7 +118,9 @@ def test_restart_backend_gate_importable_from_scripts_dir():
         "    rc = e.code if isinstance(e.code, int) else 1\n"
         "out = buf.getvalue()\n"
         "assert 'ModuleNotFoundError' not in out, out\n"
-        "assert rc == 2 and '当前分支' in out, (rc, out)\n"
+        # CI 上 HEAD 是 detached（PR merge ref），拒绝文案与本地分支态不同——
+        # 两者都 fail-closed rc=2 且指向 main，断言只锁这些稳定不变量。
+        "assert rc == 2 and 'main' in out, (rc, out)\n"
     ).format(root=str(ROOT), script=str(ROOT / 'scripts' / 'restart_backend.py'))
     # cwd=scripts：模拟操作者实际调用形态（仓库根不在 sys.path）
     result = subprocess.run(  # nosec B603 - 固定解释器+内联代码，无外部输入拼命令
