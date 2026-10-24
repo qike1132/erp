@@ -4466,7 +4466,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -4484,7 +4485,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 20
                 },
                 {
                   "type": "null"
@@ -4502,7 +4504,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -4706,7 +4709,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -4724,7 +4728,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -4742,7 +4747,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -4760,7 +4766,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 20
                 },
                 {
                   "type": "null"
@@ -4778,7 +4785,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 20
                 },
                 {
                   "type": "null"
@@ -4796,7 +4804,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -4814,7 +4823,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -4832,7 +4842,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -6291,19 +6302,43 @@
           "湖北外发"
         ],
         "summary": "List Unshipped Processes",
-        "description": "跨全部湖北订单聚合未发完工序明细（导出/打印未到货清单）。",
+        "description": "跨全部湖北订单聚合未发完工序明细（导出/打印未到货清单）。\n\nsummary=true 时为页头「未到货 N 件」信息条服务：只回一条合计行，\n不传输整表明细（此前每次进页全量拉取只为算一个和，F1a-05）。",
         "operationId": "list_unshipped_processes_api_v1_outsource_unshipped_get",
+        "parameters": [
+          {
+            "name": "summary",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "F1a-05：只回未到货件数聚合（data 仍为列表结构，但仅含合计行），供页头信息条使用",
+              "default": false,
+              "title": "Summary"
+            },
+            "description": "F1a-05：只回未到货件数聚合（data 仍为列表结构，但仅含合计行），供页头信息条使用"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/UnshippedProcessItem"
                   },
-                  "type": "array",
                   "title": "Response List Unshipped Processes Api V1 Outsource Unshipped Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -7205,7 +7240,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -7223,7 +7259,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -7241,7 +7278,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -7458,7 +7496,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -7476,7 +7515,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -7494,7 +7534,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -8013,7 +8054,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
@@ -8031,7 +8073,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -8049,7 +8092,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 10
                 },
                 {
                   "type": "null"
@@ -13195,6 +13239,7 @@
             "required": true,
             "schema": {
               "type": "string",
+              "maxLength": 64,
               "description": "会话ID",
               "title": "Session Id"
             },
@@ -13206,6 +13251,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 64,
               "description": "进度追踪ID（由 /create-task 返回）",
               "default": "",
               "title": "Task Id"
@@ -14964,6 +15010,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 10,
               "description": "区间起始日 (YYYY-MM-DD)，与 end_date 成对",
               "default": "",
               "title": "Start Date"
@@ -14976,6 +15023,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 10,
               "description": "区间结束日 (YYYY-MM-DD)，闭区间",
               "default": "",
               "title": "End Date"
@@ -14988,6 +15036,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 20,
               "description": "部门筛选 (filling/handcraft/packaging)",
               "default": "",
               "title": "Department"
@@ -15000,6 +15049,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 10,
               "description": "指定日期筛选 (YYYY-MM-DD)",
               "default": "",
               "title": "Production Date"
@@ -15012,6 +15062,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 50,
               "description": "录单人筛选；留空为不限",
               "default": "",
               "title": "Created By"
@@ -15024,6 +15075,7 @@
             "required": false,
             "schema": {
               "type": "string",
+              "maxLength": 100,
               "description": "产品名或 69 码关键词；留空为不限",
               "default": "",
               "title": "Keyword"
@@ -16360,7 +16412,7 @@
           "仪表盘"
         ],
         "summary": "Get Customer Out Details",
-        "description": "获取客户出库详情",
+        "description": "获取客户出库详情（逐客户营收金额，AUD-04 收口：report_view + 工厂隔离）。",
         "operationId": "get_customer_out_details_api_v1_dashboard_customer_out_details_get",
         "parameters": [
           {
@@ -16420,7 +16472,7 @@
           "仪表盘"
         ],
         "summary": "Get Customer Order Details",
-        "description": "获取客户订单详情",
+        "description": "获取客户订单详情（逐客户营收金额，AUD-04 收口：report_view + 工厂隔离）。",
         "operationId": "get_customer_order_details_api_v1_dashboard_customer_order_details_get",
         "parameters": [
           {
@@ -16960,7 +17012,7 @@
           "数据备份"
         ],
         "summary": "Export Backup",
-        "description": "一键备份全部数据（磁盘流式返回，避免大文件 OOM）\n\n参数：\n- remark: 备份备注\n- format: 备份格式，支持 'zip' 或 'json'\n- encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）\n- x_backup_password: 加密密码（请求头，H3：已移除 URL query 形式，避免密码进入访问日志/浏览器历史）\n\n加密密码获取优先级：\n1. X-Backup-Password请求头\n2. BACKUP_ENCRYPTION_PASSWORD环境变量\n3. 均未配置时不加密（记录告警日志）\n\n权限：backup_create",
+        "description": "一键备份全部数据（磁盘流式返回，避免大文件 OOM）\n\n参数：\n- remark: 备份备注\n- format: 备份格式，支持 'zip' 或 'json'\n- encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）\n- x_backup_password 头：加密密码（H3：已移除 URL query 形式，避免密码进入访问日志/浏览器历史）\n\n加密密码获取优先级：\n1. X-Backup-Password请求头\n2. BACKUP_ENCRYPTION_PASSWORD环境变量\n3. 均未配置时不加密（记录告警日志）\n\n权限：backup_create",
         "operationId": "export_backup_api_v1_backup_export_get",
         "parameters": [
           {
@@ -17040,7 +17092,7 @@
           "数据备份"
         ],
         "summary": "Save Backup To Server",
-        "description": "一键备份到服务器默认路径\n\n参数：\n- remark: 备份备注\n- encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）\n- password: 加密密码（请求体，H3）\n- x_backup_password: 加密密码（请求头）\n\n加密密码获取优先级：\n1. password请求体字段\n2. X-Backup-Password请求头\n3. BACKUP_ENCRYPTION_PASSWORD环境变量\n4. 均未配置时不加密（记录告警日志）\n\n权限：backup_create",
+        "description": "一键备份到服务器默认路径\n\n参数：\n- remark: 备份备注\n- encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）\n- password 体：加密密码（H3）\n- x_backup_password 头：加密密码\n\n加密密码获取优先级：\n1. password请求体字段\n2. X-Backup-Password请求头\n3. BACKUP_ENCRYPTION_PASSWORD环境变量\n4. 均未配置时不加密（记录告警日志）\n\n权限：backup_create",
         "operationId": "save_backup_to_server_api_v1_backup_save_post",
         "parameters": [
           {
@@ -26367,19 +26419,23 @@
               "type": "integer"
             },
             "type": "array",
+            "maxItems": 500,
             "title": "Item Ids",
-            "default": []
+            "description": "明细行ID列表"
           },
           "quantity": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "maximum": 9999999999.99,
+                "minimum": 0.0
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Quantity"
+            "title": "Quantity",
+            "description": "新数量；None=不改数量"
           },
           "loss_rate": {
             "anyOf": [
@@ -26390,7 +26446,8 @@
                 "type": "null"
               }
             ],
-            "title": "Loss Rate"
+            "title": "Loss Rate",
+            "description": "损耗率(千分之几)；服务层 normalize_spare_rate 收口"
           }
         },
         "additionalProperties": true,
@@ -26405,6 +26462,7 @@
               "$ref": "#/components/schemas/FactorySummaryEditItem"
             },
             "type": "array",
+            "maxItems": 500,
             "title": "Edits",
             "description": "编辑列表（可为空）"
           },
@@ -26413,6 +26471,7 @@
               "type": "integer"
             },
             "type": "array",
+            "maxItems": 500,
             "title": "Order Ids",
             "description": "本次涉及的采购单ID列表"
           },
@@ -32705,9 +32764,10 @@
               "$ref": "#/components/schemas/PurchaseOrderMaterialItem"
             },
             "type": "array",
+            "maxItems": 500,
             "minItems": 1,
             "title": "Materials",
-            "description": "物料列表"
+            "description": "物料列表（上限对齐 purchase_center 请求列表口径）"
           },
           "customer_id": {
             "anyOf": [
@@ -33719,26 +33779,31 @@
           },
           "customer": {
             "type": "string",
+            "maxLength": 100,
             "title": "Customer",
             "default": ""
           },
           "product": {
             "type": "string",
+            "maxLength": 100,
             "title": "Product",
             "default": ""
           },
           "status": {
             "type": "string",
+            "maxLength": 20,
             "title": "Status",
             "default": ""
           },
           "start_date": {
             "type": "string",
+            "maxLength": 10,
             "title": "Start Date",
             "default": ""
           },
           "end_date": {
             "type": "string",
+            "maxLength": 10,
             "title": "End Date",
             "default": ""
           }
@@ -36513,8 +36578,10 @@
           },
           "quantity": {
             "type": "number",
+            "maximum": 9999999999.99,
+            "minimum": 0.0,
             "title": "Quantity",
-            "description": "页面展示数量（已按损耗率加放）"
+            "description": "页面展示数量（已按损耗率加放）；下限/上限与落库列 Numeric(12,2) 一致，越界应在入口拦成 422 而非 flush 期 500"
           }
         },
         "type": "object",
