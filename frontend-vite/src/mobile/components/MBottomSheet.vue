@@ -15,11 +15,6 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
-  visible: boolean
-  title?: string
-  dismissible?: boolean
-}>()
 const props = defineProps<{
   visible: boolean
   title?: string
