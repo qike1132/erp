@@ -42,7 +42,7 @@ async def get_token(session: aiohttp.ClientSession) -> str | None:
     return None
 
 
-async def test_endpoint(session: aiohttp.ClientSession, token: str, method: str, path: str, json_data: dict | None = None) -> Metric:
+async def _call_endpoint(session: aiohttp.ClientSession, token: str, method: str, path: str, json_data: dict | None = None) -> Metric:
     """测试单个端点"""
     url = f"{BASE_URL}{path}"
     headers = {
@@ -92,7 +92,7 @@ async def user_worker(worker_id: int, results: list[Metric], stop_event: asyncio
 
         while not stop_event.is_set():
             for method, path, data in endpoints:
-                metric = await test_endpoint(session, token, method, path, data)
+                metric = await _call_endpoint(session, token, method, path, data)
                 results.append(metric)
                 await asyncio.sleep(0.1)  # 短暂延迟
 

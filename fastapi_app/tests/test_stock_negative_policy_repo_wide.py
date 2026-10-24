@@ -506,11 +506,9 @@ def test_remaining_current_stock_writes_are_documented(rel_path):
     assert _current_stock_writes(rel_path) == sorted(DOCUMENTED_WRITES[rel_path])
 
 
-def test_risky_writes_all_sit_behind_unified_entry():
-    for rel_path in IN_SCOPE_FILES:
-        writes = set(_current_stock_writes(rel_path))
-        if writes & RISKY_WRITES:
-            assert sum(_unified_calls(rel_path).values()) >= 1, rel_path
+# T2-F5（AUD-16 批次，2026-10-24）：原 test_risky_writes_all_sit_behind_unified_entry
+# 删除——台账收敛后各文件直写为空集，`writes & RISKY_WRITES` 恒空、循环体断言
+# 永不执行（vacuous loop）；负库存防回归的真防线是上面的台账比对测试。
 
 
 def test_update_stockin_core_is_only_called_by_the_wrapper():

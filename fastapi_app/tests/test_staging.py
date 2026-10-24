@@ -84,52 +84,9 @@ class TestStagingSchemas:
 
 
 # ==================== Service 级别单元测试 ====================
-
-class TestStagingServiceHelpers:
-    """暂存服务工具函数测试"""
-
-    def test_parse_date_value_none(self):
-        from fastapi_app.services.staging_service import import_staging_orders_from_excel
-        # _parse_date_value 已不存在，验证 import 函数存在即可
-        assert callable(import_staging_orders_from_excel)
-
-    def test_parse_date_value_datetime(self):
-        # 验证 staging 服务能处理 datetime 类型日期
-        from fastapi_app.services.staging_service import confirm_staging_orders
-        assert callable(confirm_staging_orders)
-
-    def test_parse_date_value_string(self):
-        # 验证 staging 服务能处理字符串类型日期
-        from fastapi_app.services.staging_service import import_staging_orders_from_excel
-        assert callable(import_staging_orders_from_excel)
-
-    def test_parse_date_value_excel_serial(self):
-        # 验证 staging 服务能处理 Excel 序列号日期
-        from fastapi_app.services.staging_service import import_staging_orders_from_excel
-        assert callable(import_staging_orders_from_excel)
-
-    def test_validate_customer_name_valid(self):
-        from fastapi_app.services.staging_service import confirm_staging_orders
-        # 客户名称验证逻辑已移至 endpoint 层
-        assert callable(confirm_staging_orders)
-
-    def test_validate_customer_name_empty(self):
-        # 空客户名称验证
-        from fastapi_app.schemas.staging import StagingOrderUpdate
-        data = StagingOrderUpdate(customer="")
-        assert data.customer == ""
-
-    def test_validate_customer_name_too_short(self):
-        # 短客户名称验证
-        from fastapi_app.schemas.staging import StagingOrderUpdate
-        data = StagingOrderUpdate(customer="A")
-        assert data.customer == "A"
-
-    def test_validate_customer_name_invalid_chars(self):
-        # 含脚本标签的客户名称验证（由前端/endpoint 层处理）
-        from fastapi_app.schemas.staging import StagingOrderUpdate
-        data = StagingOrderUpdate(customer="客户<script>")
-        assert data.customer == "客户<script>"
+# （AUD-16 批次 / T2-F4：原 TestStagingServiceHelpers 六个 `callable(...)` 占位
+#   用例已删除——行为已迁至 endpoint/batch_import_parser 且在他处有真测试，
+#   占位只制造虚假通过计数。）
 
 
 # ==================== API 端点集成测试 ====================
