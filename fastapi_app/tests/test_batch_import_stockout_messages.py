@@ -51,7 +51,11 @@ async def test_ambiguous_product_reports_reason():
     assert any('命中多条' in m for m in messages)
 
 
-async def test_no_available_order_reports_reason():
+async def test_no_available_order_reports_reason(monkeypatch):
+    # AUD-01 结余闸门位于订单余量校验之前；本用例聚焦订单余量文案，
+    # 桩掉结余查询（mock db 无法执行结余 SQL）。
+    from fastapi_app.services import stock_out_service
+    monkeypatch.setattr(stock_out_service, '_assert_inventory_balance', AsyncMock())
     deps = ImportDeps(
         calculate_available_shipment_quantity=AsyncMock(return_value={
             'available_quantity': 0, 'order_quantity': 0,

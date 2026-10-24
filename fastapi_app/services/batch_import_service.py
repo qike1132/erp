@@ -714,6 +714,16 @@ async def import_stockouts_service(
                 message=f'库存不足，当前库存: {product.current_stock}',
             ):
                 return False, reason
+            # 结余闸门（AUD-01，2026-10-24 审计）：可出库存 = 包装部入库 − 已出货，
+            # 与手工出货/暂存确认同口径（stock_out_service._assert_inventory_balance，
+            # 报错自带构成）。current_stock 是备货口径、恒 ≥ 结余——只判它会让
+            # 「手工出货被拒、同一张表导入却成功」（d5c4748e 要堵的绕行路径）。
+            from fastapi_app.services.stock_out_service import _assert_inventory_balance
+
+            try:
+                await _assert_inventory_balance(db, product.id, product.name, customer, qty)
+            except ValueError as exc:
+                return False, str(exc)
             # 校验可出货量（基于订单支持）
             shipment_info = await calculate_available_shipment_quantity(
                 db, product.id, customer,

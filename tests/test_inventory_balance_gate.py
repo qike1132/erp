@@ -8,6 +8,8 @@
 复用根 conftest 的会话级 test_engine，只写测试库并事务回滚。
 """
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -188,3 +190,79 @@ async def test_inventory_balance_nets_returns(db, monkeypatch):
     ))
     await db.flush()
     assert await svc.get_inventory_balance(db, product.id) == -5000
+
+
+# ---------------------------------------------------------------------------
+# AUD-01（2026-10-24 审计）：Excel 出货导入两条路径必须接同一把结余闸门。
+# 夹具口径：current_stock=500（备货，过旧校验）、包装入库 100、已出货 30
+# ⇒ 结余 70；订单余量 5000（充足）——三条旧校验全过，只有结余闸门能拦。
+# ---------------------------------------------------------------------------
+IMPORT_PRODUCT = '结余闸门导入产品'
+IMPORT_BARCODE = 'INV-BAL-IMP-001'
+IMPORT_CUSTOMER = '结余闸门导入客户'
+
+
+async def _seed_import_fixture(db):
+    product = Product(name=IMPORT_PRODUCT, barcode=IMPORT_BARCODE, current_stock=500, initial_stock=0)
+    db.add(product)
+    await db.flush()
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=product.id,
+        product_name=product.name, barcode=IMPORT_BARCODE,
+        quantity=100, production_date=datetime.now(UTC).date(),
+    ))
+    db.add(InventoryLog(
+        product_id=product.id, product_name=product.name, product_barcode=IMPORT_BARCODE,
+        change_type='出库', change_quantity=-30,
+    ))
+    db.add(Order(
+        order_no='INV-BAL-IMP-ORD-1', customer=IMPORT_CUSTOMER, product_id=product.id,
+        quantity=5000, order_date=datetime.now(UTC), status='待备货',
+    ))
+    await db.flush()
+    return product
+
+
+async def test_comprehensive_import_stockout_rejected_by_balance(db, monkeypatch):
+    """综合导入出货 Sheet（import_stockouts_from_data）：qty=100 > 结余 70 必须整行拒绝。"""
+    from fastapi_app.services import batch_import_core as bic
+
+    product = await _seed_import_fixture(db)
+    assert await svc.get_inventory_balance(db, product.id) == 70
+
+    # 分配与库存写入口替换为计数桩：闸门失效时它们会被调用（Red 判据）。
+    allocate = AsyncMock()
+    delta = AsyncMock()
+    monkeypatch.setattr(bic, '_allocate_and_write_stockout_rows', allocate)
+    monkeypatch.setattr(bic, 'apply_stock_delta_locked', delta)
+
+    count, messages = await bic.import_stockouts_from_data(
+        db, [{'产品名称': IMPORT_PRODUCT, '数量': 100, '客户名称': IMPORT_CUSTOMER}])
+
+    assert count == 0, '结余不足的出货行不能导入成功'
+    assert allocate.await_count == 0, '结余闸门必须在 FIFO 分配之前拦截'
+    assert delta.await_count == 0, '结余不足时不得扣减 current_stock'
+    assert any('库存不足' in m for m in messages), f'行级消息须说明结余不足，实际: {messages}'
+
+
+async def test_single_sheet_import_stockout_rejected_by_balance(db, monkeypatch):
+    """单 Sheet 导入（import_stockouts_service）：同一夹具同一口径必须拒绝。"""
+    from fastapi_app.services import batch_import_service as bis
+    from fastapi_app.services import batch_service
+
+    product = await _seed_import_fixture(db)
+    monkeypatch.setattr(bis, '_validate_xlsx_file', lambda _f: None)
+    monkeypatch.setattr(bis, '_read_excel_sheets', AsyncMock(return_value=(
+        [{'产品名称': IMPORT_PRODUCT, '出货数量': 100, '客户名称': IMPORT_CUSTOMER, '时间': ''}],
+        None,
+    )))
+    monkeypatch.setattr(
+        batch_service, 'get_product_by_identifier', AsyncMock(return_value=product))
+    delta = AsyncMock()
+    monkeypatch.setattr(bis, 'apply_stock_delta_locked', delta)
+
+    result = await bis.import_stockouts_service(db, SimpleNamespace(filename='x.xlsx'))
+
+    assert result.imported == 0, '结余不足的出货行不能计入 imported'
+    assert delta.await_count == 0, '结余不足时不得扣减 current_stock'
+    assert '库存不足' in result.message, f'结果消息须说明结余不足，实际: {result.message}'
