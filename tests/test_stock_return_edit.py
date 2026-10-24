@@ -34,7 +34,10 @@ async def test_edit_stockreturn_deletes_old_row_and_rebuilds(db):
                       current_stock=1000, initial_stock=1000)
     db.add(product)
     await db.flush()
-    # 2026-10-24：编辑退货 = 取消旧退货 + 建新退货，结余闸门需真实包装入库
+    # 2026-10-24：编辑退货 = 取消旧退货 + 建新退货，取消那一步走结余闸门
+    # （可出库存 = 包装部入库 − 已出货，口径见 get_inventory_balance 的 docstring）。
+    # 夹具原先只给 current_stock 就直接插 StockOut，结余恒 0 → 取消被拒；
+    # 真实链路里这批货必经 create_stockout_core，故补一条包装部入库记录。
     db.add(DailyProductionRecord(
         department='packaging', product_id=product.id, product_name=product.name,
         barcode=product.barcode or '', quantity=1000, production_date=date.today(),

@@ -300,12 +300,15 @@ async def _update_item_prices(
 
 
 async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
-    # 行锁（2026-10-24）：两个并发请求各自读到「对方未提交前」的明细快照，各自用自己
-    # 看到的行价求和后覆盖写 total_amount，后提交者把先提交者的行价漏掉；DB 也没有
-    # 约束校验「总额 = Σ明细」→ 差额永久存在，只能人工重算。
-    # 锁住订单行后，第二个请求会等第一个提交，再读就能看到对方的改动。
-    # 用 Session.get(with_for_update=True) 而不是另起一条 select：调用形状与原先的
-    # db.get 完全一致，不会给按调用次数编排的既有 mock 用例带来额外一次 execute。
+    # 行锁（2026-10-24）。不加锁时的丢更新：
+    #   A 改明细1单价、B 改明细2单价，两人几乎同时进来
+    #   → 各自 SELECT 到「1=0, 2=0」的快照 → A 算出总额 100、B 算出总额 200
+    #   → 两次 UPDATE purchase_order.total_amount，后提交者覆盖前者
+    #   → 最终明细合计 300，订单总额 200；DB 没有「总额 = Σ明细」约束，差额永久存在。
+    # 锁住订单行后，B 会等 A 提交，重新读到的快照已含 A 的改动，总额自然对得上。
+    # 实现用 Session.get(with_for_update=True) 而不是另起一条 select(...).with_for_update()：
+    # 语义相同（都发 SELECT ... FOR UPDATE），但调用形状与原先的 db.get 完全一致，
+    # 不会给「按 db.execute 调用次数编排」的既有 mock 用例多插一次查询。
     order = await db.get(PurchaseOrder, order_id, with_for_update=True)
     if not order:
         raise ValueError('采购订单不存在')

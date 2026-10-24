@@ -463,18 +463,36 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
 
 
 async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
-    """单产品「库存（结余）」= 包装部入库 − 已出货。
+    """单产品「库存（结余）」= 包装部入库 − 已出货。**「能不能出货」的唯一尺子。**
 
-    口径与 get_inventory_paginated 的 CTE 逐字一致：包装部入库取
-    daily_production_record 中 department='packaging' 的 quantity 之和，
-    已出货取 inventory_log 出库三型 + 退货（退货/退货取消）的 change_quantity
-    之和（出库为负数，故相加即净流出）。不含抵扣三型（订单抵扣/取消抵扣/抵扣回滚）：
-    抵扣期间两侧对称净影响为零，而删单时的「抵扣回滚」若计入、对应的「订单抵扣」
-    却从未计入，结余会虚高回滚量（Round16 核实），故抵扣类整体不进结余。
-    供出货前的库存闸门复用同一口径，避免另起一套。
+    ── 业务口径（2026-10-24 业务负责人确认，改动前请先读完这段）──────────────
+    举一个真实例子，五步走完两个数字的关系：
+        ① 客户下单 10000 + 备货 10000  → 订单 10000 / 备货 10000，总需求 20000
+        ② 客户再下单 5000 并抵扣备货    → 订单 15000 / 备货 5000，总需求仍是 20000
+        ③ 包装部入库 10000             → 结余 10000，此时最多只能出 10000
+        ④ 出货 10000                   → 结余 0
+        ⑤ 结果                         → 剩订单 5000 / 备货 5000，无货可出
+    原话：「填充 / 手工的数据不计入库存，只有包装入库的计入库存。」
 
-    注意：该指标是**产品级**的，不含客户维度 —— /stock 页同一产品在不同
-    客户行上显示的是同一个值。
+    ── 为什么只算包装部入库（其余来源为什么不进结余）──────────────────────
+    · 备货入库：给客户预留的原料/半成品，不是可发成品 → 不进结余；
+    · 填充部 / 手工部入库：仍是半成品，要经包装才算成品 → 不进结余；
+    · 订单抵扣（含取消抵扣/抵扣回滚）：只是把「备货」额度挪成「订单」额度，
+      货没动；而且抵扣三型若只计一侧（删单时计「抵扣回滚」、建单时「订单抵扣」
+      从未计入），结余会虚高回滚量（Round16 核实）→ 三型整体不进结余。
+    所以**不能用 product.current_stock 当出货闸门**：它含上述全部来源，恒 ≥ 结余，
+    用它判会让「备货/半成品直接出货」一路绿灯（2026-10 审计 P1-6 就是这个问题）。
+
+    ── 实现（与 get_inventory_paginated 的 CTE 逐字一致）────────────────────
+        包装部入库 = Σ daily_production_record.quantity  (department='packaging')
+        已出货     = Σ inventory_log.change_quantity     (change_type in
+                     出库 / 出库修改 / 出库删除 / 退货 / 退货取消)   # 出库为负，相加即净流出
+
+    ⚠️ 所有写入口的库存闸门都必须调本函数，**不要另写一套口径**。
+       已接入四处：新建出货(create_stockout_core)、编辑出货(update_stockout_core)、
+       取消退货(cancel_stockreturn_core)、暂存导入出货(_confirm_one_staging_stockout)。
+    ⚠️ 本指标是**产品级**的，不含客户维度 —— /stock 页同一产品在不同客户行上
+       显示的是同一个值。
     """
     packaging_qty = (await db.execute(
         select(func.coalesce(func.sum(DailyProductionRecord.quantity), 0)).where(

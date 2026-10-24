@@ -153,7 +153,12 @@ class TestStockReturnFullFlow:
         product = Product(name=f"历史关联产品-{suffix}", current_stock=50)
         db.add(product)
         await db.flush()
-        # 2026-10-24：取消退货的结余闸门读「包装部入库 − 已出货」，夹具补真实入库
+        # 2026-10-24：取消退货的闸门读「可出库存 = 包装部入库 − 已出货」，
+        # 备货 / 填充 / 手工 / 抵扣都不计入（口径见 get_inventory_balance 的 docstring）。
+        # 夹具原先只给 Product(current_stock=...) 就直接插 StockOut，既无包装入库也无
+        # inventory_log → 结余恒 0，闸门必然拒绝。真实链路里这批货必经
+        # create_stockout_core（已按结余放行并写「出库」流水），故按真实链路补一条
+        # 包装部入库记录；断言一个都没改。
         from datetime import date as _date
 
         db.add(DailyProductionRecord(

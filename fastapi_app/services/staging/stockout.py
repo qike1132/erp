@@ -208,9 +208,11 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
         product.current_stock, -staging.quantity,
         message=f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足',
     )
-    # 结余闸门（2026-10-24，业务口径已确认）：与手工出货/批量出货同口径。
-    # 可出库存 = 包装部入库 − 已出货；备货/填充/手工/抵扣都不计入。
-    # 放在 FIFO 分配之前，避免产生半成品出货行。
+    # 结余闸门（口径见 stock_inventory_service.get_inventory_balance 的 docstring）：
+    # 与手工出货/批量出货同口径 —— 可出库存 = 包装部入库 − 已出货。
+    # 放在 _allocate_ship_fifo 之前：否则会先建出 StockOut 行再被拒，留下半成品数据。
+    # 没有它时，导入路径只看 current_stock（含备货/半成品），
+    # 会出现「手工出货被拒、同一张表导入却成功」。
     from fastapi_app.services.stock_inventory_service import get_inventory_balance
 
     _balance = await get_inventory_balance(db, product_id)
