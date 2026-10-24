@@ -27,7 +27,7 @@ bandit==1.9.4
     # via -r requirements/dev.txt
 bcrypt==5.0.0
     # via -r requirements/base.txt
-certifi==2026.10.19
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
