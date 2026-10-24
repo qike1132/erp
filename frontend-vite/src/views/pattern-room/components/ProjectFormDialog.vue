@@ -67,7 +67,9 @@
     <template #footer>
       <div class="pjf-footer">
         <UiButton variant="ghost" @click="$emit('update:visible', false)">取消</UiButton>
-        <UiButton variant="primary" :loading="submitting" :disabled="!form.product_name.trim()" @click="handleSubmit">
+        <!-- AUD-10：UiButton 无 loading prop，:loading 是死属性——提交在途用
+             :disabled 收口（双击重复创建的守卫补在 useSamplingProject 三函数）。 -->
+        <UiButton variant="primary" :disabled="submitting || !form.product_name.trim()" @click="handleSubmit">
           {{ isEditing ? '保存' : '创建' }}
         </UiButton>
       </div>
