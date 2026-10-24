@@ -494,6 +494,18 @@ async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
     ⚠️ 本指标是**产品级**的，不含客户维度 —— /stock 页同一产品在不同客户行上
        显示的是同一个值。
     """
+    packaging_qty, shipped_net = await get_inventory_balance_detail(db, product_id)
+    return packaging_qty + shipped_net
+
+
+async def get_inventory_balance_detail(db: AsyncSession, product_id: int) -> tuple[int, int]:
+    """返回 (包装部入库, 出货净额)。出货净额为负，结余 = 两者相加。
+
+    拆开返回是为了让**闸门的报错能自解释**：
+        「可用 53482（包装部入库 120000 − 已出货 66518），本次 54000」
+    只给一个总数时，用户无法判断是「没包装够」还是「订单/本次出货量填多了」，
+    只能回来问人（2026-10-24 生产实例）。
+    """
     packaging_qty = (await db.execute(
         select(func.coalesce(func.sum(DailyProductionRecord.quantity), 0)).where(
             DailyProductionRecord.department == 'packaging',
@@ -508,7 +520,7 @@ async def get_inventory_balance(db: AsyncSession, product_id: int) -> int:
             InventoryLog.product_id == product_id,
         )
     )).scalar() or 0
-    return int(packaging_qty) + int(shipped_net)
+    return int(packaging_qty), int(shipped_net)
 
 
 def _build_inventory_filter_params(search_product: str, search_customer: str,
