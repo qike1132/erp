@@ -52,7 +52,12 @@ def _build_stockout_entity(
         else:
             reason = check_stock_available(product.current_stock, -qty)
             stock_check_passed = reason is None
-            stock_check_message = '库存充足' if reason is None else reason
+            # B1-04：current_stock 是备货口径（含备货/半成品），与确认环节的结余
+            # 闸门口径不同——此处只是同步路径下的参考信号，导入完成后
+            # _recalc_stock_check_by_balance 会按结余口径重算（文案含"结余"）。
+            stock_check_message = (
+                '库存充足（备货口径预检，确认按结余）' if reason is None else reason
+            )
 
     return StagingStockOut(
         session_id=session_id,
@@ -87,9 +92,17 @@ async def _stockout_extra_updates(entity, data: dict, db: AsyncSession) -> None:
         # 数量改大后暂存行仍显示导入时的旧结论）。
         product = await db.get(Product, entity.product_id)
         if product is not None:
-            reason = check_stock_available(product.current_stock, -int(entity.quantity))
-            entity.stock_check_passed = reason is None
-            entity.stock_check_message = '库存充足' if reason is None else reason
+            # B1-04：编辑路径有 db，直接按结余口径重算（与确认闸门同源），不再
+            # 沿用备货口径的 current_stock 快查。
+            from fastapi_app.services.stock_inventory_service import get_inventory_balance
+
+            balance = await get_inventory_balance(db, entity.product_id)
+            qty = int(entity.quantity)
+            entity.stock_check_passed = qty <= balance
+            entity.stock_check_message = (
+                '结余充足（按包装部入库−已出货）' if qty <= balance
+                else f'库存不足（结余 {balance}，本次 {qty}）'
+            )
     if 'stockout_date' in data:
         entity.stockout_date = parse_date_value(data['stockout_date']) or datetime.now(UTC)  # aware UTC：列已迁移为 timestamptz
     if 'note' in data:
@@ -352,7 +365,7 @@ async def confirm_staging_stockouts(
 async def import_staging_stockouts_from_excel(
     db: AsyncSession, file_content: bytes, session_id: str
 ) -> tuple[int, str, list[str]]:
-    return await _generic_import_staging_from_excel(
+    imported, msg, errors = await _generic_import_staging_from_excel(
         db, file_content, session_id,
         staging_model=StagingStockOut,
         clear_func=clear_staging_stockouts_by_session,
@@ -369,6 +382,39 @@ async def import_staging_stockouts_from_excel(
         required_fields=['product_name', 'quantity'],
         extra_row_validations=_validate_stockin_customer,
     )
+    # B1-04（2026-10-24 审计）：导入后的预检统一按「结余」口径重算——builder 里
+    # 的 current_stock 快查是同步路径下的参考信号（备货口径恒 ≥ 结余），不重算会让
+    # 确认弹窗绿灯、确认时却被结余闸门拒绝，且被拒行随即批删（暂存数据丢失）。
+    await _recalc_stock_check_by_balance(db, session_id)
+    return imported, msg, errors
+
+
+async def _recalc_stock_check_by_balance(db: AsyncSession, session_id: str) -> None:
+    """对暂存出货行按「结余」（包装部入库 − 已出货）口径重算 stock_check。
+
+    与 confirm 环节的 _confirm_one_staging_stockout 闸门（get_inventory_balance）
+    同口径；失败行的文案与确认拒绝文案一致，用户在弹窗里看到的即最终判定。
+    """
+    from fastapi_app.services.stock_inventory_service import get_inventory_balance
+
+    result = await db.execute(
+        select(StagingStockOut).where(
+            StagingStockOut.session_id == session_id,
+            StagingStockOut.is_validated.is_(True),
+            StagingStockOut.product_id.isnot(None),
+        )
+    )
+    for row in result.scalars().all():
+        qty = int(row.quantity)
+        if qty <= 0 or row.product_id is None:
+            continue
+        balance = await get_inventory_balance(db, row.product_id)
+        if qty > balance:
+            row.stock_check_passed = False
+            row.stock_check_message = f'库存不足（结余 {balance}，本次 {qty}）'
+        else:
+            row.stock_check_passed = True
+            row.stock_check_message = '结余充足（按包装部入库−已出货）'
 
 async def import_staging_stockouts_from_file(
     db: AsyncSession, file_content: bytes, session_id: str,

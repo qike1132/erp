@@ -158,8 +158,13 @@ function openReceive(item: RegItem) { receiveItem.value = { id: item.id, subItem
 function openReceiveBySubItems(subItems: SupMatItem[], name: string, ordered: number, received: number) { receiveItem.value = { id: subItems[0]?.id || 0, subItems, name, ordered, received, remaining: ordered - received }; showReceiveDialog.value = true }
 
 /** 收货登记提交：按每条 item 的剩余额度切分，依次调用 API（串行保证 registration status 一致性） */
+const receiveSubmitting = ref(false)
 async function submitReceive(payload: { qty: number | null; remark: string }) {
   if (!payload.qty || payload.qty <= 0) { toast('请输入有效的收货数量', 'warning'); return }
+  // F1b-07（2026-10-24 审计）：in-flight 守卫——后端 FOR UPDATE 兜底数量
+  // 不会写坏，但双击会看到误导性「登记失败」报错。
+  if (receiveSubmitting.value) return
+  receiveSubmitting.value = true
   let remainingToReceive = payload.qty
   let totalDelta = 0
   let lastAutoCompleted = false
@@ -196,7 +201,7 @@ async function submitReceive(payload: { qty: number | null; remark: string }) {
     updateSupplierDialogLocally(supplierDetail, showSupplierDialog, receiveItem.value, newReceived)
     updateDetailDialogLocally(detailData, showDetailDialog, receiveItem.value.id, newReceived)
     loadProgress(pPage.value)
-  } catch { toast('操作失败', 'error') }
+  } catch { toast('操作失败', 'error') } finally { receiveSubmitting.value = false }
 }
 
 const { runExport } = useExport()

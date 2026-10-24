@@ -49,7 +49,7 @@ async def create_ocr_task(current_user: User=Depends(require_any_permission('bat
     return {'task_id': task_id}
 
 @router.post('/upload', response_model=OcrPdfImportResult, summary='批量上传出货单识别导入')
-async def upload_shipping_docs(files: list[UploadFile]=File(..., description='一个或多个 PDF/图片文件'), session_id: str=Query(..., description='会话ID'), task_id: str=Query('', description='进度追踪ID（由 /create-task 返回）'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
+async def upload_shipping_docs(files: list[UploadFile]=File(..., description='一个或多个 PDF/图片文件'), session_id: str=Query(..., max_length=64, description='会话ID'), task_id: str=Query('', max_length=64, description='进度追踪ID（由 /create-task 返回）'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
     """
     批量上传出货单（PDF/图片），通过离线 OCR 识别后导入暂存区。
 
@@ -102,8 +102,10 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
             all_errors.append(f'{filename}: {e!s}')
             logger.error('OCR 批量上传依赖缺失: %s', e)
             continue
-        except Exception as e:  # defensive: 单文件失败不得中断整批（其余文件已各自提交）
-            all_errors.append(f'{filename}: 处理失败（{e!s}）')
+        except Exception:  # defensive: 单文件失败不得中断整批（其余文件已各自提交）
+            # B3-03（2026-10-24 审计）：裸 Exception 的细节（SQL/路径/驱动报错）
+            # 不进响应，与同文件 :181/:216 的 sanitize 口径一致；完整异常已在下方日志。
+            all_errors.append(f'{filename}: 处理失败（请联系管理员）')
             logger.exception('OCR 批量上传单文件处理失败: %s', filename)
             continue
         total_imported += imported

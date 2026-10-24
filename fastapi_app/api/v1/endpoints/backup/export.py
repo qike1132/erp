@@ -227,7 +227,7 @@ async def export_backup(
     - remark: 备份备注
     - format: 备份格式，支持 'zip' 或 'json'
     - encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）
-    - x_backup_password: 加密密码（请求头，H3：已移除 URL query 形式，避免密码进入访问日志/浏览器历史）
+    - x_backup_password 头：加密密码（H3：已移除 URL query 形式，避免密码进入访问日志/浏览器历史）
 
     加密密码获取优先级：
     1. X-Backup-Password请求头
@@ -272,8 +272,8 @@ async def save_backup_to_server(
     参数：
     - remark: 备份备注
     - encrypt: 是否启用加密，默认False（总开关 BACKUP_ENCRYPTION_ENABLED=false 时被忽略）
-    - password: 加密密码（请求体，H3）
-    - x_backup_password: 加密密码（请求头）
+    - password 体：加密密码（H3）
+    - x_backup_password 头：加密密码
 
     加密密码获取优先级：
     1. password请求体字段

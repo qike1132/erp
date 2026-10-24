@@ -91,7 +91,10 @@ EXPECTED_CALL_SITES = {
     # 只产出 stock_check_passed 展示结论，不抛异常。
     "fastapi_app/services/staging/stockout.py": {
         "assert_stock_available": 1,
-        "check_stock_available": 2,
+        # B1-04（2026-10-24 审计）：编辑路径 _stockout_extra_updates 的预检从
+        # check_stock_available（备货口径）改为 get_inventory_balance（结余口径，
+        # 与确认闸门同源），统一入口调用点 9→8。
+        "check_stock_available": 1,
     },
     # 删除入库（-stockin.quantity）／修改入库数量（quantity - old_quantity）
     "fastapi_app/services/stock_in_service.py": {"assert_stock_available": 2},
@@ -469,17 +472,19 @@ def test_call_sites_use_unified_entry(rel_path):
     assert _unified_calls(rel_path) == EXPECTED_CALL_SITES[rel_path]
 
 
-def test_total_call_sites_is_nine():
-    """统一入口调用点合计 9 处。
+def test_total_call_sites_is_eight():
+    """统一入口调用点合计 8 处。
 
     2026-10-17 审计 AUD-04 曾新增 2 处预检至 11；2026-10-18 P0-1 把两个
     删除路径的回滚收敛到 shared/order_stock_rollback.py（负向守卫内置在
     apply_stock_delta_locked），approval_service.py 与 order/commands.py
-    的 2 处 assert_stock_available 调用点随之移出，降为 9。
+    的 2 处 assert_stock_available 调用点随之移出，降为 9；2026-10-24 审计
+    B1-04 把 staging 编辑路径的预检改为结余口径（get_inventory_balance），
+    再降为 8。
     """
     total = sum(count for site in EXPECTED_CALL_SITES.values() for count in site.values())
-    assert total == 9
-    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 9
+    assert total == 8
+    assert sum(sum(_unified_calls(rel).values()) for rel in IN_SCOPE_FILES) == 8
 
 
 @pytest.mark.parametrize("rel_path", IN_SCOPE_FILES)
@@ -506,11 +511,9 @@ def test_remaining_current_stock_writes_are_documented(rel_path):
     assert _current_stock_writes(rel_path) == sorted(DOCUMENTED_WRITES[rel_path])
 
 
-def test_risky_writes_all_sit_behind_unified_entry():
-    for rel_path in IN_SCOPE_FILES:
-        writes = set(_current_stock_writes(rel_path))
-        if writes & RISKY_WRITES:
-            assert sum(_unified_calls(rel_path).values()) >= 1, rel_path
+# T2-F5（AUD-16 批次，2026-10-24）：原 test_risky_writes_all_sit_behind_unified_entry
+# 删除——台账收敛后各文件直写为空集，`writes & RISKY_WRITES` 恒空、循环体断言
+# 永不执行（vacuous loop）；负库存防回归的真防线是上面的台账比对测试。
 
 
 def test_update_stockin_core_is_only_called_by_the_wrapper():

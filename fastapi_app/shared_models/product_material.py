@@ -135,6 +135,8 @@ class ProductFabric(Base):
         Index('idx_product_fabric_product', 'product_id'),
         Index('idx_product_fabric_supplier', 'supplier_id'),
         Index('idx_product_fabric_role_id', 'role_id'),
+        # 注意：布料表默认作用域允许多行（一个产品默认 BOM 有多种布料），
+        # 不设 (product_id) WHERE role_id IS NULL 唯一索引——CL 修正 2026-10-24。
     )
 
     def to_dict(self):
@@ -185,6 +187,9 @@ class ProductMaterial(Base):
         Index('idx_product_material_supplier', 'supplier_id'),
         Index('idx_product_material_role_id', 'role_id'),
         UniqueConstraint('product_id', 'role_id', name='uq_product_material_product_role'),
+        # AUD-09（104 迁移）：同 ProductFabric——与迁移声明逐字一致防 check 漂移
+        Index('uq_product_material_default_scope', 'product_id', unique=True,
+              postgresql_where=text('role_id IS NULL')),
     )
 
     def to_dict(self):
@@ -236,6 +241,7 @@ class ProductAccessory(Base):
         Index('idx_product_accessory_product', 'product_id'),
         Index('idx_product_accessory_supplier', 'supplier_id'),
         Index('idx_product_accessory_role_id', 'role_id'),
+        # 注意：配件表默认作用域允许多行，同 ProductFabric——不设默认作用域唯一索引。
     )
 
     def to_dict(self):

@@ -50,7 +50,11 @@ class DisasterRecoveryTestService:
             'test_frequency_days': int(os.environ.get('BACKUP_RECOVERY_TEST_FREQUENCY', '7')),
 
             # M3: 加密备份演练密码（也可逐次传入），用于解密历史 .enc 包
-            'test_password': os.environ.get('BACKUP_TEST_PASSWORD', ''),
+            # B2-09（2026-10-24 审计）：回退 BACKUP_ENCRYPTION_PASSWORD——加密部署
+            # 只配主口令时，演练此前恒因「缺密码」失败并每月发错误告警（与
+            # plan/restore 的三层兜底链口径一致）。
+            'test_password': (os.environ.get('BACKUP_TEST_PASSWORD', '')
+                              or os.environ.get('BACKUP_ENCRYPTION_PASSWORD', '')),
 
             # 测试数据库配置（F5: 凭据缺省回落主库配置——此前默认 postgres/空密码
             # 在本机必然认证失败，演练从未真正连通过）

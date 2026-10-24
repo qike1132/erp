@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import time
-from functools import wraps
 from typing import Any
 
 import redis
@@ -489,40 +488,6 @@ class RedisCacheManager:
 
 
 redis_cache = RedisCacheManager()
-
-
-def cache_invalidate(*key_patterns):
-    """缓存失效装饰器，支持 async 和 sync 函数"""
-    def decorator(f):
-        is_async = asyncio.iscoroutinefunction(f)
-
-        if is_async:
-            @wraps(f)
-            async def async_wrapper(*args, **kwargs):
-                result = await f(*args, **kwargs)
-                for pattern in key_patterns:
-                    await redis_cache.delete_pattern(pattern)
-                return result
-            return async_wrapper
-        else:
-            @wraps(f)
-            def sync_wrapper(*args, **kwargs):
-                result = f(*args, **kwargs)
-                import asyncio as _aio
-                try:
-                    loop = _aio.get_running_loop()
-                except RuntimeError:
-                    loop = None
-                for pattern in key_patterns:
-                    if loop and loop.is_running():
-                        _aio.run_coroutine_threadsafe(
-                            redis_cache.delete_pattern(pattern), loop
-                        )
-                    else:
-                        _aio.run(redis_cache.delete_pattern(pattern))
-                return result
-            return sync_wrapper
-    return decorator
 
 
 def _generate_cache_key(f, key_prefix: str, args: tuple, kwargs: dict) -> str:

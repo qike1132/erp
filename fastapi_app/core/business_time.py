@@ -50,3 +50,34 @@ def fmt_business(dt: datetime | None, fmt: str = '%Y-%m-%d %H:%M') -> str:
     if dt is None:
         return ''
     return dt.astimezone(_BUSINESS_TZ).strftime(fmt)
+
+
+def fmt_business_naive_utc(dt: datetime | None, fmt: str = '%Y-%m-%d %H:%M') -> str:
+    """把 **naive-UTC** 列（TIMESTAMP WITHOUT TIME ZONE、墙钟即 UTC）转成北京时间。
+
+    AUD-02（2026-10-24 审计）：completed_at 等 20 个 naive 列存的是 UTC 墙钟，
+    直接 strftime 恒慢 8 小时、北京 00:00–07:59 的记录落错天。naive 值必须先
+    显式标记 UTC 再转业务时区——直接 astimezone 会按服务器本地时区解释，错得
+    更远。aware 值请用 :func:`fmt_business`。
+    """
+    if dt is None:
+        return ''
+    from datetime import UTC as _UTC
+    return dt.replace(tzinfo=_UTC).astimezone(_BUSINESS_TZ).strftime(fmt)
+
+
+def business_day_bounds_utc_naive(day: date | None = None) -> tuple[datetime, datetime]:
+    """业务日界的 **naive-UTC** 边界（供 naive-UTC 列的 SQL 比较）。
+
+    北京 [day 00:00, day+1 00:00) → UTC naive [前日 16:00, 当日 16:00)。
+    completed_at 这类 naive-UTC 列按北京日历日筛选时必须用本边界，否则
+    北京 00:00–07:59 完成的记录落到前一天（AUD-02）。返回 (start, end)，
+    比较用 ``>= start AND < end``（替代 '... 23:59:59' 闭区间——后者带 1 秒
+    微秒洞且时区语义错位）。
+    """
+    from datetime import UTC as _UTC
+    start_aware, end_aware = business_day_range(day)
+    return (
+        start_aware.astimezone(_UTC).replace(tzinfo=None),
+        end_aware.astimezone(_UTC).replace(tzinfo=None),
+    )

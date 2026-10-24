@@ -35,7 +35,7 @@ async def get_token(session):
         print(f"登录异常: {e}")
     return None
 
-async def test_api(session, token, method, path, data=None):
+async def _call_api(session, token, method, path, data=None):
     url = f"{BASE_URL}{path}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
@@ -74,7 +74,7 @@ async def worker(worker_id, stop_event):
         count = 0
         while not stop_event.is_set() and count < 100:
             for method, path, data in endpoints:
-                result = await test_api(session, token, method, path, data)
+                result = await _call_api(session, token, method, path, data)
                 results.append(result)
                 count += 1
                 await asyncio.sleep(0.1)

@@ -108,6 +108,10 @@ export function useApproval() {
     } catch (err: unknown) {
       showToast(extractErrMsg(err), 'error')
       queryClient.invalidateQueries({ queryKey: ['approvals'] })
+    } finally {
+      // AUD-11（2026-10-24 审计）：成功/失败都复位——原先失败路径不复位，
+      // 该行按钮永久禁用显示「处理中…」直到刷新（同仓 user/supplier/customer 均正确复位）
+      actionId.value = 0
     }
   }
 

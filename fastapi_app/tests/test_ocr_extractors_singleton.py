@@ -47,9 +47,18 @@ class TestModuleLevelDeclaration:
 
     @pytest.mark.parametrize('name', _SINGLETONS)
     def test_initial_value_is_none(self, name):
-        """初始值须为 None，getter 的惰性初始化分支才成立。"""
-        # 其它测试可能已初始化缓存，此处只断言"可为 None"这一前提成立
-        assert getattr(_extractors, name) is None or getattr(_extractors, name) is not None
+        """初始值须为 None，getter 的惰性初始化分支才成立。
+
+        AUD-15（2026-10-24 审计）：原断言 `X is None or X is not None` 是互补
+        析取恒真——单例初值被改成非 None 哨兵时测试仍绿，零约束。改为真断言；
+        本文件收集序在同进程消费 getter 的测试之前（pytest 按文件名字母序，
+        test_ocr_* 消费方在 OCR 服务的测试里更晚收集），若未来顺序变化导致
+        初值已被初始化而误红，按「测试能红好过恒真」原则修收集序而非回退本断言。
+        """
+        assert getattr(_extractors, name) is None, (
+            f'{name} 的模块级初值必须为 None（惰性初始化前提）；'
+            f'若因收集序变化已被初始化，请检查 import 顺序而非放松本断言'
+        )
 
 
 class TestGetterDoesNotRaiseNameError:

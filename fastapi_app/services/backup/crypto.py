@@ -125,5 +125,8 @@ def get_backup_encryption_password() -> str | None:  # log-context: internal hel
         logger.info("使用环境变量 BACKUP_ENCRYPTION_KEY 进行备份加密")
         return BACKUP_ENCRYPTION_KEY
 
-    logger.warning("备份加密已启用但未配置加密密码，备份将不加密")
+    # B2-10（2026-10-24 审计）：原文案「备份将不加密」与唯一决策点
+    # resolve_encryption_decision 的 fail-closed 行为矛盾（该请求随后即抛
+    # BackupError），排障会被引向错误方向。
+    logger.warning("备份加密已启用但未配置加密密码，降级/失败由 resolve_encryption_decision 决定")
     return None

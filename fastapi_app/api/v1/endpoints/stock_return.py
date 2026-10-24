@@ -90,9 +90,9 @@ async def list_shipment_options(
 async def list_stock_returns(
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=500, description='每页数量'),
-    customer: str | None = Query(None, description='客户'),
-    start_date: str | None = Query(None, description='开始日期'),
-    end_date: str | None = Query(None, description='结束日期'),
+    customer: str | None = Query(None, max_length=100, description='客户'),
+    start_date: str | None = Query(None, max_length=10, description='开始日期'),
+    end_date: str | None = Query(None, max_length=10, description='结束日期'),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission('stock_return_view')),
 ) -> StockListResponse:

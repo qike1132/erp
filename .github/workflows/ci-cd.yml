@@ -303,8 +303,13 @@ jobs:
       run: |
         if [ -n "${{ github.base_ref }}" ]; then
           python scripts/file_size_gate.py --base "origin/${{ github.base_ref }}"
+        elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+          # I1-03（2026-10-24 审计）：直推 main 也要拦新增巨型文件——对比事件
+          # 的上一提交（push 事件带 before SHA；删除分支的全零 before 回落 --all）。
+          git diff --name-only "${{ github.event.before }}" HEAD > /tmp/changed.txt || true
+          python scripts/file_size_gate.py --base "${{ github.event.before }}"
         else
-          echo "[file-size-gate] 非 PR 事件(无 base_ref)：改走全量报告，不阻断"
+          echo "[file-size-gate] 非 PR 事件且无 before SHA：改走全量报告，不阻断"
           python scripts/file_size_gate.py --all
         fi
 

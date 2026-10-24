@@ -190,6 +190,10 @@ export function useCreateShipmentPlan(open: Ref<boolean>, onCreated: () => void)
         byCustomer.get(cid)!.push(d)
       }
 
+      // F1a-03（2026-10-24 审计）：逐客户提交并收集成败——原先任一客户失败
+      // 整批进 catch，重试必被已建客户的 409 阻断（重试必败态），且无逐户反馈。
+      const failures: string[] = []
+      const succeededCids = new Set<number>()
       for (const [cid, lines] of byCustomer) {
         const cname = customerMap.value.get(cid) || ''
         const firstLine = lines[0]
@@ -209,10 +213,25 @@ export function useCreateShipmentPlan(open: Ref<boolean>, onCreated: () => void)
           })),
         }
 
-        await planApi.create(payload)
+        try {
+          await planApi.create(payload)
+          succeededCids.add(cid)
+        } catch (e: unknown) {
+          const detail = (e as { response?: { data?: { detail?: string } } })
+            ?.response?.data?.detail
+          failures.push(`${cname || `客户${cid}`}：${detail || '创建失败'}`)
+        }
       }
 
-      showToast('出货计划创建成功', 'success')
+      if (failures.length === 0) {
+        showToast('出货计划创建成功', 'success')
+      } else {
+        showToast(
+          `部分客户创建失败（${succeededCids.size} 成功 / ${failures.length} 失败）：`
+          + failures.join('；'),
+          'error',
+        )
+      }
       onCreated()
     } catch (err: unknown) {
       const detail = getErrorMessage(err, '创建失败，请重试')

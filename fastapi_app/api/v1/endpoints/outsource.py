@@ -374,11 +374,23 @@ async def search_hubei_products(
 
 @router.get("/unshipped", response_model=list[UnshippedProcessItem])
 async def list_unshipped_processes(
+    summary: bool = Query(False, description="F1a-05：只回未到货件数聚合（data 仍为列表结构，但仅含合计行），供页头信息条使用"),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("outsource_view")),
 ) -> list[UnshippedProcessItem]:
-    """跨全部湖北订单聚合未发完工序明细（导出/打印未到货清单）。"""
+    """跨全部湖北订单聚合未发完工序明细（导出/打印未到货清单）。
+
+    summary=true 时为页头「未到货 N 件」信息条服务：只回一条合计行，
+    不传输整表明细（此前每次进页全量拉取只为算一个和，F1a-05）。
+    """
     items = await outsource_service.list_unshipped_processes(db)
+    if summary:
+        total_remaining = sum(int(it.get('remaining', 0) or 0) for it in items)
+        return [UnshippedProcessItem(
+            order_id=0, order_no='', customer='',
+            process_type='__summary__', target_qty=0, shipped_qty=0,
+            remaining=total_remaining,
+        )]
     return [UnshippedProcessItem(**it) for it in items]
 
 

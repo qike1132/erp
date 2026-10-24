@@ -59,12 +59,12 @@ def _assert_department_writable(department: str, scope: set[str] | None) -> None
 async def list_records(
     year: int | None = Query(None, description='年份；未提供区间时必填'),
     month: int | None = Query(None, ge=1, le=12, description='月份；未提供区间时必填'),
-    start_date: str = Query('', description='区间起始日 (YYYY-MM-DD)，与 end_date 成对'),
-    end_date: str = Query('', description='区间结束日 (YYYY-MM-DD)，闭区间'),
-    department: str = Query('', description='部门筛选 (filling/handcraft/packaging)'),
-    production_date: str = Query('', description='指定日期筛选 (YYYY-MM-DD)'),
-    created_by: str = Query('', description='录单人筛选；留空为不限'),
-    keyword: str = Query('', description='产品名或 69 码关键词；留空为不限'),
+    start_date: str = Query('', max_length=10, description='区间起始日 (YYYY-MM-DD)，与 end_date 成对'),
+    end_date: str = Query('', max_length=10, description='区间结束日 (YYYY-MM-DD)，闭区间'),
+    department: str = Query('', max_length=20, description='部门筛选 (filling/handcraft/packaging)'),
+    production_date: str = Query('', max_length=10, description='指定日期筛选 (YYYY-MM-DD)'),
+    created_by: str = Query('', max_length=50, description='录单人筛选；留空为不限'),
+    keyword: str = Query('', max_length=100, description='产品名或 69 码关键词；留空为不限'),
     sort: str = Query('desc', description="排序：desc（最新在前，默认）或 asc"),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
@@ -198,9 +198,14 @@ async def update_record(
         if data.department is not None:
             _assert_department_writable(data.department, scope)
         update_data = data.model_dump(exclude_unset=True)
-        await daily_production_service.update_record(
-            db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data
-        )
+        try:
+            await daily_production_service.update_record(
+                db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data
+            )
+        except ValueError as e:
+            # OCR-F2（2026-10-24 推送前评审）：结余闸门等业务拒绝以 400 带指引
+            # 文案返回——此前落全局兜底 handler 变 500，指引文案全丢。
+            raise HTTPException(status_code=400, detail=str(e)) from e
     return ProductionRecordActionResponse(success=True, message='生产记录更新成功')
 
 
@@ -231,7 +236,11 @@ async def delete_record(
         if record is None:
             raise HTTPException(status_code=404, detail='记录不存在')
         _assert_department_writable(record.department, scope)
-        await daily_production_service.delete_record(db, record_id, operator=operator)
+        try:
+            await daily_production_service.delete_record(db, record_id, operator=operator)
+        except ValueError as e:
+            # OCR-F2（同上）：业务拒绝（记录不存在/结余闸门）以 400 带文案返回。
+            raise HTTPException(status_code=400, detail=str(e)) from e
     return ProductionRecordActionResponse(success=True, message='生产记录删除成功')
 
 

@@ -58,7 +58,7 @@
                     <BeileOrderRow
                       :item="item"
                       :confirm-status="confirmStatus"
-                      :is-confirming="confirmingIds.has(item.id)"
+                      :is-confirming="confirmingIds.has(rowKey(item))"
                       :highlight-id="highlightId"
                       :confirmable="canConfirm"
                       :selectable="canPrint"

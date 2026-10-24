@@ -193,8 +193,7 @@ function closeDialog() {
         <UiButton variant="ghost" @click="closeDialog">取消</UiButton>
         <UiButton
           variant="primary"
-          :loading="submitting"
-          :disabled="!canSubmit"
+          :disabled="submitting || !canSubmit"
           @click="handleSubmit"
         >
           提交（{{ filledCount }} 个）

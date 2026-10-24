@@ -5,14 +5,15 @@
 
 ## 一句话现状
 
-142 个 revision、**单 head**、**4 个 root**、6 个 merge revision。迁移文件零业务代码
-泄漏（`migrations/` 导入 `fastapi_app` 的次数为 0）。
+144 个 revision、**单 head**、**4 个 root**、6 个 merge revision。迁移文件零业务代码
+泄漏（`migrations/` 导入 `fastapi_app` 的次数为 0）。（B5-F3：2026-10-24 同步，
+103/104 上线前审计新增）
 
-- head：`pg_standalone_102_purchase_order_status_check`（仓库链头；生产库实际版本以
-  `alembic current` 为准，本迁移尚未应用到生产）
+- head：`pg_standalone_104_dedup_default_bom_rows`（仓库链头；生产库实际版本以
+  `alembic current` 为准）
 - root（base）：`add_pp_composite_idx`、`add_product_factory`、`add_product_price`、`pg_standalone_001`
 
-> 数字由 `scripts/check_alembic_heads.py` 的输出维护（revisions=142 heads=1 bases=4）；
+> 数字由 `scripts/check_alembic_heads.py` 的输出维护（revisions=144 heads=1 bases=4）；
 > 新增迁移后同步更新本节，避免 README 再次成为过期第二真相源（Z08-R6）。
 
 ## 删表迁移的行数守卫缺口（Z08-R3，重建库时人工复核）

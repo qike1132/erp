@@ -4,6 +4,10 @@
 运行所有备份相关服务的测试
 """
 
+# T2-F8（2026-10-24 审计）：整文件的 `assert x is not None` 恒真冒烟已删除
+# （构造函数要么抛异常要么返回对象，恒真零约束）；保留 hasattr 接口存在性
+# 与配置加载值断言。行为回归由同目录 metrics/health_check/policy/alert 各专题文件承担。
+
 import pytest
 
 
@@ -11,7 +15,6 @@ def test_backup_alert_service_import():
     """测试备份告警服务导入"""
     from fastapi_app.services.backup.metrics.alert_service import BackupAlertService
     service = BackupAlertService()
-    assert service is not None
     assert hasattr(service, 'send_alert')
     assert hasattr(service, 'retry_with_backoff')
 
@@ -20,7 +23,6 @@ def test_backup_health_check_service_import():
     """测试健康检查服务导入"""
     from fastapi_app.services.backup.verify.health_check_service import BackupHealthCheckService
     service = BackupHealthCheckService()
-    assert service is not None
     assert hasattr(service, 'perform_health_check')
     assert hasattr(service, 'get_health_history')
 
@@ -29,7 +31,6 @@ def test_backup_policy_service_import():
     """测试备份策略服务导入"""
     from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
     service = BackupPolicyService()
-    assert service is not None
     assert hasattr(service, 'get_current_policy')
     assert hasattr(service, 'apply_backup_policy')
 
@@ -38,7 +39,6 @@ def test_backup_metrics_service_import():
     """测试性能监控服务导入"""
     from fastapi_app.services.backup.metrics.service import BackupMetricsService
     service = BackupMetricsService()
-    assert service is not None
     assert hasattr(service, 'collect_backup_metrics')
     assert hasattr(service, 'get_performance_summary')
     assert hasattr(service, 'get_trend_analysis')
@@ -50,7 +50,6 @@ def test_backup_cleanup_service_import():
     """测试备份清理服务导入"""
     from fastapi_app.services.backup.cleanup.service import BackupCleanupService
     service = BackupCleanupService()
-    assert service is not None
     assert hasattr(service, 'smart_cleanup')
     assert hasattr(service, 'get_cleanup_history')
 
@@ -59,7 +58,6 @@ def test_backup_recovery_test_service_import():
     """测试灾难恢复测试服务导入"""
     from fastapi_app.services.backup.orchestration.recovery_test_service import DisasterRecoveryTestService
     service = DisasterRecoveryTestService()
-    assert service is not None
     assert hasattr(service, 'perform_recovery_test')
     assert hasattr(service, 'get_test_history')
     assert hasattr(service, 'get_test_summary')
@@ -69,14 +67,10 @@ def test_service_interactions():
     """测试服务间交互"""
     # 测试服务可以相互导入而不冲突
     from fastapi_app.services.backup.cleanup.service import cleanup_service
-    from fastapi_app.services.backup.metrics.alert_service import alert_service
     from fastapi_app.services.backup.metrics.service import metrics_service
     from fastapi_app.services.backup.orchestration.policy_service import policy_service
     from fastapi_app.services.backup.orchestration.recovery_test_service import recovery_test_service
-    from fastapi_app.services.backup.verify.health_check_service import health_check_service
 
-    assert alert_service is not None
-    assert health_check_service is not None
     assert policy_service is not None
     assert metrics_service is not None
     assert cleanup_service is not None

@@ -52,6 +52,11 @@ def _fake_db():
     db = AsyncMock()
     db.flush = AsyncMock()
     db.add = MagicMock()
+    # B1-04 的 _recalc_stock_check_by_balance 会对暂存行做一次 SELECT；
+    # 空结果集即可（本文件的用例只关心校验器文案，不涉及结余重算）。
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db.execute = AsyncMock(return_value=result)
     return db
 
 

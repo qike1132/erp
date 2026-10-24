@@ -67,4 +67,7 @@ def hide_stockin_manage_nav():
 
 
 if __name__ == '__main__':
+    # AUD-18（2026-10-24 审计）：与 add_*_nav 族同款写守卫
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('隐藏备货管理导航项（生产库）')
     hide_stockin_manage_nav()

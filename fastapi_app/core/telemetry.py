@@ -28,8 +28,11 @@ def setup_telemetry(app=None):
     # exporter 默认也落到 console（span 打进 stdout 而非 OTLP），与生产可观测口径分叉。
     from fastapi_app.core.config import _is_production_env
 
+    # B4-07（2026-10-24 审计）：生产默认改为关闭（fail-safe）——OTLP 默认指向
+    # localhost:4317，无 collector 时 BatchSpanProcessor 周期导出失败刷日志+无谓开销。
+    # 需要遥测的环境显式设 OTEL_ENABLED=true。
     is_prod = _is_production_env()
-    default_enabled = "true" if is_prod else "false"
+    default_enabled = "false"
     if os.getenv("OTEL_ENABLED", default_enabled).lower() != "true":
         logger.info("OpenTelemetry 未启用（设置 OTEL_ENABLED=true 启用）")
         return

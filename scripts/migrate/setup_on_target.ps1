@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # ERP System - Migration Setup Script (RUN ON TARGET SERVER 192.168.1.97)
 # One-shot restore: unpack -> database -> config -> services -> start -> verify.
 # Preconditions: Python 3.12 / PostgreSQL 16 / Redis / Nginx / NSSM installed.
@@ -6,7 +6,7 @@
 # Usage (PowerShell, MUST run as Administrator):
 #   powershell -ExecutionPolicy Bypass -File setup_on_target.ps1 `
 #       -PackageZip "D:\migration_in\erp_migration_20260817_100000" `
-#       -PgSuperPassword "postgres_super_password"
+#       -PgSuperPassword <uper password from .env>  # secret-scan:allow 参数用法示例占位符，非真凭据
 #
 # Optional switches to re-run only a failing stage:
 #   -SkipDbRestore  -SkipRedis  -SkipNginx  -SkipNssm  -SkipStart  -SkipVerify

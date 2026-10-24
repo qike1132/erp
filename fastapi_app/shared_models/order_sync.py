@@ -57,7 +57,9 @@ class OrderSyncRecord(Base):
     def mark_success(self):
         """标记同步成功"""
         self.sync_status = 'success'
-        self.sync_time = datetime.now()
+        # B5-F4（2026-10-24 审计）：sync_time 是 timestamptz 列，裸 datetime.now()
+        # 写 naive 本地时间会错位 8 小时（058 迁移修过的同型反模式）。
+        self.sync_time = datetime.now(UTC)
 
     def mark_failed(self, error_msg: str):
         """标记同步失败"""

@@ -1,0 +1,339 @@
+.coq-panel {
+  --coq-blue: var(--color-primary-500, #5b8def);
+  --coq-navy: var(--color-primary-700, #2d5ab8);
+  --coq-border: #e2e8f0;
+  --coq-border-light: #f1f5f9;
+  --coq-bg-soft: #f8fafc;
+  --coq-text: #0f172a;
+  --coq-text-secondary: #475569;
+  --coq-text-muted: #94a3b8;
+  --coq-red: var(--color-danger-600, #e53e3e);
+  font-family: var(--font-sans);
+  color: var(--coq-text);
+  background: #fff;
+}
+
+/* === 已生效条件 === */
+.coq-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  background: var(--coq-bg-soft);
+  border-bottom: 1px solid var(--coq-border);
+}
+
+.coq-pill-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--coq-text-muted);
+}
+
+.coq-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 999px;
+  background: var(--color-primary-50, #eff5ff);
+  color: var(--coq-navy);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.coq-pill button {
+  border: none;
+  background: transparent;
+  color: var(--coq-navy);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+  font-family: inherit;
+}
+
+.coq-pill button:hover {
+  color: var(--coq-red);
+}
+
+.coq-clear {
+  border: none;
+  background: transparent;
+  color: var(--coq-text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 4px;
+}
+
+.coq-clear:hover {
+  color: var(--coq-red);
+}
+
+/* === 按钮 === */
+.coq-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--coq-border);
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--coq-text-secondary);
+  background: #fff;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+  white-space: nowrap;
+}
+
+.coq-btn:hover:not(:disabled) {
+  border-color: var(--coq-blue);
+  color: var(--coq-navy);
+}
+
+.coq-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.coq-btn-primary {
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary-500, #5b8def), var(--color-primary-600, #3a6bd6));
+  border-color: transparent;
+  box-shadow: 0 2px 6px rgba(58, 107, 214, 0.28);
+}
+
+.coq-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--color-primary-600, #3a6bd6), var(--color-primary-700, #2d5ab8));
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(58, 107, 214, 0.34);
+  color: #fff;
+}
+
+/* === 表格 === */
+.coq-table-scroll {
+  overflow-x: auto;
+}
+
+.coq-table {
+  width: 100%;
+  /* 窄屏改为横向滚动，避免把「数量/操作」压扁 */
+  min-width: 940px;
+  /* 固定表格布局：列宽严格按下方比例分配，
+     否则「产品名称」会独占剩余宽度，右侧两列被挤在一起 */
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 表格单元格统一 border-box，保证百分比列宽不会因内边距溢出 */
+.coq-table th,
+.coq-table td {
+  box-sizing: border-box;
+}
+
+.coq-table thead th {
+  padding: 10px 14px;
+  background: var(--coq-bg-soft);
+  font-weight: 600;
+  color: var(--coq-text-secondary);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--coq-border);
+  white-space: nowrap;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/*
+ * 列宽比例：内容列按「够用」取宽，把「数量」尽量往左收；
+ * 剩余宽度全部留给最后一列「操作」（该列有 padding-left: 214px，不能削），
+ * 空白堆在表格最右端而不是中段。5 列 → 6 列（2026-09-30 加订单号）后重新配平，合计仍为 100%。
+ */
+.coq-w-date {
+  width: 13%;
+  white-space: nowrap;
+}
+.coq-w-no {
+  width: 14%;
+  white-space: nowrap;
+}
+.coq-w-customer {
+  width: 11%;
+}
+.coq-w-product {
+  width: 14%;
+}
+.coq-w-num {
+  width: 8%;
+  white-space: nowrap;
+}
+.coq-w-op {
+  width: 40%;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* 操作列内容整体右移 200px（14px 默认内边距 + 200px），只挪这一列 */
+.coq-table th.coq-w-op,
+.coq-table td.coq-w-op {
+  padding-left: 214px;
+}
+
+.coq-th-num {
+  text-align: right !important;
+  letter-spacing: 0;
+}
+
+.coq-td-num {
+  text-align: right;
+  font-weight: 600;
+}
+
+.coq-table tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--coq-border-light);
+  color: var(--coq-text);
+  vertical-align: middle;
+}
+
+.coq-table tbody tr:last-child td {
+  border-bottom: 1px solid var(--coq-border);
+}
+
+.coq-po-group {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.coq-po-group:hover td {
+  background: var(--color-primary-50, #eff5ff);
+}
+
+.coq-po-group:focus-visible {
+  outline: 2px solid var(--coq-blue);
+  outline-offset: -2px;
+}
+
+.coq-td-muted {
+  color: var(--coq-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.coq-td-product {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* 行操作按钮：常驻显示 */
+.coq-op {
+  padding: 3px 10px;
+  border: 1px solid var(--coq-border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--coq-text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.coq-op:hover {
+  border-color: var(--coq-blue);
+  color: var(--coq-navy);
+  background: var(--color-primary-50, #eff5ff);
+}
+
+.coq-pagination {
+  border-top: 1px solid var(--coq-border-light);
+}
+
+/* === 骨架 / 空态 / 错误态 === */
+.coq-skeleton-row {
+  height: 42px;
+  border-bottom: 1px solid var(--coq-border-light);
+  background: linear-gradient(90deg, var(--coq-bg-soft) 0%, #eef2f7 50%, var(--coq-bg-soft) 100%);
+  background-size: 200% 100%;
+  animation: coq-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes coq-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.coq-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 56px 20px;
+  text-align: center;
+}
+
+.coq-empty svg {
+  color: var(--coq-border);
+  margin-bottom: 6px;
+}
+
+.coq-empty-text {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--coq-text-secondary);
+}
+
+.coq-error svg {
+  color: var(--coq-red);
+}
+
+/* === 顶部细进度条（翻页/刷新时） === */
+.coq-fetching {
+  height: 2px;
+  background: var(--color-primary-100, #d6e4ff);
+  overflow: hidden;
+}
+
+.coq-fetching-bar {
+  height: 100%;
+  width: 30%;
+  background: var(--coq-blue);
+  animation: coq-progress 1s ease-in-out infinite;
+}
+
+@keyframes coq-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+/* === 响应式 === */
+@media (max-width: 900px) {
+  .coq-pills {
+    padding: 10px 14px;
+  }
+}

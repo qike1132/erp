@@ -28,6 +28,11 @@ def _fake_db():
     db = AsyncMock()
     db.flush = AsyncMock()
     db.add = MagicMock()
+    # B1-04 引入的 _recalc_stock_check_by_balance 会对暂存行做一次 SELECT；
+    # 空结果集（.scalars().all() → []）即可，不影响 builder 级断言。
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    db.execute = AsyncMock(return_value=result)
     return db
 
 
@@ -60,36 +65,44 @@ class TestExcelImportPrecheck:
         entity = await _import_stockout(monkeypatch, _fake_db(), current_stock=100, qty=10)
 
         assert entity.stock_check_passed is True
-        assert entity.stock_check_message == '库存充足'
+        assert entity.stock_check_message == '库存充足（备货口径预检，确认按结余）'
 
 
 class TestEditPrecheck:
-    async def test_edit_quantity_recomputes_precheck(self):
-        """编辑数量后预检必须重算（此前是 pass 空实现）"""
+    async def test_edit_quantity_recomputes_precheck(self, monkeypatch):
+        """编辑数量后预检必须重算（B1-04 起按结余口径，与确认闸门同源）"""
         entity = SimpleNamespace(
             product_id=1, quantity=130,
             stock_check_passed=True, stock_check_message='库存充足',
         )
         db = AsyncMock()
         db.get = AsyncMock(return_value=SimpleNamespace(id=1, current_stock=100))
+        monkeypatch.setattr(
+            'fastapi_app.services.stock_inventory_service.get_inventory_balance',
+            AsyncMock(return_value=100),  # 结余 100 < 数量 130
+        )
 
         await staging_stockout._stockout_extra_updates(entity, {'quantity': 130}, db)
 
         assert entity.stock_check_passed is False
-        assert entity.stock_check_message != '库存充足'
+        assert '结余 100' in entity.stock_check_message
 
-    async def test_edit_with_enough_stock_stays_passed(self):
+    async def test_edit_with_enough_stock_stays_passed(self, monkeypatch):
         entity = SimpleNamespace(
             product_id=1, quantity=5,
             stock_check_passed=False, stock_check_message='库存不足',
         )
         db = AsyncMock()
         db.get = AsyncMock(return_value=SimpleNamespace(id=1, current_stock=100))
+        monkeypatch.setattr(
+            'fastapi_app.services.stock_inventory_service.get_inventory_balance',
+            AsyncMock(return_value=100),  # 结余 100 >= 数量 5
+        )
 
         await staging_stockout._stockout_extra_updates(entity, {'quantity': 5}, db)
 
         assert entity.stock_check_passed is True
-        assert entity.stock_check_message == '库存充足'
+        assert '结余充足' in entity.stock_check_message
 
     async def test_edit_to_unknown_product_invalidates_precheck(self):
         """改成匹配不到的产品名后，预检必须作废（2026-10-18 OCR 评审）。

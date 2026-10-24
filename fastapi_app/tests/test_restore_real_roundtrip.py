@@ -60,6 +60,11 @@ def restore_env(monkeypatch):
     )
 
     scratch_url = urlunparse(parsed._replace(path=f"/{scratch_db}"))
+    # AUD-14 / T2-F7（2026-10-24 审计）：_replace 只换 path、query 原样保留——
+    # base_url 带 ?database=erp_system 类覆盖参数时实际连的是生产库（PG 方言的
+    # create_connect_args 会 opts.update(url.query)）。派生结果过同一硬闸收口。
+    from fastapi_app.tests._test_db_guard import assert_is_test_database
+    assert_is_test_database(scratch_url)
     userinfo = parsed.netloc.rsplit('@', 1)[0]
     db_user, _, encoded_password = userinfo.partition(':')
     db_password = unquote(encoded_password)  # urlparse 不做 percent-decode（OCR 评审 M3）

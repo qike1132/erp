@@ -181,6 +181,27 @@ async def get_schedule(db: AsyncSession, schedule_id: int) -> BackupSchedule | N
     return await db.get(BackupSchedule, schedule_id)
 
 
+def _assert_hourly_single_hit(cron_expr: str) -> None:
+    """B2-02（2026-10-24 审计）：拒绝同一小时内多次命中的 cron。
+
+    调度侧的幂等键是小时粒度（poller mark 与 ARQ _job_id 均为 %Y%m%d%H），
+    配置 ``0,30 * * * *`` 这类亚小时 cron 时第二次触发会被静默丢弃——频率
+    意图悄悄减半。入口直接拒绝，防患于然。
+    """
+    spec = parse_cron(cron_expr)
+    if spec is None:
+        return  # 非法表达式由调用方另行报错
+    minutes = spec[0]  # 分钟字段取值集合；None = *（每分钟，同样多次命中）
+    minute_hits = len(minutes) if minutes is not None else 60
+    if minute_hits > 1:
+        shown = sorted(minutes) if minutes is not None else '*'
+        raise BackupSettingsError(
+            f'cron {cron_expr!r} 在同一小时内多次触发（分钟字段 {shown}）；'
+            f'调度幂等键为小时粒度，多出的触发会被静默丢弃。'
+            f'请改为每小时单次，或拆成多个 schedule。'
+        )
+
+
 async def create_schedule(
     db: AsyncSession,
     *,
@@ -197,6 +218,7 @@ async def create_schedule(
         )
     if parse_cron(cron_expr) is None:
         raise BackupSettingsError(f'非法 cron 表达式: {cron_expr}')
+    _assert_hourly_single_hit(cron_expr)  # B2-02
     row = BackupSchedule(
         name=name.strip(),
         task_type=task_type,
@@ -232,6 +254,7 @@ async def update_schedule(
             )
         row.task_type = task_type
     if cron_expr is not None:
+        _assert_hourly_single_hit(cron_expr)  # B2-02
         if parse_cron(cron_expr) is None:
             raise BackupSettingsError(f'非法 cron 表达式: {cron_expr}')
         row.cron_expr = cron_expr

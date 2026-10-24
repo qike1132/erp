@@ -72,6 +72,9 @@ export function useSamplingProject() {
    * @returns 创建结果 { id, sequence_no } 或 null
    */
   async function create(data: ProjectCreateRequest): Promise<ActionResponse | null> {
+    // AUD-10（2026-10-24 审计）：重入守卫——双击「创建」曾并发发出两个 createProject
+    // 建出两个重复项目（按钮/hook/函数三层均无防护）。同 usePatternRoomPartActions:82 款。
+    if (submitting.value) return null
     submitting.value = true
     error.value = null
     errorStatus.value = undefined
@@ -94,6 +97,7 @@ export function useSamplingProject() {
    * - 409 冲突时自动刷新详情，便于用户看到最新数据后重试
    */
   async function update(id: number, data: ProjectUpdateRequest): Promise<ActionResponse | null> {
+    if (submitting.value) return null  // AUD-10 重入守卫
     submitting.value = true
     error.value = null
     errorStatus.value = undefined
@@ -122,6 +126,7 @@ export function useSamplingProject() {
    * 删除打样项目（级联删除部位/版本/日志，先写审计日志）
    */
   async function remove(id: number): Promise<ActionResponse | null> {
+    if (submitting.value) return null  // AUD-10 重入守卫
     submitting.value = true
     error.value = null
     errorStatus.value = undefined
