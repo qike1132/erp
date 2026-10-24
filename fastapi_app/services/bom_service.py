@@ -528,6 +528,13 @@ def _apply_bom_supplier_ids(data: dict, mapping: dict) -> None:
 
 
 async def save_bom(db: AsyncSession, product_id: int, data: dict, username: str) -> str:
+    # AUD-09（2026-10-24 审计）：先锁产品行再读 BOM——本函数全程「查后插」
+    # （_save_filling_items 先 SELECT existing 再 db.add），并发两次保存同一产品
+    # 会双双读到"无默认填充行"并 INSERT；104 迁移的 partial unique index 只兜
+    # 默认作用域（role_id IS NULL），角色行的双写静默脏数据仍靠此锁串行化。
+    locked = await db.get(Product, product_id, with_for_update=True)
+    if not locked:
+        raise ValueError('产品不存在')
     product = await _load_product_with_bom(db, product_id)
 
     # ===== 供应商：名称 -> supplier.id 解析，缺失的同事务自动建卡（REQ：BOM 供应商与 /supplier 同步）=====
