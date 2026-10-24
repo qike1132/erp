@@ -17,7 +17,7 @@ from fastapi_app.services import stock_service
 # pytest 按模块属性名注册导入的夹具：赋值回 sr_api，供本文件用例以 sr_api 参数取用
 sr_api = _flow_api_fixture
 
-from fastapi_app.shared_models import Order, Product, StockOut, StockReturn
+from fastapi_app.shared_models import DailyProductionRecord, Order, Product, StockOut, StockReturn
 
 
 async def _fresh_product(db, suffix, stock):
@@ -152,6 +152,14 @@ class TestStockReturnFullFlow:
         customer = f"历史客户-{suffix}"
         product = Product(name=f"历史关联产品-{suffix}", current_stock=50)
         db.add(product)
+        await db.flush()
+        # 2026-10-24：取消退货的结余闸门读「包装部入库 − 已出货」，夹具补真实入库
+        from datetime import date as _date
+
+        db.add(DailyProductionRecord(
+            department='packaging', product_id=product.id, product_name=product.name,
+            barcode='', quantity=50, production_date=_date.today(),
+        ))
         await db.flush()
         order = Order(
             order_no=f"ORD-LEGACY-{suffix}", product_id=product.id,

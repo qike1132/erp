@@ -6,7 +6,7 @@
 出货已退量按净变化对称调整（旧量回减、新量累加）。
 """
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 import pytest_asyncio
@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.services.stock_return_service import edit_stockreturn
-from fastapi_app.shared_models import Product, StockOut, StockReturn
+from fastapi_app.shared_models import DailyProductionRecord, Product, StockOut, StockReturn
 
 pytestmark = pytest.mark.integration
 
@@ -33,6 +33,12 @@ async def test_edit_stockreturn_deletes_old_row_and_rebuilds(db):
     product = Product(name=f"EDITPROBE-{suffix}", barcode=f"EDITPROBE-{suffix}",
                       current_stock=1000, initial_stock=1000)
     db.add(product)
+    await db.flush()
+    # 2026-10-24：编辑退货 = 取消旧退货 + 建新退货，结余闸门需真实包装入库
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=product.id, product_name=product.name,
+        barcode=product.barcode or '', quantity=1000, production_date=date.today(),
+    ))
     await db.flush()
     stockout = StockOut(stockout_no=f"SO-EDIT-{suffix}", product_id=product.id,
                         quantity=100, customer="客户E", returned_quantity=10)

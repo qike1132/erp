@@ -339,7 +339,7 @@ class TestUpdatePurchaseOrderCrossOrderTampering:
 
         call_count = {'n': 0}
 
-        async def fake_get_mux(_cls, oid):
+        async def fake_get_mux(_cls, oid, **kwargs):  # **kwargs：with_for_update 行锁参数
             call_count['n'] += 1
             # 第一次调用：update_purchase_order 开头获取 PO
             if call_count['n'] == 1:
@@ -491,7 +491,7 @@ class TestUpdatePurchaseOrderCrossOrderTampering:
         db = MagicMock()
         call_count = {'n': 0}
 
-        async def fake_get_mux(_cls, oid):
+        async def fake_get_mux(_cls, oid, **kwargs):  # **kwargs：with_for_update 行锁参数
             call_count['n'] += 1
             if call_count['n'] == 1:
                 return order if oid == 500 else None
