@@ -530,20 +530,23 @@ async def update_record(
                 setattr(record, field, kwargs[field].strip() or None)
             else:
                 setattr(record, field, kwargs[field])
-    # B1-03（2026-10-24 审计）：改部门使记录进出「包装部口径」时校验结余——
-    # packaging→非 packaging 会让包装部入库合计即刻减少 quantity，结余可能被打穿
-    # 成负数（该数量的出货已消耗它）；此前的库存联动对 department 变更是零校验。
-    if ('department' in kwargs and kwargs.get('department') is not None
-            and old_department == 'packaging'
-            and record.department != 'packaging'
-            and record.product_id is not None):
+    # B1-03（2026-10-24 审计）：旧行离开「包装部口径」时校验结余——department
+    # 移出或换产品都会让**旧产品**的包装部入库合计减少 old_quantity（OCR-F1
+    # 评审指正：合并编辑时 setattr 循环已把 record.* 更新为新值，基准必须取
+    # 变更前的 old_product_id/old_quantity，且部门移出+换产品同次编辑时结余要
+    # 查旧产品——balance 此刻仍含旧行贡献，old_quantity > balance 即拒）；
+    # 此前的库存联动对 department 变更是零校验。仅改数量（部门/产品不变）的
+    # 负向路径由 _apply_production_stock 内的结余闸门覆盖，不在此重复。
+    if (old_department == 'packaging' and old_product_id is not None and old_quantity > 0
+            and (record.department != 'packaging' or record.product_id != old_product_id)):
         from fastapi_app.services.stock_inventory_service import get_inventory_balance
 
-        balance = await get_inventory_balance(db, record.product_id)
-        if record.quantity > balance:
+        balance = await get_inventory_balance(db, old_product_id)
+        if old_quantity > balance:
             raise ValueError(
-                f'把该记录移出包装部将导致库存（结余）为负数：'
-                f'结余 {balance}，记录数量 {record.quantity}。'
+                f'该变更将导致库存（结余）为负数：'
+                f'结余 {balance}，此行此前计入产品#{old_product_id}包装部入库的数量 '
+                f'{old_quantity} 将移出。'
                 f'包装部口径计入结余，其数量可能已被出货消耗。'
             )
     if 'production_date' in kwargs and kwargs['production_date'] is not None:

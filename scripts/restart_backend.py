@@ -49,7 +49,16 @@ def main() -> int:
     # 分支或半改状态时重启，就会把那条分支/半改代码跑进生产（2026-10-14 实害
     # 75 分钟、2026-10-22 连崩 8 次两次事故的旁路入口——其余全部重启路径
     # 已接闸门，唯本脚本漏接）。与 start.py:97 同款语义。
+    # OCR-H1（2026-10-24 推送前评审）：本脚本以 `python scripts/restart_backend.py`
+    # 直跑时 sys.path[0] 是 scripts/，仓库根不在路径上——先插根再导入
+    # server_manager.git_guard，否则闸门自身 ModuleNotFoundError（fail-closed
+    # 但把操作者推向未接闸门的手工 nssm restart，更糟）。
+    import sys
     from pathlib import Path
+
+    _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+    if _REPO_ROOT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT)
 
     from server_manager.git_guard import check_production_branch
 

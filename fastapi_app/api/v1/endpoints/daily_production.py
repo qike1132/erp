@@ -198,9 +198,14 @@ async def update_record(
         if data.department is not None:
             _assert_department_writable(data.department, scope)
         update_data = data.model_dump(exclude_unset=True)
-        await daily_production_service.update_record(
-            db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data
-        )
+        try:
+            await daily_production_service.update_record(
+                db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data
+            )
+        except ValueError as e:
+            # OCR-F2（2026-10-24 推送前评审）：结余闸门等业务拒绝以 400 带指引
+            # 文案返回——此前落全局兜底 handler 变 500，指引文案全丢。
+            raise HTTPException(status_code=400, detail=str(e)) from e
     return ProductionRecordActionResponse(success=True, message='生产记录更新成功')
 
 
@@ -231,7 +236,11 @@ async def delete_record(
         if record is None:
             raise HTTPException(status_code=404, detail='记录不存在')
         _assert_department_writable(record.department, scope)
-        await daily_production_service.delete_record(db, record_id, operator=operator)
+        try:
+            await daily_production_service.delete_record(db, record_id, operator=operator)
+        except ValueError as e:
+            # OCR-F2（同上）：业务拒绝（记录不存在/结余闸门）以 400 带文案返回。
+            raise HTTPException(status_code=400, detail=str(e)) from e
     return ProductionRecordActionResponse(success=True, message='生产记录删除成功')
 
 

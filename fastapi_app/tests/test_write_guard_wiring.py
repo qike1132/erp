@@ -92,6 +92,45 @@ def test_restart_backend_refuses_on_guard_denial(monkeypatch):
     assert not nssm_called, '闸门拒绝后不得触碰 nssm'
 
 
+def test_restart_backend_gate_importable_from_scripts_dir():
+    """OCR-H1（2026-10-24 推送前评审）：脚本直跑时闸门必须可导入。
+
+    `python scripts/restart_backend.py` 的 sys.path[0] 是 scripts/，仓库根不在
+    路径上——此前 main() 内直接 `from server_manager.git_guard import ...` 必然
+    ModuleNotFoundError（fail-closed 但把操作者推向未接闸门的手工 nssm restart）。
+    修复：main() 先把仓库根插进 sys.path。本测试模拟该形态：从干净 sys.path
+    （仅仓库根 + 标准库，无 scripts/ 之外的包路径）加载脚本并调用 main()，
+    闸门必须真实执行（而非 ImportError）。
+    """
+    import subprocess  # nosec B404 - 模拟脚本真实调用形态（sys.path 形态是断言对象）必须真起子进程
+    import sys as _sys
+
+    code = (
+        "import sys, runpy, io, contextlib\n"
+        "sys.path = [p for p in sys.path if p not in (r'{root}',)]\n"
+        "sys.argv = ['restart_backend.py']\n"
+        "buf = io.StringIO()\n"
+        "try:\n"
+        "    with contextlib.redirect_stdout(buf):\n"
+        "        runpy.run_path(r'{script}', run_name='__main__')\n"
+        "        rc = 0\n"
+        "except SystemExit as e:\n"
+        "    rc = e.code if isinstance(e.code, int) else 1\n"
+        "out = buf.getvalue()\n"
+        "assert 'ModuleNotFoundError' not in out, out\n"
+        "assert rc == 2 and '当前分支' in out, (rc, out)\n"
+    ).format(root=str(ROOT), script=str(ROOT / 'scripts' / 'restart_backend.py'))
+    # cwd=scripts：模拟操作者实际调用形态（仓库根不在 sys.path）
+    result = subprocess.run(  # nosec B603 - 固定解释器+内联代码，无外部输入拼命令
+        [_sys.executable, '-c', code],
+        cwd=str(ROOT / 'scripts'), capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, (
+        f'脚本直跑形态下闸门必须可导入且 fail-closed（OCR-H1）：\n'
+        f'{result.stdout}\n{result.stderr}'
+    )
+
+
 def test_prod_write_guard_ratchet_covers_all_db_scripts():
     """AUD-18 棘轮：凡带 __main__ 且触碰 DB 的 scripts/*.py 必须接写守卫。
 

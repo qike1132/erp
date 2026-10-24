@@ -126,16 +126,45 @@ async def test_production_non_packaging_skips_balance_gate(monkeypatch):
 
 
 def test_department_move_out_guard_wired():
-    """B1-03：update_record 必须含「移出包装部」的结余守卫与旧部门捕获。"""
+    """B1-03：update_record 必须含「旧行离开包装部口径」的结余守卫。
+
+    OCR-F1（2026-10-24 推送前评审）：闸门基准必须是变更前的 old_product_id/
+    old_quantity——合并编辑（部门+数量同次改）时 setattr 已把 record.* 更新为
+    新值，拿新值比较会在旧>新时绕过闸门、旧<新时误拒。
+    """
     import inspect
 
     from fastapi_app.services import daily_production_service as dps
 
     src = inspect.getsource(dps.update_record)
     assert 'old_department' in src, '必须捕获变更前的部门'
-    assert '移出包装部' in src and '结余' in src, (
-        'packaging→非 packaging 必须校验结余（B1-03：改部门此前零校验零联动）'
+    gate = src[src.find('old_department == \'packaging\''):] if 'old_department' in src else ''
+    assert gate, '必须有包装部口径移出闸门'
+    assert 'old_quantity > balance' in gate, (
+        '闸门比较必须用 old_quantity（OCR-F1：合并编辑下 record.quantity 已是新值）'
     )
+    assert 'get_inventory_balance(db, old_product_id)' in gate, (
+        '部门移出+换产品同次编辑时，结余必须查旧产品（包装部合计减少发生在旧产品）'
+    )
+    assert '结余' in gate
+
+
+def test_production_rejection_maps_to_400():
+    """OCR-F2（2026-10-24 推送前评审）：PUT/DELETE 的业务拒绝必须 400 带文案。
+
+    结余闸门以 ValueError 拒绝并附用户指引；端点若不映射，异常落全局兜底
+    handler 变 500，文案全丢（用户可常规触达的拒绝路径不能表现为服务器错误）。
+    """
+    from pathlib import Path
+
+    endpoint_src = Path(
+        'fastapi_app/api/v1/endpoints/daily_production.py').read_text(encoding='utf-8')
+    put_seg = endpoint_src[endpoint_src.find("async def update_record"):]
+    assert 'except ValueError as e:' in put_seg, 'PUT 必须捕获 ValueError'
+    seg_400 = put_seg[put_seg.find('except ValueError as e:'):][:200]
+    assert 'status_code=400' in seg_400, 'PUT 的 ValueError 必须映射 400'
+    # DELETE 同理（update_record 与 delete_record 函数名同名歧义，用路由段定位）
+    assert endpoint_src.count('except ValueError as e:') >= 2, 'PUT 与 DELETE 都要映射'
 
 
 # ---------------------------------------------------------------------------
