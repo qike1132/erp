@@ -50,7 +50,11 @@ _PWD_PATTERN_RE = re.compile(r"pwd_pattern='((?:[^']|'\"'\"')*)'")
 # pwd_pattern 专用归一化：在通用规则之上再加一条**有依据**的等价 ——
 # 字符类内 `\"` 与 `"` 语义相同（Python `re` 把 `\"` 当 `"`），镜像多写的
 # 反斜杠冗余但无害，故归一化掉以便逐字比对。
-_PWD_NORMALIZE = ((r'[[:space:]]', r'[ \t]'), (r'\"', '"'))
+_PWD_NORMALIZE = (
+    (r'[^[:space:]', r'[^ \t'),
+    (r'[[:space:]]', r'[ \t]'),
+    (r'\"', '"'),
+)
 
 
 def _normalize_pwd(pattern: str) -> str:
