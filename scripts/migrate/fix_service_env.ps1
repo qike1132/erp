@@ -1,4 +1,4 @@
-# fix_service_env.ps1 — 修复 erp-prod / erp-arq 两个 NSSM 服务的环境变量配置
+﻿# fix_service_env.ps1 — 修复 erp-prod / erp-arq 两个 NSSM 服务的环境变量配置
 #
 # 背景：install_on_target.ps1 / setup_on_target.ps1 旧实现把 AppEnvironmentExtra
 # 写成单个字符串，NSSM 按第一个 '=' 拆分后 APP_ENV 变成

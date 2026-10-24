@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # ERP System - Portable Package Installer (RUN ON TARGET SERVER)
 # Installs ERP from a portable package built by build_portable.ps1.
 # Layout of package:
@@ -10,7 +10,7 @@
 # Usage (PowerShell, MUST be Administrator):
 #   powershell -ExecutionPolicy Bypass -File install_on_target.ps1 `
 #       -PackageDir "D:\migration_in\erp_portable" `
-#       -PgSuperPassword "postgres_super_password" `
+#       -PgSuperPassword <uper password from .env> `  # secret-scan:allow 参数用法示例占位符，非真凭据
 #       -NewServerIP "192.168.1.97"
 #
 # Skips: -SkipDbRestore -SkipRedis -SkipNginx -SkipNssm -SkipStart -SkipVerify

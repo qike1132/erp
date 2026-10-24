@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # ERP System - Build Portable Package (RUN ON SOURCE SERVER)
 # Creates D:\erp_portable\ with:
 #   runtime\python313\   - full Python 3.13.13 + all deps (copied)

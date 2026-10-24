@@ -161,3 +161,30 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.p
 - **安装报「目标盘可用空间不足 8GB」**：清理目标盘后重试。
 - **验收 `:3000` 未就绪**：现为**硬 FAIL**（重试 30s 后仍失败）——多为前端 `dist` 或 nginx conf 问题，查 `logs\erp-web.log`。
 - **验收「ARQ 哨兵键缺失」**：`erp-arq` 未在线（`arq:queue:health-check @6380` 不新鲜）——查 `logs\erp-arq.log` 与 broker `:6380`；定时备份会静默停摆，务必解决。
+
+## 回滚（安装失败 / 装坏后恢复）
+
+安装器在覆盖前自动生成回滚物料（`install_package.ps1:393-415`，任一产物缺失即
+fail-fast 中止安装，物料齐全才继续）：
+
+- `backups\preinstall-<时间戳>\`：五服务注册表导出（.reg）+ `config\` + `.env` 快照
+- `-AllowDropDatabase` 删库前另强制 `backups\preinstall-*-db.sql`（pg_dump 基线，
+  dump 失败拒绝删库）
+
+恢复顺序（管理员 PowerShell，全部在目标机）：
+
+1. **停服务**：`nssm stop erp-prod erp-arq erp-web`（依赖序：先停依赖方；
+   Redis 两服务按需）。
+2. **还原文件**：把 `preinstall-*` 快照里的 `config\` 与 `.env` 覆盖回仓库根
+   （先备份当前坏状态的这两份，便于事后归因）。
+3. **还原服务注册**：导入 `preinstall-*\*.reg`（提权双击或
+   `reg import <文件>`）——服务 ImageFile/ AppDirectory 指回旧版本目录。
+4. **数据库**：仅当装坏了库结构/数据时：先建空库再
+   `pg_restore -U erp_app -d erp_system --clean --if-exists backups\preinstall-*-db.sql`
+   （凭据同 .env；**不要**对正常库跑这句）。
+5. **拉起**：`nssm start erp-redis-broker erp-redis erp-web erp-arq erp-prod`
+   （按启动序），然后核 `logs\prod_runner.json` 的 `ready:true` +
+   `frontend_ok:true`（AGENTS §3 健康判据）。
+
+> I2-08（2026-10-24 审计）：本节补齐「物料在、动作没人写过」的缺口。
+> 回滚是**恢复到安装前状态**，不是卸载升级版重装；若要重装，走「步骤 3」。

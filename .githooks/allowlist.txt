@@ -30,3 +30,7 @@ scripts/_selftest_hook.py
 # 扫描器测试：断言用例内使用 PEM 私钥头格式串与云厂商公开文档示例密钥，
 # 用于验证扫描器确实能命中；非真实凭据。
 scripts/prod_audit/tests/test_scan_secrets.py
+# 2026-10-24 审计修复（I2-04 BOM）首次触碰既有安装脚本，密钥扫描命中的是
+# $envMap["DB_PASSWORD"] 等从 .env 读入的变量赋值（非硬编码凭据，文件内无真值）：
+scripts/migrate/install_on_target.ps1
+scripts/migrate/setup_on_target.ps1
