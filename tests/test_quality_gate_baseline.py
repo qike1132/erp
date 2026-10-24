@@ -39,9 +39,14 @@ def test_baseline_without_counts_fails_closed(tmp_path, monkeypatch):
     assert q.load_baseline() is None
 
 
-def test_missing_baseline_is_empty(tmp_path, monkeypatch):
+def test_missing_baseline_fails_closed(tmp_path, monkeypatch):
+    """2026-10-24（P1）：文件缺失不再当空基线放行。
+
+    删文件比改坏文件更容易；返回 {} 会让 14 项棘轮全部判 NEW 并退出 0，
+    等于给了一条「rm 基线即全绿」的开关。
+    """
     monkeypatch.setattr(q, 'BASELINE_PATH', tmp_path / 'nope.json')
-    assert q.load_baseline() == {}
+    assert q.load_baseline() is None
 
 
 def test_valid_baseline_parsed(tmp_path, monkeypatch):

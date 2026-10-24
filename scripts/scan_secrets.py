@@ -217,9 +217,18 @@ def _tracked_files(root: Path) -> list[str]:
     return [line for line in (proc.stdout or '').splitlines() if line.strip()]
 
 
+# 内容层豁免的「目录 + 后缀」组合：docs/ 下的 .txt 是抓取/转存的外部文档
+# （实测 docs/audit-round2/06-oss-erp-raw-capture.txt 里 `api_key:api_secret`
+#  是文档正文），与 .md 同等性质。**不能**把 .txt 整体豁免——库里的
+# db_dump.txt / 日志转存才是真正的泄漏高发区。
+_CONTENT_EXEMPT_PAIRS = (('docs/', '.txt'),)
+
+
 def content_scan_applies(rel: str) -> bool:
     """该文件是否参与**内容层**扫描（路径层不受影响）。"""
     if rel.endswith(_CONTENT_EXEMPT_SUFFIXES):
+        return False
+    if any(rel.startswith(prefix) and rel.endswith(suffix) for prefix, suffix in _CONTENT_EXEMPT_PAIRS):
         return False
     return not rel.startswith(_CONTENT_EXEMPT_PREFIXES)
 
