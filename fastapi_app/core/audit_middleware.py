@@ -138,8 +138,14 @@ class AuditLogMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             duration_ms = round((time.time() - start_time) * 1000, 2)
 
+            # AUD-07（2026-10-24 审计）：request_id 中间件在本中间件**内层**，
+            # call_next 返回后才写入 state——dispatch 进入时读到的自产 id 与
+            # 响应头 X-Request-ID/业务日志用的是两个不同值，审计-日志-客户端
+            # 对账链路全断。此处重读最终值，保证写审计主条目与响应头同源。
+            final_request_id = getattr(request.state, 'request_id', None) or request_id
+
             try:
-                await self._record_audit(request, response, request_id, duration_ms)
+                await self._record_audit(request, response, final_request_id, duration_ms)
             except Exception as e:  # defensive: 审计记录失败不能影响主请求
                 logger.warning('审计日志记录失败: %s', e)
 
@@ -312,6 +318,15 @@ async def _flush_request_audit_entries(request: Request) -> None:
     if not pending:
         return
     request.state.audit_pending_entries = []
+    # AUD-07（2026-10-24 审计）：桶内条目在请求处理过程中逐个入桶，入桶时刻
+    # request.state.request_id 可能还是外层审计中间件的自产值（request_id 中间件
+    # 在内层、更晚才写）。投递前统一覆写为最终值，保证同一请求的全部审计条目
+    # （写审计主条目 / access_denied / 领域事件）与 X-Request-ID 同源可对账。
+    final_request_id = str(getattr(request.state, 'request_id', '') or '')[:36]
+    if final_request_id:
+        for entry in pending:
+            if entry.get('request_id'):
+                entry['request_id'] = final_request_id
     if len(pending) == 1:
         # 单条与既有单条管线完全等价（同样只有一次写库）
         await _buffer_audit_entry(pending[0])
