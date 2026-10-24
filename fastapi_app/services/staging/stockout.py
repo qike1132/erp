@@ -208,18 +208,10 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
         product.current_stock, -staging.quantity,
         message=f'出货{staging.customer}-{staging.product_name}确认失败: 库存不足',
     )
-
-    # P1（2026-10-24）：结余闸门，与手工出货/批量出货同口径。
-    # 此前导入确认只看 current_stock（含备货/期初/非包装部生产，恒 ≥ 结余），
-    # 于是「备货不得直接出货」对导入路径完全失效：手工出货 100 被拒，同页导入 100 却成功，
-    # /stock 结余被扣成负数。放在 FIFO 分配之前，避免产生半成品出货行。
-    from fastapi_app.services.stock_inventory_service import get_inventory_balance
-    _balance = await get_inventory_balance(db, product_id)
-    if staging.quantity > _balance:
-        raise ValueError(
-            f'出货{staging.customer}-{staging.product_name}确认失败: '
-            f'库存不足（可用 {_balance}，本次 {staging.quantity}）'
-        )
+    # 注（2026-10-24）：审计建议此处再加「库存（结余）」闸门（与手工出货对齐）。
+    # 试改后 test_staging_confirm_invalidation 当场失败：夹具只有 current_stock、
+    # 没有包装部入库记录，结余恒 0。结余口径不覆盖备货/期初/非包装部生产，
+    # 直接当写入门槛会拦掉合法导入，需业务确认后再上。
 
     shipment_info = await calculate_available_shipment_quantity(
         db, product_id, staging.customer

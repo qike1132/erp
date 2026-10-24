@@ -212,8 +212,10 @@ async def update_user_permissions(db: AsyncSession, user_id: int, permission_ids
 
     # 清空现有权限（敏感权限随后原样加回）
     user.permissions.clear()
-    for permission in kept_sensitive:
-        user.permissions.append(permission)
+    for _kept in kept_sensitive:
+        # 变量名不用 permission：下方 `permission = permissions.get(pid)` 是
+        # Permission | None，复用同名会让 mypy 按首个绑定的 Permission 定型并报 assignment
+        user.permissions.append(_kept)
 
     # 批量获取权限
     # 注：变量名不用 `result` —— 上方 `result` 已被推断为 Result[User]，

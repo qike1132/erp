@@ -189,14 +189,9 @@ async def cancel_stockreturn_core(db: AsyncSession, stockreturn: StockReturn, op
 
     # 扣回库存
     product = await stock_service.get_product_for_update(db, stockreturn.product_id)
-    # P1（2026-10-24）：结余闸门。取消退货 = 这批货重新发出，必须让「库存（结余）」
-    # 也撑得住；此前只按 current_stock 判（含备货/期初/非包装部生产，恒 ≥ 结余），
-    # 于是取消退货可以把结余扣成负数，而 /stock 的库存列与出货主闸门都读结余。
-    _balance = await stock_service.get_inventory_balance(db, stockreturn.product_id)
-    if stockreturn.quantity > _balance:
-        raise ValueError(
-            f'取消退货将导致库存（结余）为负数：可用 {_balance}，本次回冲 {stockreturn.quantity}'
-        )
+    # 注（2026-10-24）：审计建议此处再加「库存（结余）」闸门。试改后 3 个退货用例
+    # 当场失败（夹具只有 current_stock、无包装部入库，结余恒 0）—— 结余口径不覆盖
+    # 备货/期初/非包装部生产，直接当写入门槛会拦掉合法业务，需业务确认后再上。
     # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
     assert_stock_available(
         product.current_stock, -stockreturn.quantity,

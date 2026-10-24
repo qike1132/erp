@@ -206,6 +206,11 @@ async def _check_order_lock(db: AsyncSession, order_id: int, order: Order,
     # 在锁主就是申请人时直接早退 —— 而提交编辑/删除审批时锁主正是申请人本人，
     # 于是本人 pending 期间可直改明细/抵扣量，管理员批准时又按 operation_data 再改一次，
     # 数量被二次覆盖。update_order_item 的 docstring 明写「审批中的订单不可改」。
+    #
+    # 未锁定的订单不存在 pending 审批（提交审批时必然置 is_locked + locked_by_id），
+    # 直接放行即可 —— 同时避免给每次编辑都加一次审批查询。
+    if not order.is_locked:
+        return
     result = await db.execute(
         select(ApprovalRequest).options(
             joinedload(ApprovalRequest.requester)
@@ -217,7 +222,7 @@ async def _check_order_lock(db: AsyncSession, order_id: int, order: Order,
     pending = result.unique().scalar_one_or_none()
     if pending:
         raise ValueError(f'该订单正在等待审批（申请人：{pending.requester.username}），暂时无法{action}！')
-    if order.is_locked and order.locked_by_id != current_user.id:
+    if order.locked_by_id != current_user.id:
         raise ValueError(f'该订单已被其他用户锁定，暂时无法{action}！')
 
 async def _ensure_no_pending_request(db: AsyncSession, order_id: int,

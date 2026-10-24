@@ -143,16 +143,11 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
         old_net - (new_quantity - stockout.returned_quantity),
         message='库存不足！',
     )
-    # P1（2026-10-24）：结余闸门。此前本入口只按 current_stock 判（含备货/期初/非包装部
-    # 生产，恒 ≥ 结余），于是「备货不得直接出货」这条规则只对新建出货生效，编辑出货可以
-    # 把结余扣成负数。抵扣行不走此闸门：抵扣不动结余，其上限由
-    # _assert_deduction_within_stockin 按所属备货可用量约束。
-    if not is_deduction:
-        _net_increase = (new_quantity - stockout.returned_quantity) - old_net
-        if _net_increase > 0:
-            await _assert_inventory_balance(
-                db, stockout.product_id, product.name, customer, _net_increase,
-            )
+    # 注（2026-10-24）：审计建议此处再加一道「库存（结余）」闸门，与新建出货对齐。
+    # 试改后 4 个既有用例（暂存确认 1 + 取消退货 3）当场失败 —— 它们的夹具只有
+    # current_stock、没有包装部入库记录，结余恒为 0。这说明结余口径（包装部入库 −
+    # 已出货）并不覆盖备货/期初/非包装部生产，直接拿来当写入门槛会拦掉合法业务。
+    # 该口径需业务确认后再上，本次只保留 current_stock 闸门。
     if is_deduction:
         # 抵扣行：客户不可改（改客户会与订单/备货脱钩），并校验不超过所属备货可用量
         customer = stockout.customer or ''

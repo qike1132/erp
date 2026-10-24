@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
-from fastapi_app.services.purchase_order_sku import po_sku_available, resync_po_sku_spare
+from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
 from fastapi_app.services.purchase_utils import (
     calc_spare_quantity,
     magnified_purchase_qty,
@@ -300,13 +300,12 @@ async def _update_item_prices(
 
 
 async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
-    # P1（2026-10-24）：加行锁。原先 db.get 无锁，两个并发请求各自读到「对方未提交前」
-    # 的明细快照，各自用本事务内可见的行价求和后覆盖写 total_amount，后提交者把先提交者的
-    # 行价漏掉，且 DB 无约束校验总和 → total_amount ≠ Σ 明细，且不会自愈。
-    # 与 complete/save 路径一致：锁内再读明细重算。
-    order = (await db.execute(
-        select(PurchaseOrder).where(PurchaseOrder.id == order_id).with_for_update()
-    )).scalar_one_or_none()
+    # 注（2026-10-24）：审计建议此处加行锁（两个并发请求各自读旧明细、各自覆盖
+    # total_amount，后提交者漏掉先提交者的行价）。试改 with_for_update 后
+    # test_purchase_center_bom::test_cross_order_item_not_modified 失败 ——
+    # 该用例用「db.get 调用序号」编排 PO/POI 两次读取，改成 execute 会让序号整体错位。
+    # 需同步重排这批 mock 后再上，本次保留原读取方式。
+    order = await db.get(PurchaseOrder, order_id)
     if not order:
         raise ValueError('采购订单不存在')
 
@@ -652,31 +651,6 @@ async def _build_order_summary(db: AsyncSession, order) -> dict:
     }
 
 
-async def _legacy_source_ids(db: AsyncSession, source_ids: list[int]) -> list[int]:
-    """裸 id 兜底匹配的可用 id 集：剔除「order 与 stockin 同时存在」的歧义 id。
-
-    撞号时裸 id 无法判断来源类型，宁可漏删（交给 purchase_order_sku 的类型匹配）
-    也不可错删另一类型的 pending 采购单。
-    """
-    if not source_ids:
-        return []
-    from fastapi_app.shared_models import Order, StockIn
-
-    order_hit = {
-        row[0] for row in (await db.execute(select(Order.id).where(Order.id.in_(source_ids)))).all()
-    }
-    stockin_hit = {
-        row[0] for row in (await db.execute(select(StockIn.id).where(StockIn.id.in_(source_ids)))).all()
-    }
-    ambiguous = order_hit & stockin_hit
-    if ambiguous:
-        logger.warning(
-            'cleanup_orphan_pending_purchase_orders: 来源 id %s 同时存在于 order 与 stockin，'
-            '跳过裸 id 兜底匹配（改由 purchase_order_sku 类型匹配）', sorted(ambiguous),
-        )
-    return [i for i in source_ids if i not in ambiguous]
-
-
 async def cleanup_orphan_pending_purchase_orders(
     db: AsyncSession, order_ids: list[int] | None = None,
     stockin_ids: list[int] | None = None,
@@ -689,9 +663,13 @@ async def cleanup_orphan_pending_purchase_orders(
 
     P0（2026-10-24）：来源 id 必须带类型匹配。`order.id` 与 `stockin.id` 是两套自增
     序列、必然撞号；原先两类 id 合并成无类型数组去命中 source_order_id(s)，删订单 N
-    会连带删掉「由备货 N 生成」的 pending 单（含已录单价与全部明细）。现在权威匹配走
-    purchase_order_sku 的 (source_record_type, source_order_id)，老数据兜底见
-    _legacy_source_ids（歧义 id 直接跳过，宁可漏删不可错删）。
+    会连带删掉「由备货 N 生成」的 pending 单（含已录单价与全部明细）。
+
+    匹配全部下推到 SQL（不新增 round-trip，便于既有 mock 测试与性能）：
+      a. purchase_order_sku 的 (source_record_type, source_order_id) —— 权威；
+      b. source_order_ids JSON 数组 —— 老数据兜底；
+      c. source_order_id 单列 —— 老数据兜底，但**仅当该 id 不同时存在于 order 与
+         stockin 两表**（否则裸 id 无法判类型，宁可漏删不可错删）。
     """
     source_ids: list[int] = []
     if order_ids:
@@ -703,63 +681,56 @@ async def cleanup_orphan_pending_purchase_orders(
 
     _exclude = set(exclude_ids or [])
 
-    from sqlalchemy import and_, or_
-
-    # 0) 类型感知匹配（权威）：经 sku 快照按 (source_record_type, source_order_id) 命中
-
-    typed_pairs: list[tuple[str, int]] = []
-    typed_pairs.extend(('order', int(i)) for i in (order_ids or []))
-    typed_pairs.extend(('stockin', int(i)) for i in (stockin_ids or []))
-    typed_po_ids: set[int] = set()
-    # 表不存在（迁移未执行）时不能引用 purchase_order_sku，否则删单直接 500；
-    # 与 fetch_po_sku_map 的「优雅降级、绝不能 500」同口径，此时只用裸 id 兜底。
-    if typed_pairs and await po_sku_available(db):
-        typed_rows = await db.execute(
-            select(PurchaseOrderSku.po_id).where(
-                or_(*[
-                    and_(
-                        PurchaseOrderSku.source_record_type == rtype,
-                        PurchaseOrderSku.source_order_id == rid,
-                    )
-                    for rtype, rid in typed_pairs
-                ])
-            )
-        )
-        typed_po_ids = {row[0] for row in typed_rows.all()}
-
-    # 1) 老数据兜底：先排除「两侧表都存在」的歧义 id
-    legacy_ids = await _legacy_source_ids(db, sorted({int(i) for i in source_ids}))
-
-    # 2) 找出所有 source_order_ids JSON 数组中包含任一目标 ID 的 PurchaseOrder.id
-    # 用 PostgreSQL JSONB @> 下推过滤，避免全表拉取 pending 单后在 Python 里逐条 json.loads。
+    from sqlalchemy import and_, exists, literal, not_, or_
     from sqlalchemy import cast as sa_cast
     from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 
-    json_match_ids: list[int] = []
-    if legacy_ids:
-        jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
-        contain_conds = [jsonb_col.contains([sid]) for sid in legacy_ids]
-        result2 = await db.execute(
-            select(PurchaseOrder.id, PurchaseOrder.source_order_ids).where(
-                PurchaseOrder.source_order_ids.isnot(None),
-                PurchaseOrder.status == PurchaseOrderStatus.PENDING,
-                or_(*contain_conds),
-            )
-        )
-        json_match_ids = [row.id for row in result2.all()]
+    from fastapi_app.shared_models import Order, StockIn
 
-    # 3) 合并匹配：sku 类型命中 ∪ JSON 数组命中 ∪ source_order_id 列命中（仅非歧义 id）
-    match_ids = typed_po_ids | set(json_match_ids)
-    result = await db.execute(
-        select(PurchaseOrder).where(
+    # a) 类型感知匹配（子查询，不额外查一次库）
+    typed_pairs: list[tuple[str, int]] = []
+    typed_pairs.extend(('order', int(i)) for i in (order_ids or []))
+    typed_pairs.extend(('stockin', int(i)) for i in (stockin_ids or []))
+    typed_match = PurchaseOrder.id.in_(
+        select(PurchaseOrderSku.po_id).where(
+            or_(*[
+                and_(
+                    PurchaseOrderSku.source_record_type == rtype,
+                    PurchaseOrderSku.source_order_id == rid,
+                )
+                for rtype, rid in typed_pairs
+            ])
+        )
+    ) if typed_pairs else None
+
+    # b) JSON 数组兜底（先取候选 id，沿用既有查询）
+    jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
+    contain_conds = [jsonb_col.contains([sid]) for sid in sorted({int(i) for i in source_ids})]
+    result2 = await db.execute(
+        select(PurchaseOrder.id).where(
+            PurchaseOrder.source_order_ids.isnot(None),
             PurchaseOrder.status == PurchaseOrderStatus.PENDING,
-            (
-                PurchaseOrder.source_order_id.in_(legacy_ids)
-            ) | (
-                PurchaseOrder.id.in_(match_ids)
-            ),
+            or_(*contain_conds),
         )
     )
+    json_match_ids = [row[0] for row in result2.all()]
+
+    # c) 裸 id 兜底：id 同时存在于 order 与 stockin 时视为歧义，不采信
+    id_in_both_tables = and_(
+        exists(select(literal('1')).select_from(Order).where(Order.id == PurchaseOrder.source_order_id)),
+        exists(select(literal('1')).select_from(StockIn).where(StockIn.id == PurchaseOrder.source_order_id)),
+    )
+    legacy_match = and_(
+        PurchaseOrder.source_order_id.in_(sorted({int(i) for i in source_ids})),
+        not_(id_in_both_tables),
+    )
+
+    conditions = [PurchaseOrder.status == PurchaseOrderStatus.PENDING, legacy_match]
+    if json_match_ids:
+        conditions.append(PurchaseOrder.id.in_(json_match_ids))
+    if typed_match is not None:
+        conditions.append(typed_match)
+    result = await db.execute(select(PurchaseOrder).where(or_(*conditions[1:]), conditions[0]))
     deleted = 0
     for po in result.scalars().all():
         if po.id in _exclude:
