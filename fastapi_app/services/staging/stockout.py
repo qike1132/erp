@@ -406,7 +406,7 @@ async def _recalc_stock_check_by_balance(db: AsyncSession, session_id: str) -> N
     )
     for row in result.scalars().all():
         qty = int(row.quantity)
-        if qty <= 0:
+        if qty <= 0 or row.product_id is None:
             continue
         balance = await get_inventory_balance(db, row.product_id)
         if qty > balance:

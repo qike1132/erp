@@ -181,7 +181,7 @@ async def get_schedule(db: AsyncSession, schedule_id: int) -> BackupSchedule | N
     return await db.get(BackupSchedule, schedule_id)
 
 
-async def _assert_hourly_single_hit(cron_expr: str) -> None:
+def _assert_hourly_single_hit(cron_expr: str) -> None:
     """B2-02（2026-10-24 审计）：拒绝同一小时内多次命中的 cron。
 
     调度侧的幂等键是小时粒度（poller mark 与 ARQ _job_id 均为 %Y%m%d%H），
