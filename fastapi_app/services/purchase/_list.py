@@ -8,6 +8,7 @@ from collections import defaultdict
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.purchase._common import _parse_source_order_ids
 from fastapi_app.shared_models import (
@@ -363,7 +364,8 @@ def _serialize_po_list_item(order, items, product_name, quantity, source_order_n
         'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else '',
         'has_bom': bool(items),
         'note': order.remark or '',
-        'create_time': order.create_time.strftime('%Y-%m-%d %H:%M') if order.create_time else '',
+        # AUD-02：create_time 是 timestamptz（aware），按北京时间渲染（原 UTC 直出）
+        'create_time': fmt_business(order.create_time),
         'items': [_serialize_po_item(item) for item in items],
         'sku_items': sku_items or [],
     }

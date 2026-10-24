@@ -10,12 +10,18 @@ purchase_order_query_helpers.py，并在文件末尾 re-export，
 （X 为任意原函数名/模块级常量）保持兼容。
 """
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import desc, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.core.business_time import (
+    business_day_bounds_utc_naive,
+    business_today,
+    fmt_business,
+    fmt_business_naive_utc,
+)
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.export_limits import EXPORT_MAX_ROWS
@@ -111,7 +117,8 @@ async def get_purchase_order(db: AsyncSession, order_id: int) -> dict | None:
         'quantity': quantity,
         'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else '',
         'note': order.remark or '',
-        'create_time': order.create_time.strftime('%Y-%m-%d %H:%M') if order.create_time else '',
+        # AUD-02：与列表同口径按北京时间渲染（导出与屏幕必须一致）
+        'create_time': fmt_business(order.create_time),
         # 订单级损耗率快照（千分之几）：物料清单「数量」列在逐行 loss_rate 缺失时回退到它，
         # 与「汇总下单 → 工厂内部采购订单汇总」的展示口径完全同源。
         'spare_rate': float(order.spare_rate) if order.spare_rate is not None else None,
@@ -433,9 +440,13 @@ async def export_completed_orders(
     eff_start = start_date or date_from
     eff_end = end_date or date_to
     if eff_start:
-        query = query.where(PurchaseOrder.completed_at >= eff_start)
+        lower, _ = business_day_bounds_utc_naive(
+            datetime.strptime(eff_start, '%Y-%m-%d').date())  # AUD-02：北京日界
+        query = query.where(PurchaseOrder.completed_at >= lower)
     if eff_end:
-        query = query.where(PurchaseOrder.completed_at <= f'{eff_end} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
+        _, upper = business_day_bounds_utc_naive(
+            datetime.strptime(eff_end, '%Y-%m-%d').date())  # AUD-02：北京日界
+        query = query.where(PurchaseOrder.completed_at < upper)
     query = query.order_by(PurchaseOrder.completed_at.desc())
 
     # 2026-10-18 OCR 评审：门禁必须建在**未截断**的订单集上。
@@ -503,7 +514,8 @@ async def export_completed_orders(
                 'quantity': float(pricing_qty),
                 'unit_price': float(item.unit_price or 0),
                 'amount': float(item.total_price or 0),
-                'completed_at': order.completed_at.strftime('%Y-%m-%d') if order.completed_at else '',
+                'completed_at': fmt_business_naive_utc(order.completed_at, '%Y-%m-%d')
+                if order.completed_at else '',
             })
     # 二次兜底：单张订单的明细行数可能远超 1（多 SKU/多物料），订单数未超限时
     # 明细行数仍可能爆掉上限。这里按实际展开后的行数拒绝，不再静默截断。
@@ -755,21 +767,25 @@ async def get_completed_order_suggestions(
 
 
 async def get_completed_order_quick_filters(db: AsyncSession) -> dict:
-    today = datetime.now(UTC).replace(tzinfo=None).date()
-    week_ago = today - timedelta(days=7)
-    month_ago = today - timedelta(days=30)
+    # AUD-02：快捷过滤的「今天/近7天/近30天」边界按业务时区（北京）日界换算成
+    # naive-UTC 再与 completed_at 比较——原先 date 直比（UTC 日界），北京
+    # 00:00–07:59 的完成单不算进"今天"。
+    today = business_today()
+    today_start, _ = business_day_bounds_utc_naive(today)
+    week_start, _ = business_day_bounds_utc_naive(today - timedelta(days=7))
+    month_start, _ = business_day_bounds_utc_naive(today - timedelta(days=30))
     # 单次查询 + 条件聚合：3 个 COUNT 合并为 1 次 roundtrip
     # 全局 WHERE status='completed' 缩小扫描行集，FILTER 仅按时间区分
     result = await db.execute(
         select(
             func.count(PurchaseOrder.id).filter(
-                PurchaseOrder.completed_at >= today,
+                PurchaseOrder.completed_at >= today_start,
             ).label('today'),
             func.count(PurchaseOrder.id).filter(
-                PurchaseOrder.completed_at >= week_ago,
+                PurchaseOrder.completed_at >= week_start,
             ).label('week'),
             func.count(PurchaseOrder.id).filter(
-                PurchaseOrder.completed_at >= month_ago,
+                PurchaseOrder.completed_at >= month_start,
             ).label('month'),
         ).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
     )

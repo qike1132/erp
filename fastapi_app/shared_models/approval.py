@@ -23,7 +23,12 @@ def _utcnow() -> datetime:
 
 
 def _fmt_dt(value: datetime | None) -> str | None:
-    return value.strftime(_DATETIME_FMT) if value else None
+    # AUD-02（2026-10-24 审计）：本模块时间列是 naive-UTC（_utcnow 落库），原样
+    # strftime 输出 UTC 墙钟——前端 ApprovalTable 原样渲染恒慢 8 小时。naive 值
+    # 显式标记 UTC 后转业务时区（core.business_time 是 stdlib-only 叶子模块，
+    # shared_models 引用不构成反向依赖，见该模块 docstring）。
+    from fastapi_app.core.business_time import fmt_business_naive_utc
+    return fmt_business_naive_utc(value, _DATETIME_FMT) if value else None
 
 
 class ApprovalRequest(Base):

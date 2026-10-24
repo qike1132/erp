@@ -269,7 +269,14 @@ class TestPurchaseCenterService:
 
     @pytest.mark.asyncio
     async def test_export_date_aliases_backward_compatible(self):
-        """date_from/date_to 作为 start_date/end_date 的兼容别名仍生效"""
+        """date_from/date_to 作为 start_date/end_date 的兼容别名仍生效。
+
+        AUD-02（2026-10-24）：completed_at 是 naive-UTC 列，日期边界按北京日界
+        换算成 naive-UTC——北京 09-01 00:00 = UTC 08-31 16:00；结束日由闭区间
+        '23:59:59'（含 1 秒微秒洞）改为 < 次日 00:00 = UTC 09-14 16:00。
+        """
+        from datetime import datetime
+
         from fastapi_app.services.purchase_center_service import export_completed_orders
         db = MagicMock()
         db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -277,13 +284,18 @@ class TestPurchaseCenterService:
 
         await export_completed_orders(db, date_from='2026-09-01', date_to='2026-09-14')
         params = db.execute.call_args_list[0].args[0].compile().params
-        # 日期以绑定参数传入（非字符串拼接），结束日补齐到当日 23:59:59
-        assert '2026-09-01' in params.values()
-        assert '2026-09-14 23:59:59' in params.values()
+        # 日期以换算后的 naive-UTC datetime 绑定参数传入（非字符串拼接）
+        assert datetime(2026, 8, 31, 16, 0) in params.values()
+        assert datetime(2026, 9, 14, 16, 0) in params.values()
 
     @pytest.mark.asyncio
     async def test_export_start_date_takes_precedence_over_alias(self):
-        """同时传 start_date 与 date_from 时，以 start_date 为准"""
+        """同时传 start_date 与 date_from 时，以 start_date 为准。
+
+        AUD-02：北京 09-10 的下界 = UTC 09-09 16:00；别名 date_from 不再出现。
+        """
+        from datetime import datetime
+
         from fastapi_app.services.purchase_center_service import export_completed_orders
         db = MagicMock()
         db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -291,8 +303,8 @@ class TestPurchaseCenterService:
 
         await export_completed_orders(db, start_date='2026-09-10', date_from='2026-01-01')
         values = db.execute.call_args_list[0].args[0].compile().params.values()
-        assert '2026-09-10' in values
-        assert '2026-01-01' not in values
+        assert datetime(2026, 9, 9, 16, 0) in values
+        assert datetime(2025, 12, 31, 16, 0) not in values  # 2026-01-01 的北京日界换算
 
     @pytest.mark.asyncio
     async def test_export_rejects_when_order_count_exceeds_limit(self):

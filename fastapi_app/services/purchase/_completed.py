@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import business_day_bounds_utc_naive, fmt_business, fmt_business_naive_utc
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.purchase._list import _serialize_po_item
 from fastapi_app.services.purchase_utils import (
@@ -57,16 +58,23 @@ def _apply_completed_filters(
         query = query.where(kw_filter)
         count_query = count_query.where(kw_filter)
     if date_from:
-        query = query.where(PurchaseOrder.completed_at >= date_from)
-        count_query = count_query.where(PurchaseOrder.completed_at >= date_from)
+        # AUD-02（2026-10-24 审计）：completed_at 是 naive-UTC 列，日期边界按
+        # 业务时区（北京）日界换算成 UTC——原先直比 'YYYY-MM-DD'（UTC 日界），
+        # 北京 00:00–07:59 完成的记录落到前一天。
+        lower, _ = business_day_bounds_utc_naive(
+            datetime.strptime(date_from, '%Y-%m-%d').date())
+        query = query.where(PurchaseOrder.completed_at >= lower)
+        count_query = count_query.where(PurchaseOrder.completed_at >= lower)
     if date_to:
         # 用独立变量：原先赋给 `end_date`（同名参数）→ 末尾 `f'{end_date} 23:59:59'`
         # 又拼一次得到 '... 23:59:59 23:59:59' 作为绑定参数与 timestamp 比较
         # → Postgres `invalid input syntax for type timestamp` → 整个列表 500。
         # 端点 order_routes 把 date_to 作为兼容字段对外暴露，老客户端/直连 API 即命中。
-        date_to_bound = f'{date_to} 23:59:59'
-        query = query.where(PurchaseOrder.completed_at <= date_to_bound)
-        count_query = count_query.where(PurchaseOrder.completed_at <= date_to_bound)
+        # AUD-02：闭区间 '23:59:59' 带 1 秒微秒洞且时区语义错位，改 < 次日 00:00（UTC）。
+        _, upper = business_day_bounds_utc_naive(
+            datetime.strptime(date_to, '%Y-%m-%d').date())
+        query = query.where(PurchaseOrder.completed_at < upper)
+        count_query = count_query.where(PurchaseOrder.completed_at < upper)
     # 分字段过滤（与前端 useCompletedOrders filters 一一对应）
     for col, val in (
         (PurchaseOrder.order_no, order_no),
@@ -79,11 +87,15 @@ def _apply_completed_filters(
             query = query.where(col.ilike(pattern))
             count_query = count_query.where(col.ilike(pattern))
     if start_date:
-        query = query.where(PurchaseOrder.completed_at >= start_date)
-        count_query = count_query.where(PurchaseOrder.completed_at >= start_date)
+        lower, _ = business_day_bounds_utc_naive(
+            datetime.strptime(start_date, '%Y-%m-%d').date())  # AUD-02：北京日界
+        query = query.where(PurchaseOrder.completed_at >= lower)
+        count_query = count_query.where(PurchaseOrder.completed_at >= lower)
     if end_date:
-        query = query.where(PurchaseOrder.completed_at <= f'{end_date} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
-        count_query = count_query.where(PurchaseOrder.completed_at <= f'{end_date} 23:59:59')  # sql-safe: escape_like/绑定参数/常量片段
+        _, upper = business_day_bounds_utc_naive(
+            datetime.strptime(end_date, '%Y-%m-%d').date())  # AUD-02：北京日界
+        query = query.where(PurchaseOrder.completed_at < upper)
+        count_query = count_query.where(PurchaseOrder.completed_at < upper)
     # barcode / material_name 需要 EXISTS 子查询 purchase_order_item
     if barcode:
         barcode_pattern = f'%{escape_like(barcode)}%'
@@ -181,8 +193,10 @@ def _serialize_completed_order(order, items, arrived_map: dict, source_order_no:
         'quantity': float(order.product_quantity or 0) if order.product_quantity else 0,
         'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else '',
         'note': order.remark or '',
-        'create_time': order.create_time.strftime('%Y-%m-%d %H:%M') if order.create_time else '',
-        'completed_at': order.completed_at.strftime('%Y-%m-%d %H:%M') if order.completed_at else '',
+        # AUD-02：create_time 是 timestamptz（aware）、completed_at 是 naive-UTC
+        # 列——两者都按北京时间渲染（原先 UTC 墙钟直出恒慢 8 小时）。
+        'create_time': fmt_business(order.create_time),
+        'completed_at': fmt_business_naive_utc(order.completed_at),
         'items': [_serialize_completed_item(item, arrived_map, order) for item in items],
         'sku_items': sku_items or [],
     }
