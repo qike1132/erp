@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
@@ -60,8 +61,19 @@ async def _assert_inventory_balance(
     """
     balance = await stock_service.get_inventory_balance(db, product_id)
     if quantity > balance:
+        # 报错必须带构成，否则用户分不清「没包装够」还是「本次填多了」，
+        # 只能回来问人（2026-10-24 生产实例：可用 53482，本次 54000）。
+        # 构成只在**报错路径**多查一次，正常流程零额外开销；
+        # 查询失败（如单测里只桩了 get_inventory_balance）时降级为只给总数，
+        # 绝不因为「解释文案」把异常变成另一种异常。
+        detail = ''
+        try:
+            _pack, _shipped = await stock_service.get_inventory_balance_detail(db, product_id)
+            detail = f'（包装部入库 {_pack} − 已出货 {-_shipped}）'
+        except (TypeError, ValueError, AttributeError, SQLAlchemyError) as e:
+            logger.debug('结余构成查询失败，报错降级为只给总数: %s', e)
         raise ValueError(
-            f'客户「{customer}」产品「{product_name}」库存不足：可用 {balance}，本次 {quantity}'
+            f'客户「{customer}」产品「{product_name}」库存不足：可用 {balance}{detail}，本次 {quantity}'
         )
 
 
