@@ -216,6 +216,20 @@ async def _export_database(db, user, remark, tmpdir_path: Path, snapshot_id,
             pg_dump_available = True
         except (TimeoutError, OSError, RuntimeError) as e:
             logger.warning(f'pg_dump 不可用，使用 JSON 格式备份数据库: {e}')
+            # AUD-03（2026-10-24 审计）：JSON 降级必须告警——降级包不含 schema、
+            # 无法在空库/新机恢复，若状态仍 success 则灾难恢复能力静默失效
+            # （触发条件真实存在：pg_dump 版本不匹配/工具丢失）。
+            try:
+                from fastapi_app.services.backup.metrics.alert_service import alert_service
+                await alert_service.send_alert(
+                    task_name='pg_dump_unavailable',
+                    error=f'pg_dump 不可用，本次备份降级为 JSON 格式'
+                          f'（不含 schema，无法在空库恢复）：{e}',
+                    task_type='backup', severity='warning',
+                    additional_info={'snapshot_id': snapshot_id},
+                )
+            except Exception:  # defensive: 告警通道故障不得中断备份本身
+                logger.warning('降级告警发送失败（不影响备份继续）', exc_info=True)
             json_path = tmpdir_path / 'database'
             json_path.mkdir(parents=True, exist_ok=True)
             json_bytes = await execute_legacy_backup_to_bytes(user, remark, db)
@@ -381,6 +395,9 @@ def _build_manifest(user, remark: str, partial: bool, include_set, exclude_set,
         # coverage 供人工/巡检核对「库里有几张、产物里几张、差在哪」。
         'failed_tables': count_failed_tables,
         'coverage': coverage,
+        # AUD-03：产物自述 dump 格式。JSON 降级包不含 schema、无法空库恢复，
+        # evaluate_backup_completeness 据此判 partial（而非静默 success）。
+        'dump_format': dump_info.get('format', 'sql'),
         'total_rows': sum(v for v in table_stats.values() if v >= 0),
         'dump_size': dump_info.get('dump_size', 0),
         'dump_duration_seconds': dump_info.get('duration_seconds', 0),
