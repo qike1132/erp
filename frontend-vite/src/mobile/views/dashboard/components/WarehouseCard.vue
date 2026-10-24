@@ -21,7 +21,7 @@
             <path d="M12 19V5" />
             <path d="M5 12l7-7 7 7" />
           </svg>
-          进仓数量
+          今日进仓
         </div>
         <div class="ios-wh-value">{{ fmtNum(data?.warehouse?.in_qty) }}</div>
         <div class="ios-wh-sub">{{ fmtMoney(data?.warehouse?.in_amount) }} 元</div>
@@ -32,7 +32,7 @@
             <path d="M12 5v14" />
             <path d="M19 12l-7 7-7-7" />
           </svg>
-          出仓数量
+          今日出仓
         </div>
         <div class="ios-wh-value">{{ fmtNum(data?.warehouse?.out_qty) }}</div>
         <div class="ios-wh-sub">{{ fmtMoney(data?.warehouse?.out_amount) }} 元</div>

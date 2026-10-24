@@ -43,6 +43,13 @@ from fastapi_app.services import purchase_center_service as svc
 
 router = APIRouter()
 
+# 口径固化（F1a-07，2026-10-24 审计）：本模块全部端点统一用粗粒度
+# product_manage|purchase_center_manage 两码（init_permissions.py:97-101 无子码），
+# 前端按钮级权限同样不做细分（purchase/stock 等模块无 hasPermission）。
+# 这是**有意的粗粒度设计**：若未来需要「仅导出/仅完成」等细分，先在
+# init_permissions/迁移加子码（先例：backup_* 与 pg_standalone_093），再前端挂
+# hasPermission——不要单侧悄悄收紧，会造成 403 弹窗与按钮不可点的错位。
+
 
 async def _invalidate_orders_cache() -> None:
     """失效采购订单列表 + 湖北订单（beile）列表/计数缓存（L1 + L2）。

@@ -76,6 +76,10 @@ async def _reload_redis() -> bool:
 async def restore_redis_rdb(zf) -> dict:
     """恢复 Redis RDB 文件"""
     try:
+        # B2-07（2026-10-24 审计）：与 filestore/config 的成员上限对称，防构造包 OOM
+        _rdb_info = zf.getinfo('redis/dump.rdb')
+        if _rdb_info.file_size > 512 * 1024 * 1024:
+            return {'status': 'error', 'error': 'redis/dump.rdb 成员超过 512MB 上限，疑似构造包，已拒绝'}
         rdb_data = zf.read('redis/dump.rdb')
         if REDIS_DUMP.is_file():
             backup_path = REDIS_DUMP.with_suffix('.rdb.bak')
@@ -92,6 +96,9 @@ async def restore_redis_rdb(zf) -> dict:
 async def restore_meilisearch(zf) -> dict:
     """恢复 MeiliSearch 索引"""
     try:
+        _meili_info = zf.getinfo('meilisearch/dump.json')
+        if _meili_info.file_size > 512 * 1024 * 1024:
+            return {'status': 'error', 'error': 'meilisearch/dump.json 成员超过 512MB 上限，疑似构造包，已拒绝'}
         meili_data = json.loads(zf.read('meilisearch/dump.json'))
     except (json.JSONDecodeError, KeyError, OSError) as e:
         return {'status': 'error', 'error': f'MeiliSearch 数据读取失败: {e}'}

@@ -20,9 +20,17 @@ defineProps<{
   title?: string
   dismissible?: boolean
 }>()
+const props = defineProps<{
+  visible: boolean
+  title?: string
+  dismissible?: boolean
+}>()
 const emit = defineEmits<{ (e: 'update:visible', v: boolean): void; (e: 'close'): void }>()
 
 function handleOverlayClick() {
+  // F3-07（2026-10-24 审计）：dismissible=false 时 overlay 点击不关——原先声明
+  // 了语义没实现（防误关表单抽屉的场景会静默失效）。
+  if (props.dismissible === false) return
   emit('update:visible', false)
   emit('close')
 }

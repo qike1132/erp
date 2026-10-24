@@ -1,5 +1,5 @@
 <template>
-  <UiDialog :open="open" title="收货登记" title-icon="" max-width-class="max-w-[540px]" overlay-z-class="z-[var(--z-overlay-nested)]" content-z-class="z-[var(--z-modal-nested)]" @update:open="$emit('update:open', $event)">
+  <UiDialog :open="open" title="收货登记" max-width-class="max-w-[540px]" overlay-z-class="z-[var(--z-overlay-nested)]" content-z-class="z-[var(--z-modal-nested)]" @update:open="$emit('update:open', $event)">
     <template #title-icon><FontAwesomeIcon icon="box" style="color:var(--color-success-500);" /></template>
     <div class="mr-fg2"><label>物料名称</label><div style="font-weight:600;font-size:17px;">{{ item.name }}</div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
@@ -11,6 +11,8 @@
     <div class="mr-fg2"><label>备注</label><textarea v-model="remark" rows="2" placeholder="可选备注..." aria-label="可选备注..." /></div>
     <template #footer>
       <button class="mr-btn mr-btn-ghost" aria-label="取消" @click="$emit('update:open', false)">取消</button>
+      <!-- F1b-07（2026-10-24 审计）：重入守卫在父组件 submitReceive（receiveSubmitting
+           早退 + finally 复位）——异步状态在父，本组件只做同步 emit。 -->
       <button class="mr-btn mr-btn-success" aria-label="确认收货" @click="onSubmit"><FontAwesomeIcon icon="check" /> 确认收货</button>
     </template>
   </UiDialog>

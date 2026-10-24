@@ -155,8 +155,10 @@ const unshippedQty = ref<number | null>(null)
 
 async function loadUnshippedQty() {
   try {
-    const items = await outsourceApi.unshipped()
-    unshippedQty.value = items.reduce((sum, it) => sum + (it.remaining || 0), 0)
+    // F1a-05（2026-10-24 审计）：页头只差一个和——改走聚合口径，不再全量拉
+    // 明细在客户端 reduce（随订单×工序增长线性变慢）。
+    const rows = await outsourceApi.unshippedSummary()
+    unshippedQty.value = rows.reduce((sum, it) => sum + (it.remaining || 0), 0)
   } catch {
     unshippedQty.value = null
   }

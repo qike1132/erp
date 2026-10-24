@@ -2,7 +2,7 @@
   <UiDialog
     :open="visible"
     :title="isEditing ? '编辑打样项目' : '新增打样项目'"
-    max-width="500px"
+    max-width-class="max-w-[500px]"
     @update:open="$emit('update:visible', $event)"
   >
     <div class="pjf-body">

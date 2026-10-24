@@ -53,7 +53,9 @@
              同数字两个口径。标签改为与数据一致的「累计订单」；若产品要本月口径，
              需后端补 month_qty（SUM FILTER order_date >= month_start）后再改回。 -->
         <span>累计订单 {{ fmtNum(data?.orders?.total_qty) }}</span>
-        <span>累计产值 {{ fmtMoney(data?.stock?.total_amount) }}</span>
+        <!-- F3-04（2026-10-24 审计）：stock.total_amount 是全历史出库净额，
+             桌面 KPI 无「产值」标签——「累计产值」会被管理层当生产总产值读。 -->
+        <span>累计出库金额 {{ fmtMoney(data?.stock?.total_amount) }}</span>
       </div>
     </section>
 

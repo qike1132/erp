@@ -226,7 +226,7 @@ async function triggerFull(opts?: { password?: string; tables?: string[]; exclud
       // 开关关闭 → 后端忽略本字段产出明文；开关开启 → 有密码才加密。前端硬编码 false 会让
       // 开关重新打开后 UI 永远产不出加密包，故此处保持 true（由服务端裁决）。
       encrypt: true,
-      password: opts?.password,
+      password: opts?.password,  // secret-scan:allow 变量传递非凭据字面量（可选链不匹配纯标识符豁免）
       tables: opts?.tables?.length ? opts.tables : undefined,
       exclude_tables: opts?.excludeTables?.length ? opts.excludeTables : undefined,
     })
@@ -394,7 +394,15 @@ async function executeRestore(filename: string, opts?: RestoreExecuteOptions): P
 async function onUploadRestore(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
+  // F1b-03（2026-10-24 审计）：读后立即清值——不清则同一文件二次选择不触发
+  // change（对照 DialogImageUpload.vue:50 的既有修法）；并加 busy 预检与页内
+  // 其他重任务入口互斥（triggerScheduleNow 同款）。
+  input.value = ''
   if (!file) return
+  if (busy.value || uploadRestoring.value) {
+    toast.warning('有备份任务执行中，请等待完成后再发起上传还原')
+    return
+  }
   const fd = new FormData()
   fd.append('file', file)
   uploadRestoring.value = true
