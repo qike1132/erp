@@ -14,6 +14,7 @@
 断言的是「登记了 post-commit 失效回调」这一接线事实 —— 与既有同类测试同款。
 """
 import itertools
+from datetime import date
 
 import pytest
 import pytest_asyncio
@@ -23,6 +24,7 @@ from fastapi_app.core.cache_invalidation import cache_mgr
 from fastapi_app.core.state_machine import StagingStatus
 from fastapi_app.services import staging_service
 from fastapi_app.shared_models import (
+    DailyProductionRecord,
     Order,
     Product,
     StagingOrder,
@@ -77,6 +79,20 @@ async def _seed_product(db: AsyncSession, barcode: str, stock: int = 0) -> Produ
     return product
 
 
+async def _seed_packaging(db: AsyncSession, product: Product, quantity: int) -> None:
+    """补一条包装部入库。
+
+    2026-10-24：出货闸门读「可出库存 = 包装部入库 − 已出货」，备货/填充/手工都不计入
+    （业务口径）。夹具原先只给 current_stock，结余恒 0 → 确认被拒。真实业务里
+    这笔成品必然有包装部入库记录，故按真实链路补上。
+    """
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=product.id, product_name=product.name,
+        barcode=product.barcode or '', quantity=quantity, production_date=date.today(),
+    ))
+    await db.flush()
+
+
 async def test_confirm_staging_stockins_registers_post_commit_invalidation(db):
     """备货确认会写 stock_in + inventory_log + product.current_stock，必须失效库存缓存。"""
     product = await _seed_product(db, 'PCI-STG-IN')
@@ -96,6 +112,7 @@ async def test_confirm_staging_stockins_registers_post_commit_invalidation(db):
 async def test_confirm_staging_stockouts_registers_post_commit_invalidation(db):
     """出货确认会写 stock_out + inventory_log + product.current_stock，必须失效库存缓存。"""
     product = await _seed_product(db, 'PCI-STG-OUT', stock=100)
+    await _seed_packaging(db, product, 100)
     # 出货确认要求「有可用订单支持」，先造一张足量订单
     db.add(Order(
         order_no='PCI-STG-OUT-ORD', customer='PCI客户',

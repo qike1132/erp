@@ -300,12 +300,13 @@ async def _update_item_prices(
 
 
 async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
-    # 注（2026-10-24）：审计建议此处加行锁（两个并发请求各自读旧明细、各自覆盖
-    # total_amount，后提交者漏掉先提交者的行价）。试改 with_for_update 后
-    # test_purchase_center_bom::test_cross_order_item_not_modified 失败 ——
-    # 该用例用「db.get 调用序号」编排 PO/POI 两次读取，改成 execute 会让序号整体错位。
-    # 需同步重排这批 mock 后再上，本次保留原读取方式。
-    order = await db.get(PurchaseOrder, order_id)
+    # 行锁（2026-10-24）：两个并发请求各自读到「对方未提交前」的明细快照，各自用自己
+    # 看到的行价求和后覆盖写 total_amount，后提交者把先提交者的行价漏掉；DB 也没有
+    # 约束校验「总额 = Σ明细」→ 差额永久存在，只能人工重算。
+    # 锁住订单行后，第二个请求会等第一个提交，再读就能看到对方的改动。
+    # 用 Session.get(with_for_update=True) 而不是另起一条 select：调用形状与原先的
+    # db.get 完全一致，不会给按调用次数编排的既有 mock 用例带来额外一次 execute。
+    order = await db.get(PurchaseOrder, order_id, with_for_update=True)
     if not order:
         raise ValueError('采购订单不存在')
 

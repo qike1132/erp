@@ -295,6 +295,16 @@ class TestStockReturnApi:
         product = Product(name=f"退货删除产品-{suffix}", current_stock=100)
         db.add(product)
         await db.flush()
+        # 2026-10-24：取消退货的结余闸门读「包装部入库 − 已出货」，夹具补真实入库
+        from datetime import date as _date
+
+        from fastapi_app.shared_models import DailyProductionRecord
+
+        db.add(DailyProductionRecord(
+            department='packaging', product_id=product.id, product_name=product.name,
+            barcode='', quantity=100, production_date=_date.today(),
+        ))
+        await db.flush()
         stockout = StockOut(
             stockout_no=f"SO-HDEL-{suffix}", product_id=product.id,
             quantity=50, customer="退货删除客户", returned_quantity=5,
