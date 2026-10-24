@@ -190,4 +190,7 @@ def _fix_other_nav_sections(session):
 
 
 if __name__ == '__main__':
+    # AUD-18（2026-10-24 审计）：与 add_*_nav 族同款写守卫
+    from _prod_write_guard import require_prod_write_consent
+    require_prod_write_consent('修正采购中心导航项（生产库）')
     fix_purchase_center_nav()

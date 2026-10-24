@@ -44,6 +44,23 @@ def _health_ok() -> bool:
 
 
 def main() -> int:
+    # AUD-17（2026-10-24 审计 P1）：重启 = 把工作区当前签出的代码跑进生产。
+    # 生产直接吃 D:\erp_system 源码（AGENTS §6.1-6/§6.1-9），工作区在非 main
+    # 分支或半改状态时重启，就会把那条分支/半改代码跑进生产（2026-10-14 实害
+    # 75 分钟、2026-10-22 连崩 8 次两次事故的旁路入口——其余全部重启路径
+    # 已接闸门，唯本脚本漏接）。与 start.py:97 同款语义。
+    from pathlib import Path
+
+    from server_manager.git_guard import check_production_branch
+
+    ok, guard_msg = check_production_branch(Path(__file__).resolve().parent.parent)
+    if not ok:
+        print(f"❌ {guard_msg}")
+        print("   生产重启只允许在 main 分支且工作区干净时进行（server_manager / start.py 同闸门）。")
+        return 2
+    if guard_msg.startswith('警告') or '覆盖' in guard_msg:
+        print(f"⚠️ {guard_msg}")
+
     nssm = _find_nssm()
     if not nssm:
         print("❌ 找不到 nssm.exe。生产后端由 NSSM 托管，请安装 NSSM 或用 "
