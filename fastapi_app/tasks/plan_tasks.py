@@ -42,7 +42,20 @@ def _sync_one_date(session, target_date: date, customer_id_map: dict[str, int]) 
         if existing:
             session.execute(text('\n                        UPDATE shipment_records\n                        SET quantity = :qty, synced_at = NOW()\n                        WHERE shipment_no = :no\n                    '), {'qty': row.quantity - row.returned_quantity, 'no': row.stockout_no})
         else:
-            session.execute(text("\n                        INSERT INTO shipment_records\n                            (shipment_no, customer_id, customer_name, product_id,\n                             product_name, quantity, shipment_date, source_type,\n                             source_id, synced_at)\n                        VALUES (:no, :cid, :cname, :pid, :pname, :qty,\n                                :sdate, 'stockout', :sid, NOW())\n                    "), {'no': row.stockout_no, 'cid': customer_id, 'cname': row.customer, 'pid': row.product_id, 'pname': row.product_name, 'qty': row.quantity - row.returned_quantity, 'sdate': row.stockout_date, 'sid': row.id})
+            # 走 ORM 而非原生 SQL：created_at/synced_at 只有 Python 侧 default
+            # （无 server_default），原生 INSERT 列清单漏列即 NotNullViolation——
+            # 2026-10-23 起生产每日同步因此断流 3 天（2026-10-25 上线前审计 H-1）。
+            from fastapi_app.shared_models.purchase_plan import ShipmentRecord
+            session.add(ShipmentRecord(
+                shipment_no=row.stockout_no,
+                customer_id=customer_id,
+                customer_name=row.customer,
+                product_id=row.product_id,
+                product_name=row.product_name,
+                quantity=row.quantity - row.returned_quantity,
+                shipment_date=row.stockout_date,
+                source_id=row.id,
+            ))
         synced += 1
     return synced
 
