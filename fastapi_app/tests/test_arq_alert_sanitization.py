@@ -27,7 +27,8 @@ def _failed_ctx(exc: Exception) -> dict:
 
 async def test_failure_alert_does_not_leak_exception_text():
     """外发 error 不得含异常原文/密钥样式串；须含类型名与 job_id。"""
-    secret = 'SECRET_TOKEN=sk-live-9f8e7d6c5b4a'
+    # EXAMPLE_ 前缀 = hook 第 2 层占位符排除列表放行（无 allowlist 可依）
+    secret = 'SECRET_TOKEN=EXAMPLE_NOT_REAL_9f8e7d6c5b4a'
     exc = RuntimeError(f'psycopg 连接失败 password={secret} order_id=SO-20261025-0001')
 
     with patch('fastapi_app.services.backup.metrics.alert_service.alert_service.send_alert',
@@ -42,7 +43,7 @@ async def test_failure_alert_does_not_leak_exception_text():
     assert 'RuntimeError' in error_text, '类型名保留（定位用）'
     assert 'job-abc-123' in error_text, '关联 ID 保留（定位用）'
     assert secret not in error_text, '密钥样式原文不得外发（M4）'
-    assert 'sk-live' not in error_text
+    assert 'EXAMPLE_NOT_REAL' not in error_text
     assert 'SO-20261025-0001' not in error_text, '业务标识不得外发（M4）'
     assert 'password=' not in error_text
 

@@ -39,7 +39,7 @@ def _handler_rec(hours_ago: float = 1.0) -> dict:
     # 否则脱敏断言无变异敏感性（评审 finding 10）。
     return {'ts': ts, 'stage': 'handler', 'handler': 'on_order_deleted',
             'event_type': 'order.deleted',
-            'error': 'cannot import name x; password=sk-live-9f8e7d6c order=SO-20261025-0001'}
+            'error': 'cannot import name x; password=EXAMPLE_NOT_REAL_9f8e7d6c order=SO-20261025-0001'}
 
 
 def _broadcast_rec(hours_ago: float = 1.0) -> dict:
@@ -134,7 +134,7 @@ async def test_handler_alert_error_is_sanitized_not_raw_exception(monkeypatch, a
     error_text = alert_spy[0]['error']
     assert 'on_order_deleted' in error_text, '外发必须含 handler 名（定位用）'
     assert 'cannot import name' not in error_text, '异常原文不得外发（M4）'
-    assert 'sk-live-9f8e7d6c' not in error_text, '密钥样式原文不得外发（M4）'
+    assert 'EXAMPLE_NOT_REAL' not in error_text, '密钥样式原文不得外发（M4）'
     assert 'SO-20261025-0001' not in error_text, '业务标识不得外发（M4）'
 
 

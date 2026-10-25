@@ -33,6 +33,3 @@ scripts/prod_audit/tests/test_scan_secrets.py
 # 2026-10-24 审计修复（I2-04 BOM）曾登记两安装脚本；同日把示例占位串改为
 # <...> 尖括号形式后命中归零，条目按「冗余即删」原则移除（allowlist_effectiveness 锁）。
 
-# M4 告警脱敏回归（2026-10-25）：构造"密钥样式"假值（sk-live-… 假串）断言
-# 外发告警不含异常原文——值是定义出来的占位符，非真实凭据。
-fastapi_app/tests/test_arq_alert_sanitization.py
