@@ -99,6 +99,20 @@ class TestReportService:
         assert result['logs'] == []
 
     @pytest.mark.asyncio
+    async def test_get_deduction_logs_excludes_fully_returned(self, mock_db, mock_empty_result):
+        """屏幕侧必须带「净量>0」过滤（与导出第八轮审计口径对齐），全退抵扣不计入。"""
+        from fastapi_app.services.report_service import get_deduction_logs
+        mock_db.execute = AsyncMock(return_value=mock_empty_result)
+
+        # 用独立筛选参数错开 cache_result 的 L1 缓存键——同参用例会命中缓存、
+        # inner 不执行，SQL 断言将空转变红
+        await get_deduction_logs(mock_db, customer='净量口径用例', page=1, per_page=20)
+
+        sqls = [str(call.args[0]) for call in mock_db.execute.call_args_list]
+        assert any('(so.quantity - so.returned_quantity) > 0' in s for s in sqls), \
+            '抵扣流水屏幕查询缺少净量>0 过滤'
+
+    @pytest.mark.asyncio
     async def test_get_return_logs_empty(self, mock_db, mock_empty_result):
         from fastapi_app.services.report_service import get_return_logs
         mock_db.execute = AsyncMock(return_value=mock_empty_result)
