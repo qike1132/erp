@@ -22,6 +22,15 @@ BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', 'backups/server'))
 # '*.zip'，导致「有备份却报没有备份/备份过旧」的假阳性，且加密备份从未被 testzip() 校验
 # （2026-10-02 P2 审计实测：生产恒报"最新备份 132 小时前"，而当天 14:00 刚出过加密包）。
 BACKUP_FILE_EXTENSIONS = ('.zip', '.zip.enc', '.tar.gz', '.tar')
+# 备份文件名前缀/后缀口径（单源，L-1 2026-10-25 上线前审计）：
+# - 统计口径（records）：含已停产的 legacy（erp_incremental_ 增量包 / .json JSON 包），
+#   历史文件在统计与列表里仍要看得见；
+# - 清理口径（cleanup）：刻意只清在产格式——legacy 包**不参与**保留期删除（防误删
+#   历史档案）。此前两张表各自硬编码且成员漂移无书面约定；改动任一口径须两表同步决策。
+BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_incremental_', 'erp_auto_')
+BACKUP_CLEANUP_PREFIXES = ('erp_backup_', 'erp_auto_')
+BACKUP_RECORD_SUFFIXES = ('.zip', '.json', '.zip.enc')
+BACKUP_CLEANUP_SUFFIXES = ('.zip', '.zip.enc')
 MAX_BACKUP_FILE_SIZE = 500 * 1024 * 1024
 BACKUP_LOCK_ID = 20240427
 # 灾难恢复演练互斥锁（第十四轮）：演练会建/删同名测试库，同秒两次触发会互毁。

@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ._constants import (
     _MAX_PRE_RESTORE_BACKUPS,
     BACKUP_DIR,
+    BACKUP_NAME_PREFIXES,
+    BACKUP_RECORD_SUFFIXES,
     PRE_RESTORE_DIR,
 )
 from .crypto import sha256_bytes, sha256_file
@@ -31,8 +33,9 @@ _record_write_fail_count: int = 0
 _background_tasks: set[asyncio.Task] = set()
 
 # 正式备份文件命名约定：m5_fix_verify_*/erp_m3drill_* 等演练/测试件不计入统计与列表
-_BACKUP_NAME_PREFIXES = ('erp_backup_', 'erp_incremental_', 'erp_auto_')
-_BACKUP_FILE_SUFFIXES = ('.zip', '.json', '.zip.enc')
+# （前缀/后缀单源见 _constants，L-1）
+_BACKUP_NAME_PREFIXES = BACKUP_NAME_PREFIXES
+_BACKUP_FILE_SUFFIXES = BACKUP_RECORD_SUFFIXES
 
 # 文件名时间戳格式：'YYYYMMDD_HHMMSS'（解析见 verify/query_service._parse_timestamp_from_filename）
 

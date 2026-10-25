@@ -20,15 +20,23 @@ import psutil
 from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.database import get_async_db_context
-from fastapi_app.services.backup._constants import BACKUP_DIR, retention_count, retention_days
+from fastapi_app.services.backup._constants import (
+    BACKUP_CLEANUP_PREFIXES,
+    BACKUP_CLEANUP_SUFFIXES,
+    BACKUP_DIR,
+    retention_count,
+    retention_days,
+)
 from fastapi_app.services.backup.metrics.alert_service import alert_service
 from fastapi_app.services.backup.records import _delete_backup_sidecars
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
 
-_FULL_PREFIXES = ('erp_backup_', 'erp_auto_')
-_FULL_SUFFIXES = ('.zip', '.zip.enc')
+# 清理口径（单源见 _constants，L-1）：只清在产格式；legacy（erp_incremental_/.json）
+# 刻意不在清理范围——防误删历史档案。
+_FULL_PREFIXES = BACKUP_CLEANUP_PREFIXES
+_FULL_SUFFIXES = BACKUP_CLEANUP_SUFFIXES
 _WRITE_GRACE_SECONDS = 120
 
 
