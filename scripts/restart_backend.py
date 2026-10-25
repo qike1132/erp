@@ -84,7 +84,11 @@ def main() -> int:
         return 2
 
     print(f"=== 重启 {SERVICE_NAME}（nssm restart） ===")
-    result = subprocess.run([nssm, "restart", SERVICE_NAME], capture_output=True, text=True)
+    # nssm 输出是 UTF-16 形态的宽字节，任何单一码页严格解码都可能炸——
+    # 2026-10-25 实证：text=True 默认码页在读取阶段 UnicodeDecodeError，
+    # restart 已发出但脚本崩溃，调用方据返回码误判。显式 utf-8+replace。
+    result = subprocess.run([nssm, "restart", SERVICE_NAME], capture_output=True,
+                            text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         print(f"❌ nssm restart 失败（rc={result.returncode}）: {result.stderr.strip() or result.stdout.strip()}")
         print("   排查：nssm status erp-prod；日志 logs/后端(uvicorn).*.log")
