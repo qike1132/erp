@@ -2,13 +2,12 @@
 来料登记 单元测试
 
 覆盖：
-- 来料登记列表查询（分页、多维度筛选）
-- 来料登记创建（关联采购订单、物料明细）
-- 来料登记更新（状态变更）
+- 来料登记创建（关联采购订单）
 - 来料登记删除
-- 物料收货登记（并发安全、数量校验）
-- 统计概览和趋势
-- 边界条件
+
+M-H（2026-10-25 复审）：原文件挂了 6 个零测试方法的空类（列表查询/更新/收货/
+统计/订单物料/历史），只制造「已测」假象——已删除；这些域的行为覆盖在
+fastapi_app/tests/test_material_registration.py（computed_status 三分支真断言等）。
 """
 from unittest.mock import AsyncMock
 
@@ -18,10 +17,6 @@ from fastapi_app.services.material_registration_service import (
     create_registration,
     delete_registration,
 )
-
-
-class TestGetRegistrations:
-    """来料登记列表查询"""
 
 
 class TestCreateRegistration:
@@ -36,10 +31,6 @@ class TestCreateRegistration:
             await create_registration(mock_async_db, 999, user_id=1)
 
 
-class TestUpdateRegistration:
-    """来料登记更新"""
-
-
 class TestDeleteRegistration:
     """来料登记删除"""
 
@@ -50,20 +41,3 @@ class TestDeleteRegistration:
 
         with pytest.raises(ValueError, match='来料登记不存在'):
             await delete_registration(mock_async_db, 999)
-
-
-class TestReceiveMaterial:
-    """物料收货登记"""
-
-
-class TestStats:
-    """统计相关"""
-
-
-class TestGetPurchaseOrderItems:
-    """获取采购订单物料"""
-
-
-class TestGetHistory:
-    """来料登记历史"""
-

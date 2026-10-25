@@ -67,6 +67,100 @@ def test_restart_backend_wires_git_branch_guard():
     # OCR-H1：main() 必须先把仓库根插进 sys.path 再导 guard（scripts-dir 直跑形态）。
     assert 'sys.path.insert' in source
     assert source.find('sys.path.insert') < source.find('from server_manager.git_guard')
+    # M-G（2026-10-25 复审）：禁用 `nssm restart`（NSSM 2.24 停机失败即放弃启动，
+    # 服务永久 STOPPED），必须复用 ServiceOps 的显式 stop→start 原语。
+    assert 'restart_service_via_stop_start' in source
+    assert '"restart"' not in source, '脚本不得再出现 nssm restart 调用'
+
+
+def _install_fake_service_ops(monkeypatch, outcome):
+    """替换 server_manager.service_ops 为记录型 fake，返回调用记录。"""
+    import sys
+    import types
+
+    calls = []
+
+    class _FakeOps:
+        def __init__(self, msg_queue, gate, project_dir, log_message, release_ports=None):
+            calls.append({'ctor': True, 'project_dir': project_dir})
+
+        def restart_service_via_stop_start(self, name, nssm=None, **kwargs):
+            calls.append({'restart': name, 'nssm': nssm})
+            return outcome
+
+    fake_mod = types.ModuleType('server_manager.service_ops')
+    fake_mod.ServiceOps = _FakeOps
+    monkeypatch.setitem(sys.modules, 'server_manager.service_ops', fake_mod)
+    return calls
+
+
+def test_restart_backend_uses_stop_start_and_waits_health(monkeypatch):
+    """M-G 行为锁：stop_start 成功 + 健康通过 → rc=0；ServiceOps 收到 nssm 路径。"""
+    import sys
+    import types
+
+    mod = _load('restart_backend_mg_ok', ROOT / 'scripts' / 'restart_backend.py')
+    fake_guard = types.ModuleType('server_manager.git_guard')
+    fake_guard.check_production_branch = lambda _root: (True, 'ok')
+    monkeypatch.setitem(sys.modules, 'server_manager.git_guard', fake_guard)
+    calls = _install_fake_service_ops(
+        monkeypatch, (True, 'RUNNING', 12345),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    monkeypatch.setattr(mod, '_health_ok', lambda: True)
+    monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)  # 轮询间隔 3s，测试不真睡
+
+    rc = mod.main()
+
+    assert rc == 0
+    restart_calls = [c for c in calls if 'restart' in c]
+    assert restart_calls == [{'restart': 'erp-prod', 'nssm': r'C:\nssm\nssm.exe'}]
+
+
+def test_restart_backend_reports_failure_when_restart_not_effective(monkeypatch):
+    """M-G 行为锁：重启未生效（终态非 RUNNING）→ rc=1，且仍等健康循环不假报成功。"""
+    import sys
+    import types
+
+    mod = _load('restart_backend_mg_fail', ROOT / 'scripts' / 'restart_backend.py')
+    fake_guard = types.ModuleType('server_manager.git_guard')
+    fake_guard.check_production_branch = lambda _root: (True, 'ok')
+    monkeypatch.setitem(sys.modules, 'server_manager.git_guard', fake_guard)
+    _install_fake_service_ops(monkeypatch, (False, 'STOPPED', None))
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    health_calls = []
+    monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or False)
+    monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)  # 30 轮 × 3s，测试不真睡
+
+    rc = mod.main()
+
+    assert rc == 1
+    assert health_calls == [], '重启未生效（未达 RUNNING）时不得假报健康，直接如实失败'
+
+
+def test_service_ops_headless_gate_none_survives_wait_service():
+    """评审 H-2 锁：headless 构造 ServiceOps（gate=None）在 wait_service 不得崩。
+
+    restart_backend 直跑形态正是 headless 构造；wait_service 轮询里无条件
+    ``self._gate.checkpoint()`` 会在 gate=None 时 AttributeError——stop 已发出而
+    start 永不执行，服务停在 STOPPED（恰是 stop_start 原语要防的形态）。
+    真 ServiceOps 构造 + state_fn 注入（零子进程），变异（恢复无条件 checkpoint）
+    本测试必红。
+    """
+    import queue as _queue
+
+    from server_manager.service_ops import ServiceOps
+
+    ops = ServiceOps(
+        msg_queue=_queue.SimpleQueue(),
+        gate=None,
+        project_dir=str(ROOT),
+        log_message=lambda *_a, **_k: None,
+    )
+    state = ops.wait_service(
+        'erp-prod', 'RUNNING', timeout=1, state_fn=lambda _name: 'RUNNING',
+    )
+    assert 'RUNNING' in state.upper()
 
 
 def test_restart_backend_refuses_on_guard_denial(monkeypatch):

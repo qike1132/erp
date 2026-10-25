@@ -14,6 +14,7 @@ from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.finished_stock import (
+    BatchAvailableItem,
     BatchListResponse,
     FinishedStockRemarkResponse,
     FinishedStockRemarkUpdate,
@@ -68,7 +69,8 @@ async def product_batches(
 ) -> BatchListResponse:
     """某产品的批次可用量列表（供 /stock-out 录入 SKU 后带出批次选择）。"""
     rows = await finished_stock_service.get_batches_by_product(db, product_id, customer_name=customer)
-    return BatchListResponse(data=rows)
+    # 服务层返回 list[dict]，显式构造成模型（与 response_model 的隐式校验等价），mypy 可查字段
+    return BatchListResponse(data=[BatchAvailableItem(**row) for row in rows])
 
 
 def _build_finished_stock_excel(rows: list[dict]) -> bytes:

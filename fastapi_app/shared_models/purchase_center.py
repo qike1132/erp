@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 
@@ -41,7 +42,7 @@ class ModificationLog(Base):
             'new_value': self.new_value,
             'modifier_id': self.modifier_id,
             'modifier_name': self.modifier_name,
-            'modify_time': self.modify_time.strftime('%Y-%m-%d %H:%M:%S') if self.modify_time else None,
+            'modify_time': fmt_business(self.modify_time, '%Y-%m-%d %H:%M:%S') if self.modify_time else None,
             'modify_reason': self.modify_reason,
         }
 
@@ -75,7 +76,7 @@ class SavedQuery(Base):
             'conditions': json.loads(self.conditions) if self.conditions else None,
             'creator_id': self.creator_id,
             'creator_name': self.creator_name,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
             'use_count': self.use_count,
             'last_use_time': self.last_use_time.strftime('%Y-%m-%d %H:%M:%S') if self.last_use_time else None,
         }

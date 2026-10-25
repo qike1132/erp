@@ -506,7 +506,10 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
     product = product.strip()[:100]
 
     where_clauses = ["so.stockin_id IS NOT NULL",
-                     "(o.is_deleted = false OR o.is_deleted IS NULL)"]
+                     "(o.is_deleted = false OR o.is_deleted IS NULL)",
+                     # 与导出 _get_deduction_logs（第八轮审计口径）对齐：净量>0，
+                     # 全退抵扣（quantity==returned_quantity）不以 0 数量计入 total_count
+                     "(so.quantity - so.returned_quantity) > 0"]
     params: dict[str, object] = {}
 
     if customer:

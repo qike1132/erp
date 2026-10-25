@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.float_utils import float_compare, round_qty
 from fastapi_app.shared_models import Base
 
@@ -103,14 +104,14 @@ class MaterialRegistration(Base):
             'remark': self.remark or '',
             'status': self.computed_status,
             'progress': self.progress,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else '',
-            'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else '',
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else '',
+            'update_time': fmt_business(self.update_time, '%Y-%m-%d %H:%M:%S') if self.update_time else '',
             'items': [item.to_dict() for item in items_list],
             'customer_name': self.purchase_order.customer_name if self.purchase_order else None,
             'product_name': self.purchase_order.product_name if self.purchase_order else None,
             'product_quantity': float(self.purchase_order.product_quantity) if self.purchase_order and self.purchase_order.product_quantity else None,
             'po_status': self.purchase_order.status if self.purchase_order else None,
-            'po_create_time': self.purchase_order.create_time.strftime('%Y-%m-%d %H:%M') if self.purchase_order and self.purchase_order.create_time else '',
+            'po_create_time': fmt_business(self.purchase_order.create_time, '%Y-%m-%d %H:%M') if self.purchase_order and self.purchase_order.create_time else '',
             'item_count': len(items_list),
             'total_ordered': total_ordered,
             'total_received': total_received,
@@ -164,5 +165,5 @@ class MaterialRegistrationItem(Base):
             'progress': item_progress,
             'material_category': self.material_category or '',
             'remark': self.remark or '',
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else '',
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else '',
         }

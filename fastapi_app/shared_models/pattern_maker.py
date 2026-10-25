@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 
@@ -45,6 +46,6 @@ class PatternMaker(Base):
         return {
             'id': self.id,
             'name': self.name,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else '',
+            'created_at': fmt_business(self.created_at, '%Y-%m-%d %H:%M:%S') if self.created_at else '',
+            'updated_at': fmt_business(self.updated_at, '%Y-%m-%d %H:%M:%S') if self.updated_at else '',
         }

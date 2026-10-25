@@ -158,8 +158,18 @@ async def test_on_job_end_failed_writes_failed_and_dlq(monkeypatch) -> None:
     async def fake_push(entry):
         entries.append(entry)
 
+    from fastapi_app.services.backup.metrics.alert_service import (
+        alert_service as _alert_singleton,
+    )
+
+    alerts: list[dict] = []
+
+    async def fake_send_alert(**kwargs):
+        alerts.append(kwargs)
+
     monkeypatch.setattr(arq_callbacks, '_push_to_dead_letter', fake_push)
     monkeypatch.setattr(arq_callbacks, '_emit_failure_metric', lambda _name: None)
+    monkeypatch.setattr(_alert_singleton, 'send_alert', fake_send_alert)
 
     ctx = {
         'job_id': 'sched:9:0',
@@ -184,6 +194,11 @@ async def test_on_job_end_failed_writes_failed_and_dlq(monkeypatch) -> None:
     assert entry['max_tries'] == 3
     assert '(1, ' in entry['args']
     assert "'k': 'v'" in entry['kwargs']
+    # M-C：任务终态失败必须接 alert_service（critical 恒通知），不再只落日志
+    assert len(alerts) == 1
+    assert alerts[0]['task_name'] == 'arq:demo_task'
+    assert alerts[0]['severity'] == 'critical'
+    assert 'ValueError: boom' in alerts[0]['error']
 
 
 async def test_on_job_end_without_outcome_keeps_legacy_success(monkeypatch) -> None:

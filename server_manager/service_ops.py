@@ -190,7 +190,10 @@ class ServiceOps:
                 return state
             if time.monotonic() >= deadline:
                 return state
-            if checkpoint:
+            # gate 可为 None（headless 消费方，如 scripts/restart_backend.py 直跑）：
+            # 无 GUI 门时 checkpoint 即 no-op，不得 AttributeError——否则 stop 已发出、
+            # start 永不执行，服务停在 STOPPED（恰是 stop_start 原语要防的形态）。
+            if checkpoint and self._gate is not None:
                 self._gate.checkpoint()
             time.sleep(interval)
             state = fn(name)

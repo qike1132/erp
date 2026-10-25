@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 
@@ -56,8 +57,8 @@ class PurchasePlan(Base):
             'remark': self.remark or '',
             'upload_batch': self.upload_batch or '',
             'created_by': self.created_by or '',
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else '',
-            'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else '',
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else '',
+            'update_time': fmt_business(self.update_time, '%Y-%m-%d %H:%M:%S') if self.update_time else '',
         }
 
 
@@ -144,5 +145,5 @@ class ShipmentRecord(Base):
             'shipment_date': self.shipment_date.isoformat() if self.shipment_date else '',
             'source_type': self.source_type,
             'source_id': self.source_id,
-            'synced_at': self.synced_at.strftime('%Y-%m-%d %H:%M:%S') if self.synced_at else '',
+            'synced_at': fmt_business(self.synced_at, '%Y-%m-%d %H:%M:%S') if self.synced_at else '',
         }

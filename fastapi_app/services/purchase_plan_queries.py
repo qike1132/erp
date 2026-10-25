@@ -15,6 +15,7 @@ from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.plan_utils import calc_shipment_status
@@ -191,7 +192,7 @@ async def get_shipment_records_by_date(db: AsyncSession, target_date: str) -> li
             'customer_name': row.customer or '',
             'product_name': row.product_name,
             'quantity': row.quantity - row.returned_quantity,
-            'shipment_date': row.stockout_date.strftime('%Y-%m-%d') if row.stockout_date else '',
+            'shipment_date': fmt_business(row.stockout_date, '%Y-%m-%d') if row.stockout_date else '',
             'source_type': 'stockout',
             'note': row.note or '',
         })

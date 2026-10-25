@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission, require_permission
@@ -159,7 +160,7 @@ async def edit_stockin(
     await assert_product_factory_scoped(db, stockin.product_id, _user, what='入库记录')
     quantity = data.quantity if data.quantity is not None else stockin.quantity
     customer = data.customer if data.customer is not None else stockin.customer
-    stockin_date = data.stockin_date if data.stockin_date else stockin.stockin_date.strftime('%Y-%m-%d') if stockin.stockin_date else ''
+    stockin_date = data.stockin_date if data.stockin_date else fmt_business(stockin.stockin_date, '%Y-%m-%d') if stockin.stockin_date else ''
     note = data.note if data.note is not None else stockin.note or ''
     async with db_transaction(db):
         await stock_service.update_stockin(
@@ -307,7 +308,7 @@ async def edit_stockout(
         customer = stockout.customer or ''
     else:
         customer = data.customer if data.customer is not None else stockout.customer or ''
-    stockout_date = data.stockout_date if data.stockout_date else stockout.stockout_date.strftime('%Y-%m-%d') if stockout.stockout_date else ''
+    stockout_date = data.stockout_date if data.stockout_date else fmt_business(stockout.stockout_date, '%Y-%m-%d') if stockout.stockout_date else ''
     note = data.note if data.note is not None else stockout.note or ''
     async with db_transaction(db):
         await stock_service.update_stockout(

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Numeric, String, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -95,7 +96,7 @@ class Product(Base):
             'factory': self.factory,
             'initial_stock': self.initial_stock,
             'current_stock': self.current_stock,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None
         }
 
     def has_bom(self):

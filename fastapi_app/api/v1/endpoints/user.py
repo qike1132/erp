@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import invalidate_user_permission_cache, require_superuser
 from fastapi_app.core.exceptions import db_transaction
@@ -31,7 +32,7 @@ _HIDDEN_PERMISSION_CODES = frozenset({'user_manage'})
 
 def _format_user_response(u: User) -> UserResponse:
     """将 User ORM 对象转换为响应模型，处理时间格式化。"""
-    create_time = u.create_time.strftime('%Y-%m-%d %H:%M') if u.create_time else None
+    create_time = fmt_business(u.create_time, '%Y-%m-%d %H:%M') if u.create_time else None
     return UserResponse(
         id=u.id,
         username=u.username,

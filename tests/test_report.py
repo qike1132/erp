@@ -204,11 +204,13 @@ class TestGetDeductionLogs:
 
     @pytest.mark.asyncio
     async def test_base_where_invariants(self, mock_async_db):
-        """固定条件：stockin_id 非空（抵扣出货）"""
+        """固定条件：stockin_id 非空（抵扣出货）+ 净量>0（与导出口径对齐）"""
         with _patch_generic() as m:
             await get_deduction_logs(mock_async_db, customer='客户Y')
         where = m.call_args.kwargs['base_where']
         assert 'so.stockin_id IS NOT NULL' in where
+        # 第八轮审计在导出侧补的「净量>0」必须同步在屏幕侧，全退抵扣不再以 0 数量计入
+        assert '(so.quantity - so.returned_quantity) > 0' in where
 
 
 class TestGetReturnLogs:
