@@ -33,6 +33,7 @@ from fastapi_app.schemas.production_summary import (
     ProductionSummaryResponse,
 )
 from fastapi_app.services import production_summary_service
+from fastapi_app.services.xlsx_budget import XlsxBudgetError
 from fastapi_app.shared_models import User
 
 router = APIRouter()
@@ -324,9 +325,13 @@ async def upload_packaging_excel(
         raise HTTPException(status_code=413, detail=f'文件超过 {MAX_PACKAGING_UPLOAD_SIZE // 1024 // 1024}MB 上传限制')
     # P0-12：扩展名之外再校验文件头（改扩展名的伪 xlsx 在此拦下）
     require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename or '')
-    async with db_transaction(db):
-        created_by = user.username if hasattr(user, 'username') else ''
-        result = await production_summary_service.upload_packaging_excel(db, content, created_by)
+    try:
+        async with db_transaction(db):
+            created_by = user.username if hasattr(user, 'username') else ''
+            result = await production_summary_service.upload_packaging_excel(db, content, created_by)
+    except XlsxBudgetError as e:
+        # M5 评审 finding 3：资源预算拒绝必须落成 400 友好报错，而不是全局 handler 的 500
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return PackagingUploadResponse(**success_response(**{**result}))
 
 

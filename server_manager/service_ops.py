@@ -620,7 +620,7 @@ class ServiceOps:
             ok, msg = git_guard.check_production_branch(self._project_dir)
             if not ok:
                 self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
-                return False, 'REJECTED', None
+                return ServiceRunResult(False, 'REJECTED', None, False)
             if git_guard.is_warning(msg):
                 self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
             # 只有重启 erp-prod 才刷新启动宽限（arq/web 不影响 prod_runner 快照）
@@ -771,24 +771,30 @@ class ServiceOps:
         （如 SCM 因「有正在运行的依赖方」拒停 erp-redis / erp-redis-broker），本次
         「重启」实际没发生。此时 ``ok=True``（服务确实在跑）但 ``effective=False``，
         消费方**不得**把该结果当重启成功——发布验收只看 ok 会把旧代码当新版本放行
-        （2026-10-25 上线前检查 B1 正是拿掉了这个假成功口子）。PID 探测失败同理：
-        身份未经证实，effective=False 并告警。
+        （2026-10-25 上线前检查 B1 正是拿掉了这个假成功口子）。
+
+        PID 读取用 ``svc_pid_ex`` 区分「服务未运行（pid=None, ok=True）」与「探测
+        通道不可用（ok=False）」：通道故障时身份未经证实，effective=False 并告警——
+        否则「SCM 拒停 + 探测通道恰好故障」的组合会让同 PID 旧进程再次被当新版本
+        （评审 2026-10-25 finding 2，宁可误报不可漏报）。``prev_pid=None`` 且通道
+        正常时，停机前服务确认为未运行，起来的必是新进程，effective=True。
         """
         state = self.wait_service(name, 'RUNNING', timeout)
         if 'RUNNING' in state.upper():
-            pid = self.svc_pid(name)
-            if prev_pid is not None:
-                if pid is None:
-                    self._msg_queue.put(('log', {
-                        'text': f'{name} 已 RUNNING 但读取新 PID 失败，无法验证本次重启是否生效',
-                        'level': 'WARNING'}))
-                    return ServiceRunResult(True, state, None, False)
-                if pid == prev_pid:
-                    self._msg_queue.put(('log', {
-                        'text': f'{name} 仍是原进程 (PID: {pid})，本次重启未生效（停机未停成）',
-                        'level': 'WARNING'}))
-                    return ServiceRunResult(True, state, pid, False)
-            self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid if pid is not None else "?"})'}))
+            pid, pid_ok = self.svc_pid_ex(name)
+            if not pid_ok or pid is None:
+                self._msg_queue.put(('log', {
+                    'text': f'{name} 已 RUNNING 但读取新 PID 失败'
+                            f'（{"探测通道不可用" if not pid_ok else "SCM 未报告 PID"}），'
+                            '无法验证本次重启是否生效',
+                    'level': 'WARNING'}))
+                return ServiceRunResult(True, state, None, False)
+            if prev_pid is not None and pid == prev_pid:
+                self._msg_queue.put(('log', {
+                    'text': f'{name} 仍是原进程 (PID: {pid})，本次重启未生效（停机未停成）',
+                    'level': 'WARNING'}))
+                return ServiceRunResult(True, state, pid, False)
+            self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid})'}))
             return ServiceRunResult(True, state, pid, True)
         self._msg_queue.put(('log', {'text': f'{name} 在 {timeout}s 内未进入 RUNNING（当前: {state}），请查看 logs\\{name}.log', 'level': 'WARNING'}))
         return ServiceRunResult(False, state, None, False)

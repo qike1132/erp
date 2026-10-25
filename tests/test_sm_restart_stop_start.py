@@ -71,7 +71,7 @@ def _ops(stop_rc=0, stop_out='', *, real_wait_running=False):
         return 0, ''
 
     ops.run_capture = fake_run
-    ops.svc_pid = lambda name: None
+    ops.svc_pid_ex = lambda name: (None, True)
     ops.wait_service = lambda name, target, timeout, **kw: 'STOPPED'
     if not real_wait_running:
         ops.wait_service_running = lambda name, timeout=25, prev_pid=None: ServiceRunResult(
@@ -301,7 +301,7 @@ def test_restart_same_pid_is_ok_but_never_effective():
         stop_out='erp-redis: STOP: 停止控制被发送到其他正在运行的服务所依赖的服务。',
         real_wait_running=True,
     )
-    ops.svc_pid = lambda name: 18792      # 停前停后同一 PID：从未停成
+    ops.svc_pid_ex = lambda name: (18792, True)  # 停前停后同一 PID：从未停成
     ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
     res = ops.restart_service_via_stop_start('erp-redis')
     assert res.ok is True, '服务确实在跑（旧进程），ok 仍为真'
@@ -318,8 +318,8 @@ def test_restart_with_unreadable_pid_is_never_effective():
     宁可误报（让运维手查一次），不可漏报（把旧进程当新版本发布）。
     """
     ops, q = _ops(real_wait_running=True)
-    pids = iter([111, None])              # 停前 111 → 停后读不到
-    ops.svc_pid = lambda name: next(pids)
+    pids = iter([(111, True), (None, True)])  # 停前 111 → 停后 RUNNING 却无 PID（身份未证实）
+    ops.svc_pid_ex = lambda name: next(pids)
     ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
     res = ops.restart_service_via_stop_start('erp-prod')
     assert res.ok is True and res.pid is None and res.effective is False
@@ -330,8 +330,8 @@ def test_restart_with_unreadable_pid_is_never_effective():
 def test_restart_reports_success_when_pid_changes():
     """真实重启（PID 变了）仍报「启动成功」且 effective=True——防新判定把正常重启误判成未生效。"""
     ops, q = _ops(real_wait_running=True)
-    pids = iter([111, 222])               # 停前 111 → 停后 222
-    ops.svc_pid = lambda name: next(pids)
+    pids = iter([(111, True), (222, True)])   # 停前 111 → 停后 222
+    ops.svc_pid_ex = lambda name: next(pids)
     ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
     res = ops.restart_service_via_stop_start('erp-prod')
     assert res.ok is True and res.effective is True and res.pid == 222
@@ -343,7 +343,7 @@ def test_restart_reports_success_when_pid_changes():
 def test_start_without_prev_pid_is_effective_when_running():
     """纯启动路径（无 prev_pid）不比对 PID：RUNNING 即 effective（如开机首启、崩溃自愈后手拉）。"""
     ops, _q = _ops(real_wait_running=True)
-    ops.svc_pid = lambda name: 333        # 无 prev_pid，无从比对，直接生效
+    ops.svc_pid_ex = lambda name: (333, True)  # 无 prev_pid，无从比对，直接生效
     ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
     res = ops.start_one_service('erp-prod')
     assert res.ok is True and res.effective is True and res.pid == 333

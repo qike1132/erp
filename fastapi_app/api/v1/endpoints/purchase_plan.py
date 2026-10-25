@@ -48,6 +48,7 @@ from fastapi_app.schemas.purchase_plan import (
     ShipmentRecordsResponse,
 )
 from fastapi_app.services import purchase_plan_service
+from fastapi_app.services.xlsx_budget import XlsxBudgetError
 from fastapi_app.shared_models import User
 
 # 上传 Excel 文件大小上限（10MB）
@@ -436,8 +437,12 @@ async def upload_excel(file: UploadFile=File(..., description='Excel文件'), db
     # 会直接进入解析器（下游多落为 500）。此处补齐，与 production_plan/summary 等口径一致。
     require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename)
     session_id, created_by = get_user_identity(_user)
-    async with db_transaction(db):
-        result = await purchase_plan_service.upload_excel(db, content, session_id, created_by)
+    try:
+        async with db_transaction(db):
+            result = await purchase_plan_service.upload_excel(db, content, session_id, created_by)
+    except XlsxBudgetError as e:
+        # M5 评审 finding 3：资源预算拒绝必须落成 400 友好报错，而不是全局 handler 的 500
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return success_response(**{**result})
 
 @router.get('/staging/list', response_model=PurchasePlanStagingListResponse)

@@ -1212,7 +1212,14 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         if needs_restart:
             self._gate.checkpoint()
             self._msg_queue.put(('log', {'text': f'重启 {_SVC_API} 使 Worker={target} 生效...'}))
-            self.svc.restart_one_service(_SVC_API)
+            # B1 评审 finding 7：消费重启结果——停机未停成（effective=False）时
+            # Worker 数改动实际未生效，必须如实告知，不能只靠界面显示 RUNNING。
+            res = self.svc.restart_one_service(_SVC_API)
+            if not (res.ok and res.effective):
+                self._msg_queue.put(('log', {
+                    'text': f'{_SVC_API} 重启未确认生效（ok={res.ok}, effective={res.effective}, '
+                            f'PID={res.pid}）：Worker={target} 可能仍是旧值，请检查后重试',
+                    'level': 'WARNING'}))
         self._msg_queue.put(('hosting_refresh', {}))
 
     def _install_services(self):

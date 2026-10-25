@@ -130,6 +130,16 @@ async def test_multipart_file_at_exact_limit_reaches_endpoint(client):
     )
 
 
+async def test_chunked_body_on_batch_path_still_capped(client):
+    """M2 流式口径（评审 finding 9）：batch 放宽路径的 chunked 累计边界 = 12MiB。"""
+    resp = await client.post(
+        '/api/v1/batch/import-orders',
+        content=_chunked_body(13),
+        headers={'content-type': 'application/octet-stream'},
+    )
+    assert resp.status_code == 413, f'batch 放宽路径的 13MB 流未被拦下: {resp.status_code}'
+
+
 async def test_multipart_body_over_relaxed_budget_is_413(client):
     """M2 边界：body 超过放宽预算（文件 12MB > 10MB 文件上限 + 余量）仍要 413。"""
     oversize = b'0' * (10 * 1024 * 1024 + 3 * 1024 * 1024)
@@ -155,13 +165,19 @@ def _parse_size(raw: str) -> int:
 
 
 def _location_body_limits(conf_text: str) -> dict[str, int]:
-    """解析各 location 块内的 client_max_body_size（字节）。"""
+    """解析各 location 块内的 client_max_body_size（字节）。
+
+    key 保留 ``= `` 修饰符前缀：精确匹配 location 与前缀 location 语义不同，
+    M2 评审把 production-summary 的放宽收窄为精确匹配后，两者必须在断言里
+    可区分，否则「整前缀放宽」会伪装成「精确放宽」通过 parity。
+    """
     limits: dict[str, int] = {}
-    for loc in re.finditer(r'location\s+([^\s{]+)\s*\{([^{}]*)\}', conf_text):
-        prefix, block = loc.group(1), loc.group(2)
+    for loc in re.finditer(r'location\s+(=\s+)?([^\s{]+)\s*\{([^{}]*)\}', conf_text):
+        modifier, prefix = loc.group(1) or '', loc.group(2)
+        block = loc.group(3)
         m = re.search(r'client_max_body_size\s+([0-9]+[kmgKMG]?)\s*;', block)
         if m:
-            limits[prefix] = _parse_size(m.group(1))
+            limits[modifier.replace(' ', '') + prefix] = _parse_size(m.group(1))
     return limits
 
 
@@ -170,7 +186,7 @@ def test_deployed_nginx_relaxes_exactly_the_declared_upload_paths():
     limits = _location_body_limits(_NGINX_CONF.read_text(encoding='utf-8'))
     assert set(limits) == {
         '/api/v1/backup/', '/api/v1/tasks/import-',
-        '/api/v1/batch/', '/api/v1/production-summary/',
+        '/api/v1/batch/', '=/api/v1/production-summary/packaging/upload',
     }, (
         f'nginx location 级上限的覆盖范围与预期不符: {sorted(limits)}'
     )
@@ -195,7 +211,7 @@ def test_deployed_nginx_excel_limits_leave_multipart_headroom():
     assert limits['/api/v1/batch/'] > MAX_IMPORT_FILE_SIZE, (
         'nginx 与文件上限相等 = 恰好 10MB 的合法文件被边缘 413（M2）'
     )
-    assert limits['/api/v1/production-summary/'] > MAX_PACKAGING_UPLOAD_SIZE
+    assert limits['=/api/v1/production-summary/packaging/upload'] > MAX_PACKAGING_UPLOAD_SIZE
 
 # --------------------------------------------------------------------------
 # 无 Content-Length（chunked / 流式）请求体上限（P0-12）

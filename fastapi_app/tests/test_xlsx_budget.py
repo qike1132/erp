@@ -182,3 +182,48 @@ async def test_extract_cell_images_normal_workbook_still_empty(tmp_path):
     path = tmp_path / 'plain.xlsx'
     path.write_bytes(_make_xlsx())
     assert extract_cell_images(str(path)) == {}
+
+
+# ---------------------------------------------------------------------------
+# 端点层：预算拒绝必须落成 400（评审 finding 3），不得 500
+# ---------------------------------------------------------------------------
+
+async def test_packaging_upload_budget_violation_is_400(client, monkeypatch):
+    """包装部上传链：service 层抛 XlsxBudgetError → 端点转 400（而非全局 500）。"""
+    from unittest.mock import AsyncMock
+
+    from fastapi_app.services import production_summary_service
+
+    monkeypatch.setattr(
+        production_summary_service, 'upload_packaging_excel',
+        AsyncMock(side_effect=XlsxBudgetError('文件解压后总量过大（999999999 字节，上限 134217728）')),
+    )
+    resp = await client.post(
+        '/api/v1/production-summary/packaging/upload',
+        files={'file': ('b.xlsx', b'PK\x03\x04' + b'0' * 100,
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+    )
+    assert resp.status_code == 400, (
+        f'预算拒绝必须 400 且带可读原因，实际 {resp.status_code} {resp.text[:150]}'
+    )
+    assert '上限' in resp.json()['detail']
+
+
+async def test_production_plan_upload_budget_violation_is_400(client, monkeypatch):
+    """生产计划上传链：XlsxBudgetError → 400。"""
+    from unittest.mock import AsyncMock
+
+    from fastapi_app.services import production_plan_service
+
+    monkeypatch.setattr(
+        production_plan_service, 'upload_excel',
+        AsyncMock(side_effect=XlsxBudgetError('文件压缩比异常（999:1，上限 100:1），疑似压缩炸弹')),
+    )
+    resp = await client.post(
+        '/api/v1/production-plans/upload',
+        files={'file': ('b.xlsx', b'PK\x03\x04' + b'0' * 100,
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+    )
+    assert resp.status_code == 400, (
+        f'预算拒绝必须 400，实际 {resp.status_code} {resp.text[:150]}'
+    )

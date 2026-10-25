@@ -176,16 +176,23 @@ def main() -> int:
         log_message=lambda *_a, **_k: None,
     )
     # B1 版本指纹：停机前 PID / HEAD / 起始时刻——重启后再独立复核。
-    prev_pid = ops.svc_pid(SERVICE_NAME)
+    # 用 svc_pid_ex 区分「服务未运行（None, ok=True）」与「探测通道故障
+    # (None, ok=False)」——后者意味着停机前后都无法证实身份，评审 finding 2。
+    prev_pid, prev_ok = ops.svc_pid_ex(SERVICE_NAME)
     head_before = _git_head(repo_root)
     wall_started = time.time()
     if prev_pid is not None:
         print(f"停机前 PID: {prev_pid}")
+    elif not prev_ok:
+        print("⚠️ 停机前 PID 探测通道不可用（sc queryex 失败）——身份核验将依赖重启后的探测结果")
     if head_before:
         print(f"目标 commit: {head_before[:12]}")
 
-    result = ops.restart_service_via_stop_start(SERVICE_NAME, nssm=nssm)
-    _drain_queue(msg_queue)
+    try:
+        result = ops.restart_service_via_stop_start(SERVICE_NAME, nssm=nssm)
+    finally:
+        # B1：即使重启调用抛未捕获异常，也要把队列里已投递的停机告警吐出来
+        _drain_queue(msg_queue)
 
     if not result.ok:
         print(f"❌ 重启未生效（终态: {result.state}）。排查：nssm status erp-prod；"
@@ -197,6 +204,13 @@ def main() -> int:
         return 1
     if result.pid is None or (prev_pid is not None and result.pid == prev_pid):
         print(f"❌ PID 身份核验失败（prev={prev_pid}, now={result.pid}），不得宣告发布成功。")
+        return 1
+    # 脚本侧独立复核（不信任 ServiceOps 内部判定）：用 svc_pid_ex 再查一次当前 PID，
+    # 通道故障或与 ServiceOps 报告不一致都按身份未证实处理（评审 finding 2/5）。
+    now_pid, now_ok = ops.svc_pid_ex(SERVICE_NAME)
+    if not now_ok or now_pid != result.pid:
+        print(f"❌ PID 独立复核不一致（ServiceOps: {result.pid}, 复核: {now_pid}, "
+              f"通道{'不可用' if not now_ok else '正常'}），不得宣告发布成功。")
         return 1
 
     print("等待健康检查通过（最多 90s）...")

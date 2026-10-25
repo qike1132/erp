@@ -21,7 +21,7 @@ from fastapi_app.schemas.finished_stock import (
     FinishedStockSummaryResponse,
 )
 from fastapi_app.services import finished_stock_service
-from fastapi_app.shared.factory_scope import assert_product_factory_scoped
+from fastapi_app.shared.factory_scope import assert_product_factory_scoped, factory_scope_of
 from fastapi_app.shared_models import User
 
 # Excel 公式注入清洗（审查 H12）：customer_name/product_name/batch_no 等是
@@ -35,12 +35,8 @@ MAX_EXPORT_ROWS = 10000
 
 
 def _factory_scope(user: User) -> str:
-    """读侧工厂范围：厂绑定（factory 非空）非超管收窄到本厂，其余全量。
-
-    与 stock.py::_factory_scope、report.py::_factory_scope 同口径；读端点不得信任
-    调用方传参，工厂一律由服务端当前用户派生（2026-10-25 上线前检查 H1）。
-    """
-    return user.factory if (user.factory and not user.is_super) else ''
+    """读侧工厂范围（转发 shared 的单一真相源，2026-10-25 H1 评审 finding 7）。"""
+    return factory_scope_of(user)
 
 
 @router.get('/summary', response_model=FinishedStockSummaryResponse)

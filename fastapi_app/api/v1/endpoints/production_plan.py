@@ -33,6 +33,7 @@ from fastapi_app.schemas.production_plan import (
     UploadExcelResponse,
 )
 from fastapi_app.services import production_plan_service
+from fastapi_app.services.xlsx_budget import XlsxBudgetError
 from fastapi_app.shared_models import User
 
 router = APIRouter()
@@ -255,8 +256,12 @@ async def upload_excel(
     # P0-12：扩展名之外再校验文件头（.xls 改名 .xlsx、任意文件改名 .xlsx 都拦在这里）
     require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename or '')
     session_id, _ = get_user_identity(_user)
-    async with db_transaction(db):
-        result = await production_plan_service.upload_excel(db, content, session_id)
+    try:
+        async with db_transaction(db):
+            result = await production_plan_service.upload_excel(db, content, session_id)
+    except XlsxBudgetError as e:
+        # M5 评审 finding 3：资源预算拒绝必须落成 400 友好报错，而不是全局 handler 的 500
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return UploadExcelResponse(**success_response(**{**result}))
 
 

@@ -150,14 +150,26 @@ def _run_import_plans_impl(file_path: str, user_id: int, job_id: str,
             # 重放前先清掉同 batch 旧行：commit 后被杀再重试不会重复插入
             _clear_batch_rows(session, batch_id)
             session_id = str(user_id)
+            # M5 评审 finding 4（2026-10-25）：ARQ 链与三条 openpyxl 端点链同一预算
+            # 口径（ZIP 成员/压缩比/解压总量 + 行列帽）。本任务当前无 enqueue 入口、
+            # 属潜伏链路，但已注册为 worker 函数，不得裸奔解析。
+            from fastapi_app.services.xlsx_budget import (
+                MAX_SHEET_COLS,
+                assert_zip_budget,
+                clip_iter_rows,
+            )
+            assert_zip_budget(file_path)
             wb = openpyxl.load_workbook(file_path, read_only=True)
             ws = wb.active
-            rows = list(ws.iter_rows(min_row=2, values_only=True))
+            rows = list(clip_iter_rows(ws))
             wb.close()
             # 第十轮审计：原无行数上界（对照 material_registration 5000 / case 20000）——
-            # 超大文件会整表载入内存。与前端导入模板量级对齐，20000 行封顶。
+            # 超大文件会整表载入内存。与前端导入模板量级对齐，20000 行封顶（行帽维持
+            # 本任务原有值；M5 补的是 ZIP/列维度，行帽不放宽）。
             if len(rows) > 20000:
                 raise ValueError(f'导入行数超限（{len(rows)} 行，上限 20000），请拆分文件后重试')
+            if max((len(r) for r in rows), default=0) > MAX_SHEET_COLS:
+                raise ValueError(f'导入列数超限（上限 {MAX_SHEET_COLS}），请使用标准模板')
             success_count = 0
             errors = []
             detected_month = None

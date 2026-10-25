@@ -269,9 +269,11 @@ async def write_backup_record(
                     loop = None
                 if loop:
                     # 保留强引用，避免告警任务被 GC 中途回收（asyncio 仅持弱引用）
+                    # M4：外发只给类型名与失败次数，异常原文留内部日志
                     _task = loop.create_task(alert_service.send_alert(
                         task_name='backup_record_write',
-                        error=f'备份记录写入已连续失败 {_record_write_fail_count} 次: {e}',
+                        error=(f'备份记录写入已连续失败 {_record_write_fail_count} 次: '
+                               f'{type(e).__name__}（详见内部日志）'),
                         task_type='backup',
                         severity='error',
                     ))

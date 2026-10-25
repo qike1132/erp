@@ -78,30 +78,42 @@ def test_restart_backend_wires_git_branch_guard():
 def _install_fake_service_ops(monkeypatch, outcome):
     """替换 server_manager.service_ops 为记录型 fake，返回调用记录。
 
-    B1（2026-10-25）：重启结果契约是 ``ServiceRunResult(ok, state, pid, effective)``，
-    fake 提供 ``svc_pid``（restart_backend 停机前会先读 PID 做指纹基线）。
+    B1（2026-10-25）：重启结果契约是 ``ServiceRunResult(ok, state, pid, effective)``；
+    fake 的 ``svc_pid_ex`` 报告与 outcome 一致的 PID（通道正常），供脚本停机前
+    基线与重启后独立复核。评审 finding 5：要测「脚本复核拦住 ServiceOps 漏判」，
+    用 `_pid_ex_override` 注入不一致值。
     """
     import sys
     import types
 
     calls = []
+    pid_ex_override = {'value': None}  # 非 None 时强制返回该值（模拟探测异常/不一致）
 
     class _FakeOps:
         def __init__(self, msg_queue, gate, project_dir, log_message, release_ports=None):
             calls.append({'ctor': True, 'project_dir': project_dir})
+            self._pid_calls = 0
 
-        def svc_pid(self, name):
-            return None
+        def svc_pid_ex(self, name):
+            # 第 1 次调用 = 停机前基线（旧 PID 111），其后 = 重启后独立复核（outcome.pid）
+            self._pid_calls += 1
+            if pid_ex_override['value'] is not None:
+                return pid_ex_override['value']
+            if self._pid_calls == 1:
+                return (111, True)
+            return (outcome.pid, True)
 
         def restart_service_via_stop_start(self, name, nssm=None, **kwargs):
             calls.append({'restart': name, 'nssm': nssm})
             return outcome
 
+    fake = _FakeOps
     fake_mod = types.ModuleType('server_manager.service_ops')
-    fake_mod.ServiceOps = _FakeOps
+    fake_mod.ServiceOps = fake
     fake_mod.ServiceRunResult = ServiceRunResult
+    fake_mod._pid_ex_override = pid_ex_override
     monkeypatch.setitem(sys.modules, 'server_manager.service_ops', fake_mod)
-    return calls
+    return calls, pid_ex_override
 
 
 def _wire_restart_module(monkeypatch, name: str):
@@ -124,7 +136,7 @@ def _wire_restart_module(monkeypatch, name: str):
 def test_restart_backend_uses_stop_start_and_waits_health(monkeypatch):
     """M-G 行为锁：stop_start 成功（ok+effective）+ 健康通过 → rc=0；nssm 路径直达。"""
     mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_ok')
-    calls = _install_fake_service_ops(
+    calls, _pid_override = _install_fake_service_ops(
         monkeypatch, ServiceRunResult(True, '4 RUNNING', 12345, True),
     )
     monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
@@ -175,6 +187,40 @@ def test_restart_backend_fails_when_same_pid_and_old_process_healthy(monkeypatch
 
     assert rc == 1, '同 PID = 本次重启未发生，即使旧进程健康也必须判失败'
     assert health_calls == [], '未生效的重启不得再拿健康检查粉饰'
+
+
+def test_restart_backend_script_pid_recheck_catches_ops_miss(monkeypatch):
+    """评审 finding 5：脚本侧独立 PID 复核必须能拦住 ServiceOps 的漏判。
+
+    场景：ServiceOps 错误地宣称 ok+effective（pid=999），但停机前 PID 也是 999
+    ——脚本自己的 prev_pid 比对必须拦下（该分支此前零覆盖，删除它现有测试全绿）。
+    """
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_pid_recheck')
+    _calls, pid_override = _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 999, True),
+    )
+    pid_override['value'] = (111, True)  # 独立复核发现 5002 上仍是旧进程 111
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    health_calls = []
+    monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or True)
+
+    rc = mod.main()
+
+    assert rc == 1, '独立复核 PID 与 ServiceOps 报告不一致必须判失败'
+    assert health_calls == []
+
+
+def test_restart_backend_fails_when_reported_pid_is_none(monkeypatch):
+    """评审 finding 5：ServiceOps 宣称生效但 PID 为 None（身份未证实）→ rc=1。"""
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_pid_none')
+    _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', None, True),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+
+    rc = mod.main()
+
+    assert rc == 1
 
 
 def test_restart_backend_fails_when_health_never_passes(monkeypatch):

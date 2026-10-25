@@ -12,6 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.shared_models import Product, User
 
 
+def factory_scope_of(user: User) -> str:
+    """读侧工厂范围的单一真相源（2026-10-25 上线前检查 H1 评审 finding 7）。
+
+    此前 stock.py / report.py / finished_stock.py 各持一份逐字拷贝，靠注释引用
+    「与 xx 同口径」人肉同步。厂绑定（User.factory 非空）非超管收窄到本厂，
+    其余（超管/未绑定厂）返回空串 = 不限。
+    """
+    return user.factory if (user.factory and not user.is_super) else ''
+
+
 async def assert_product_factory_scoped(
     db: AsyncSession, product_id: int | None, user: User, *, what: str,
 ) -> None:

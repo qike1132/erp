@@ -110,7 +110,7 @@ async def _seed_two_factories(db: AsyncSession, tag: str):
     """东莞/湖北两厂产品 + 各自的包装部入库行与出货行。返回 (dg, hb, rows)。"""
     from datetime import date
 
-    from fastapi_app.shared_models import DailyProductionRecord, Product, StockOut
+    from fastapi_app.shared_models import DailyProductionRecord, Product, StockIn, StockOut
 
     dg = Product(name=f"东莞-{tag}", barcode=f"DG-{tag}", factory="东莞")
     hb = Product(name=f"湖北-{tag}", barcode=f"HB-{tag}", factory="湖北")
@@ -123,16 +123,24 @@ async def _seed_two_factories(db: AsyncSession, tag: str):
             production_date=date(2026, 10, 20), batch_no=f"B-{tag}",
             customer_name=cust,
         ))
+        # all_customers（客户快捷栏）的唯一数据源是 stock_in ∪ 未软删 order
+        # （stock_inventory_service._get_all_customers），必须种 StockIn 才会出现。
+        db.add(StockIn(
+            stockin_no=f"SI-FS-{prod.id}", product_id=prod.id, quantity=100,
+            customer=cust, stockin_date=None))
+        # 出货必须带 batch_no：不带会落 ''（未分批次）桶，与 bi 的 B-{tag} 桶
+        # join 不上，批次扣减不生效（OCR 2026-10-25 finding：种子缺陷致断言必红）。
         db.add(StockOut(
             stockout_no=f"SO-FS-{prod.id}", product_id=prod.id, quantity=10,
-            customer=cust, stockout_date=None))
+            customer=cust, batch_no=f"B-{tag}", stockout_date=None))
     await db.flush()
     return dg, hb
 
 
 async def _cleanup(db: AsyncSession, dg, hb, tag: str):
-    from fastapi_app.shared_models import DailyProductionRecord, FinishedStockRemark, StockOut
+    from fastapi_app.shared_models import DailyProductionRecord, FinishedStockRemark, StockIn, StockOut
     await db.execute(delete(StockOut).where(StockOut.product_id.in_([dg.id, hb.id])))
+    await db.execute(delete(StockIn).where(StockIn.product_id.in_([dg.id, hb.id])))
     await db.execute(delete(DailyProductionRecord).where(
         DailyProductionRecord.product_id.in_([dg.id, hb.id])))
     await db.execute(delete(FinishedStockRemark).where(
