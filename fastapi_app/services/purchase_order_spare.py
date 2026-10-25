@@ -13,6 +13,13 @@
 - SKU 快照表不可用        → 保持既有订单级口径 calc_spare_quantity(product_quantity, spare_rate)
 - 产品/BOM 解析不出/无匹配 → 该 SKU 降级为「该单全部明细的 max」（spec §2.2/§4），记 warning
 - 该单无 SKU 快照行        → 保持既有订单级口径（合法旧单，不属降级噪声源，静默）
+
+**未接线（L-5 判定，2026-10-25 上线前审计）**：``recompute_po_spare_from_item_rates``
+当前仅被 fastapi_app/tests/services/test_po_spare_from_part_rates.py 引用，
+生产导入图不可达（check_orphan_modules 亦如实 WARN）。本模块是已实现待接线的
+特性（规格文档 + 3 个特性提交 + 全套降级链），**不是死代码，勿删**；何时在
+采购完成/保存链路调用属产品决策，接线前保持本模块 lint-clean + 测试绿，
+孤儿检查的 WARN 即其"未接线"状态的显式标记。
 """
 from __future__ import annotations
 
