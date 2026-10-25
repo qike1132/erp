@@ -64,6 +64,9 @@ def test_restart_backend_wires_git_branch_guard():
     source = (ROOT / 'scripts' / 'restart_backend.py').read_text(encoding='utf-8')
     assert 'check_production_branch' in source
     assert 'git_guard' in source
+    # OCR-H1：main() 必须先把仓库根插进 sys.path 再导 guard（scripts-dir 直跑形态）。
+    assert 'sys.path.insert' in source
+    assert source.find('sys.path.insert') < source.find('from server_manager.git_guard')
 
 
 def test_restart_backend_refuses_on_guard_denial(monkeypatch):
@@ -101,14 +104,29 @@ def test_restart_backend_gate_importable_from_scripts_dir():
     修复：main() 先把仓库根插进 sys.path。本测试模拟该形态：从干净 sys.path
     （仅仓库根 + 标准库，无 scripts/ 之外的包路径）加载脚本并调用 main()，
     闸门必须真实执行（而非 ImportError）。
+
+    子进程两段式（2026-10-25 评审收口）：先按 main 的插根方式真导入 guard
+    （锁「可导入」）；再把 sys.modules 里的 guard 换成确定性拒绝的 fake 后
+    runpy（锁 fail-closed rc=2）。必须 fake 的原因：干净 main + 提权环境下
+    真闸门会**放行**，放行即触达真实 `nssm restart erp-prod`——2026-10-25
+    复现过（测试子进程走进 nssm，仅因非提权静默 no-op 才未重启生产）。
+    拒绝必须环境无关，nssm 永不可被测试触达。
     """
     import subprocess  # nosec B404 - 模拟脚本真实调用形态（sys.path 形态是断言对象）必须真起子进程
     import sys as _sys
 
     code = (
-        "import sys, runpy, io, contextlib\n"
+        "import sys, runpy, io, contextlib, types\n"
         "sys.path = [p for p in sys.path if p not in (r'{root}',)]\n"
         "sys.argv = ['restart_backend.py']\n"
+        # 第一段：按 main() 的插根方式真导入 guard——锁「scripts-dir 形态可导入」。
+        "sys.path.insert(0, r'{root}')\n"
+        "import server_manager.git_guard as g\n"
+        "assert hasattr(g, 'check_production_branch')\n"
+        # 第二段：确定性拒绝 fake + runpy——锁 fail-closed，nssm 不可触达。
+        "fake = types.ModuleType('server_manager.git_guard')\n"
+        "fake.check_production_branch = lambda root=None: (False, '工作区不在 main 分支')\n"
+        "sys.modules['server_manager.git_guard'] = fake\n"
         "buf = io.StringIO()\n"
         "try:\n"
         "    with contextlib.redirect_stdout(buf):\n"
@@ -118,8 +136,6 @@ def test_restart_backend_gate_importable_from_scripts_dir():
         "    rc = e.code if isinstance(e.code, int) else 1\n"
         "out = buf.getvalue()\n"
         "assert 'ModuleNotFoundError' not in out, out\n"
-        # CI 上 HEAD 是 detached（PR merge ref），拒绝文案与本地分支态不同——
-        # 两者都 fail-closed rc=2 且指向 main，断言只锁这些稳定不变量。
         "assert rc == 2 and 'main' in out, (rc, out)\n"
     ).format(root=str(ROOT), script=str(ROOT / 'scripts' / 'restart_backend.py'))
     # cwd=scripts：模拟操作者实际调用形态（仓库根不在 sys.path）
