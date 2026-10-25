@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -49,6 +50,6 @@ class Supplier(Base):
             'address': self.address,
             'remark': self.remark,
             'status': self.status,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+            'created_at': fmt_business(self.created_at, '%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'updated_at': fmt_business(self.updated_at, '%Y-%m-%d %H:%M:%S') if self.updated_at else None,
         }

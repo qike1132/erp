@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -58,8 +59,8 @@ class Role(Base):
         return {
             'id': self.id,
             'name': self.name,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
-            'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else None,
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
+            'update_time': fmt_business(self.update_time, '%Y-%m-%d %H:%M:%S') if self.update_time else None,
         }
 
 
@@ -105,7 +106,7 @@ class ProductRole(Base):
             'product_id': self.product_id,
             'role_name': self.role_name,
             'name': self.role_name,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
         }
 
 
@@ -157,7 +158,7 @@ class ProductFabric(Base):
             'category': self.material_category,
             'category_name': MATERIAL_CATEGORIES.get(self.material_category, {}).get('name', '面料类'),
             'remark': self.remark,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None
         }
 
 
@@ -211,8 +212,8 @@ class ProductMaterial(Base):
             'category': self.material_category,
             'category_name': MATERIAL_CATEGORIES.get(self.material_category, {}).get('name', '填充类'),
             'remark': self.remark,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
-            'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else None
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
+            'update_time': fmt_business(self.update_time, '%Y-%m-%d %H:%M:%S') if self.update_time else None
         }
 
 
@@ -263,5 +264,5 @@ class ProductAccessory(Base):
             'category': category,
             'category_name': MATERIAL_CATEGORIES.get(category, {}).get('name', '辅料类'),
             'remark': self.remark,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None
         }

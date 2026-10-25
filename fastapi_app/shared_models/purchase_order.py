@@ -24,6 +24,7 @@ from sqlalchemy import (
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -158,8 +159,8 @@ class PurchaseOrder(Base):
             'product_quantity': float(self.product_quantity) if self.product_quantity else None,
             'spare_quantity': float(self.spare_quantity) if self.spare_quantity is not None else None,
             'spare_rate': float(self.spare_rate) if self.spare_rate is not None else None,
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else None,
-            'update_time': self.update_time.strftime('%Y-%m-%d %H:%M:%S') if self.update_time else None,
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
+            'update_time': fmt_business(self.update_time, '%Y-%m-%d %H:%M:%S') if self.update_time else None,
             'completed_at': self.completed_at.strftime('%Y-%m-%d %H:%M:%S') if self.completed_at else None,
             'completed_by': self.completed_by,
             'item_count': len(_items),

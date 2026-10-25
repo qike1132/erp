@@ -9,6 +9,7 @@ from decimal import Decimal
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.shared_models import Base
 
@@ -81,6 +82,6 @@ class DailyProductionRecord(Base):
             'is_custom': bool(self.is_custom),
             'custom_country': self.custom_country or '',
             'remark': self.remark or '',
-            'create_time': self.create_time.strftime('%Y-%m-%d %H:%M:%S') if self.create_time else '',
+            'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else '',
             'created_by': self.created_by or '',
         }

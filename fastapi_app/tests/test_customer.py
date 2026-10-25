@@ -1,4 +1,5 @@
 """客户管理模块测试"""
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -150,8 +151,9 @@ class TestCustomerEndpoints:
         mock_customer.address = None
         mock_customer.note = None
         mock_customer.status = True
-        mock_customer.create_time = MagicMock()
-        mock_customer.create_time.strftime.return_value = "2024-01-01 00:00"
+        # create_time 走 fmt_business（业务时区格式化），必须用真实 aware datetime——
+        # MagicMock 没有 astimezone 语义，裸 mock 会让 fmt_business 返回非字符串。
+        mock_customer.create_time = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [mock_customer]

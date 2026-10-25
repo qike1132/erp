@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -55,7 +56,7 @@ class StagingStockOut(Base):
         return {
             'id': self.id,
             'customer': self.customer or '',
-            'stockout_date': self.stockout_date.strftime('%Y-%m-%d') if self.stockout_date else '',
+            'stockout_date': fmt_business(self.stockout_date, '%Y-%m-%d') if self.stockout_date else '',
             'product_name': self.product_name,
             'product_barcode': self.product_barcode or '',
             'product_id': self.product_id,
@@ -66,5 +67,5 @@ class StagingStockOut(Base):
             'validation_error': self.validation_error or '',
             'stock_check_passed': self.stock_check_passed,
             'stock_check_message': self.stock_check_message or '',
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else ''
+            'created_at': fmt_business(self.created_at, '%Y-%m-%d %H:%M:%S') if self.created_at else ''
         }

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache_keys import CACHE_KEY_PREFIX, CacheNamespace, build_cache_key
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import get_current_user_id, require_permission
@@ -58,7 +59,7 @@ def _customer_to_resp(c: Customer) -> CustomerResponse:
     return CustomerResponse(
         id=c.id, customer_code=c.customer_code, name=c.name, contact=c.contact,
         phone=c.phone, address=c.address, note=c.note, status=c.status,
-        create_time=c.create_time.strftime('%Y-%m-%d %H:%M') if c.create_time else None,
+        create_time=fmt_business(c.create_time, '%Y-%m-%d %H:%M') if c.create_time else None,
     )
 
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
@@ -230,7 +231,7 @@ async def get_inventory_logs(
             'change_quantity': log.change_quantity,
             'related_id': log.related_id,
             'note': log.note,
-            'change_date': log.change_date.strftime('%Y-%m-%d %H:%M:%S') if log.change_date else '',
+            'change_date': fmt_business(log.change_date, '%Y-%m-%d %H:%M:%S') if log.change_date else '',
         } for log in logs],
         'total': total, 'page': page, 'per_page': per_page,
     }
@@ -254,7 +255,7 @@ async def available_stockins(
         'id': s.id, 'product_id': s.product_id,
         'product_name': s.product.name if s.product else '',
         'quantity': s.quantity, 'customer': s.customer,
-        'stockin_date': s.stockin_date.strftime('%Y-%m-%d') if s.stockin_date else '',
+        'stockin_date': fmt_business(s.stockin_date, '%Y-%m-%d') if s.stockin_date else '',
         'available': s.quantity - sum(st.quantity for st in s.stockin_stockouts) if s.stockin_stockouts else s.quantity,
     } for s in stockins]
 
@@ -275,7 +276,7 @@ async def stockin_info(
         'id': stockin.id, 'product_id': stockin.product_id,
         'product_name': stockin.product.name if stockin.product else '',
         'quantity': stockin.quantity, 'customer': stockin.customer,
-        'stockin_date': stockin.stockin_date.strftime('%Y-%m-%d') if stockin.stockin_date else '',
+        'stockin_date': fmt_business(stockin.stockin_date, '%Y-%m-%d') if stockin.stockin_date else '',
         'note': stockin.note or '',
     }
 

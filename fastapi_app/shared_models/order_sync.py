@@ -9,6 +9,7 @@ from typing import TypedDict
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 
@@ -46,7 +47,7 @@ class OrderSyncRecord(Base):
             'order_no': self.order_no,
             'sync_type': self.sync_type,
             'sync_status': self.sync_status,
-            'sync_time': self.sync_time.strftime('%Y-%m-%d %H:%M:%S') if self.sync_time else None,
+            'sync_time': fmt_business(self.sync_time, '%Y-%m-%d %H:%M:%S') if self.sync_time else None,
             'retry_count': self.retry_count,
             'max_retries': self.max_retries,
             'next_retry_time': self.next_retry_time.strftime('%Y-%m-%d %H:%M:%S') if self.next_retry_time else None,
@@ -116,7 +117,7 @@ class SyncRetryQueue(Base):
             'next_retry_time': self.next_retry_time.strftime('%Y-%m-%d %H:%M:%S') if self.next_retry_time else None,
             'last_retry_time': self.last_retry_time.strftime('%Y-%m-%d %H:%M:%S') if self.last_retry_time else None,
             'last_error': self.last_error,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'created_at': fmt_business(self.created_at, '%Y-%m-%d %H:%M:%S') if self.created_at else None,
             'priority': self.priority,
         }
 
@@ -171,7 +172,7 @@ class OrderSyncConfig(Base):
             'config_key': self.config_key,
             'config_value': self.config_value or '',
             'description': self.description or '',
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+            'updated_at': fmt_business(self.updated_at, '%Y-%m-%d %H:%M:%S') if self.updated_at else None,
             'updated_by_id': self.updated_by_id,
         }
 

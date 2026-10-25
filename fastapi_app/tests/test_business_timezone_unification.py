@@ -148,3 +148,54 @@ def test_auxiliary_business_month_str_business_tz():
     assert business_month_str(datetime(2026, 10, 31, 20, 30, tzinfo=UTC)) == '2026-11'
     assert business_month_str(datetime(2026, 10, 31, 10, 30, tzinfo=UTC)) == '2026-10'
     assert business_month_str(datetime(2026, 11, 1, 3, 0, tzinfo=UTC)) == '2026-11'
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-25 audit-optimize：shared_models to_dict 与端点序列化器的 aware 列
+# 裸 strftime 收口 fmt_business。期望值手工推导：UTC 2026-10-24 16:30 =
+# 北京 2026-10-25 00:30（跨日，验证「日期落对天」）。
+# ---------------------------------------------------------------------------
+def test_shared_model_to_dict_times_are_beijing():
+    """Supplier.to_dict 的 created_at/updated_at（timestamptz）按北京渲染。
+
+    夹具：aware-UTC 2026-10-24 16:30 = 北京 2026-10-25 00:30 —— 修复前裸
+    strftime 按 UTC 渲染成 '2026-10-24 16:30:00'（落错天且慢 8 小时）。
+    Supplier.to_dict 只读标量字段，用 SimpleNamespace 脱离 DB 构造即可。
+    """
+    from types import SimpleNamespace
+
+    from fastapi_app.shared_models.supplier import Supplier
+
+    s = SimpleNamespace(
+        id=1, name='供应商T', contact_person=None, phone=None,
+        address=None, remark=None, status=True,
+        created_at=datetime(2026, 10, 24, 16, 30, tzinfo=UTC),
+        updated_at=datetime(2026, 10, 24, 16, 30, tzinfo=UTC),
+    )
+    d = Supplier.to_dict(s)
+    assert d['created_at'] == '2026-10-25 00:30:00', 'UTC 16:30 必须显示为北京次日 00:30'
+    assert d['updated_at'] == '2026-10-25 00:30:00'
+
+
+def test_customer_endpoint_serializer_time_is_beijing():
+    """客户列表序列化 _customer_to_resp 的 create_time（timestamptz）按北京渲染。
+
+    修复前 `c.create_time.strftime('%Y-%m-%d %H:%M')` 按 UTC 渲染；
+    修复后经 fmt_business 转业务时区。None 仍序列化为 None。
+    """
+    from types import SimpleNamespace
+
+    from fastapi_app.api.v1.endpoints.customer import _customer_to_resp
+
+    c = SimpleNamespace(
+        id=1, customer_code='KH-001', name='客户T', contact=None,
+        phone=None, address=None, note=None, status=True,
+        create_time=datetime(2026, 10, 24, 16, 30, tzinfo=UTC),
+    )
+    assert _customer_to_resp(c).create_time == '2026-10-25 00:30'
+
+    c_none = SimpleNamespace(
+        id=2, customer_code='KH-002', name='客户N', contact=None,
+        phone=None, address=None, note=None, status=True, create_time=None,
+    )
+    assert _customer_to_resp(c_none).create_time is None

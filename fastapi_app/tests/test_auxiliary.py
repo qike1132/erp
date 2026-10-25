@@ -1,4 +1,5 @@
 """辅助API接口测试"""
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -100,8 +101,8 @@ class TestAuxiliaryEndpoints:
         stockin.product.name = "产品A"
         stockin.quantity = 100
         stockin.customer = "客户1"
-        stockin.stockin_date = MagicMock()
-        stockin.stockin_date.strftime.return_value = "2024-01-01"
+        # stockin_date 走 fmt_business（业务时区格式化），必须用真实 aware datetime。
+        stockin.stockin_date = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
         stockin.note = None
         mock_db.get = AsyncMock(return_value=stockin)
 
