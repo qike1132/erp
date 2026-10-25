@@ -162,9 +162,14 @@ class RedisCacheManager:
                 self.redis_client = None
         else:
             try:
-                self.redis_client = self._build_client()
-                await self.redis_client.ping()
-                logger.info("Redis 异步连接成功: %s:%s", redis_host, redis_port)
+                client = self._build_client()  # 可能为 None（构建失败不抛的路径）
+                if client is not None:
+                    await client.ping()
+                    self.redis_client = client
+                    logger.info("Redis 异步连接成功: %s:%s", redis_host, redis_port)
+                else:
+                    logger.warning("Redis 异步连接失败（客户端构建为空），将使用内存缓存")
+                    self.redis_client = None
             except Exception as e:  # defensive: 连接失败不得阻断启动，降级到内存缓存
                 logger.warning("Redis 异步连接失败，将使用内存缓存: %s", e)
                 self.redis_client = None
@@ -450,7 +455,8 @@ class RedisCacheManager:
             return new_value
 
     async def get_stats(self) -> dict:
-        stats = {
+        # 值异构（str/bool/int），显式放宽，避免 mypy 从首两条推断窄类型后报 assignment
+        stats: dict[str, Any] = {
             'backend': 'redis' if self.redis_client else 'memory',
             'connected': self.redis_client is not None
         }
