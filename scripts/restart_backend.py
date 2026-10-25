@@ -19,6 +19,13 @@ import time
 import urllib.error
 import urllib.request
 
+# GBK 控制台会炸 emoji print（2026-10-25 实证：重启成功但 print('✅') 抛
+# UnicodeEncodeError → exit 1，部署核验被误判 INCOMPLETE）。入口统一重配置，
+# 输出不再依赖终端码页。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 SERVICE_NAME = "erp-prod"
 HEALTH_URL = "http://127.0.0.1:5002/api/health"
 NSSM_CANDIDATES = (r"C:\nssm\nssm.exe", r"C:\Program Files\nssm\nssm.exe")
