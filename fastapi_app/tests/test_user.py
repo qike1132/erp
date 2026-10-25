@@ -1,4 +1,5 @@
 """用户管理模块测试"""
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -443,8 +444,9 @@ class TestUserEndpoints:
         mock_user.status = True
         mock_user.factory = None
         mock_user.department = None
-        mock_user.create_time = MagicMock()
-        mock_user.create_time.strftime.return_value = "2024-01-01 00:00"
+        # 真实 aware datetime：序列化已改走 fmt_business（astimezone 链），
+        # MagicMock+strftime.return_value 夹具会断链返回裸 mock 导致 pydantic 拒收
+        mock_user.create_time = datetime(2024, 1, 1, 0, 0, tzinfo=UTC)
         mock_user.permissions = []
 
         mock_result = MagicMock()

@@ -10,6 +10,7 @@
 
 使用 mock_async_db + mock_user fixtures，无需数据库。
 """
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,8 +56,9 @@ class TestGetSuppliers:
         supplier.address = '测试地址'
         supplier.remark = '备注'
         supplier.status = True
-        supplier.created_at = MagicMock()
-        supplier.created_at.strftime.return_value = '2024-01-01 12:00'
+        # 真实 aware datetime（UTC 04:00 = 北京 12:00）：to_dict 序列化已改走
+        # fmt_business（astimezone 链），MagicMock+strftime.return_value 会断链
+        supplier.created_at = datetime(2024, 1, 1, 4, 0, tzinfo=UTC)
 
         mock_execute = AsyncMock()
         mock_async_db.execute = mock_execute
