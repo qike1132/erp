@@ -13,6 +13,7 @@ import locale
 import shutil
 import subprocess
 import time
+from typing import NamedTuple
 
 from server_manager import git_guard, windows_ops
 from server_manager.constants import (
@@ -69,6 +70,26 @@ def decode_output(raw, *, strip=False):
         except Exception:  # noqa: S112 - 解码探测，失败即试下一种编码
             continue
     return _fin(raw.decode('utf-8', errors='replace'))
+
+
+class ServiceRunResult(NamedTuple):
+    """启动/重启的结构化结果（2026-10-25 上线前检查 B1）。
+
+    「服务终态在跑」与「本次重启已生效」是两个独立事实，此前共用一个
+    ``ok=True`` —— 同 PID（停机未停成，服务从未换过进程）也被当成功返回，
+    调用方（发布脚本/界面）随后用不绑定版本的健康检查验收，旧代码被当
+    新版本发布（假成功）。拆分后：
+
+    - ``ok``：服务终态是否 RUNNING（"现在在跑"）。
+    - ``effective``：本次动作是否**验证生效**——启动路径 = RUNNING；重启路径
+      还要求新 PID 与停机前不同（PID 不可读同样不算，宁可误报不可漏报）。
+      发布验收必须同时要求两者，绝不能只看 ``ok``。
+    """
+
+    ok: bool
+    state: str
+    pid: int | None
+    effective: bool
 
 
 class ServiceOps:
@@ -587,7 +608,8 @@ class ServiceOps:
         停前先记 PID：停后 PID 未变即服务从未停成（SCM 因依赖方在跑而拒停），本次
         「重启」实际没发生 —— 由 ``wait_service_running`` 据此改报「未生效」而非「启动成功」。
 
-        返回 ``(ok, state, pid)``，与 ``start_one_service`` 一致。
+        返回 :class:`ServiceRunResult`（ok/state/pid/effective），与 ``start_one_service``
+        一致。发布类调用方必须同时校验 ``ok and effective``。
         """
         nssm = nssm or self.find_nssm()
         # 2026-10-18 OCR 复评：闸门必须在**任何副作用之前**（记录 prev_pid 之前），
@@ -739,32 +761,40 @@ class ServiceOps:
                     self._msg_queue.put(('log', {'text': f'{name} 在 45s 内未确认 STOPPED（当前: {self.svc_state(name)}），请到服务管理器检查', 'level': 'WARNING'}))
         self._msg_queue.put(('hosting_refresh', {}))
 
-    def wait_service_running(self, name, timeout=25, prev_pid=None):
-        """轮询直到服务 RUNNING；返回 (ok, state, pid)，成功/超时都写日志。
+    def wait_service_running(self, name, timeout=25, prev_pid=None) -> ServiceRunResult:
+        """轮询直到服务 RUNNING；返回 :class:`ServiceRunResult`，成功/超时都写日志。
 
         NSSM start/restart 立即返回，服务要经 START_PENDING 才到 RUNNING——
         不轮询就报「已执行」等于什么都没说。超时仍未 RUNNING 如实告警并指路日志文件。
 
         ``prev_pid`` 由**重启**路径传入停机前的 PID：停后 PID 未变 = 服务从未停成
         （如 SCM 因「有正在运行的依赖方」拒停 erp-redis / erp-redis-broker），本次
-        「重启」实际没发生。此时若只报「启动成功」，运维会误以为配置已生效（改
-        redis.conf 后点重启的典型场景）——故改报「未生效」。
+        「重启」实际没发生。此时 ``ok=True``（服务确实在跑）但 ``effective=False``，
+        消费方**不得**把该结果当重启成功——发布验收只看 ok 会把旧代码当新版本放行
+        （2026-10-25 上线前检查 B1 正是拿掉了这个假成功口子）。PID 探测失败同理：
+        身份未经证实，effective=False 并告警。
         """
         state = self.wait_service(name, 'RUNNING', timeout)
         if 'RUNNING' in state.upper():
             pid = self.svc_pid(name)
-            if prev_pid is not None and pid == prev_pid:
-                self._msg_queue.put(('log', {
-                    'text': f'{name} 仍是原进程 (PID: {pid})，本次重启未生效（停机未停成）',
-                    'level': 'WARNING'}))
-                return True, state, pid
+            if prev_pid is not None:
+                if pid is None:
+                    self._msg_queue.put(('log', {
+                        'text': f'{name} 已 RUNNING 但读取新 PID 失败，无法验证本次重启是否生效',
+                        'level': 'WARNING'}))
+                    return ServiceRunResult(True, state, None, False)
+                if pid == prev_pid:
+                    self._msg_queue.put(('log', {
+                        'text': f'{name} 仍是原进程 (PID: {pid})，本次重启未生效（停机未停成）',
+                        'level': 'WARNING'}))
+                    return ServiceRunResult(True, state, pid, False)
             self._msg_queue.put(('log', {'text': f'{name} 启动成功 (state={state}, PID: {pid if pid is not None else "?"})'}))
-            return True, state, pid
+            return ServiceRunResult(True, state, pid, True)
         self._msg_queue.put(('log', {'text': f'{name} 在 {timeout}s 内未进入 RUNNING（当前: {state}），请查看 logs\\{name}.log', 'level': 'WARNING'}))
-        return False, state, None
+        return ServiceRunResult(False, state, None, False)
 
-    def start_one_service(self, name, timeout=25, prev_pid=None):
-        """发出启动命令并轮询确认 RUNNING；返回 (ok, state, pid)。
+    def start_one_service(self, name, timeout=25, prev_pid=None) -> ServiceRunResult:
+        """发出启动命令并轮询确认 RUNNING；返回 :class:`ServiceRunResult`。
 
         ``prev_pid`` 透传给 ``wait_service_running``，供重启路径判定本次是否真的重启。
         """

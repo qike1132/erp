@@ -75,10 +75,12 @@ TYPE_CASE_STOCKOUTS = 'case_stockouts'
 TYPE_PRODUCTS = 'products'
 TYPE_COMPREHENSIVE = 'comprehensive'
 
-#: 上传体积上限（端点级兜底）。core/middleware.py 的路径级上限对 /batch/import-*
-#: 走全局 10MB（未进放宽名单），此处与该有效值同口径声明——体积的真正校验由
-#: 端点内常量负责（见 middleware.py「H-2」注释），声明值不得高于中间件有效值，
-#: parity 由 fastapi_app/tests/test_request_body_limit_paths.py 锁定。
+#: 上传体积上限（端点级兜底，**文件级**口径）。multipart 请求体 = 文件 + 边界/
+#: 字段头开销，外层 body 预算由 core/middleware.py 的放宽名单给足余量
+#: （文件 10MB + _MULTIPART_OVERHEAD_BYTES），nginx 同步放宽到 12m——否则
+#: 「恰好 10MB 的合法文件」会在抵达端点前被 413（M2，2026-10-25 上线前检查）。
+#: 本常量校验的是文件本体大小，对用户承诺的语义不变；parity 由
+#: fastapi_app/tests/test_request_body_limit_paths.py 锁定。
 MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 

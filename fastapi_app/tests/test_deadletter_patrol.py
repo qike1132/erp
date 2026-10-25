@@ -1,8 +1,12 @@
 """死信巡检任务（M-C，2026-10-25 审计）的回归测试。
 
 行为锁定：
-- handler 级死信（stage=handler/handler_cross_process，近24h）→ critical 告警；
-- ARQ DLQ 残留 → warning 告警；
+- handler 级死信（stage=handler/handler_cross_process，近24h）→ critical 告警，
+  外发文本不含异常原文（M4：截断不等于脱敏）；
+- ARQ DLQ 残留 → critical 告警（M3：原 warning 受 failure_threshold=3 约束，
+  每日巡检头两次不外发；critical 首次即通知）；
+- Redis DLQ 状态不可知 → critical 告警 + 任务按失败收尾（M1：unknown 洗成
+  「空队列」是假健康）；
 - 只有广播死信 → 不告警（Redis 重启窗口属常态，不打扰）；
 - 时间窗外/坏行不计数；死信文件不存在 → 空结果不告警。
 """
@@ -113,32 +117,73 @@ async def test_handler_deadletter_alerts_critical(monkeypatch, alert_spy, dlq_em
 
 
 @pytest.mark.asyncio
-async def test_dlq_length_uses_llen_not_get(monkeypatch):
-    """评审 H-1 锁：arq:dead_letter 是 List，必须走 safe_llen。
+async def test_handler_alert_error_is_sanitized_not_raw_exception(monkeypatch, alert_spy, dlq_empty, tmp_path):
+    """M4 锁：外发告警只给结构化字段（handler 名），不得携带异常原文。
+
+    变异：把实现改回在 error 里拼 _sample_desc（含 error 字段原文），本测试必红。
+    """
+    path = tmp_path / 'deadletter.jsonl'
+    _write(path, [_handler_rec(1.0)])
+    monkeypatch.setattr(patrol, 'default_deadletter_path', lambda: path)
+
+    await patrol.run_deadletter_patrol()
+
+    error_text = alert_spy[0]['error']
+    assert 'on_order_deleted' in error_text, '外发必须含 handler 名（定位用）'
+    assert 'cannot import name' not in error_text, '异常原文不得外发（M4）'
+    assert '敏感' not in error_text
+
+
+@pytest.mark.asyncio
+async def test_dlq_length_uses_three_state_llen(monkeypatch):
+    """H-1 + M1 锁：DLQ 长度必须走三态 safe_llen_ex（List 用 LLEN）。
 
     safe_get（Redis GET）打在 List 上抛 WRONGTYPE、被底层缓存层吞成 None →
-    恒报 0，DLQ 残留的 warning 分支成为死代码。变异：把实现改回 safe_get
-    本测试必红（safe_get 被调用 / 返回值不来自 llen）。
+    恒报 0；safe_llen（二态折叠版）又把「查不出来」洗成 0——两者都是假健康。
+    变异：把实现改回 safe_get / safe_llen，本测试必红。
     """
     calls: list[tuple[str, str]] = []
 
-    async def fake_llen(key, context=''):
-        calls.append(('llen', key))
+    async def fake_llen_ex(key, context=''):
+        calls.append(('llen_ex', key))
         return 4
 
     async def fake_get(key, default=None, context=''):
         calls.append(('get', key))
         return default
 
-    monkeypatch.setattr('fastapi_app.core.redis_wrapper.safe_llen', fake_llen)
+    monkeypatch.setattr('fastapi_app.core.redis_wrapper.safe_llen_ex', fake_llen_ex)
     monkeypatch.setattr('fastapi_app.core.redis_wrapper.safe_get', fake_get)
 
     assert await patrol._redis_dlq_length() == 4
-    assert calls == [('llen', patrol.ARQ_DLQ_KEY)], 'DLQ 长度必须经 safe_llen 读取，不得用 safe_get'
+    assert calls == [('llen_ex', patrol.ARQ_DLQ_KEY)], 'DLQ 长度必须经三态 safe_llen_ex 读取'
 
 
 @pytest.mark.asyncio
-async def test_dlq_residue_alerts_warning(monkeypatch, alert_spy, tmp_path):
+async def test_dlq_unknown_alerts_critical_and_task_fails(monkeypatch, alert_spy, tmp_path):
+    """M1 锁：Redis 不可知 ≠ 空队列。必须 critical 外发 + 任务按失败收尾。
+
+    变异：把 unknown 折叠成 0（走「无残留」分支），本测试必红（无告警/success=True）。
+    """
+    async def fake_len():
+        return None
+    monkeypatch.setattr(patrol, '_redis_dlq_length', fake_len)
+    monkeypatch.setattr(patrol, 'default_deadletter_path', lambda: tmp_path / 'none.jsonl')
+
+    task_result = await patrol.inspect_deadletter_task({})
+
+    assert task_result['dlq_status'] == 'unknown'
+    assert task_result['arq_dlq_len'] is None
+    assert len(alert_spy) == 1
+    assert alert_spy[0]['severity'] == 'critical'
+    assert '无法读取 Redis DLQ' in alert_spy[0]['error']
+    assert task_result['success'] is False, 'unknown 时巡检任务必须记失败'
+    assert task_result['status'] == 'error', "status='error' 让 _tracked_job 记 failed（失败链 critical）"
+
+
+@pytest.mark.asyncio
+async def test_dlq_residue_alerts_critical_on_first_occurrence(monkeypatch, alert_spy, tmp_path):
+    """M3 锁：DLQ 残留必须 critical（首次即外发），不得走 warning 阈值。"""
     async def fake_len():
         return 2
     monkeypatch.setattr(patrol, '_redis_dlq_length', fake_len)
@@ -148,7 +193,36 @@ async def test_dlq_residue_alerts_warning(monkeypatch, alert_spy, tmp_path):
 
     assert result['arq_dlq_len'] == 2
     assert len(alert_spy) == 1
-    assert alert_spy[0]['severity'] == 'warning'
+    assert alert_spy[0]['severity'] == 'critical', 'warning 受 failure_threshold 约束会静默两轮（M3）'
+
+
+@pytest.mark.asyncio
+async def test_critical_alert_bypasses_failure_threshold(monkeypatch):
+    """M3 配套锁：alert_service 的 critical 级别必须绕过 failure_threshold=3。
+
+    模拟真实链路：只替换邮件/webhook 两个出口（记录调用），failure_counts 从零
+    开始、阈值 3——第一次 critical 就必须触发通知。变异（critical 也走阈值）
+    本测试必红。
+    """
+    from fastapi_app.services.backup.metrics.alert_service import alert_service as real_svc
+
+    sent = []
+    monkeypatch.setattr(real_svc, 'failure_counts', {}, raising=False)
+    monkeypatch.setattr(real_svc, 'last_alert_times', {}, raising=False)
+    monkeypatch.setitem(real_svc.alert_config, 'failure_threshold', 3)
+    monkeypatch.setitem(real_svc.alert_config, 'email_enabled', True)
+    monkeypatch.setitem(real_svc.alert_config, 'webhook_enabled', False)
+
+    async def fake_email(_data):
+        sent.append('email')
+        return True
+
+    monkeypatch.setattr(real_svc, '_send_email_alert', fake_email)
+    ok = await real_svc.send_alert(
+        task_name='deadletter-patrol', error='ARQ 死信队列残留 2 条',
+        task_type='deadletter_patrol', severity='critical',
+    )
+    assert ok is True and sent == ['email'], f'critical 首次必须外发，实际 sent={sent}'
 
 
 @pytest.mark.asyncio

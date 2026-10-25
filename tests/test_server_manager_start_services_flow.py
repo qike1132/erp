@@ -16,6 +16,7 @@
 """
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -56,7 +57,13 @@ class TestStartServicesFlow:
         monkeypatch.setattr(app, '_ensure_development_stopped', lambda *a, **k: (calls.__setitem__('dev_stopped', calls['dev_stopped'] + 1) or False), raising=False)
         monkeypatch.setattr(app, '_release_ports', lambda *a, **k: calls.__setitem__('release_ports', calls['release_ports'] + 1), raising=False)
         monkeypatch.setattr(app, '_ensure_redis_broker', lambda *a, **k: (calls.__setitem__('broker', calls['broker'] + 1) or True), raising=False)
-        monkeypatch.setattr(app, '_start_one_service', lambda *a, **k: (calls.__setitem__('start_one', calls['start_one'] + 1) or True), raising=False)
+        # B1（2026-10-25）：启动结果改为 ServiceRunResult 形态（ok/state/pid/effective），
+        # _start_services_flow 按「在跑且已验证生效」汇总，替身须给全四个属性。
+        monkeypatch.setattr(
+            app, '_start_one_service',
+            lambda *a, **k: (calls.__setitem__('start_one', calls['start_one'] + 1)
+                             or SimpleNamespace(ok=True, state='4 RUNNING', pid=1, effective=True)),
+            raising=False)
         monkeypatch.setattr(app, '_verify_installed_service_paths', lambda *a, **k: None, raising=False)
         monkeypatch.setattr(app, 'log_message', lambda *a, **k: None, raising=False)
 

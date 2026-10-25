@@ -215,16 +215,28 @@ async def safe_release_lock(key: str, token: str, context: str = "") -> None:
         logger.warning("%s释放锁失败: %s", _ctx(context, key), e)
 
 
-async def safe_llen(key: str, context: str = "") -> int:
-    """安全获取 List 长度"""
+async def safe_llen_ex(key: str, context: str = "") -> int | None:
+    """三态 List 长度：``None`` = 状态不可知（M1，2026-10-25 上线前检查）。
+
+    ``safe_llen`` 把「client 缺失 / 基础设施异常」全部折叠成 0——对缓存类调用
+    是合理降级，但对**以 0 为语义**的消费者（死信巡检「队列空 = 一切正常」）
+    是假健康：故障被洗成「无残留」。需要区分「真实空队列」与「查不出来」的
+    调用方必须用本函数，unknown 分支自行显式失败/告警。
+    """
     try:
         client = get_client()
         if client is None:
-            return 0
-        return await client.llen(key)
+            return None
+        return int(await client.llen(key))
     except INFRA_EXCEPTIONS as e:
         logger.warning("%sllen失败: %s", _ctx(context, key), e)
-        return 0
+        return None
+
+
+async def safe_llen(key: str, context: str = "") -> int:
+    """安全获取 List 长度（不可知折叠为 0；需要三态语义请用 ``safe_llen_ex``）"""
+    n = await safe_llen_ex(key, context)
+    return n if n is not None else 0
 
 
 async def safe_lrem(key: str, count: int, value: Any, context: str = "") -> int:

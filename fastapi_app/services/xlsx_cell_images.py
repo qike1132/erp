@@ -78,7 +78,17 @@ def extract_cell_images(xlsx_path: str) -> dict[str, bytes]:
         dict[str, bytes]: 图片 ID → 图片字节。解压总量超过
             :data:`MAX_EXTRACTED_IMAGE_BYTES` 时放弃提取并返回空字典。
     """
+    # M5（2026-10-25）：统一 ZIP 前置预算（成员数/压缩比/解压总量）。图片总量
+    # 的 64MiB 上限只看 cellimages 关联的媒体成员；本闸门兜住关系/XML 等其余成员。
+    # 放进主 try（契约：任何失败都返回空 dict，不阻断导入主流程）。
+    from fastapi_app.services.xlsx_budget import XlsxBudgetError, assert_zip_budget
+
     try:
+        try:
+            assert_zip_budget(xlsx_path)
+        except XlsxBudgetError as exc:
+            logger.warning('单元格图片提取前置预算未通过: %s', exc)
+            return {}
         with zipfile.ZipFile(xlsx_path) as zf:
             names = set(zf.namelist())
             if 'xl/cellimages.xml' not in names:

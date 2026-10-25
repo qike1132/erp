@@ -198,7 +198,10 @@ async def test_on_job_end_failed_writes_failed_and_dlq(monkeypatch) -> None:
     assert len(alerts) == 1
     assert alerts[0]['task_name'] == 'arq:demo_task'
     assert alerts[0]['severity'] == 'critical'
-    assert 'ValueError: boom' in alerts[0]['error']
+    # M4（2026-10-25）：外发告警只给类型名 + 关联 ID，异常原文（'boom'）不得外发——
+    # 截断不等于脱敏；原文保留在上方日志与死信条目（entry['exception'] == 'boom'）。
+    assert 'ValueError' in alerts[0]['error']
+    assert 'boom' not in alerts[0]['error']
 
 
 async def test_on_job_end_without_outcome_keeps_legacy_success(monkeypatch) -> None:

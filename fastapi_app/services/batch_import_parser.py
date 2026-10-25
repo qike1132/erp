@@ -15,6 +15,11 @@ from typing import Any
 from zipfile import BadZipFile
 
 from fastapi_app.schemas.batch import BatchImportResult, ExcelUpload
+from fastapi_app.services.xlsx_budget import (
+    assert_rows_within_budget,
+    assert_zip_budget,
+    run_parse_with_timeout,
+)
 from fastapi_app.services.xlsx_cell_images import extract_cell_images
 from fastapi_app.utils import parse_date_value as _shared_parse_date_value
 from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
@@ -42,10 +47,11 @@ def _looks_like_xlsx(file_path: str) -> bool:
 def _bad_xlsx_message() -> str:
     return '文件无法解析，请确认是有效的 .xlsx 文件（可重新下载模板填写）'
 
-#: 上传文件大小上限。产品导入模板可内嵌 WPS 单元格图片，工作簿体积随图片数量增长
-#: （实测 33 张图 ≈ 2.3MB），5MB 很快就成为瓶颈；10MB 与 nginx
-#: ``client_max_body_size 10m``（config/nginx-windows.conf）对齐，使后端的友好报错
-#: 与反向代理的硬限制一致，不会出现「nginx 先 413、用户看不到原因」。
+#: 上传文件大小上限（**文件级**口径）。产品导入模板可内嵌 WPS 单元格图片，
+#: 工作簿体积随图片数量增长（实测 33 张图 ≈ 2.3MB），5MB 很快就成为瓶颈。
+#: 10MB 是对用户承诺的文件上限；multipart 请求体 = 文件 + 开销，外层 body
+#: 预算由 core/middleware.py 放宽名单给足余量、nginx 同步 12m——本常量与
+#: 外层相等会造成「恰好 10MB 的合法文件被提前 413」（M2，2026-10-25）。
 MAX_BATCH_UPLOAD_SIZE = 10 * 1024 * 1024
 MAX_BATCH_UPLOAD_SIZE_MB = MAX_BATCH_UPLOAD_SIZE // 1024 // 1024
 
@@ -59,13 +65,20 @@ validate_customer_name = _shared_validate_customer_name
 # ==================== Excel 解析辅助 ====================
 
 async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) -> tuple[bool, list, str]:
-    """异步解析 Excel 文件（Polars 引擎，比 pandas 快 5x）"""
+    """异步解析 Excel 文件（Polars 引擎，比 pandas 快 5x）。
+
+    M5（2026-10-25）：前置 ZIP 预算（成员数/压缩比/解压总量）+ 物化前行列上限
+    + 解析超时——请求体 10MiB 只限压缩后体积，防不住解压膨胀与病态工作簿。
+    预算失败与解析失败同口径：返回 (False, [], 友好消息)，不向调用方抛异常。
+    """
     if file_path.lower().endswith(_XLSX_SUFFIXES) and not _looks_like_xlsx(file_path):
         return False, [], _bad_xlsx_message()
     loop = asyncio.get_running_loop()
 
     def _sync_parse():
         try:
+            assert_zip_budget(file_path)
+
             import math
 
             import polars as pl
@@ -76,6 +89,7 @@ async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) 
                 if df is None or df.is_empty():
                     return False, [], "Excel 文件为空"
 
+            assert_rows_within_budget(df.height, df.width)
             data_list = df.to_dicts()
             for row in data_list:
                 for key, value in row.items():
@@ -87,17 +101,18 @@ async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) 
         except (ValueError, TypeError, OSError, BadZipFile, CalamineError) as e:
             return False, [], str(e)
 
-    return await loop.run_in_executor(None, _sync_parse)
+    return await run_parse_with_timeout(loop.run_in_executor(None, _sync_parse))
 
 
 async def read_excel_sheets_async(file_path: str) -> tuple[bool, list, str]:
-    """读取 Excel 文件的所有 Sheet 名称"""
+    """读取 Excel 文件的所有 Sheet 名称（M5：ZIP 预算同口径折叠为失败消息）"""
     if file_path.lower().endswith(_XLSX_SUFFIXES) and not _looks_like_xlsx(file_path):
         return False, [], _bad_xlsx_message()
     loop = asyncio.get_running_loop()
 
     def _sync_read():
         try:
+            assert_zip_budget(file_path)
             from openpyxl import load_workbook
             wb = load_workbook(filename=file_path, read_only=True)
             sheets = wb.sheetnames
@@ -106,7 +121,7 @@ async def read_excel_sheets_async(file_path: str) -> tuple[bool, list, str]:
         except (ValueError, TypeError, OSError, BadZipFile, CalamineError) as e:
             return False, [], str(e)
 
-    return await loop.run_in_executor(None, _sync_read)
+    return await run_parse_with_timeout(loop.run_in_executor(None, _sync_read))
 
 
 def parse_date_value(date_value) -> datetime | None:

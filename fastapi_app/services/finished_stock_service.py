@@ -19,18 +19,31 @@ from fastapi_app.shared_models import DailyProductionRecord, FinishedStockRemark
 PACKAGING = 'packaging'
 
 
-def _batch_in_subq():
+def _factory_match(factory: str):
+    """读侧工厂条件：本厂产品 + 未分配工厂（NULL/空串）的历史行。
+
+    与 stock_inventory_service._factory_match / 写侧 factory_scope 放行口径一致：
+    product_service.create_product 落库未分配工厂写空串，必须一并放行，否则厂
+    绑定用户会丢全部历史产品（2026-10-18 P0-2 实证）。
+    """
+    return or_(Product.factory == factory, Product.factory.is_(None), Product.factory == '')
+
+
+def _batch_in_subq(factory: str = ''):
     """入库聚合：按 (产品, 批次) 分组。
 
     批次可用是 (产品,批次) 级事实——一个批次号编码一次生产，出货也按批次扣减；
     故**不**按客户拆行：若同一 (产品,批次) 有多个客户的入库行，拆行会让出货量在
     每行重复扣减（'' 桶承载全部存量数据，尤其常见）。
     客户只作展示：该批次入库行同属一个客户时显示该客户名，跨客户则显示 ''（未指定）。
+
+    ``factory`` 非空时按产品工厂收窄（DailyProductionRecord 本身无工厂字段，
+    经 product_id join Product 判定——H1，2026-10-25 上线前检查）。
     """
     batch_key = func.coalesce(DailyProductionRecord.batch_no, '')
     cust = func.coalesce(DailyProductionRecord.customer_name, '')
     display_cust = case((func.count(func.distinct(cust)) == 1, func.max(cust)), else_='')
-    return (
+    q = (
         select(
             display_cust.label('customer_name'),
             DailyProductionRecord.product_id.label('product_id'),
@@ -46,18 +59,24 @@ def _batch_in_subq():
             DailyProductionRecord.product_id.isnot(None),
         )
         .group_by(DailyProductionRecord.product_id, batch_key)
-        .subquery()
     )
+    if factory:
+        q = q.join(Product, Product.id == DailyProductionRecord.product_id).where(
+            _factory_match(factory))
+    return q.subquery()
 
 
-def _batch_out_subq():
+def _batch_out_subq(factory: str = ''):
     """出货聚合：按 (产品, 批次) 分组，排除备货抵扣行。
 
     不过滤 batch_no IS NULL：无批次出货（默认「不指定批次」路径 + 全部存量行）仍消耗
     产品级库存，必须落进 ''（未分批次）桶，否则该桶只减入库不减出货、可用量虚高。
+
+    ``factory`` 非空时出货行同样按产品工厂收窄——入/出两侧范围必须一致，否则
+    他厂出货会扣减本厂批次可用量（出现负数）。
     """
     batch_key = func.coalesce(StockOut.batch_no, '')
-    return (
+    q = (
         select(
             StockOut.product_id.label('product_id'),
             batch_key.label('batch_no'),
@@ -65,8 +84,11 @@ def _batch_out_subq():
         )
         .where(StockOut.stockin_id.is_(None))
         .group_by(StockOut.product_id, batch_key)
-        .subquery()
     )
+    if factory:
+        q = q.where(StockOut.product_id.in_(
+            select(Product.id).where(_factory_match(factory))))
+    return q.subquery()
 
 
 async def get_finished_stock_summary(
@@ -77,16 +99,20 @@ async def get_finished_stock_summary(
     batch_no: str = '',
     page: int = 1,
     per_page: int = 20,
+    factory: str = '',
 ) -> dict:
     """按 客户/产品/批次 聚合成品库存。
+
+    ``factory``：读侧工厂范围（端点由当前用户派生，见 finished_stock._factory_scope）；
+    空串 = 不限（超管/未绑定厂用户）。厂绑定用户只见本厂产品（含未分配工厂的历史行）。
 
     Returns:
         dict: {data, total, page, per_page, all_customers}
         data 每项：customer_name/product_name/barcode/batch_no/
                    batch_in_qty/batch_available/is_custom/custom_country
     """
-    bi = _batch_in_subq()
-    bo = _batch_out_subq()
+    bi = _batch_in_subq(factory)
+    bo = _batch_out_subq(factory)
 
     available = (bi.c.batch_in_qty - func.coalesce(bo.c.batch_out_qty, 0)).label('batch_available')
 
@@ -166,7 +192,7 @@ async def get_finished_stock_summary(
         for r in rows
     ]
 
-    all_customers = await _get_all_customers(db)
+    all_customers = await _get_all_customers(db, factory)
     return {
         'data': data,
         'total': int(total),
@@ -177,33 +203,37 @@ async def get_finished_stock_summary(
     }
 
 
-async def _get_all_customers(db: AsyncSession) -> list[str]:
+async def _get_all_customers(db: AsyncSession, factory: str = '') -> list[str]:
     """客户快捷切换栏客户列表。
 
     复用 /stock 的同一口径（``stock_inventory_service._get_all_customers``）：
     成员 = 出现在 stock_in 或「未软删 order」里的客户，按最近活动排序。
     不读 daily_production_record：包装部录入的客户可能为空（存量大量未填），
     用它会让 chips 时有时无；且 /stock 的客户源更完整、两页观感一致。
+    ``factory`` 透传给同一实现，快捷栏与列表行同范围（厂用户不见他厂客户）。
     """
     from fastapi_app.services.stock_inventory_service import _get_all_customers as _stock_customers
 
-    return await _stock_customers(db, None)
+    return await _stock_customers(db, None, factory)
 
 
 async def get_batches_by_product(
     db: AsyncSession,
     product_id: int,
     customer_name: str = '',
+    factory: str = '',
 ) -> list[dict]:
     """某产品的批次可用量列表（供 /stock-out 录入 SKU 后带出批次选择）。
 
     批次可用是 (产品, 批次) 级事实，与客户无关：``customer_name`` 仅为兼容既有
     API 签名而保留，**不参与过滤**（原因见下方注释）。
+    ``factory`` 非空时按产品工厂收窄（端点已先对 product_id 过工厂闸门，此处
+    再收窄出货侧聚合，保证可用量不会被他厂出货拉低——H1）。
 
     Returns: [{batch_no, available_quantity}]，按批次号升序（= 生产时间正序）。
     """
-    bi = _batch_in_subq()
-    bo = _batch_out_subq()
+    bi = _batch_in_subq(factory)
+    bo = _batch_out_subq(factory)
     available = (bi.c.batch_in_qty - func.coalesce(bo.c.batch_out_qty, 0)).label('available_quantity')
 
     q = (

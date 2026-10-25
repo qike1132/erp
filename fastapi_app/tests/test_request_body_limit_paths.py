@@ -57,10 +57,12 @@ def test_unlisted_path_keeps_default_limit():
 
 
 def test_endpoint_level_declared_limits_within_effective_middleware_limit():
-    """端点级新声明的体积兜底（batch 七端点 / packaging 上传）不得高于中间件有效上限。
+    """端点级文件上限（batch 七端点 / packaging 上传）必须小于中间件有效 body 上限。
 
-    这两处路径未进放宽名单、吃全局 10MB；端点常量与该有效值同口径声明，
-    漂移（端点声明 > 中间件有效值）会让 413 永远先被中间件拦下、端点常量成死配置。
+    M2（2026-10-25 上线前检查）：multipart 请求体 = 文件 + 边界/字段头开销。
+    body 上限与文件上限相等时，「恰好 10MB 的合法文件」会在抵达端点**之前**被
+    413——端点常量成死配置、用户看不到友好报错。中间件预算 = 文件上限 +
+    _MULTIPART_OVERHEAD_BYTES，本断言锁「严格大于」（余量存在）。
     """
     from fastapi_app.api.v1.endpoints.import_guard import (
         MAX_IMPORT_FILE_SIZE as GUARD_LIMIT,
@@ -69,10 +71,21 @@ def test_endpoint_level_declared_limits_within_effective_middleware_limit():
         MAX_PACKAGING_UPLOAD_SIZE,
     )
 
-    assert max_body_size_for_path('/api/v1/batch/import-orders') >= GUARD_LIMIT
+    assert max_body_size_for_path('/api/v1/batch/import-orders') > GUARD_LIMIT
     assert max_body_size_for_path(
         '/api/v1/production-summary/packaging/upload'
-    ) >= MAX_PACKAGING_UPLOAD_SIZE
+    ) > MAX_PACKAGING_UPLOAD_SIZE
+
+
+def test_multipart_overhead_is_covered_for_at_limit_file():
+    """恰好 10MB 文件 + multipart 开销的总 body 不得撞中间件上限（M2 核心）。"""
+    from fastapi_app.api.v1.endpoints.import_guard import MAX_IMPORT_FILE_SIZE
+    from fastapi_app.core.middleware import _MULTIPART_OVERHEAD_BYTES
+
+    limit = max_body_size_for_path('/api/v1/batch/import-comprehensive')
+    # 典型 multipart：单文件字段 + 边界两行 + 少量文本字段，开销远小于余量，
+    # 但必须至少容得下「文件恰好上限 + 1 字节以上的边界开销」。
+    assert limit >= MAX_IMPORT_FILE_SIZE + _MULTIPART_OVERHEAD_BYTES
 
 
 # --------------------------------------------------------------------------
@@ -95,6 +108,36 @@ async def test_ordinary_write_path_is_still_capped(client):
     """普通写路径仍然在 10MB 处拦截（豁免不得扩大化）。"""
     resp = await _post_declaring(client, '/api/v1/orders', _ABOVE_DEFAULT)
     assert resp.status_code == 413
+
+
+async def test_multipart_file_at_exact_limit_reaches_endpoint(client):
+    """M2 线级回归：恰好 10MB 文件的真实 multipart 请求不得被 413 挡在端点之外。
+
+    multipart body = 10MB 文件 + 边界/字段头开销 > 旧全局 10MB —— 修复前本用例
+    必红（413 来自中间件而非端点）。端点之后的业务响应（401/422/500…）不在本
+    断言范围，只锁「体积预算放行到端点」。
+    """
+    from fastapi_app.api.v1.endpoints.import_guard import MAX_IMPORT_FILE_SIZE
+
+    content = b'0' * MAX_IMPORT_FILE_SIZE
+    resp = await client.post(
+        '/api/v1/batch/import-orders',
+        files={'file': ('at-limit.xlsx', content,
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
+    )
+    assert resp.status_code != 413, (
+        f'恰好上限的合法文件被 413（multipart 开销未给余量）: {resp.status_code} {resp.text[:120]}'
+    )
+
+
+async def test_multipart_body_over_relaxed_budget_is_413(client):
+    """M2 边界：body 超过放宽预算（文件 12MB > 10MB 文件上限 + 余量）仍要 413。"""
+    oversize = b'0' * (10 * 1024 * 1024 + 3 * 1024 * 1024)
+    resp = await client.post(
+        '/api/v1/batch/import-orders',
+        files={'file': ('too-big.xlsx', oversize, 'application/octet-stream')},
+    )
+    assert resp.status_code == 413, f'超预算 body 未被拦下: {resp.status_code}'
 
 
 # --------------------------------------------------------------------------
@@ -122,10 +165,13 @@ def _location_body_limits(conf_text: str) -> dict[str, int]:
     return limits
 
 
-def test_deployed_nginx_relaxes_exactly_the_two_upload_paths():
-    """部署的 nginx 只应给备份/导入两个 location 放宽（不扩大到其它路径）。"""
+def test_deployed_nginx_relaxes_exactly_the_declared_upload_paths():
+    """部署的 nginx 只应给四组上传 location 放宽（备份 / ARQ 导入 / batch / packaging）。"""
     limits = _location_body_limits(_NGINX_CONF.read_text(encoding='utf-8'))
-    assert set(limits) == {'/api/v1/backup/', '/api/v1/tasks/import-'}, (
+    assert set(limits) == {
+        '/api/v1/backup/', '/api/v1/tasks/import-',
+        '/api/v1/batch/', '/api/v1/production-summary/',
+    }, (
         f'nginx location 级上限的覆盖范围与预期不符: {sorted(limits)}'
     )
 
@@ -138,6 +184,18 @@ def test_deployed_nginx_backup_limit_covers_declared_backup_max_size():
 def test_deployed_nginx_import_limit_covers_declared_import_max_size():
     limits = _location_body_limits(_NGINX_CONF.read_text(encoding='utf-8'))
     assert limits['/api/v1/tasks/import-'] >= MAX_IMPORT_FILE_SIZE
+
+
+def test_deployed_nginx_excel_limits_leave_multipart_headroom():
+    """M2：nginx 对 batch/packaging 的 body 上限必须大于端点文件上限（余量给足）。"""
+    from fastapi_app.api.v1.endpoints.import_guard import MAX_IMPORT_FILE_SIZE
+    from fastapi_app.api.v1.endpoints.production_summary import MAX_PACKAGING_UPLOAD_SIZE
+
+    limits = _location_body_limits(_NGINX_CONF.read_text(encoding='utf-8'))
+    assert limits['/api/v1/batch/'] > MAX_IMPORT_FILE_SIZE, (
+        'nginx 与文件上限相等 = 恰好 10MB 的合法文件被边缘 413（M2）'
+    )
+    assert limits['/api/v1/production-summary/'] > MAX_PACKAGING_UPLOAD_SIZE
 
 # --------------------------------------------------------------------------
 # 无 Content-Length（chunked / 流式）请求体上限（P0-12）

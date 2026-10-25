@@ -37,8 +37,10 @@ from fastapi_app.shared_models import User
 
 router = APIRouter()
 
-#: 包装部 Excel 上传体积上限（端点级兜底）。该路径未进 core/middleware.py 的
-#: 放宽名单，走全局 10MB；此处与该有效值同口径声明，超出即 413。
+#: 包装部 Excel 上传体积上限（端点级兜底，**文件级**口径）。multipart 请求体 =
+#: 文件 + 边界/字段头开销，外层 body 预算由 core/middleware.py 的放宽名单给足
+#: 余量、nginx 同步 12m——本常量若与外层相等，「恰好 10MB 的合法文件」会在
+#: 抵达端点前被 413（M2，2026-10-25 上线前检查）。
 MAX_PACKAGING_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 
@@ -310,7 +312,7 @@ async def upload_packaging_excel(
     filename = file.filename or ''
     if not filename.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail='仅支持 .xlsx 格式文件，.xls 已不再支持')
-    # 端点级体积兜底（与 core/middleware.py 全局 10MB 同口径；该路径未进放宽名单）
+    # 端点级体积兜底（文件级 10MB；multipart body 的余量由 core/middleware.py 放宽名单负责）
     declared = getattr(file, 'size', None)
     if declared is not None and declared > MAX_PACKAGING_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail=f'文件超过 {MAX_PACKAGING_UPLOAD_SIZE // 1024 // 1024}MB 上传限制')
