@@ -233,6 +233,7 @@ from fastapi_app.tasks.batch_tasks import (
     batch_import_orders_task,
     batch_import_stockins_task,
 )
+from fastapi_app.tasks.deadletter_patrol_task import inspect_deadletter_task
 from fastapi_app.tasks.inventory_reconcile_task import (
     inventory_reconcile_cron_entry,
     inventory_reconcile_task,
@@ -259,7 +260,7 @@ from fastapi_app.tasks.report_tasks import export_report_task
 # 注意它只是上限——任务体必须抛 ``Retry`` 才会真正重放（ARQ 0.28 语义）。
 
 # 日级 cron：worker 停机跨越触发点会永久漏跑，由 catch_up_daily_crons 补跑
-_DAILY_CRON_NAMES = {"sync-shipment-daily", "log-maintenance"}
+_DAILY_CRON_NAMES = {"sync-shipment-daily", "log-maintenance", "deadletter-patrol"}
 _CRON_LAST_OK_PREFIX = "cron_last_ok:"
 
 
@@ -329,6 +330,16 @@ cron_schedules: list[dict[str, Any]] = [
         'cron': {'hour': 4, 'minute': 30},
         'schedule': '4:30',
         'timeout': 120,
+    },
+    {
+        # 死信巡检（M-C，2026-10-25 审计）：handler 级死信/cron:dead_letter 只增
+        # 不消费，H-1 型静默断流靠人翻日志才发现。每日 06:30（业务日 08:00 备份
+        # 与 01:00 同步之外的低峰点）扫一次，发现即走 alert_service 告警。
+        'name': 'deadletter-patrol',
+        'func': inspect_deadletter_task,
+        'cron': {'hour': 6, 'minute': 30},
+        'schedule': '6:30',
+        'timeout': 60,
     },
     {
         # 编号不变量巡检：counter_behind（数据号 > 水位）与格式违规落库，
@@ -496,6 +507,8 @@ class WorkerSettings:
             maintain_logs_task,
             replica_lag_task,
             catch_up_daily_crons,
+            # deadletter-patrol 同为日级 cron + catchup 按名入队（M-C），必须注册
+            inspect_deadletter_task,
         )
     ]
     cron_jobs = cron_jobs

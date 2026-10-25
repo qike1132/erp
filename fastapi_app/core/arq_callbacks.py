@@ -144,6 +144,20 @@ async def _handle_job_failure(ctx, exc) -> None:
         'ALERT: ARQ任务失败需人工介入 func=%s id=%s exc=%s',
         func_name, job_id, exc,
     )
+    # M-C（2026-10-25 审计）：接入 alert_service（critical 恒通知）。此前告警只有
+    # 日志行——H-1 出货同步断流 3 天、408 条错误日志无人发现即后果。owner 配置
+    # BACKUP_ALERT_EMAIL_/WEBHOOK_ 后自动外推；未配置时失败计数/冷却逻辑照常工作。
+    try:
+        from fastapi_app.services.backup.metrics.alert_service import alert_service
+        await alert_service.send_alert(
+            task_name=f'arq:{func_name}',
+            error=f'{type(exc).__name__}: {exc}',
+            task_type='arq_task',
+            severity='critical',
+            additional_info={'job_id': job_id, 'job_try': job_try, 'max_tries': max_tries},
+        )
+    except Exception as alert_exc:  # defensive: 告警失败不得影响失败收尾链路
+        logger.warning('ARQ 任务失败告警发送异常（忽略）: %s', alert_exc)
 
 
 async def _push_to_dead_letter(entry: dict):
