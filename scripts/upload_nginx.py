@@ -64,7 +64,26 @@ sudo nginx -T 2>/dev/null | grep client_max_body_size | head -1
     ssh.close()
     print("\n✅ Done!")
 
+def deprecated_guard_engaged(argv: list[str]) -> bool:
+    """L-3（2026-10-25 上线前审计）弃用守卫：未显式 ``--accept-deprecated`` 时返回 True。
+
+    本脚本面向**远端 Linux** nginx（systemctl/nginx -t），上传的是本仓死配置
+    config/nginx.conf（其 root /app 在 Windows 永不生效）；本机生产生效配置是
+    config/nginx-windows.conf（erp-web 服务直读，无需上传）。历史遗留工具，
+    勿在当前拓扑误用——确需远端部署时显式传 --accept-deprecated。
+    """
+    if "--accept-deprecated" not in argv:
+        print("Deprecated: remote-Linux nginx uploader for the dead config/nginx.conf.")
+        print("Live config on this host = config/nginx-windows.conf (erp-web).")
+        print("Pass --accept-deprecated to override.")
+        return True
+    return False
+
+
 if __name__ == "__main__":
+    if deprecated_guard_engaged(sys.argv[1:]):
+        sys.exit(1)
+
     if not LOCAL_CONFIG.exists():
         print(f"❌ Config not found: {LOCAL_CONFIG}")
         sys.exit(1)
