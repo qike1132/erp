@@ -95,3 +95,56 @@ def test_order_serializer_order_date_is_beijing():
     result = OrderSerializer._format_value(
         OrderField.ORDER_DATE, datetime(2026, 10, 24, 18, 0, tzinfo=UTC))
     assert result == '2026-10-25 02:00', 'UTC 18:00 必须显示为北京次日 02:00'
+
+
+# ---------------------------------------------------------------------------
+# M-1（2026-10-25 上线前审计）残留簇：报表导出/统一流水/箱包流水的 aware 列
+# 裸 strftime 收口 fmt_business。期望值手工推导：UTC 18:00/18:05/18:30 = 北京
+# 次日 02:00/02:05/02:30（跨日）。
+# ---------------------------------------------------------------------------
+def test_fmt_business_variants_cover_m1_call_sites():
+    """date-only / 月份键 / 带秒三种 fmt 变体（M-1 各落点的口径锁）。"""
+    dt = datetime(2026, 10, 24, 18, 30, 5, tzinfo=UTC)
+    assert fmt_business(dt, '%Y-%m-%d') == '2026-10-25'
+    assert fmt_business(dt, '%Y-%m') == '2026-10'
+    assert fmt_business(dt, '%Y-%m-%d %H:%M:%S') == '2026-10-25 02:30:05'
+    assert fmt_business(None, '%Y-%m') == ''
+
+
+def test_unified_fmt_datetime_is_beijing():
+    """订单统一流水 _fmt_datetime（order/stockin 两类 timestamptz 共用）。"""
+    from fastapi_app.services.order.unified import _fmt_datetime
+
+    assert _fmt_datetime(datetime(2026, 10, 24, 18, 0, tzinfo=UTC)) == '2026-10-25 02:00'
+    assert _fmt_datetime(None) == ''
+
+
+def test_case_movement_serializer_is_beijing():
+    """箱包出入库流水序列化（movement_date/create_time 均 timestamptz）。"""
+    from types import SimpleNamespace
+
+    from fastapi_app.services.case._serializers import _serialize_movement
+
+    m = SimpleNamespace(
+        id=1, case_id=1, case=None, direction='in', movement_no='CM-1',
+        quantity=2, customer='客户A', note=None,
+        movement_date=datetime(2026, 10, 24, 18, 5, tzinfo=UTC),
+        create_time=datetime(2026, 10, 24, 18, 30, 5, tzinfo=UTC),
+    )
+    d = _serialize_movement(m)
+    assert d['movement_date'] == '2026-10-25', 'UTC 18:05 = 北京次日 02:05 → 日期落 10-25'
+    assert d['create_time'] == '2026-10-25 02:30:05'
+
+
+def test_auxiliary_business_month_str_business_tz():
+    """L-2（2026-10-25 审计）：辅助台账月份键与单号系统同源（业务时区）。
+
+    旧实现 ``datetime.now(UTC).strftime('%Y-%m')`` 与 numbering_sequence 的
+    业务时区是两个"当期"源——月末/月初 8 小时窗口内单号落本月、台账落邻月。
+    """
+    from fastapi_app.services.auxiliary_service import business_month_str
+
+    # UTC 10-31 20:30 = 北京 11-01 04:30 → 键必须落 11 月（旧 UTC 实现落 10 月）
+    assert business_month_str(datetime(2026, 10, 31, 20, 30, tzinfo=UTC)) == '2026-11'
+    assert business_month_str(datetime(2026, 10, 31, 10, 30, tzinfo=UTC)) == '2026-10'
+    assert business_month_str(datetime(2026, 11, 1, 3, 0, tzinfo=UTC)) == '2026-11'

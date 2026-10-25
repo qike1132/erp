@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
@@ -33,6 +34,15 @@ from fastapi_app.shared_models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def business_month_str(now: datetime | None = None) -> str:
+    """业务口径（北京时间）的 YYYY-MM——与 numbering_sequence 同一时区源。
+
+    L-2（2026-10-25 审计）：月份键此前用 UTC 墙钟，月末/月初 8 小时窗口内
+    与单号系统的「当期」不一致（单号落本月、台账落邻月）。
+    """
+    return fmt_business(now or datetime.now(UTC), '%Y-%m')
 
 
 async def orchestrate_batch_orders(db: AsyncSession, orders_data: list[dict], created_by: str = '') -> dict:
@@ -110,7 +120,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                 select(Product).where(Product.id.in_(unique_product_ids))
             )
             product_map = {p.id: p for p in product_result.scalars().all()}
-            now_month = datetime.now(UTC).strftime('%Y-%m')
+            now_month = business_month_str()
             for product_id, customer in successful_pairs:
                 product = product_map.get(product_id)
                 product_name = product.name if product is not None else ''

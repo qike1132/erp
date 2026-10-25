@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import Customer
 from fastapi_app.utils import calc_total_pages
@@ -54,8 +55,8 @@ async def get_customers(db: AsyncSession, *, page: int = 1, per_page: int = 20,
                 'id': c.id,
                 'name': c.name,
                 'status': c.status,
-                'create_time': c.create_time.strftime('%Y-%m-%d %H:%M') if c.create_time else '',
-                'update_time': c.update_time.strftime('%Y-%m-%d %H:%M') if c.update_time else '',
+                'create_time': fmt_business(c.create_time),
+                'update_time': fmt_business(c.update_time),
             }
             for c in customers
         ],

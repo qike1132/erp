@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import Join
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.float_utils import round_money
@@ -1003,7 +1004,7 @@ async def export_records(
             val,
             _sanitize_excel_value(r.remark or ''),
             _sanitize_excel_value(r.created_by or ''),
-            r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else '',
+            fmt_business(r.create_time, '%Y-%m-%d %H:%M:%S'),
         ])
 
     # 数据行样式

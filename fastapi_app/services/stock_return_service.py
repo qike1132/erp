@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
 from fastapi_app.core.exception_handler import safe_publish_event
@@ -157,7 +158,7 @@ async def search_returnable_stockouts(db: AsyncSession, keyword: str, limit: int
         data.append({
             'stockout_id': s.id,
             'stockout_no': s.stockout_no,
-            'stockout_date': s.stockout_date.strftime('%Y-%m-%d') if s.stockout_date else '',
+            'stockout_date': fmt_business(s.stockout_date, '%Y-%m-%d'),
             'product_id': s.product_id,
             'product_name': s.product.name if s.product else '',
             'customer': s.customer,
@@ -250,7 +251,7 @@ async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
     stockout = await db.get(StockOut, stockout_id)
     customer_name = stockout.customer if stockout and stockout.customer else ''
     product_name = product.name if product is not None else ''
-    plan_month = stockout.stockout_date.strftime('%Y-%m') if stockout and stockout.stockout_date else ''
+    plan_month = fmt_business(stockout.stockout_date, '%Y-%m') if stockout else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_RETURN_CREATED,
         domain='stock',
@@ -295,7 +296,7 @@ async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int, operator_id:
         stockout = await db.get(StockOut, stockout_id)
     customer_name = stockout.customer if stockout and stockout.customer else ''
     product_name = product.name if product is not None else ''
-    plan_month = stockout.stockout_date.strftime('%Y-%m') if stockout and stockout.stockout_date else ''
+    plan_month = fmt_business(stockout.stockout_date, '%Y-%m') if stockout else ''
     schedule_post_commit_domain_event(db, DomainEvent(
         event_type=DomainEventType.STOCK_RETURN_CANCELLED,
         domain='stock',

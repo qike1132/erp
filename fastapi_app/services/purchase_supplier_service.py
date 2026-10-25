@@ -10,6 +10,7 @@ from sqlalchemy import exists, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.shared_models import (
@@ -59,7 +60,7 @@ async def get_suppliers(db: AsyncSession, page: int = 1, per_page: int = 50, sea
             'address': getattr(supplier, 'address', None),
             'remark': getattr(supplier, 'remark', None),
             'status': getattr(supplier, 'status', True),
-            'created_at': supplier.created_at.strftime('%Y-%m-%d %H:%M') if supplier.created_at else None,
+            'created_at': fmt_business(supplier.created_at) or None,
         }
         supplier_list.append(s_dict)
     return {'items': supplier_list, 'total': total, 'page': page, 'per_page': per_page}

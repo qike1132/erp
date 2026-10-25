@@ -15,6 +15,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import Case, CaseMovement, CraftWork, PackagingRecord, Product
@@ -118,7 +119,7 @@ async def export_craft_works(db: AsyncSession, start_date: str='', end_date: str
     for r in records:
         d = r.work_date.isoformat() if r.work_date else ''
         daily_total[d] = daily_total.get(d, 0) + r.quantity
-        ws.append([d, _sanitize_excel_value(r.worker_name), r.quantity, _sanitize_excel_value(r.remark or ''), r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else ''])
+        ws.append([d, _sanitize_excel_value(r.worker_name), r.quantity, _sanitize_excel_value(r.remark or ''), fmt_business(r.create_time, '%Y-%m-%d %H:%M:%S')])
     ws.append([])
     ws.append(['日期', '当天生产总数'])
     for d in sorted(daily_total.keys()):
@@ -290,7 +291,7 @@ async def export_packaging_records(db: AsyncSession, start_date: str='', end_dat
     total_qty = 0
     for r in records:
         total_qty += r.quantity
-        ws.append([r.pack_date.isoformat() if r.pack_date else '', _sanitize_excel_value(r.customer), _sanitize_excel_value(r.product_name), _sanitize_excel_value(r.barcode), r.quantity, _sanitize_excel_value(r.remark or ''), r.create_time.strftime('%Y-%m-%d %H:%M:%S') if r.create_time else ''])
+        ws.append([r.pack_date.isoformat() if r.pack_date else '', _sanitize_excel_value(r.customer), _sanitize_excel_value(r.product_name), _sanitize_excel_value(r.barcode), r.quantity, _sanitize_excel_value(r.remark or ''), fmt_business(r.create_time, '%Y-%m-%d %H:%M:%S')])
     ws.append([])
     ws.append(['合计', '', '', '', total_qty])
     output = io.BytesIO()

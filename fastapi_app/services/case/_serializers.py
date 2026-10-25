@@ -1,4 +1,5 @@
 """皮套序列化辅助（SKU 主档 / 出入库流水）"""
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Case, CaseMovement
 
 
@@ -33,7 +34,7 @@ def _serialize_movement(m: CaseMovement) -> dict:
         'movement_no': m.movement_no,
         'quantity': m.quantity,
         'customer': m.customer or '',
-        'movement_date': m.movement_date.strftime('%Y-%m-%d') if m.movement_date else '',
+        'movement_date': fmt_business(m.movement_date, '%Y-%m-%d'),
         'note': m.note or '',
-        'create_time': m.create_time.strftime('%Y-%m-%d %H:%M:%S') if m.create_time else '',
+        'create_time': fmt_business(m.create_time, '%Y-%m-%d %H:%M:%S'),
     }

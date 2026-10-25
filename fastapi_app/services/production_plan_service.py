@@ -17,6 +17,7 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.services import customer_service, product_service, stock_service
 from fastapi_app.services.plan_utils import (
     build_inventory_map,
@@ -115,7 +116,7 @@ async def get_plans_with_inventory(db: AsyncSession, year: int, month: int, cust
         inventory_qty = inventory_map.get(key, 0)
         shipped_qty = shipped_map.get(key, 0)
         remaining_qty = plan.quantity - shipped_qty
-        plan_list.append({'id': plan.id, 'customer_name': plan.customer_name, 'product_name': plan.product_name, 'barcode': plan.barcode, 'quantity': plan.quantity, 'inventory_qty': inventory_qty, 'shipped_qty': shipped_qty, 'remaining_qty': remaining_qty, 'diff': plan.quantity - inventory_qty, 'stock_status': _calc_stock_status(plan.quantity, inventory_qty), 'shipment_status': calc_shipment_status(plan.quantity, shipped_qty), 'plan_date': plan.plan_date.isoformat() if plan.plan_date else '', 'status': plan.status, 'remark': plan.remark or '', 'upload_batch': plan.upload_batch or '', 'create_time': plan.create_time.strftime('%Y-%m-%d %H:%M:%S') if plan.create_time else '', 'update_time': plan.update_time.strftime('%Y-%m-%d %H:%M:%S') if plan.update_time else '', 'created_by': plan.created_by or ''})
+        plan_list.append({'id': plan.id, 'customer_name': plan.customer_name, 'product_name': plan.product_name, 'barcode': plan.barcode, 'quantity': plan.quantity, 'inventory_qty': inventory_qty, 'shipped_qty': shipped_qty, 'remaining_qty': remaining_qty, 'diff': plan.quantity - inventory_qty, 'stock_status': _calc_stock_status(plan.quantity, inventory_qty), 'shipment_status': calc_shipment_status(plan.quantity, shipped_qty), 'plan_date': plan.plan_date.isoformat() if plan.plan_date else '', 'status': plan.status, 'remark': plan.remark or '', 'upload_batch': plan.upload_batch or '', 'create_time': fmt_business(plan.create_time, '%Y-%m-%d %H:%M:%S'), 'update_time': fmt_business(plan.update_time, '%Y-%m-%d %H:%M:%S'), 'created_by': plan.created_by or ''})
     # 注意：这是只读查询，不得回写 plan.shipped_qty 或 flush()。shipped_qty 列由
     # 出货时的 _recalc_plans_common 维护；此处只把即时计算值放进返回 dict，
     # 回写会产生隐蔽脏写，且在只读/副本会话上会报错。

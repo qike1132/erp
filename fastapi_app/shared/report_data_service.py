@@ -289,7 +289,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date, factory=
             'product_barcode': stockin.product.barcode or '',
             'quantity': stockin.quantity,
             'remaining': remaining,
-            'stockin_date': stockin.stockin_date.strftime('%Y-%m-%d %H:%M'),
+            'stockin_date': fmt_business(stockin.stockin_date),
             'note': stockin.note or ''
         })
 
@@ -359,7 +359,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date, factory
             'product_name': so.product.name,
             'product_barcode': so.product.barcode or '',
             'quantity': so.quantity,
-            'stockout_date': so.stockout_date.strftime('%Y-%m-%d %H:%M'),
+            'stockout_date': fmt_business(so.stockout_date),
             'order_no': order_no,
             'order_id': order_id,
             'note': so.note or ''
@@ -427,7 +427,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date, factor
             order_id = so.order.id
         logs.append({
             'id': so.id,
-            'deduction_time': so.stockout_date.strftime('%Y-%m-%d %H:%M'),
+            'deduction_time': fmt_business(so.stockout_date),
             # 统一键（2026-10-13）：抵扣行原只有 sku 键，导出器读 product_barcode/record_no
             'record_no': so.stockout_no,
             'product_barcode': so.product.barcode or '',
@@ -487,7 +487,7 @@ def _get_return_logs(session, customer, product, start_date, end_date, factory='
             'return_no': sr.return_no,
             # 统一键（2026-10-13）：导出器表头按 record_no 取值
             'record_no': sr.return_no,
-            'return_date': sr.return_date.strftime('%Y-%m-%d %H:%M') if sr.return_date else '',
+            'return_date': fmt_business(sr.return_date),
             'customer': sr.customer or '',
             'product_name': sr.product.name,
             'product_barcode': sr.product.barcode or '',

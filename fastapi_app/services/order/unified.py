@@ -21,6 +21,7 @@ from sqlalchemy import desc, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.services import escape_like
 from fastapi_app.services.order.queries import _batch_item_factories, _parse_date_condition
@@ -217,8 +218,12 @@ async def _fetch_stockins(db: AsyncSession, stockin_ids: list[int]) -> dict[int,
 
 
 def _fmt_datetime(dt: datetime | None) -> str:
-    """格式化时间戳（对齐 OrderSerializer：'%Y-%m-%d %H:%M'，空值返回空串）。"""
-    return dt.strftime('%Y-%m-%d %H:%M') if dt else ''
+    """格式化时间戳（对齐 OrderSerializer：业务时区 '%Y-%m-%d %H:%M'，空值返回空串）。
+
+    M-1（2026-10-25 审计）：aware-UTC 列裸 strftime 恒慢 8 小时，改走
+    fmt_business（order_serializer 同款口径）。
+    """
+    return fmt_business(dt)
 
 
 def _product_dict(product: Product | None) -> dict | None:

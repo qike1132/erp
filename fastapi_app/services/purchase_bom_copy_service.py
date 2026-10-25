@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.bom_service import (  # noqa: F401
@@ -181,9 +182,8 @@ async def get_bom_preview(db: AsyncSession, source_product_id: int) -> dict:
         + len(bom_data['accessory'])
     )
 
-    create_time_str = None
-    if source_product.create_time:
-        create_time_str = source_product.create_time.strftime('%Y-%m-%d %H:%M:%S')
+    create_time_str = fmt_business(
+        source_product.create_time, '%Y-%m-%d %H:%M:%S') or None
 
     return {
         'product': {

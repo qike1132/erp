@@ -41,6 +41,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstanceState, selectinload
 
+from fastapi_app.core.business_time import fmt_business
 from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
 from fastapi_app.services.product.role_service import _name_key
 from fastapi_app.services.purchase_supplier_service import resolve_bom_suppliers
@@ -1064,10 +1065,8 @@ async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
         + sum(r['filling_count'] + r['fabric_count'] + r['accessory_count'] for r in bom_data['roles'])
     )
 
-    create_time_str = (
-        source_product.create_time.strftime('%Y-%m-%d %H:%M:%S')
-        if source_product.create_time else None
-    )
+    create_time_str = fmt_business(
+        source_product.create_time, '%Y-%m-%d %H:%M:%S') or None
 
     return {
         'product': {
