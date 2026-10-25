@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -41,8 +41,10 @@ from fastapi_app.shared_models import (
     InventoryLog,
     Order,
     OrderItem,
+    OrderOutsourceProcess,
     OrderStatusLog,
     OrderSyncRecord,
+    OutsourceShipment,
     StockOut,
     SyncRetryQueue,
     User,
@@ -519,6 +521,18 @@ async def _handle_delete_approval(
         ApprovalRequest.order_id == order.id,
         ApprovalRequest.id != approval.id,
     ))
+
+    # 与直删路径同口径（2026-10-25 上线前审计 M-3）：清掉本订单的外发工序并
+    # 解绑发货单。OrderItem 的 CASCADE 只带走有明细的工序——order_item_id
+    # IS NULL 的历史工序行与 OutsourceShipment.order_id（SET NULL 仅对硬删
+    # 生效）此前残留，审批删单后出货计划仍挂已删订单号。
+    from fastapi_app.services.order.commands import _purge_outsource_processes
+    _process_ids = (await db.execute(
+        select(OrderOutsourceProcess.id).where(OrderOutsourceProcess.order_id == order.id)
+    )).scalars().all()
+    await _purge_outsource_processes(db, list(_process_ids))
+    await db.execute(update(OutsourceShipment).where(
+        OutsourceShipment.order_id == order.id).values(order_id=None))
 
     # 清掉订单明细：与直删路径（order/commands.py::_purge_order_related_rows）同口径。
     # 明细的 product_id 是 FK NO ACTION，残留会永久阻塞该产品的删除；
