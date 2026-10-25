@@ -20230,7 +20230,7 @@
           "成品库存"
         ],
         "summary": "Finished Stock Summary",
-        "description": "按 客户/产品/批次 聚合成品库存（只读副本）。",
+        "description": "按 客户/产品/批次 聚合成品库存（只读副本，厂绑定用户限本厂产品）。",
         "operationId": "finished_stock_summary_api_v1_finished_stock_summary_get",
         "parameters": [
           {
@@ -20385,7 +20385,7 @@
           "成品库存"
         ],
         "summary": "Export Finished Stock",
-        "description": "导出当前筛选（客户 + 搜索词）的成品库存为 Excel。",
+        "description": "导出当前筛选（客户 + 搜索词）的成品库存为 Excel（厂绑定用户限本厂）。",
         "operationId": "export_finished_stock_api_v1_finished_stock_export_get",
         "parameters": [
           {
