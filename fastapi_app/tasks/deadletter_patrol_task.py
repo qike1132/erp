@@ -78,11 +78,14 @@ def summarize_deadletter(path: Path, since: datetime) -> dict:
 
 
 async def _redis_dlq_length() -> int:
-    """ARQ 死信队列长度；Redis 不可用时报 0 并由调用方日志留痕。"""
-    from fastapi_app.core.redis_wrapper import safe_get
+    """ARQ 死信队列长度；Redis 不可用时报 0 并由调用方日志留痕。
 
-    entries = await safe_get(ARQ_DLQ_KEY, [], context='死信巡检')
-    return len(entries) if isinstance(entries, list) else 0
+    必须用 ``safe_llen``——``arq:dead_letter`` 是 List（``safe_lpush`` 写入），
+    用 GET 读会 WRONGTYPE 且被底层缓存层吞成 None，恒报 0（评审 H-1）。
+    """
+    from fastapi_app.core.redis_wrapper import safe_llen
+
+    return await safe_llen(ARQ_DLQ_KEY, context='死信巡检')
 
 
 def _sample_desc(records: list[dict]) -> str:

@@ -113,6 +113,31 @@ async def test_handler_deadletter_alerts_critical(monkeypatch, alert_spy, dlq_em
 
 
 @pytest.mark.asyncio
+async def test_dlq_length_uses_llen_not_get(monkeypatch):
+    """评审 H-1 锁：arq:dead_letter 是 List，必须走 safe_llen。
+
+    safe_get（Redis GET）打在 List 上抛 WRONGTYPE、被底层缓存层吞成 None →
+    恒报 0，DLQ 残留的 warning 分支成为死代码。变异：把实现改回 safe_get
+    本测试必红（safe_get 被调用 / 返回值不来自 llen）。
+    """
+    calls: list[tuple[str, str]] = []
+
+    async def fake_llen(key, context=''):
+        calls.append(('llen', key))
+        return 4
+
+    async def fake_get(key, default=None, context=''):
+        calls.append(('get', key))
+        return default
+
+    monkeypatch.setattr('fastapi_app.core.redis_wrapper.safe_llen', fake_llen)
+    monkeypatch.setattr('fastapi_app.core.redis_wrapper.safe_get', fake_get)
+
+    assert await patrol._redis_dlq_length() == 4
+    assert calls == [('llen', patrol.ARQ_DLQ_KEY)], 'DLQ 长度必须经 safe_llen 读取，不得用 safe_get'
+
+
+@pytest.mark.asyncio
 async def test_dlq_residue_alerts_warning(monkeypatch, alert_spy, tmp_path):
     async def fake_len():
         return 2

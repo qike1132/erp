@@ -138,6 +138,31 @@ def test_restart_backend_reports_failure_when_restart_not_effective(monkeypatch)
     assert health_calls == [], '重启未生效（未达 RUNNING）时不得假报健康，直接如实失败'
 
 
+def test_service_ops_headless_gate_none_survives_wait_service():
+    """评审 H-2 锁：headless 构造 ServiceOps（gate=None）在 wait_service 不得崩。
+
+    restart_backend 直跑形态正是 headless 构造；wait_service 轮询里无条件
+    ``self._gate.checkpoint()`` 会在 gate=None 时 AttributeError——stop 已发出而
+    start 永不执行，服务停在 STOPPED（恰是 stop_start 原语要防的形态）。
+    真 ServiceOps 构造 + state_fn 注入（零子进程），变异（恢复无条件 checkpoint）
+    本测试必红。
+    """
+    import queue as _queue
+
+    from server_manager.service_ops import ServiceOps
+
+    ops = ServiceOps(
+        msg_queue=_queue.SimpleQueue(),
+        gate=None,
+        project_dir=str(ROOT),
+        log_message=lambda *_a, **_k: None,
+    )
+    state = ops.wait_service(
+        'erp-prod', 'RUNNING', timeout=1, state_fn=lambda _name: 'RUNNING',
+    )
+    assert 'RUNNING' in state.upper()
+
+
 def test_restart_backend_refuses_on_guard_denial(monkeypatch):
     """AUD-17 行为锁：闸门拒绝时 main() 返回 2 且不得触碰 nssm。"""
     import sys

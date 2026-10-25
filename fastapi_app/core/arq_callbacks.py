@@ -151,7 +151,8 @@ async def _handle_job_failure(ctx, exc) -> None:
         from fastapi_app.services.backup.metrics.alert_service import alert_service
         await alert_service.send_alert(
             task_name=f'arq:{func_name}',
-            error=f'{type(exc).__name__}: {exc}',
+            # 异常消息可能携带整段 SQL/超长 payload，告警通道（邮件/Webhook）截断
+            error=f'{type(exc).__name__}: {exc}'[:300],
             task_type='arq_task',
             severity='critical',
             additional_info={'job_id': job_id, 'job_try': job_try, 'max_tries': max_tries},
