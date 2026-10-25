@@ -56,6 +56,25 @@ def test_unlisted_path_keeps_default_limit():
     assert MAX_REQUEST_BODY_SIZE == 10 * 1024 * 1024
 
 
+def test_endpoint_level_declared_limits_within_effective_middleware_limit():
+    """端点级新声明的体积兜底（batch 七端点 / packaging 上传）不得高于中间件有效上限。
+
+    这两处路径未进放宽名单、吃全局 10MB；端点常量与该有效值同口径声明，
+    漂移（端点声明 > 中间件有效值）会让 413 永远先被中间件拦下、端点常量成死配置。
+    """
+    from fastapi_app.api.v1.endpoints.import_guard import (
+        MAX_IMPORT_FILE_SIZE as GUARD_LIMIT,
+    )
+    from fastapi_app.api.v1.endpoints.production_summary import (
+        MAX_PACKAGING_UPLOAD_SIZE,
+    )
+
+    assert max_body_size_for_path('/api/v1/batch/import-orders') >= GUARD_LIMIT
+    assert max_body_size_for_path(
+        '/api/v1/production-summary/packaging/upload'
+    ) >= MAX_PACKAGING_UPLOAD_SIZE
+
+
 # --------------------------------------------------------------------------
 # 线级行为
 # --------------------------------------------------------------------------

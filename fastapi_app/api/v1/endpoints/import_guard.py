@@ -75,6 +75,12 @@ TYPE_CASE_STOCKOUTS = 'case_stockouts'
 TYPE_PRODUCTS = 'products'
 TYPE_COMPREHENSIVE = 'comprehensive'
 
+#: 上传体积上限（端点级兜底）。core/middleware.py 的路径级上限对 /batch/import-*
+#: 走全局 10MB（未进放宽名单），此处与该有效值同口径声明——体积的真正校验由
+#: 端点内常量负责（见 middleware.py「H-2」注释），声明值不得高于中间件有效值，
+#: parity 由 fastapi_app/tests/test_request_body_limit_paths.py 锁定。
+MAX_IMPORT_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
 
 def _duplicate_detail(import_type: str, prior_at: Any) -> str:
     when = ''
@@ -135,9 +141,23 @@ async def run_guarded_import[T](
         runner: 接收「可重放的上传对象」并执行导入，返回带 ``success`` 的结果。
 
     Raises:
-        HTTPException: 409 —— 同文件同类型已导入过（含并发双击）。
+        HTTPException: 409 —— 同文件同类型已导入过（含并发双击）；
+            413 —— 文件超过 ``MAX_IMPORT_FILE_SIZE``。
     """
+    # 声明体积先查（SpooledTemporaryFile 场景下 Starlette 会填 size），
+    # 免得为大文件白白缓冲；实际字节数落地后再硬校验一次防声明失真。
+    declared = getattr(file, 'size', None)
+    if declared is not None and declared > MAX_IMPORT_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f'文件超过 {MAX_IMPORT_FILE_SIZE // 1024 // 1024}MB 上传限制',
+        )
     content = await file.read()
+    if len(content) > MAX_IMPORT_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail=f'文件超过 {MAX_IMPORT_FILE_SIZE // 1024 // 1024}MB 上传限制',
+        )
     digest = hashlib.sha256(content).hexdigest()
 
     prior = await db.scalar(

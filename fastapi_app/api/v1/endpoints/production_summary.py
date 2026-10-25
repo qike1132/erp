@@ -37,6 +37,10 @@ from fastapi_app.shared_models import User
 
 router = APIRouter()
 
+#: 包装部 Excel 上传体积上限（端点级兜底）。该路径未进 core/middleware.py 的
+#: 放宽名单，走全局 10MB；此处与该有效值同口径声明，超出即 413。
+MAX_PACKAGING_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+
 
 @router.get('/craft/list', response_model=CraftWorkListResponse)
 async def list_craft_works(
@@ -306,10 +310,16 @@ async def upload_packaging_excel(
     filename = file.filename or ''
     if not filename.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail='仅支持 .xlsx 格式文件，.xls 已不再支持')
+    # 端点级体积兜底（与 core/middleware.py 全局 10MB 同口径；该路径未进放宽名单）
+    declared = getattr(file, 'size', None)
+    if declared is not None and declared > MAX_PACKAGING_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f'文件超过 {MAX_PACKAGING_UPLOAD_SIZE // 1024 // 1024}MB 上传限制')
     try:
         content = await file.read()
     except (OSError, ValueError) as e:
         raise HTTPException(status_code=400, detail=_sanitize_error(f'文件读取失败: {e}')) from e
+    if len(content) > MAX_PACKAGING_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail=f'文件超过 {MAX_PACKAGING_UPLOAD_SIZE // 1024 // 1024}MB 上传限制')
     # P0-12：扩展名之外再校验文件头（改扩展名的伪 xlsx 在此拦下）
     require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename or '')
     async with db_transaction(db):

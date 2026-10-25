@@ -67,6 +67,55 @@ async def _count(session: AsyncSession) -> int:
 
 
 # ---------------------------------------------------------------------------
+# 超限上传 → 413
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_oversized_file_rejected_413(session, monkeypatch):
+    """超过 MAX_IMPORT_FILE_SIZE 的文件即 413，不进指纹登记、不执行导入。"""
+    monkeypatch.setattr(import_guard, 'MAX_IMPORT_FILE_SIZE', 8)
+    called = False
+
+    async def runner(_f):
+        nonlocal called
+        called = True
+        return SimpleNamespace(success=True)
+
+    with pytest.raises(HTTPException) as ei:
+        await run_guarded_import(
+            session, _FakeUpload('big.xlsx', b'123456789'), import_guard.TYPE_ORDERS, _USER, runner
+        )
+    assert ei.value.status_code == 413
+    assert not called, '超限文件不得执行导入'
+    assert await _count(session) == 0, '超限文件不得留下指纹登记'
+
+
+@pytest.mark.asyncio
+async def test_declared_oversize_rejected_before_read(session, monkeypatch):
+    """声明体积（UploadFile.size）已超限时不再读取文件体。"""
+    monkeypatch.setattr(import_guard, 'MAX_IMPORT_FILE_SIZE', 8)
+    reads: list[bytes] = []
+
+    class _DeclaredUpload:
+        filename = 'big.xlsx'
+        size = 100
+
+        async def read(self, _size: int = -1) -> bytes:
+            reads.append(b'x')
+            return b'123456789'
+
+    async def runner(_f):
+        return SimpleNamespace(success=True)
+
+    with pytest.raises(HTTPException) as ei:
+        await run_guarded_import(
+            session, _DeclaredUpload(), import_guard.TYPE_ORDERS, _USER, runner
+        )
+    assert ei.value.status_code == 413
+    assert reads == [], '声明超限时应免读文件体'
+    assert await _count(session) == 0
+
+
+# ---------------------------------------------------------------------------
 # 重复导入 → 409
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
