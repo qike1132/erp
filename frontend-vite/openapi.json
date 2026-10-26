@@ -89,7 +89,7 @@
           "健康检查"
         ],
         "summary": "Readiness Probe",
-        "description": "K8s readiness probe - 检查所有依赖就绪\n\n失败时K8s将Pod从Service摘除，不接收流量。\n无缓存，实时检查DB+Redis。",
+        "description": "K8s readiness probe - 检查所有依赖就绪\n\n失败时K8s将Pod从Service摘除，不接收流量。\n无缓存，实时检查DB+Redis。\n\nB2（2026-10-26）：额外要求「没有悬而未决的数据库还原」——恢复中断标记存在\n或不可读时，数据库可能是空壳，正常业务流量必须被挡住；进程与恢复端点保持\n可用，运维才有受控通道回滚并清除标记。",
         "operationId": "readiness_probe_api_health_ready_get",
         "responses": {
           "200": {

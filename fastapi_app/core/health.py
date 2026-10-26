@@ -45,6 +45,7 @@ def _read_loaded_commit(repo_root: Path | None = None) -> str | None:
     """
     root = repo_root or Path(__file__).resolve().parents[2]
     git_dir = root / '.git'
+    commit: str | None = None
     try:
         if git_dir.is_file():
             # linked worktree / submodule：.git 是 "gitdir: <path>" 文本
