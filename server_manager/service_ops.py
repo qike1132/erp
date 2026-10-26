@@ -626,7 +626,18 @@ class ServiceOps:
             # 只有重启 erp-prod 才刷新启动宽限（arq/web 不影响 prod_runner 快照）
             if name == _SVC_API:
                 self._msg_queue.put(('service_action_accepted', {'verb': 'restart'}))
-        prev_pid = self.svc_pid(name)
+        # 停前 PID 必须保留三态。``svc_pid`` 把「确认未运行」与「探测通道
+        # 故障」都折叠成 None：后者若继续停服，wait_service_running 会把
+        # 事后可读的同一旧 PID 当成新进程，产生 effective=True 的假重启。
+        # 发布安全优先于可用性，身份 unknown 时在**任何副作用之前**拒绝。
+        prev_pid, prev_ok = self.svc_pid_ex(name)
+        if not prev_ok:
+            self._msg_queue.put(('log', {
+                'text': f'{name} 停机前 PID 探测失败，无法确认重启是否生效；'
+                        '已在执行 stop 前拒绝本次重启，请先修复 SCM 探测通道',
+                'level': 'ERROR',
+            }))
+            return ServiceRunResult(False, 'PID_UNKNOWN', None, False)
         self._msg_queue.put(('log', {'text': f'正在重启生产服务 {name}...'}))
         self._stop_service_sync(name, nssm, stop_timeout)
         return self.start_one_service(name, timeout=start_timeout, prev_pid=prev_pid)

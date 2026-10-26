@@ -8,8 +8,14 @@ name: Refresh requirements locks
 # 为什么必须在 CI 跑而不是本地：本地 PyPI 镜像可能滞后（实测本机解析 pluggy 1.6.0，
 # 而 CI 解析 1.7.0），本地刷新的锁仍会与 CI 口径不符 → CI 依旧红。
 #
-# 为什么直接推 main 而非开 PR：本仓未开「Allow GitHub Actions to create and approve
-# pull requests」，开 PR 会被拒；锁刷新是纯机械变更，直接提交即可。
+# M5（2026-10-26 上线前检查）：**不再直推 main**。
+# 原实现 `git commit && git push` 到 main：机器人绕过 PR 评审与分支保护，把
+# 一批新版本（含传递依赖）直接写进主干；一旦上游包被投毒/破坏性变更，落到
+# main 之前没有任何人看过 diff，也没有 CI 在合并前跑过。现在改为推固定分支 +
+# 开 PR：PR 会正常触发 CI（含锁新鲜度门禁），合并由人决定。
+# 若仓库未开启「Allow GitHub Actions to create and approve pull requests」，
+# PR 创建会失败——此时分支已推送，job 打 warning 并给出一键开 PR 的地址，
+# 主分支仍然不受影响。
 
 on:
   schedule:
@@ -18,8 +24,9 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
-# 2026-10-17 审计 P2-70：机器人直推 main，禁止并发运行（两次刷新同时 push
+# 2026-10-17 审计 P2-70：机器人刷新同一分支，禁止并发运行（两次刷新同时 push
 # 会产生非快进冲突/相互覆盖）
 concurrency:
   group: refresh-requirements-lock
@@ -43,14 +50,43 @@ jobs:
               --quiet --python-platform windows --python-version 3.13
           done
 
-      - name: Commit and push if changed
+      - name: Open PR if changed (never push to main)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           if git diff --quiet -- requirements/; then
             echo "锁已最新，无需刷新"
             exit 0
           fi
+
+          # 兜底：本工作流只应改 requirements/，出现其它路径说明 checkout 被污染
+          changed="$(git diff --name-only)"
+          if echo "$changed" | grep -qv '^requirements/'; then
+            echo "::error::刷新过程改动了 requirements/ 之外的路径，拒绝提交：$changed"
+            exit 1
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          branch="chore/refresh-requirements-lock"
+          git switch -c "$branch"
           git add requirements/
           git commit -m "chore(deps): 自动刷新 requirements 锁（上游漂移）"
-          git push
+          # 机器人独占的临时分支：用 --force 覆盖上一轮未合并的刷新结果
+          git push --force origin "$branch"
+
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            echo "已有打开的刷新 PR，分支内容已更新（无需重复创建）"
+          elif gh pr create --base main --head "$branch" \
+              --title "chore(deps): 刷新 requirements 锁（上游漂移）" \
+              --body "由 Refresh requirements locks 工作流自动生成。
+
+          - 变更范围：仅 \`requirements/*.lock\`（uv pip compile 重新解析）
+          - 本 PR 会跑完整 CI，其中「Check requirements lock freshness」确认锁与声明一致
+          - 合并由人评审：新版本进入 main 前必须有人看过 diff"; then
+            echo "已创建 PR"
+          else
+            echo "::warning::无法自动创建 PR（仓库可能未允许 Actions 创建 PR）。分支 $branch 已推送，请手动开 PR：https://github.com/${{ github.repository }}/compare/main...$branch?expand=1"
+          fi

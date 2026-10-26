@@ -168,3 +168,43 @@ def test_non_windows_uses_sigterm(monkeypatch) -> None:
     svc.kill_tree()
     assert seen["sig"] == signal.SIGTERM
     assert seen.get("terminated"), "ProcessLookupError 后应回退 terminate()"
+
+
+def test_kill_tree_returns_true_and_clears_identity_when_dead(monkeypatch) -> None:
+    """确认终止 → 返回 True 并清空 proc（调用方可安全安排新进程）。"""
+    proc = _FakeProc(exit_after=1)
+    svc = _make_svc(proc)
+
+    def fake_run(cmd, **kwargs):
+        proc._polls = proc._exit_after
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(prod_runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(prod_runner.time, "sleep", lambda s: None)
+    monkeypatch.setattr(prod_runner, "_SOFT_KILL_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(prod_runner.os, "name", "nt")
+
+    assert svc.kill_tree() is True
+    assert svc.proc is None
+
+
+def test_kill_tree_returns_false_and_keeps_identity_when_survives(monkeypatch) -> None:
+    """H2：终止后仍存活 → 返回 False 且**不得**清 self.proc。
+
+    旧实现无论成败都 ``self.proc = None``，调用方接着 ``_mark_crashed()`` 起新实例，
+    而旧进程仍占着 :5002 —— 同端口双进程且监督器永久失去旧进程句柄。
+    """
+    proc = _FakeProc(exit_after=10**9)
+    svc = _make_svc(proc)
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(prod_runner.subprocess, "run", fake_run)
+    monkeypatch.setattr(prod_runner.time, "sleep", lambda s: None)
+    monkeypatch.setattr(prod_runner, "_SOFT_KILL_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr(prod_runner, "_SOFT_KILL_POLL_INTERVAL", 0.001)
+    monkeypatch.setattr(prod_runner.os, "name", "nt")
+
+    assert svc.kill_tree() is False
+    assert svc.proc is proc, "未确认终止必须保留句柄，否则再也杀不掉该进程"

@@ -15,14 +15,15 @@ M-G（2026-10-25 复审）：重启**不用** `nssm restart` —— NSSM 2.24 �
 显式 stop → 等 STOPPED → 无条件 start → 等 RUNNING（headless 构造，
 与 server_manager 界面共用同一实现，避免两处停机口径漂移）。
 
-B1（2026-10-25 上线前检查）：健康 200 不绑定版本，旧进程健康会被当发布成功。
-本脚本的成功口径收紧为四条全过：
-1. ServiceOps 结果 ``ok and effective``（effective=新 PID 与停机前不同，同 PID
-   = 停机未停成，本次重启没发生——即使旧进程健康也必须非零退出）；
-2. 脚本侧独立复核 PID 身份（不丢弃返回的 PID，不消费队列里的 WARNING 等于撒谎）；
-3. /api/health 通过；
-4. 版本指纹：重启前后 HEAD 一致（工作区没在发布中途换代码），新进程启动时刻
-   晚于本脚本开始时刻（探测可得时必查）。
+B1（2026-10-25 上线前检查，2026-10-26 修复）：健康 200 不绑定版本，旧进程
+健康会被当发布成功。本脚本的成功口径收紧为五条全过：
+1. 停前 PID 身份可确认；ServiceOps 结果 ``ok and effective``（effective=新 PID
+   与停机前不同，同 PID = 停机未停成——即使旧进程健康也必须非零退出）；
+2. 脚本侧独立复核 PID 身份，且新 supervisor 的启动年龄可证实；
+3. /api/health 为 healthy、无 security_degraded，/api/health/ready 为 ready；
+4. 回环健康响应中的实际 uvicorn worker runtime 存在，commit 等于目标 HEAD，
+   worker 启动时刻晚于本次操作；
+5. 重启前后 HEAD 一致，HEAD 任一次不可读都失败关闭。
 """
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 
 # GBK 控制台会炸 emoji print（2026-10-25 实证：重启成功但 print('✅') 抛
@@ -45,6 +47,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 SERVICE_NAME = "erp-prod"
 HEALTH_URL = "http://127.0.0.1:5002/api/health"
+READY_URL = "http://127.0.0.1:5002/api/health/ready"
 NSSM_CANDIDATES = (r"C:\nssm\nssm.exe", r"C:\Program Files\nssm\nssm.exe")
 
 
@@ -58,13 +61,83 @@ def _find_nssm() -> str | None:
     return shutil.which("nssm")
 
 
-def _health_ok() -> bool:
+def _fetch_json(url: str) -> dict:
+    with urllib.request.urlopen(url, timeout=3) as resp:
+        if resp.status != 200:
+            raise ValueError(f"HTTP {resp.status}")
+        body = json.loads(resp.read().decode("utf-8", "replace"))
+    if not isinstance(body, dict):
+        raise ValueError("响应不是 JSON 对象")
+    return body
+
+
+def _health_probe() -> dict | None:
+    """发布验收健康检查：healthy + readiness + 实际 worker runtime。
+
+    通用 ``/api/health`` 为兼容监督器，在 Redis 缺失/安全降级时仍可能 200；
+    发布口径必须同时查 readiness 与 security_degraded。``runtime`` 仅由回环
+    请求返回，用于绑定实际响应 worker 的 commit/启动代次。
+    """
     try:
-        with urllib.request.urlopen(HEALTH_URL, timeout=3) as resp:
-            body = json.loads(resp.read().decode("utf-8", "replace"))
-        return resp.status == 200 and str(body.get("status", "")).lower() in {"ok", "healthy", "degraded"}
+        body = _fetch_json(HEALTH_URL)
+        ready = _fetch_json(READY_URL)
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
-        return False
+        return None
+    if str(body.get("status", "")).lower() not in {"ok", "healthy"}:
+        return None
+    if body.get("security_degraded") is not False:
+        return None
+    if (
+        ready.get("status") != "ready"
+        or ready.get("database") is not True
+        or ready.get("redis") is not True
+    ):
+        return None
+    runtime = body.get("runtime")
+    if not isinstance(runtime, dict):
+        return None
+    return {**body, "runtime": runtime}
+
+
+def _parse_started_at(value: object) -> float | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC).timestamp()
+
+
+def _verify_runtime(runtime: dict, head_before: str, wall_started: float) -> tuple[bool, str]:
+    """校验回环 ``runtime`` 是否属于「本次重启拉起的、目标 commit 的 worker」。
+
+    H4（2026-10-26）：健康 200 只是必要条件之一。真正的验收对象是**实际响应
+    请求的那个 uvicorn worker**：commit 必须等于目标 HEAD（否则旧进程还在服务），
+    启动时刻必须晚于本次操作（否则进程根本没换），PID 必须可读（否则身份未证实）。
+    任一不满足即失败关闭——这三项都能被「旧进程健康」同时满足而骗过状态码。
+    """
+    commit = runtime.get('commit')
+    if not isinstance(commit, str) or len(commit.strip()) != 40:
+        return False, 'runtime 未提供有效 commit（无法绑定发布版本）'
+    if commit.strip().lower() != head_before.strip().lower():
+        return False, (
+            f'worker commit={commit.strip()[:12]} 与目标 HEAD={head_before.strip()[:12]} 不一致'
+        )
+    pid = runtime.get('pid')
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False, 'runtime 未提供有效 worker PID（身份未证实）'
+    started = _parse_started_at(runtime.get('started_at'))
+    if started is None:
+        return False, 'runtime.started_at 缺失或非带时区 ISO 时间（启动代次未证实）'
+    if started < wall_started - 5:
+        return False, (
+            f'worker 启动于 {time.time() - started:.0f}s 前，早于本次重启开始'
+            f'（{time.time() - wall_started:.0f}s 前）——不是本次重启拉起的进程'
+        )
+    return True, ''
 
 
 def _git_head(repo_root: Path) -> str | None:
@@ -86,7 +159,7 @@ def _process_age_seconds(pid: int) -> float | None:
 
     用「存活时长」而不是绝对启动时刻，规避 PowerShell 输出的本地时区解析问题
     （统一在 PowerShell 内部以 UTC 计算差值，脚本只拿数字）。探测失败返回 None，
-    调用方降级为 WARNING——PID 已变本身就是身份证据，启动时刻是加固项。
+    **调用方必须失败关闭**（H4：无法证明是新进程 == 不能宣告发布成功）。
     """
     cmd = (
         "[int]((Get-Date).ToUniversalTime() - "
@@ -179,14 +252,17 @@ def main() -> int:
     # 用 svc_pid_ex 区分「服务未运行（None, ok=True）」与「探测通道故障
     # (None, ok=False)」——后者意味着停机前后都无法证实身份，评审 finding 2。
     prev_pid, prev_ok = ops.svc_pid_ex(SERVICE_NAME)
+    if not prev_ok:
+        print("❌ 停机前 PID 探测通道不可用（sc queryex 失败）——"
+              "无法证明重启是否真的换了进程，已在停服前拒绝执行。")
+        return 1
     head_before = _git_head(repo_root)
+    if not head_before:
+        print("❌ 无法读取目标 HEAD，发布版本指纹不可证实，已在停服前拒绝执行。")
+        return 1
     wall_started = time.time()
-    if prev_pid is not None:
-        print(f"停机前 PID: {prev_pid}")
-    elif not prev_ok:
-        print("⚠️ 停机前 PID 探测通道不可用（sc queryex 失败）——身份核验将依赖重启后的探测结果")
-    if head_before:
-        print(f"目标 commit: {head_before[:12]}")
+    print(f"停机前 PID: {prev_pid}" if prev_pid is not None else "停机前服务确认为未运行")
+    print(f"目标 commit: {head_before[:12]}")
 
     try:
         result = ops.restart_service_via_stop_start(SERVICE_NAME, nssm=nssm)
@@ -213,31 +289,54 @@ def main() -> int:
               f"通道{'不可用' if not now_ok else '正常'}），不得宣告发布成功。")
         return 1
 
-    print("等待健康检查通过（最多 90s）...")
-    healthy = False
+    print("等待发布验收通过（health + readiness + 版本代次，最多 90s）...")
+    verified_runtime: dict | None = None
+    last_reason = '未收到任何健康响应'
     for i in range(30):
         time.sleep(3)
-        if _health_ok():
-            print(f"✅ 后端已就绪（{(i + 1) * 3}s，PID: {result.pid}）")
-            healthy = True
-            break
-        print(f"  ... {(i + 1) * 3}s 未就绪")
-    if not healthy:
-        print("❌ 90s 内 /api/health 未通过。请检查 logs/prod_runner.json 与 "
+        probe = _health_probe()
+        if probe is None:
+            last_reason = ('/api/health 或 /api/health/ready 未通过'
+                           '（含 security_degraded / DB / Redis）')
+        else:
+            ok_runtime, reason = _verify_runtime(probe['runtime'], head_before, wall_started)
+            if ok_runtime:
+                verified_runtime = probe['runtime']
+                print(f"✅ 后端已就绪且版本已绑定（{(i + 1) * 3}s，"
+                      f"supervisor PID: {result.pid}，"
+                      f"worker PID: {verified_runtime['pid']}，"
+                      f"commit: {head_before[:12]}）")
+                break
+            last_reason = f"健康但 worker 版本代次不符：{reason}"
+        print(f"  ... {(i + 1) * 3}s 未就绪：{last_reason}")
+    if verified_runtime is None:
+        print(f"❌ 90s 内发布验收未通过：{last_reason}")
+        print("   健康 200 不等于新代码已加载；请检查 logs/prod_runner.json 与 "
               "logs/后端(uvicorn).*.log；注意本脚本不再手工拉起 uvicorn。")
         return 1
 
     # B1 版本指纹：发布中途工作区换代码 / 新进程其实是老进程，都不得报成功。
     head_after = _git_head(repo_root)
-    if head_before and head_after and head_before != head_after:
+    if not head_after:
+        print("❌ 重启后无法读取 HEAD，发布版本指纹不可证实（fail-closed）。")
+        return 1
+    if head_before != head_after:
         print(f"❌ 版本指纹不符：重启前 HEAD={head_before[:12]}，重启后={head_after[:12]}。"
               "发布期间工作区被改动，本次重启加载的代码版本不可信。")
+        return 1
+    if verified_runtime.get('commit', '').strip().lower() != head_after.lower():
+        print(f"❌ worker 报告的 commit={str(verified_runtime.get('commit'))[:12]} "
+              f"与重启后 HEAD={head_after[:12]} 不一致，发布版本不可信。")
         return 1
     age = _process_age_seconds(result.pid)
     elapsed = time.time() - wall_started
     if age is None:
-        print("⚠️ 新进程启动时刻探测失败（Get-Process 不可用），已按 PID 变化判定身份。")
-    elif age > elapsed + 5:
+        # H4：探测失败不再降级为 WARNING——「无法证明是新进程」与「确认是老进程」
+        # 对发布结论等价，都必须非零退出（worker runtime 已另行证明启动代次）。
+        print(f"❌ 无法探测 PID {result.pid} 的启动时刻（Get-Process 不可用），"
+              "supervisor 身份未证实，本次发布不得宣告成功。")
+        return 1
+    if age > elapsed + 5:
         # +5s 余量：探测本身有 ~1s 开销、进程启动时刻与 wall_started 之间还有
         # 停机等待（服务收尾数秒），新进程 age 贴着 elapsed 属正常；老进程（数
         # 百秒起步）远超该阈值。真实重启 elapsed ≥ 3s（健康轮询首查前必 sleep）。
@@ -245,8 +344,8 @@ def main() -> int:
               f"（{elapsed:.0f}s 前）——这不是本次重启拉起的新进程。")
         return 1
 
-    print(f"✅ 重启完成并已验证：PID {prev_pid} → {result.pid}，"
-          f"HEAD {head_after[:12] if head_after else '(未知)'}")
+    print(f"✅ 重启完成并已验证：supervisor PID {prev_pid} → {result.pid}，"
+          f"worker PID {verified_runtime['pid']}，HEAD {head_after[:12]}")
     return 0
 
 

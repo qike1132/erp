@@ -46,6 +46,8 @@ def _managed(status='ready', fail_window_s=None):
     m.health_url = 'http://127.0.0.1:5002/api/health'
     m.consecutive_health_fail = 0
     m.health_fail_start = None if fail_window_s is None else time.monotonic() - fail_window_s
+    # H2（2026-10-26）：杀树失败后的重试时刻（poll 会读它）
+    m._kill_retry_at = 0.0
     m.delay = 2.0
     m.backoff_step = 0
     m.workers = 4
@@ -58,7 +60,12 @@ def test_poll_force_restarts_after_degraded_window(monkeypatch):
     m = _managed(status='ready', fail_window_s=601.0)
     m.consecutive_health_fail = 3
     killed = []
-    monkeypatch.setattr(m, 'kill_tree', lambda: killed.append(1))
+
+    def _kill() -> bool:
+        killed.append(1)
+        return True  # H2 契约：kill_tree 返回「是否已确认终止」
+
+    monkeypatch.setattr(m, 'kill_tree', _kill)
     monkeypatch.setattr(m, '_probe_health', lambda: (False, 0.1))
 
     m.poll()
@@ -86,7 +93,7 @@ def test_poll_does_not_override_terminal_statuses(monkeypatch):
     """crashed/failed/starting 语义不动（maybe_restart 依赖）。"""
     for status in ('crashed', 'failed', 'starting'):
         m = _managed(status=status, fail_window_s=100.0)
-        monkeypatch.setattr(m, 'kill_tree', lambda: None)
+        monkeypatch.setattr(m, 'kill_tree', lambda: True)
         monkeypatch.setattr(m, '_probe_health', lambda: (False, 0.1))
         m.poll()
         assert m.status == status, f'{status} 不得被降级逻辑覆盖'

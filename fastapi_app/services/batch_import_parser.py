@@ -9,7 +9,8 @@ import asyncio
 import logging
 import os
 import tempfile
-from contextlib import asynccontextmanager, suppress
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 from zipfile import BadZipFile
@@ -18,7 +19,7 @@ from fastapi_app.schemas.batch import BatchImportResult, ExcelUpload
 from fastapi_app.services.xlsx_budget import (
     assert_rows_within_budget,
     assert_zip_budget,
-    run_parse_with_timeout,
+    run_sync_with_timeout,
 )
 from fastapi_app.services.xlsx_cell_images import extract_cell_images
 from fastapi_app.utils import parse_date_value as _shared_parse_date_value
@@ -73,7 +74,6 @@ async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) 
     """
     if file_path.lower().endswith(_XLSX_SUFFIXES) and not _looks_like_xlsx(file_path):
         return False, [], _bad_xlsx_message()
-    loop = asyncio.get_running_loop()
 
     def _sync_parse():
         try:
@@ -101,14 +101,13 @@ async def parse_excel_file_async(file_path: str, sheet_name: str | None = None) 
         except (ValueError, TypeError, OSError, BadZipFile, CalamineError) as e:
             return False, [], str(e)
 
-    return await run_parse_with_timeout(loop.run_in_executor(None, _sync_parse))
+    return await run_sync_with_timeout(_sync_parse)
 
 
 async def read_excel_sheets_async(file_path: str) -> tuple[bool, list, str]:
     """读取 Excel 文件的所有 Sheet 名称（M5：ZIP 预算同口径折叠为失败消息）"""
     if file_path.lower().endswith(_XLSX_SUFFIXES) and not _looks_like_xlsx(file_path):
         return False, [], _bad_xlsx_message()
-    loop = asyncio.get_running_loop()
 
     def _sync_read():
         try:
@@ -121,7 +120,7 @@ async def read_excel_sheets_async(file_path: str) -> tuple[bool, list, str]:
         except (ValueError, TypeError, OSError, BadZipFile, CalamineError) as e:
             return False, [], str(e)
 
-    return await run_parse_with_timeout(loop.run_in_executor(None, _sync_read))
+    return await run_sync_with_timeout(_sync_read)
 
 
 def parse_date_value(date_value) -> datetime | None:
@@ -129,14 +128,32 @@ def parse_date_value(date_value) -> datetime | None:
     return _shared_parse_date_value(date_value)
 
 
-def cleanup_temp_file(file_path: str) -> None:
-    """清理临时上传文件"""
-    try:
-        if file_path and os.path.exists(file_path):
+def cleanup_temp_file(file_path: str, *, attempts: int = 10, delay: float = 0.5) -> bool:
+    """清理临时上传文件，返回是否已删除。
+
+    M1（2026-10-26）：Windows 上解析线程可能仍在读该文件（解析超时后请求已返回，
+    线程还在跑），``unlink`` 会抛 WinError 32（文件被占用）。原实现只记一条
+    WARNING 就走 —— 文件静静留在 %TEMP% 里。现在按短间隔重试覆盖「线程收尾」
+    这个常见窗口，最终仍失败则升为 ERROR（带路径），不再无声泄漏。
+    """
+    if not file_path:
+        return True
+    attempts = max(1, attempts)
+    for i in range(attempts):
+        try:
             os.unlink(file_path)
             logger.debug(f"已清理临时文件: {file_path}")
-    except OSError as e:
-        logger.warning(f"清理临时文件失败: {file_path}, {e}")
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError as e:
+            if i == attempts - 1:
+                logger.error(f"清理临时文件失败（已重试 {attempts} 次，文件可能残留）: "
+                             f"{file_path}, {e}")
+                return False
+            if delay:
+                time.sleep(delay)
+    return False
 
 
 # ==================== 上传文件工具 ====================
@@ -165,9 +182,10 @@ async def _save_uploaded_file(file: ExcelUpload):
             await asyncio.to_thread(fh.write, content)
         yield temp_path
     finally:
-        if temp_path and os.path.exists(temp_path):
-            with suppress(OSError):
-                os.unlink(temp_path)
+        if temp_path:
+            # M1：解析线程可能仍在占用该文件（超时后请求先返回），重试删除并在
+            # 最终失败时 ERROR 留痕，避免临时文件在 %TEMP% 里无声堆积。
+            cleanup_temp_file(temp_path)
 
 
 # ==================== Sheet 定位与类型识别 ====================

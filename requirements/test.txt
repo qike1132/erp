@@ -11,7 +11,13 @@ pytest-cov>=6.0
 pytest-html>=4.0
 pytest-xdist>=3.8
 pytest-mock>=3.14
-pytest-asyncio>=1.0.0
+# G0（2026-10-26 上线前检查）：显式钉版，不用 `>=`。
+# 这里写 `>=1.0.0` 时，上游每发一个补丁（实测 1.4.0 → 1.4.1）都会让
+# `check_requirements_lock.py` 的「fresh 解析 vs 已提交 .lock」比对变红：本地镜像
+# 还没同步、CI 已能解析到新版，于是同一次提交在 CI 上必红且与代码改动无关。
+# .lock 本来就把它钉死在 1.4.0，钉在 .txt 只是把同一事实写进声明，不减少可复现性；
+# 升级时改这一行 + 重编译 .lock 即可（refresh-requirements-lock 工作流同样适用）。
+pytest-asyncio==1.4.0
 pytest-sugar==0.9.7
 
 # ----- 测试数据生成 -----

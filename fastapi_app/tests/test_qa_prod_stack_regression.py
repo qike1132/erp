@@ -193,7 +193,12 @@ class TestD7PollStateMachine:
         monkeypatch.setattr(prod_runner, "_http_ok", lambda *a, **k: False)
         m = _mk_managed(_RaceProc())
         killed = {"n": 0}
-        monkeypatch.setattr(m, "kill_tree", lambda: killed.__setitem__("n", killed["n"] + 1))
+
+        def _kill() -> bool:
+            killed["n"] += 1
+            return True  # H2 契约：kill_tree 返回「是否已确认终止」
+
+        monkeypatch.setattr(m, "kill_tree", _kill)
         m.consecutive_health_fail = 2
         m.health_fail_start = clock.t - 200.0
 
@@ -209,7 +214,12 @@ class TestD7PollStateMachine:
         monkeypatch.setattr(prod_runner, "_http_ok", lambda *a, **k: False)
         m = _mk_managed(_DeadProc())
         killed = {"n": 0}
-        monkeypatch.setattr(m, "kill_tree", lambda: killed.__setitem__("n", killed["n"] + 1))
+
+        def _kill() -> bool:
+            killed["n"] += 1
+            return True  # H2 契约：kill_tree 返回「是否已确认终止」
+
+        monkeypatch.setattr(m, "kill_tree", _kill)
         calls = {"n": 0}
         orig = prod_runner._should_restart
 

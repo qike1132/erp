@@ -35,6 +35,33 @@ describe('csv utils', () => {
     it('不含特殊字符的字段不加引号（避免污染 CSV）', () => {
       expect(escapeCsvField('中文名称')).toBe('中文名称')
     })
+
+    // H8：RFC 4180 转义不等于公式中和 —— 以 = + - @ 开头的单元格会被 Excel/WPS
+    // 当公式求值（HYPERLINK 外带数据、旧版 DDE 可执行命令），而这些字段来自
+    // 用户可控的客户名/产品名/条码。
+    it('公式起始字符被中和为文本（= + @）', () => {
+      expect(escapeCsvField('=1+1')).toBe("'=1+1")
+      expect(escapeCsvField('=HYPERLINK("http://evil","x")')).toBe(
+        '"\'=HYPERLINK(""http://evil"",""x"")"',
+      )
+      expect(escapeCsvField('+86 13800000000')).toBe("'+86 13800000000")
+      expect(escapeCsvField('@SUM(A1)')).toBe("'@SUM(A1)")
+    })
+
+    it('公式起始字符被中和为文本（- 开头但非纯数字）', () => {
+      expect(escapeCsvField('-1+1')).toBe("'-1+1")
+      expect(escapeCsvField('-cmd|calc')).toBe("'-cmd|calc")
+    })
+
+    it('纯数字（含负数）不中和，避免数值列被转成文本', () => {
+      expect(escapeCsvField(-123)).toBe('-123')
+      expect(escapeCsvField('-123.45')).toBe('-123.45')
+    })
+
+    it('前导空白不能绕过公式中和', () => {
+      expect(escapeCsvField('  =cmd')).toBe("'  =cmd")
+      expect(escapeCsvField('\t=cmd')).toBe("'\t=cmd")
+    })
   })
 
   describe('buildCsvRow', () => {

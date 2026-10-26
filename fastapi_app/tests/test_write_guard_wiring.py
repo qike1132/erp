@@ -133,6 +133,26 @@ def _wire_restart_module(monkeypatch, name: str):
     return mod
 
 
+def _valid_probe(commit: str = 'a' * 40, pid: int = 4242, started_at=None) -> dict:
+    """构造通过发布验收的回环健康响应（commit 绑定 + 启动代次 + worker PID）。
+
+    H4：main() 现在消费的是 ``_health_probe()`` 的完整结构，不再是裸布尔。
+    """
+    from datetime import UTC, datetime
+
+    return {
+        'status': 'healthy',
+        'security_degraded': False,
+        'runtime': {
+            'pid': pid,
+            'boot_id': 'b' * 32,
+            'started_at': (started_at or datetime.now(UTC)).isoformat(),
+            'commit': commit,
+            'version': 'test',
+        },
+    }
+
+
 def test_restart_backend_uses_stop_start_and_waits_health(monkeypatch):
     """M-G 行为锁：stop_start 成功（ok+effective）+ 健康通过 → rc=0；nssm 路径直达。"""
     mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_ok')
@@ -143,7 +163,7 @@ def test_restart_backend_uses_stop_start_and_waits_health(monkeypatch):
     # 新进程必须比重启动作「年轻」：sleep 被桩成 no-op（elapsed≈0），age 给 0.5s
     # 才能穿过指纹判定（给大值会误判「早于重启开始」）。
     monkeypatch.setattr(mod, '_process_age_seconds', lambda _pid: 0.5)
-    monkeypatch.setattr(mod, '_health_ok', lambda: True)
+    monkeypatch.setattr(mod, '_health_probe', lambda: _valid_probe())
     monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)  # 轮询间隔 3s，测试不真睡
 
     rc = mod.main()
@@ -159,7 +179,7 @@ def test_restart_backend_reports_failure_when_restart_not_effective(monkeypatch)
     _install_fake_service_ops(monkeypatch, ServiceRunResult(False, 'STOPPED', None, False))
     monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
     health_calls = []
-    monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or False)
+    monkeypatch.setattr(mod, '_health_probe', lambda: health_calls.append(1) or None)
     monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)  # 30 轮 × 3s，测试不真睡
 
     rc = mod.main()
@@ -181,7 +201,7 @@ def test_restart_backend_fails_when_same_pid_and_old_process_healthy(monkeypatch
     )
     monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
     health_calls = []
-    monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or True)
+    monkeypatch.setattr(mod, '_health_probe', lambda: health_calls.append(1) or _valid_probe())
 
     rc = mod.main()
 
@@ -202,7 +222,7 @@ def test_restart_backend_script_pid_recheck_catches_ops_miss(monkeypatch):
     pid_override['value'] = (111, True)  # 独立复核发现 5002 上仍是旧进程 111
     monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
     health_calls = []
-    monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or True)
+    monkeypatch.setattr(mod, '_health_probe', lambda: health_calls.append(1) or _valid_probe())
 
     rc = mod.main()
 
@@ -230,12 +250,96 @@ def test_restart_backend_fails_when_health_never_passes(monkeypatch):
         monkeypatch, ServiceRunResult(True, '4 RUNNING', 12345, True),
     )
     monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
-    monkeypatch.setattr(mod, '_health_ok', lambda: False)
+    monkeypatch.setattr(mod, '_health_probe', lambda: None)
     monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)
 
     rc = mod.main()
 
     assert rc == 1
+
+
+def test_restart_backend_rejects_health_from_old_commit(monkeypatch):
+    """H4 核心回归：健康 200 但 worker commit ≠ 目标 HEAD → 不得宣告发布成功。
+
+    旧进程一直 healthy，旧实现只看状态码就 rc=0——新代码根本没加载成功。
+    """
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_h4_commit')
+    _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 12345, True),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    monkeypatch.setattr(mod, '_process_age_seconds', lambda _pid: 0.5)
+    monkeypatch.setattr(mod, '_health_probe', lambda: _valid_probe(commit='c' * 40))
+    monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)
+
+    rc = mod.main()
+
+    assert rc == 1, 'worker 版本与目标 HEAD 不一致时健康 200 不能算发布成功'
+
+
+def test_restart_backend_rejects_worker_started_before_restart(monkeypatch):
+    """H4：worker 的 started_at 早于本次操作 → 是旧进程，必须失败。"""
+    from datetime import UTC, datetime, timedelta
+
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_h4_stale')
+    _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 12345, True),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    monkeypatch.setattr(mod, '_process_age_seconds', lambda _pid: 0.5)
+    stale = datetime.now(UTC) - timedelta(hours=2)
+    monkeypatch.setattr(mod, '_health_probe', lambda: _valid_probe(started_at=stale))
+    monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)
+
+    rc = mod.main()
+
+    assert rc == 1, '两小时前启动的 worker 不可能是本次重启拉起的'
+
+
+def test_restart_backend_fails_closed_when_process_age_unknown(monkeypatch):
+    """H4：supervisor 启动时刻探测失败不得降级为 WARNING（旧实现 rc=0）。"""
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_h4_age_unknown')
+    _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 12345, True),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    monkeypatch.setattr(mod, '_process_age_seconds', lambda _pid: None)
+    monkeypatch.setattr(mod, '_health_probe', lambda: _valid_probe())
+    # 旧实现在 age is None 时只打 WARNING 并 rc=0——本测试锁住「必须失败关闭」。
+    monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)
+
+    rc = mod.main()
+
+    assert rc == 1, '身份未证实必须失败关闭，不能拿 PID 变化当唯一证据'
+
+
+def test_health_probe_requires_readiness_and_no_security_degradation(monkeypatch):
+    """H4：``_health_probe`` 必须同时消费 health / readiness / security_degraded。"""
+    mod = _load('restart_backend_probe_h4', ROOT / 'scripts' / 'restart_backend.py')
+    healthy = {'status': 'healthy', 'security_degraded': False,
+               'runtime': {'pid': 1, 'commit': 'a' * 40, 'started_at': 'x', 'boot_id': 'b'}}
+    ready_ok = {'status': 'ready', 'database': True, 'redis': True}
+
+    monkeypatch.setattr(mod, '_fetch_json', lambda url: dict(ready_ok if 'ready' in url else healthy))
+    assert mod._health_probe() is not None
+
+    for broken in (
+        {**healthy, 'security_degraded': True},
+        {**healthy, 'status': 'degraded'},
+        {k: v for k, v in healthy.items() if k != 'runtime'},
+    ):
+        monkeypatch.setattr(mod, '_fetch_json',
+                            lambda url, _b=broken: dict(ready_ok if 'ready' in url else _b))
+        assert mod._health_probe() is None, f'必须拒绝：{broken}'
+
+    for bad_ready in (
+        {'status': 'not_ready', 'database': True, 'redis': True},
+        {'status': 'ready', 'database': True, 'redis': False},
+        {'status': 'ready', 'database': False, 'redis': True},
+    ):
+        monkeypatch.setattr(mod, '_fetch_json',
+                            lambda url, _r=bad_ready: dict(_r if 'ready' in url else healthy))
+        assert mod._health_probe() is None, f'必须拒绝 readiness：{bad_ready}'
 
 
 def test_service_ops_headless_gate_none_survives_wait_service():

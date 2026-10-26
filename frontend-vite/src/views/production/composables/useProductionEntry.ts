@@ -202,10 +202,16 @@ export function useProductionEntry(
   let searchTimer: ReturnType<typeof setTimeout> | null = null
   // selectProduct 的单价请求序号（丢弃过期响应，防止乱序覆盖）
   let _priceSeq = 0
+  // H7（2026-10-26）：搜索请求序号。输入一变就作废在途请求——否则先发的慢响应
+  // 会覆盖后发的新结果，而 `confirmSearchSelection` 在未按 ↑↓ 时默认选第一条，
+  // 于是「输入 AB + 回车」可能落成「A 的第一条」，选到与输入毫不相干的产品。
+  let _searchSeq = 0
 
   function onSearchInput() {
     if (searchTimer) clearTimeout(searchTimer)
     searchError.value = ''
+    const kw = searchQuery.value.trim()
+    const seq = ++_searchSeq
     if (form.product_name && searchQuery.value !== form.product_name) {
       form.product_id = null
       form.product_name = ''
@@ -214,9 +220,10 @@ export function useProductionEntry(
       clearFinishedStockFields()
       duplicateTotal.value = 0
     }
-    if (!searchQuery.value.trim()) {
+    if (!kw) {
       searchResults.value = []
       showDropdown.value = false
+      searchLoading.value = false
       return
     }
     searchLoading.value = true
@@ -224,14 +231,17 @@ export function useProductionEntry(
     searchActiveIndex.value = -1
     searchTimer = setTimeout(async () => {
       try {
-        const res = (await productApi.search(searchQuery.value.trim())) as unknown as Product[] & { products?: Product[] }
+        const res = (await productApi.search(kw)) as unknown as Product[] & { products?: Product[] }
+        // 序号或关键字任一不匹配即丢弃（输入又变了 / 已选中产品）
+        if (seq !== _searchSeq || searchQuery.value.trim() !== kw) return
         searchResults.value = res.products ?? res ?? []
         searchError.value = ''
       } catch {
+        if (seq !== _searchSeq || searchQuery.value.trim() !== kw) return
         searchError.value = '产品搜索失败，请重试'
         searchResults.value = []
       } finally {
-        searchLoading.value = false
+        if (seq === _searchSeq) searchLoading.value = false
       }
     }, 300)
   }
@@ -273,6 +283,9 @@ export function useProductionEntry(
     searchResults.value = []
     showDropdown.value = false
     searchActiveIndex.value = -1
+    // H7：选中即定稿，任何在途搜索响应都不得再把下拉/结果写回来
+    _searchSeq += 1
+    searchLoading.value = false
     pushRecent(product)
     // 请求序号：连点 chip/快速换产品时，慢响应不得覆盖新产品的单价
     const seq = ++_priceSeq

@@ -327,6 +327,39 @@ def test_restart_with_unreadable_pid_is_never_effective():
     assert any('无法验证本次重启是否生效' in t for t in texts), texts
 
 
+def test_restart_refuses_before_stop_when_pid_probe_unknown():
+    """B1：停前 PID 探测通道故障 → 必须在**任何副作用之前**拒绝重启。
+
+    ``svc_pid`` 把「确认未运行（None, ok）」与「通道故障（None, not ok）」折叠成
+    同一个 None。后者若继续停服，等待新 PID 时读到的仍是同一旧 PID，会被当成
+    「PID 变了 → 生效」而报成功。三态必须保留到重启入口。
+    """
+    ops, q = _ops(real_wait_running=True)
+    ops.svc_pid_ex = lambda name: (None, False)  # sc queryex 失败：身份 unknown
+    ops.wait_service = lambda name, target, timeout, **kw: '1 STOPPED'
+
+    res = ops.restart_service_via_stop_start('erp-prod')
+
+    assert res.ok is False and res.effective is False and res.pid is None
+    assert res.state == 'PID_UNKNOWN'
+    assert ops.calls == [], f'身份 unknown 时不得执行 stop/start（有副作用），实际 {ops.calls}'
+    errs = [d['text'] for kind, d in q.msgs if kind == 'log' and d.get('level') == 'ERROR']
+    assert any('PID 探测失败' in t and '拒绝本次重启' in t for t in errs), errs
+
+
+def test_restart_unknown_is_not_folded_into_effective_success():
+    """B1：unknown 绝不得产生 effective=True —— 直接对契约做断言（不依赖日志）。"""
+    ops, _q = _ops(real_wait_running=True)
+    ops.svc_pid_ex = lambda name: (111, False)  # 读到旧值但通道报错：仍属 unknown
+    ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
+
+    res = ops.restart_service_via_stop_start('erp-prod')
+
+    assert res.effective is False
+    assert res.ok is False
+    assert ops.calls == []
+
+
 def test_restart_reports_success_when_pid_changes():
     """真实重启（PID 变了）仍报「启动成功」且 effective=True——防新判定把正常重启误判成未生效。"""
     ops, q = _ops(real_wait_running=True)

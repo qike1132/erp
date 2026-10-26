@@ -8,7 +8,6 @@
 
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
 """
-import asyncio
 import io
 import uuid
 
@@ -111,11 +110,12 @@ def _validate_excel_row(fields: dict, detected_month: str | None) -> tuple[str, 
 
 async def upload_excel(db: AsyncSession, file_content: bytes, session_id: str, created_by: str='') -> dict:
     """解析Excel文件，写入暂存表，返回预览数据"""
-    from fastapi_app.services.xlsx_budget import run_parse_with_timeout
+    from fastapi_app.services.xlsx_budget import run_sync_with_timeout
 
     batch_id = str(uuid.uuid4())[:8]
     # M5：同步解析离场事件循环 + 统一超时（病态工作簿不得钉死 worker/请求）
-    rows = await run_parse_with_timeout(asyncio.to_thread(_load_excel_rows, file_content))
+    # M1：专用有界线程池 + 可跟踪终态（不占默认 executor）
+    rows = await run_sync_with_timeout(_load_excel_rows, file_content)
     if not rows:
         raise ValueError('Excel文件无数据行')
     detected_month = None

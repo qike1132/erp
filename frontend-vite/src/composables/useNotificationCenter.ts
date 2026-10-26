@@ -193,18 +193,36 @@ export function useNotificationCenter() {
     // 否则刚标记的项目会被错误地保留在列表中。
     list.value = list.value.filter((n) => !affectedIds.has(n.id))
     total.value = Math.max(0, total.value - affected.length)
+
+    const rollback = (items: typeof affected) => {
+      if (items.length === 0) return
+      list.value = [...list.value, ...items]
+      total.value += items.length
+      items.forEach((n) => { n.is_read = false })
+    }
+
+    let result: Awaited<ReturnType<typeof notificationApi.markBatchAsRead>>
     try {
-      await notificationApi.markBatchAsRead(ids)
-      selectedIds.value = new Set()
+      result = await notificationApi.markBatchAsRead(ids)
     } catch (e) {
-      // 回滚：恢复列表与已读状态
-      list.value = [...list.value, ...affected]
-      total.value += affected.length
-      affected.forEach((n) => { n.is_read = false })
+      // 整体失败（网络/鉴权）：全部回滚
+      rollback(affected)
       throw e
     } finally {
       marking.value = false
     }
+
+    // M8（2026-10-26）：部分失败必须回滚失败项并如实上报。
+    // 原实现在这里直接清空选择——服务端只成功 1 条时，界面同样显示「已标记 N 条」，
+    // 未读徽章与列表也就永远对不上。
+    if (result.failed_count > 0) {
+      const failedSet = new Set(result.failed_ids)
+      rollback(affected.filter((n) => failedSet.has(n.id)))
+      throw new Error(
+        `已标记 ${result.marked_count} 条，${result.failed_count} 条失败，请重试`,
+      )
+    }
+    selectedIds.value = new Set()
   }
 
   /** 全部标记已读 */

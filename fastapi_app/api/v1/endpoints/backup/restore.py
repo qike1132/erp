@@ -42,6 +42,7 @@ from fastapi_app.services.backup import (
     BackupError,
 )
 from fastapi_app.services.backup import restore_plan as restore_plan_service
+from fastapi_app.services.backup._constants import RESTORE_TOTAL_TIMEOUT
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -654,58 +655,71 @@ async def _run_async_file_restore(
 
     watchdog = asyncio.create_task(_lock_watchdog())
     try:
-        await update_progress(task_id, 'pre_backup', detail='准备恢复')
-        pre_restore_info = None
+        # H3（2026-10-26）：全阶段总时限。watchdog 只续锁与心跳，不是 deadline；
+        # 预备份 / 重建 / 导入 / 校验任一阶段叠加超预算时，恢复任务必须被中止，
+        # 而不是无限期挂在「运行中」并一直持锁。
+        async with asyncio.timeout(RESTORE_TOTAL_TIMEOUT):
+            await update_progress(task_id, 'pre_backup', detail='准备恢复')
+            pre_restore_info = None
 
-        async with get_async_db_context() as db:
-            try:
-                await update_progress(task_id, 'pre_backup', 0.0, '创建安全备份')
-                # 异步路径已持有还原锁，须跳过还原互斥检查，否则安全备份必然失败。
-                # 闸门失败时本处无法向已返回的客户端抛 HTTP，由下面 `except HTTPException`
-                # 转 fail_progress —— 与同步端点同一道闸，只是出口不同。
-                pre_restore_info = await _pre_restore_info_or_fail(
-                    db, allow_missing_pre_restore_backup, skip_restore_check=True,
-                )
-                await update_progress(task_id, 'pre_backup', 1.0, '安全备份完成')
-
-                if is_zip:
-                    result = await backup_service.restore_from_zip(
-                        content, db,
-                        decrypt_password=decrypt_password,
-                        task_id=task_id,
-                        confirm_sensitive=confirm_sensitive,
+            async with get_async_db_context() as db:
+                try:
+                    await update_progress(task_id, 'pre_backup', 0.0, '创建安全备份')
+                    # 异步路径已持有还原锁，须跳过还原互斥检查，否则安全备份必然失败。
+                    # 闸门失败时本处无法向已返回的客户端抛 HTTP，由下面 `except HTTPException`
+                    # 转 fail_progress —— 与同步端点同一道闸，只是出口不同。
+                    pre_restore_info = await _pre_restore_info_or_fail(
+                        db, allow_missing_pre_restore_backup, skip_restore_check=True,
                     )
-                else:
-                    try:
-                        backup_data = await asyncio.to_thread(json.loads, content)
-                    except json.JSONDecodeError:
-                        await fail_progress(task_id, '备份文件格式无效（非 ZIP 亦非有效 JSON）')
-                        return
-                    if 'tables' not in backup_data:
-                        await fail_progress(task_id, 'JSON 备份文件缺少 tables 字段')
-                        return
-                    # JSON 恢复路径（Redis 还原锁已由入口端点获取，见 finally 统一释放）
-                    await update_progress(task_id, 'restore_db', 0.0, '通过 JSON 恢复数据库')
-                    result = await backup_service.restore_legacy_json(backup_data, db)
+                    await update_progress(task_id, 'pre_backup', 1.0, '安全备份完成')
 
-                result['pre_restore_backup'] = pre_restore_info
-                result['restored_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                result['filename'] = filename
-                result['format'] = 'zip' if is_zip else 'json'
+                    if is_zip:
+                        result = await backup_service.restore_from_zip(
+                            content, db,
+                            decrypt_password=decrypt_password,
+                            task_id=task_id,
+                            confirm_sensitive=confirm_sensitive,
+                        )
+                    else:
+                        try:
+                            backup_data = await asyncio.to_thread(json.loads, content)
+                        except json.JSONDecodeError:
+                            await fail_progress(task_id, '备份文件格式无效（非 ZIP 亦非有效 JSON）')
+                            return
+                        if 'tables' not in backup_data:
+                            await fail_progress(task_id, 'JSON 备份文件缺少 tables 字段')
+                            return
+                        # JSON 恢复路径（Redis 还原锁已由入口端点获取，见 finally 统一释放）
+                        await update_progress(task_id, 'restore_db', 0.0, '通过 JSON 恢复数据库')
+                        result = await backup_service.restore_legacy_json(backup_data, db)
 
-                if is_zip:
-                    manifest_tables = result.get('_manifest_tables', {})
-                    total_rows = sum(td.get('rows', 0) for td in manifest_tables.values()) if manifest_tables else 0
-                    result['total_inserted'] = total_rows
-                    result.pop('_manifest_tables', None)
+                    result['pre_restore_backup'] = pre_restore_info
+                    result['restored_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    result['filename'] = filename
+                    result['format'] = 'zip' if is_zip else 'json'
 
-                await _report_restore_outcome(task_id, result)
+                    if is_zip:
+                        manifest_tables = result.get('_manifest_tables', {})
+                        total_rows = sum(td.get('rows', 0) for td in manifest_tables.values()) if manifest_tables else 0
+                        result['total_inserted'] = total_rows
+                        result.pop('_manifest_tables', None)
 
-            except HTTPException as e:
-                await fail_progress(task_id, e.detail)
-            except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
-                # fail_progress 内部经 _sanitize_error 清洗（去除路径并截断），可安全写入 str(e)
-                await fail_progress(task_id, str(e))
+                    await _report_restore_outcome(task_id, result)
+
+                except HTTPException as e:
+                    await fail_progress(task_id, e.detail)
+                except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
+                    # fail_progress 内部经 _sanitize_error 清洗（去除路径并截断），可安全写入 str(e)
+                    await fail_progress(task_id, str(e))
+    except TimeoutError:
+        # asyncio.timeout 取消内层任务后在此收口：必须写明「可能已被重建」——
+        # 超时点可能落在 DROP 之后，此时库是空壳/部分状态，恢复中断标记仍在。
+        logger.error('恢复任务 %s 超过全阶段总时限 %ss，已中止', task_id, RESTORE_TOTAL_TIMEOUT)
+        await asyncio.shield(fail_progress(
+            task_id,
+            f'恢复超时（超过 {RESTORE_TOTAL_TIMEOUT}s），已中止。'
+            '若已进入重建/导入阶段，数据库可能不完整：请按恢复中断标记的指引核对并回滚',
+        ))
     except asyncio.CancelledError:
         # P1-10：停机/重启取消在跑任务，必须落失败终态——否则进度键停在中间态，
         # is_stale_restore_lock 判不了陈旧锁，还原锁要占满 TTL 才释放。

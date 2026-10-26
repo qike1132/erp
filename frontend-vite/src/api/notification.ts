@@ -52,9 +52,21 @@ export const notificationApi = {
   unreadCount: () => get<{ count: number }>('/notifications/unread-count', undefined, { routeCancel: false }),
   list: (params?: NotificationListParams) => get<NotificationListResponse>('/notifications', params, { routeCancel: false }),
   markAsRead: (id: number) => post<{ success: boolean; message: string }>(`/notifications/${id}/read`),
-  /** 批量标记已读（逐条调用，带并发控制） */
-  markBatchAsRead: async (ids: number[]): Promise<{ success: boolean; marked_count: number }> => {
+  /**
+   * 批量标记已读（逐条调用，带并发控制）。
+   *
+   * M8（2026-10-26）：返回**逐条**结果。原实现把 `Promise.allSettled` 折叠成
+   * `{ success: markedCount > 0 }`，永不 reject——调用方 await 后无条件清空选择
+   * 并提示「已标记 N 条」，实际可能只成功 1 条甚至全部失败。
+   */
+  markBatchAsRead: async (ids: number[]): Promise<{
+    success: boolean
+    marked_count: number
+    failed_count: number
+    failed_ids: number[]
+  }> => {
     let markedCount = 0
+    const failedIds: number[] = []
     const CONCURRENCY = 5
     for (let i = 0; i < ids.length; i += CONCURRENCY) {
       const batch = ids.slice(i, i + CONCURRENCY)
@@ -63,9 +75,20 @@ export const notificationApi = {
           post<{ success: boolean; message: string }>(`/notifications/${id}/read`)
         )
       )
-      markedCount += results.filter((r) => r.status === 'fulfilled' && r.value?.success).length
+      results.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value?.success) {
+          markedCount += 1
+        } else {
+          failedIds.push(batch[idx]!)
+        }
+      })
     }
-    return { success: markedCount > 0, marked_count: markedCount }
+    return {
+      success: failedIds.length === 0 && markedCount > 0,
+      marked_count: markedCount,
+      failed_count: failedIds.length,
+      failed_ids: failedIds,
+    }
   },
   markAllAsRead: () => post<{ success: boolean; marked_count: number }>('/notifications/read-all'),
 }

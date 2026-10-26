@@ -72,8 +72,10 @@ import { useCreateShipmentPlan } from '../composables/useCreateShipmentPlan'
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  /** 手动创建成功（调用方据此关闭对话框） */
+  /** 手动创建**全部成功**（调用方据此关闭对话框） */
   created: []
+  /** 有分组创建成功（部分成功时只刷新数据，对话框保持打开以保留失败草稿） */
+  succeeded: []
   /** 批量导入完成，参数为数据所属月份 YYYY-MM（对话框保持打开以展示结果） */
   imported: [month?: string]
 }>()
@@ -84,7 +86,10 @@ const mode = ref<'manual' | 'import'>('manual')
 const {
   form, productSuggestions, submitting, errorMsg, customerOptions,
   addDetail, removeDetail, onProductInput, onProductFocus, onProductBlur, selectProduct, handleSubmit,
-} = useCreateShipmentPlan(toRef(props, 'open'), () => emit('created'))
+} = useCreateShipmentPlan(toRef(props, 'open'), () => emit('created'), {
+  // H6：部分成功只刷新数据，不关闭对话框（失败草稿必须留在表单里可重试）
+  onSucceeded: () => emit('succeeded'),
+})
 
 // 打开对话框时切回「填写数据」页签（表单重置在 composable 内、文件清空在 ImportPanel 内完成）
 watch(() => props.open, (val) => {

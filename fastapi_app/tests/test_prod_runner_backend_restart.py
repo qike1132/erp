@@ -137,7 +137,12 @@ class TestPollRestartsDeadProcess:
         m = _mk(_RaceProc())
         monkeypatch.setattr(prod_runner, "_http_ok", lambda *a, **k: False)
         killed = {"n": 0}
-        monkeypatch.setattr(m, "kill_tree", lambda: killed.__setitem__("n", killed["n"] + 1))
+
+        def _kill() -> bool:
+            killed["n"] += 1
+            return True  # 已确认终止（H2 契约：kill_tree 返回 bool）
+
+        monkeypatch.setattr(m, "kill_tree", _kill)
         m.consecutive_health_fail = 2
         m.health_fail_start = time.monotonic() - 200.0
 
@@ -145,6 +150,78 @@ class TestPollRestartsDeadProcess:
 
         assert killed["n"] == 1
         assert m.status == "crashed"
+
+
+# ---------------------------------------------------------------------------
+# H2：杀树未确认成功 → 不得清身份、不得 mark_crashed、不得起新进程
+# ---------------------------------------------------------------------------
+class TestKillFailureKeepsIdentity:
+    def test_poll_does_not_restart_when_kill_unconfirmed(self, monkeypatch, capsys):
+        proc = _RaceProc()
+        m = _mk(proc)
+        monkeypatch.setattr(prod_runner, "_http_ok", lambda *a, **k: False)
+        monkeypatch.setattr(m, "kill_tree", lambda: False)  # 杀树未确认
+        m.consecutive_health_fail = 5
+        m.health_fail_start = time.monotonic() - 200.0
+        next_start_before = m.next_start
+
+        m.poll()
+
+        assert m.proc is proc, '未确认终止必须保留进程身份，不能 self.proc=None'
+        assert m.status != "crashed", '未确认终止不得宣布 crashed（会触发同端口重启）'
+        assert m.next_start == next_start_before, '未确认终止不得安排新进程'
+        assert m._kill_retry_at > time.monotonic(), '必须设置重试时刻'
+        out = capsys.readouterr().out
+        assert "未确认终止" in out and "不启动新进程" in out
+
+    def test_poll_skips_kill_during_retry_window(self, monkeypatch):
+        m = _mk(_AliveProc())
+        monkeypatch.setattr(prod_runner, "_http_ok", lambda *a, **k: False)
+        calls = {"n": 0}
+
+        def _kill() -> bool:
+            calls["n"] += 1
+            return False
+
+        monkeypatch.setattr(m, "kill_tree", _kill)
+        m.consecutive_health_fail = 50
+        m.health_fail_start = time.monotonic() - 9999.0
+        m._kill_retry_at = time.monotonic() + 60.0  # 重试窗口内
+
+        m.poll()
+
+        assert calls["n"] == 0, '重试窗口内不得再次发杀树（避免 taskkill 风暴）'
+
+    def test_shutdown_reports_unconfirmed_kill(self, monkeypatch, capsys):
+        sup = prod_runner.Supervisor.__new__(prod_runner.Supervisor)
+        sup._shutdown_done = False
+        backend = _mk(_AliveProc())
+        backend.name = "backend"
+        arq = _mk(_AliveProc())
+        arq.name = "arq"
+        sup.backend = backend
+        sup.arq = arq
+        monkeypatch.setattr(backend, "kill_tree", lambda: False)
+        monkeypatch.setattr(arq, "kill_tree", lambda: True)
+
+        sup.shutdown()
+
+        out = capsys.readouterr().out
+        assert "已停止" not in out, '存在未确认终止的服务时不得宣称已停止'
+        assert "关闭未完成" in out and "backend" in out
+        assert "arq" not in out.split("关闭未完成")[1]
+
+    def test_shutdown_reports_success_when_all_confirmed(self, monkeypatch, capsys):
+        sup = prod_runner.Supervisor.__new__(prod_runner.Supervisor)
+        sup._shutdown_done = False
+        backend = _mk(_AliveProc())
+        sup.backend = backend
+        sup.arq = None
+        monkeypatch.setattr(backend, "kill_tree", lambda: True)
+
+        sup.shutdown()
+
+        assert "已停止" in capsys.readouterr().out
 
 
 if __name__ == "__main__":  # pragma: no cover

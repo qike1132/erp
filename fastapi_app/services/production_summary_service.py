@@ -3,7 +3,6 @@
 
 包含手工部录入、包装部录入、汇总动态报表、数据导出等功能。
 """
-import asyncio
 import calendar
 import io
 import logging
@@ -248,9 +247,10 @@ def _parse_packaging_rows(file_content: bytes) -> list[tuple]:
 
 async def upload_packaging_excel(db: AsyncSession, file_content: bytes, created_by: str='') -> dict:
     """上传Excel文件，解析并批量创建包装部记录"""
-    from fastapi_app.services.xlsx_budget import run_parse_with_timeout
+    from fastapi_app.services.xlsx_budget import run_sync_with_timeout
 
-    rows = await run_parse_with_timeout(asyncio.to_thread(_parse_packaging_rows, file_content))
+    # M1：专用有界线程池 + 可跟踪终态（不占默认 executor）
+    rows = await run_sync_with_timeout(_parse_packaging_rows, file_content)
     if not rows:
         raise ValueError('Excel文件无数据行')
     records_data = []
