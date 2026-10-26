@@ -147,12 +147,16 @@ async def _handle_job_failure(ctx, exc) -> None:
     # M-C（2026-10-25 审计）：接入 alert_service（critical 恒通知）。此前告警只有
     # 日志行——H-1 出货同步断流 3 天、408 条错误日志无人发现即后果。owner 配置
     # BACKUP_ALERT_EMAIL_/WEBHOOK_ 后自动外推；未配置时失败计数/冷却逻辑照常工作。
+    # M4（2026-10-25 上线前检查）：外发文本不带异常原文——`{exc}` 可能携带 SQL
+    # 片段/参数/标识符等敏感内容，300 字符截断不提供机密性保证。外发只给异常
+    # 类型与 job 关联 ID；原文已落受保护的内部日志（上方 logger.error）与死信
+    # 队列条目，供有权限者排查。
     try:
         from fastapi_app.services.backup.metrics.alert_service import alert_service
         await alert_service.send_alert(
             task_name=f'arq:{func_name}',
-            # 异常消息可能携带整段 SQL/超长 payload，告警通道（邮件/Webhook）截断
-            error=f'{type(exc).__name__}: {exc}'[:300],
+            error=(f'{type(exc).__name__} 失败，需人工介入。'
+                   f'详情见 logs/ 后端与 ARQ 日志及死信队列（job_id={job_id}）'),
             task_type='arq_task',
             severity='critical',
             additional_info={'job_id': job_id, 'job_try': job_try, 'max_tries': max_tries},

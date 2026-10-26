@@ -23,7 +23,7 @@ import pytest
 
 from server_manager import git_guard
 from server_manager.constants import _SVC_ALL, _SVC_REDIS_BROKER, _SVC_REVERSE, _SVC_START_ORDER, _SVC_WEB
-from server_manager.service_ops import ServiceOps
+from server_manager.service_ops import ServiceOps, ServiceRunResult
 
 NSSM = r'C:\nssm\nssm.exe'
 
@@ -71,18 +71,19 @@ def _ops(stop_rc=0, stop_out='', *, real_wait_running=False):
         return 0, ''
 
     ops.run_capture = fake_run
-    ops.svc_pid = lambda name: None
+    ops.svc_pid_ex = lambda name: (None, True)
     ops.wait_service = lambda name, target, timeout, **kw: 'STOPPED'
     if not real_wait_running:
-        ops.wait_service_running = lambda name, timeout=25, prev_pid=None: (True, '4 RUNNING', 4242)
+        ops.wait_service_running = lambda name, timeout=25, prev_pid=None: ServiceRunResult(
+            True, '4 RUNNING', 4242, True)
     return ops, q
 
 
 def test_restart_uses_stop_then_start_and_never_nssm_restart():
     """重启 = 显式 stop + start；`nssm restart` 这个坑不能再回去。"""
     ops, _q = _ops()
-    ok, _state, pid = ops.restart_service_via_stop_start('erp-prod')
-    assert ok is True and pid == 4242
+    res = ops.restart_service_via_stop_start('erp-prod')
+    assert res.ok is True and res.effective is True and res.pid == 4242
     verbs = [c[1] for c in ops.calls]
     assert verbs == ['stop', 'start'], f'必须显式先停后起，实际 {verbs}'
     assert 'restart' not in verbs, 'nssm restart 停机失败会跳过 start，不得使用'
@@ -91,8 +92,8 @@ def test_restart_uses_stop_then_start_and_never_nssm_restart():
 def test_start_still_issued_when_stop_reports_failure():
     """★ 核心回归：停机阶段返回非 0 **不得**拦掉 start。"""
     ops, _q = _ops(stop_rc=1, stop_out='erp-prod: STOP: 服务无法接受控制信息。')
-    ok, _state, _pid = ops.restart_service_via_stop_start('erp-prod')
-    assert ok is True, '停机报错也必须继续把服务拉起来'
+    res = ops.restart_service_via_stop_start('erp-prod')
+    assert res.ok is True, '停机报错也必须继续把服务拉起来'
     assert [c[1] for c in ops.calls] == ['stop', 'start']
 
 
@@ -272,8 +273,8 @@ def test_restart_skips_port_cleanup_when_not_injected():
     """未注入清端口能力时不得报错（纯逻辑调用方 / 旧调用点）。"""
     ops, _q = _ops()
     assert ops._release_ports is None
-    ok, _state, _pid = ops.restart_one_service('erp-prod')
-    assert ok is True
+    res = ops.restart_one_service('erp-prod')
+    assert res.ok is True and res.effective is True
 
 
 def test_unconfirmed_stop_is_reported_not_silent():
@@ -286,38 +287,66 @@ def test_unconfirmed_stop_is_reported_not_silent():
     assert '仍继续启动' in warns[0], '告警须说明仍会继续启动，避免与后续「启动成功」自相矛盾'
 
 
-def test_restart_flags_noop_when_stop_never_took_effect():
-    """停机被 SCM 拒（依赖方在跑）→ PID 不变 → 必须报「未生效」，不得只报「启动成功」。
+def test_restart_same_pid_is_ok_but_never_effective():
+    """B1 核心锁：停机被 SCM 拒（依赖方在跑）→ PID 不变 → ok=True 但 effective=False。
 
     erp-redis / erp-redis-broker 有依赖方（erp-prod / erp-arq）：全栈重启轮到它们时，
     依赖方已重启回 RUNNING，SCM 拒停 → 服务从未停过（2026-10-15 现场：PID 18792 全程未变）。
-    若只报「启动成功」，运维会以为配置已生效（改 redis.conf 后点重启的典型场景）——假成功。
+    若只报「启动成功」，运维会以为配置已生效（改 redis.conf 后点重启的典型场景）。
+    2026-10-25 上线前检查 B1：同 PID 旧进程健康仍被当发布成功——发布验收消费方
+    必须同时要求 ok and effective，本用例锁 effective=False，脚本侧才可能非零退出。
     """
     ops, q = _ops(
         stop_rc=1,
         stop_out='erp-redis: STOP: 停止控制被发送到其他正在运行的服务所依赖的服务。',
         real_wait_running=True,
     )
-    ops.svc_pid = lambda name: 18792      # 停前停后同一 PID：从未停成
+    ops.svc_pid_ex = lambda name: (18792, True)  # 停前停后同一 PID：从未停成
     ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
-    ok, _state, pid = ops.restart_service_via_stop_start('erp-redis')
-    assert ok is True and pid == 18792
+    res = ops.restart_service_via_stop_start('erp-redis')
+    assert res.ok is True, '服务确实在跑（旧进程），ok 仍为真'
+    assert res.effective is False, '同 PID = 重启未发生，绝不能判定 effective'
+    assert res.pid == 18792
     texts = q.texts()
     assert any('未生效' in t for t in texts), f'停机未生效必须报「未生效」，实际={texts}'
     assert not any('启动成功' in t for t in texts), f'PID 未变时不得只报「启动成功」，实际={texts}'
 
 
-def test_restart_reports_success_when_pid_changes():
-    """真实重启（PID 变了）仍报「启动成功」——防新判定把正常重启也误判成未生效。"""
+def test_restart_with_unreadable_pid_is_never_effective():
+    """B1：新 PID 读不出来（探测通道故障）时身份未经证实，effective 必须为 False。
+
+    宁可误报（让运维手查一次），不可漏报（把旧进程当新版本发布）。
+    """
     ops, q = _ops(real_wait_running=True)
-    pids = iter([111, 222])               # 停前 111 → 停后 222
-    ops.svc_pid = lambda name: next(pids)
+    pids = iter([(111, True), (None, True)])  # 停前 111 → 停后 RUNNING 却无 PID（身份未证实）
+    ops.svc_pid_ex = lambda name: next(pids)
     ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
-    ok, _state, pid = ops.restart_service_via_stop_start('erp-prod')
-    assert ok is True and pid == 222
+    res = ops.restart_service_via_stop_start('erp-prod')
+    assert res.ok is True and res.pid is None and res.effective is False
+    texts = q.texts()
+    assert any('无法验证本次重启是否生效' in t for t in texts), texts
+
+
+def test_restart_reports_success_when_pid_changes():
+    """真实重启（PID 变了）仍报「启动成功」且 effective=True——防新判定把正常重启误判成未生效。"""
+    ops, q = _ops(real_wait_running=True)
+    pids = iter([(111, True), (222, True)])   # 停前 111 → 停后 222
+    ops.svc_pid_ex = lambda name: next(pids)
+    ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
+    res = ops.restart_service_via_stop_start('erp-prod')
+    assert res.ok is True and res.effective is True and res.pid == 222
     texts = q.texts()
     assert any('启动成功' in t for t in texts), texts
     assert not any('未生效' in t for t in texts), texts
+
+
+def test_start_without_prev_pid_is_effective_when_running():
+    """纯启动路径（无 prev_pid）不比对 PID：RUNNING 即 effective（如开机首启、崩溃自愈后手拉）。"""
+    ops, _q = _ops(real_wait_running=True)
+    ops.svc_pid_ex = lambda name: (333, True)  # 无 prev_pid，无从比对，直接生效
+    ops.wait_service = lambda name, target, timeout, **kw: '4 RUNNING'
+    res = ops.start_one_service('erp-prod')
+    assert res.ok is True and res.effective is True and res.pid == 333
 
 
 def test_start_already_running_localized_is_not_a_warning():

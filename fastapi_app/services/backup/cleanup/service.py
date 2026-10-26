@@ -110,8 +110,9 @@ class BackupCleanupService:
             return report
         except Exception as e:  # defensive: cleanup task must report failure but not crash
             logger.error('备份清理失败: %s', e)
+            # M4：外发只给类型名，异常原文已在上方 logger.error 留痕
             await alert_service.send_alert(task_name='smart_cleanup',
-                                           error=f'备份清理失败: {e!s}',
+                                           error=f'备份清理失败: {type(e).__name__}（详见内部日志）',
                                            task_type='cleanup', severity='error')
             return {'success': False, 'error': str(e), 'message': '备份清理失败'}
 

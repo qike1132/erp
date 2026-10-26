@@ -21,6 +21,7 @@ from fastapi_app.schemas.finished_stock import (
     FinishedStockSummaryResponse,
 )
 from fastapi_app.services import finished_stock_service
+from fastapi_app.shared.factory_scope import assert_product_factory_scoped, factory_scope_of
 from fastapi_app.shared_models import User
 
 # Excel 公式注入清洗（审查 H12）：customer_name/product_name/batch_no 等是
@@ -31,6 +32,11 @@ router = APIRouter()
 
 # 导出最大行数（仿 stock.py 的 MAX_EXPORT_INVENTORY_ROWS），防 openpyxl 全量内存构建 OOM
 MAX_EXPORT_ROWS = 10000
+
+
+def _factory_scope(user: User) -> str:
+    """读侧工厂范围（转发 shared 的单一真相源，2026-10-25 H1 评审 finding 7）。"""
+    return factory_scope_of(user)
 
 
 @router.get('/summary', response_model=FinishedStockSummaryResponse)
@@ -44,9 +50,9 @@ async def finished_stock_summary(
     # 与 /stock/inventory 同权限用户（stock_view / stockin_manage），外加本页导航权限码
     # finished_stock_view（见 seed_nav.py）——否则管理员按导航勾选「成品库存」的用户
     # 能看到入口却拿 403（导航码↔接口码错配）。
-    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
+    user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
 ) -> FinishedStockSummaryResponse:
-    """按 客户/产品/批次 聚合成品库存（只读副本）。"""
+    """按 客户/产品/批次 聚合成品库存（只读副本，厂绑定用户限本厂产品）。"""
     result = await finished_stock_service.get_finished_stock_summary(
         db,
         customer_name=customer,
@@ -54,6 +60,7 @@ async def finished_stock_summary(
         batch_no=batch_no,
         page=page,
         per_page=per_page,
+        factory=_factory_scope(user),
     )
     return FinishedStockSummaryResponse(**result)
 
@@ -65,10 +72,14 @@ async def product_batches(
     db: AsyncSession = Depends(get_async_read_db),
     # 唯一消费方是出库管理页（StockOutTab → finishedStockApi.batches），其权限码是
     # stockout_manage；只授该码的用户也须能取批次，否则出货页批次下拉静默 403。
-    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view', 'stockout_manage')),
+    user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view', 'stockout_manage')),
 ) -> BatchListResponse:
     """某产品的批次可用量列表（供 /stock-out 录入 SKU 后带出批次选择）。"""
-    rows = await finished_stock_service.get_batches_by_product(db, product_id, customer_name=customer)
+    # product_id 由调用方提供，必须先过工厂闸门（与写端点同口径）：他厂产品 404，
+    # 不暴露存在性（2026-10-25 上线前检查 H1）。
+    await assert_product_factory_scoped(db, product_id, user, what='产品')
+    rows = await finished_stock_service.get_batches_by_product(
+        db, product_id, customer_name=customer, factory=_factory_scope(user))
     # 服务层返回 list[dict]，显式构造成模型（与 response_model 的隐式校验等价），mypy 可查字段
     return BatchListResponse(data=[BatchAvailableItem(**row) for row in rows])
 
@@ -102,14 +113,14 @@ async def export_finished_stock(
     product: str = Query('', description='产品名称/69码搜索'),
     batch_no: str = Query('', description='批次号筛选（精确）'),
     db: AsyncSession = Depends(get_async_read_db),
-    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
+    user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
 ) -> StreamingResponse:
-    """导出当前筛选（客户 + 搜索词）的成品库存为 Excel。"""
+    """导出当前筛选（客户 + 搜索词）的成品库存为 Excel（厂绑定用户限本厂）。"""
     import asyncio
 
     result = await finished_stock_service.get_finished_stock_summary(
         db, customer_name=customer, product_search=product, batch_no=batch_no,
-        page=1, per_page=MAX_EXPORT_ROWS,
+        page=1, per_page=MAX_EXPORT_ROWS, factory=_factory_scope(user),
     )
     if result['total'] > MAX_EXPORT_ROWS:
         raise HTTPException(status_code=400, detail=f'数据量过大({result["total"]}条)，请缩小查询范围后重试')
@@ -130,9 +141,12 @@ async def upsert_remark(
     data: FinishedStockRemarkUpdate = Body(...),
     db: AsyncSession = Depends(get_async_db),
     # 备注是页面维护动作，与 /finished-stock 读同权限（含本页导航码）
-    _user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
+    user: User = Depends(require_any_permission('stockin_manage', 'stock_view', 'finished_stock_view')),
 ) -> FinishedStockRemarkResponse:
     """页面级备注 UPSERT：键 (客户,产品,批次) 一行一条；内容清空即删除。"""
+    # product_id 由请求体提供：他厂产品的备注读写一律 404（与读端点同口径，
+    # 防厂绑定用户借备注写探到他厂产品存在性——2026-10-25 上线前检查 H1）。
+    await assert_product_factory_scoped(db, data.product_id, user, what='产品')
     async with db_transaction(db):
         await finished_stock_service.upsert_remark(
             db,

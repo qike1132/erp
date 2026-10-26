@@ -12,7 +12,8 @@ URL（见 tests/conftest.py）。改用测试库 sync 会话直接调 ``_sync_on
 （与 tests/test_plan_import_idempotency_real.py 同款注入法）。
 """
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -63,6 +64,7 @@ class TestSyncOneDateInsertsCreatedAt:
         from fastapi_app.shared_models.purchase_plan import ShipmentRecord
         from fastapi_app.tasks.plan_tasks import _sync_one_date
 
+        target = business_today()
         product = Product(
             name='SYNCGATE 产品', barcode=_PROD_BARCODE,
             current_stock=0, initial_stock=0,
@@ -70,14 +72,22 @@ class TestSyncOneDateInsertsCreatedAt:
         customer = Customer(name=_CUST_NAME)
         async_db_session.add_all([product, customer])
         await async_db_session.flush()
+        # 出库时刻取业务日正午（Asia/Shanghai）：_sync_one_date 用
+        # ``DATE(stockout_date) = :target_date``（DB 时区日期）过滤，种子若用
+        # now(UTC)，在 UTC 16:00–24:00（北京 0:00–8:00）窗口内 DB 的 UTC 日期
+        # 会落后业务日一天 → 同步 0 行（2026-10-25 CI 三跑实锤，北京 00:06）。
+        # 业务日正午在 UTC 与 +08 两种 DB 时区下 DATE() 都落在 target 当天。
+        stockout_dt = datetime(
+            target.year, target.month, target.day, 12, 0,
+            tzinfo=ZoneInfo('Asia/Shanghai'),
+        )
         async_db_session.add(StockOut(
             stockout_no=_SHIP_NO, product_id=product.id,
             quantity=5, customer=_CUST_NAME,
-            stockout_date=datetime.now(UTC),
+            stockout_date=stockout_dt,
         ))
         await async_db_session.commit()
         cust_map = {_CUST_NAME: customer.id}
-        target = business_today()
 
         sync_url = TEST_DATABASE_URL.replace('+asyncpg', '+psycopg')
 

@@ -123,9 +123,25 @@ async def degraded_reasons_all() -> list[str]:
 _BACKUP_UPLOAD_BODY_LIMIT = int(os.environ.get('MAX_BACKUP_UPLOAD_BYTES', str(512 * 1024 * 1024)))
 _IMPORT_UPLOAD_BODY_LIMIT = int(os.environ.get('MAX_IMPORT_UPLOAD_BYTES', str(64 * 1024 * 1024)))
 
+# M2（2026-10-25 上线前检查）：multipart 请求体 = 文件本体 + 边界/字段头开销（O>0）。
+# 文件上限恰好等于请求体上限时，「合法的恰好 10MiB 文件」会因 multipart 开销
+# F+O > 10MiB 在抵达端点**之前**被 413——端点级校验根本没机会执行。故对
+# 「端点内按 10MiB 文件上限校验」的上传路径，外层 body 预算 =
+# 文件上限 + multipart 余量（2MiB 覆盖边界/字段头；余量只放行到端点，真正的
+# 文件级校验仍在端点常量，对用户承诺的 10MiB 语义不变）。
+_MULTIPART_OVERHEAD_BYTES = 2 * 1024 * 1024
+_EXCEL_UPLOAD_BODY_LIMIT = int(os.environ.get(
+    'MAX_EXCEL_UPLOAD_BODY_BYTES', str(10 * 1024 * 1024 + _MULTIPART_OVERHEAD_BYTES)))
+
 _PATH_BODY_LIMITS: tuple[tuple[str, int], ...] = (
     ('/api/v1/backup/', _BACKUP_UPLOAD_BODY_LIMIT),
     ('/api/v1/tasks/import-', _IMPORT_UPLOAD_BODY_LIMIT),
+    # batch 七个导入端点 + packaging 上传：端点内文件上限 10MiB
+    # （import_guard / production_summary / batch_import_parser 三处同口径声明）。
+    ('/api/v1/batch/', _EXCEL_UPLOAD_BODY_LIMIT),
+    # 精确到 packaging/upload：该前缀下其余 11 个端点是纯 JSON 小请求，整前缀
+    # 放宽属扩大化（评审 finding 5）。middleware 是 startswith 匹配，写全路径即可。
+    ('/api/v1/production-summary/packaging/upload', _EXCEL_UPLOAD_BODY_LIMIT),
 )
 
 

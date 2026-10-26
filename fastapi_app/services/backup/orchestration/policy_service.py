@@ -259,9 +259,10 @@ class BackupPolicyService:
             logger.error(f"应用备份策略失败: {e}")
 
             # 发送告警
+            # M4（2026-10-25）：外发只给类型名，异常原文（可能含配置/路径）留内部日志
             await alert_service.send_alert(
                 task_name='apply_backup_policy',
-                error=f"应用备份策略失败: {e!s}",
+                error=f"应用备份策略失败: {type(e).__name__}（详见内部日志）",
                 task_type='policy',
                 severity='error'
             )

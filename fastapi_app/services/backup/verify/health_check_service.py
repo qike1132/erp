@@ -254,9 +254,10 @@ class BackupHealthCheckService:
             }
 
             # 发送错误告警
+            # M4：外发只给类型名，异常原文留内部日志
             await alert_service.send_alert(
                 task_name='health_check',
-                error=f"健康检查执行失败: {e!s}",
+                error=f"健康检查执行失败: {type(e).__name__}（详见内部日志）",
                 task_type='health_check',
                 severity='error'
             )

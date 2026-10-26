@@ -221,10 +221,11 @@ async def _export_database(db, user, remark, tmpdir_path: Path, snapshot_id,
             # （触发条件真实存在：pg_dump 版本不匹配/工具丢失）。
             try:
                 from fastapi_app.services.backup.metrics.alert_service import alert_service
+                # M4：外发只给类型名（pg_dump 不可用的具体报错可能带路径/版本环境），原文留内部日志
                 await alert_service.send_alert(
                     task_name='pg_dump_unavailable',
                     error=f'pg_dump 不可用，本次备份降级为 JSON 格式'
-                          f'（不含 schema，无法在空库恢复）：{e}',
+                          f'（不含 schema，无法在空库恢复）：{type(e).__name__}',
                     task_type='backup', severity='warning',
                     additional_info={'snapshot_id': snapshot_id},
                 )

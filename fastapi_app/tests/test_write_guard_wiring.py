@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from server_manager.service_ops import ServiceRunResult
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -74,39 +76,73 @@ def test_restart_backend_wires_git_branch_guard():
 
 
 def _install_fake_service_ops(monkeypatch, outcome):
-    """替换 server_manager.service_ops 为记录型 fake，返回调用记录。"""
+    """替换 server_manager.service_ops 为记录型 fake，返回调用记录。
+
+    B1（2026-10-25）：重启结果契约是 ``ServiceRunResult(ok, state, pid, effective)``；
+    fake 的 ``svc_pid_ex`` 报告与 outcome 一致的 PID（通道正常），供脚本停机前
+    基线与重启后独立复核。评审 finding 5：要测「脚本复核拦住 ServiceOps 漏判」，
+    用 `_pid_ex_override` 注入不一致值。
+    """
     import sys
     import types
 
     calls = []
+    pid_ex_override = {'value': None}  # 非 None 时强制返回该值（模拟探测异常/不一致）
 
     class _FakeOps:
         def __init__(self, msg_queue, gate, project_dir, log_message, release_ports=None):
             calls.append({'ctor': True, 'project_dir': project_dir})
+            self._pid_calls = 0
+
+        def svc_pid_ex(self, name):
+            # 第 1 次调用 = 停机前基线（旧 PID 111），其后 = 重启后独立复核（outcome.pid）
+            self._pid_calls += 1
+            if pid_ex_override['value'] is not None:
+                return pid_ex_override['value']
+            if self._pid_calls == 1:
+                return (111, True)
+            return (outcome.pid, True)
 
         def restart_service_via_stop_start(self, name, nssm=None, **kwargs):
             calls.append({'restart': name, 'nssm': nssm})
             return outcome
 
+    fake = _FakeOps
     fake_mod = types.ModuleType('server_manager.service_ops')
-    fake_mod.ServiceOps = _FakeOps
+    fake_mod.ServiceOps = fake
+    fake_mod.ServiceRunResult = ServiceRunResult
+    fake_mod._pid_ex_override = pid_ex_override
     monkeypatch.setitem(sys.modules, 'server_manager.service_ops', fake_mod)
-    return calls
+    return calls, pid_ex_override
 
 
-def test_restart_backend_uses_stop_start_and_waits_health(monkeypatch):
-    """M-G 行为锁：stop_start 成功 + 健康通过 → rc=0；ServiceOps 收到 nssm 路径。"""
+def _wire_restart_module(monkeypatch, name: str):
+    """加载 restart_backend 并接上 git 闸门/版本指纹的确定性替身。
+
+    版本指纹函数（_git_head / _process_age_seconds）一律 monkeypatch：真跑会
+    触达本机 git 与 Get-Process（PID 不存在），既慢又环境相关。
+    """
     import sys
     import types
 
-    mod = _load('restart_backend_mg_ok', ROOT / 'scripts' / 'restart_backend.py')
+    mod = _load(name, ROOT / 'scripts' / 'restart_backend.py')
     fake_guard = types.ModuleType('server_manager.git_guard')
     fake_guard.check_production_branch = lambda _root: (True, 'ok')
     monkeypatch.setitem(sys.modules, 'server_manager.git_guard', fake_guard)
-    calls = _install_fake_service_ops(
-        monkeypatch, (True, 'RUNNING', 12345),
+    monkeypatch.setattr(mod, '_git_head', lambda _root: 'a' * 40)
+    return mod
+
+
+def test_restart_backend_uses_stop_start_and_waits_health(monkeypatch):
+    """M-G 行为锁：stop_start 成功（ok+effective）+ 健康通过 → rc=0；nssm 路径直达。"""
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_ok')
+    calls, _pid_override = _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 12345, True),
     )
     monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    # 新进程必须比重启动作「年轻」：sleep 被桩成 no-op（elapsed≈0），age 给 0.5s
+    # 才能穿过指纹判定（给大值会误判「早于重启开始」）。
+    monkeypatch.setattr(mod, '_process_age_seconds', lambda _pid: 0.5)
     monkeypatch.setattr(mod, '_health_ok', lambda: True)
     monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)  # 轮询间隔 3s，测试不真睡
 
@@ -118,15 +154,9 @@ def test_restart_backend_uses_stop_start_and_waits_health(monkeypatch):
 
 
 def test_restart_backend_reports_failure_when_restart_not_effective(monkeypatch):
-    """M-G 行为锁：重启未生效（终态非 RUNNING）→ rc=1，且仍等健康循环不假报成功。"""
-    import sys
-    import types
-
-    mod = _load('restart_backend_mg_fail', ROOT / 'scripts' / 'restart_backend.py')
-    fake_guard = types.ModuleType('server_manager.git_guard')
-    fake_guard.check_production_branch = lambda _root: (True, 'ok')
-    monkeypatch.setitem(sys.modules, 'server_manager.git_guard', fake_guard)
-    _install_fake_service_ops(monkeypatch, (False, 'STOPPED', None))
+    """M-G 行为锁：重启未生效（终态非 RUNNING）→ rc=1，且不进入健康循环。"""
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_fail')
+    _install_fake_service_ops(monkeypatch, ServiceRunResult(False, 'STOPPED', None, False))
     monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
     health_calls = []
     monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or False)
@@ -138,14 +168,83 @@ def test_restart_backend_reports_failure_when_restart_not_effective(monkeypatch)
     assert health_calls == [], '重启未生效（未达 RUNNING）时不得假报健康，直接如实失败'
 
 
-def test_service_ops_headless_gate_none_survives_wait_service():
-    """评审 H-2 锁：headless 构造 ServiceOps（gate=None）在 wait_service 不得崩。
+def test_restart_backend_fails_when_same_pid_and_old_process_healthy(monkeypatch):
+    """B1 核心回归：同 PID（重启没发生）+ 旧进程健康 → 必须非零退出。
 
-    restart_backend 直跑形态正是 headless 构造；wait_service 轮询里无条件
-    ``self._gate.checkpoint()`` 会在 gate=None 时 AttributeError——stop 已发出而
-    start 永不执行，服务停在 STOPPED（恰是 stop_start 原语要防的形态）。
-    真 ServiceOps 构造 + state_fn 注入（零子进程），变异（恢复无条件 checkpoint）
-    本测试必红。
+    旧实现此处 rc=0：ServiceOps 对同 PID 返回 ok=True，脚本丢弃 PID 后只看
+    /api/health——旧进程一直健康就能假报发布成功。修复后 effective=False
+    直接 1 退出，且健康检查一次都不该发起。
+    """
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_samepid')
+    _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 18792, False),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    health_calls = []
+    monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or True)
+
+    rc = mod.main()
+
+    assert rc == 1, '同 PID = 本次重启未发生，即使旧进程健康也必须判失败'
+    assert health_calls == [], '未生效的重启不得再拿健康检查粉饰'
+
+
+def test_restart_backend_script_pid_recheck_catches_ops_miss(monkeypatch):
+    """评审 finding 5：脚本侧独立 PID 复核必须能拦住 ServiceOps 的漏判。
+
+    场景：ServiceOps 错误地宣称 ok+effective（pid=999），但停机前 PID 也是 999
+    ——脚本自己的 prev_pid 比对必须拦下（该分支此前零覆盖，删除它现有测试全绿）。
+    """
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_pid_recheck')
+    _calls, pid_override = _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 999, True),
+    )
+    pid_override['value'] = (111, True)  # 独立复核发现 5002 上仍是旧进程 111
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    health_calls = []
+    monkeypatch.setattr(mod, '_health_ok', lambda: health_calls.append(1) or True)
+
+    rc = mod.main()
+
+    assert rc == 1, '独立复核 PID 与 ServiceOps 报告不一致必须判失败'
+    assert health_calls == []
+
+
+def test_restart_backend_fails_when_reported_pid_is_none(monkeypatch):
+    """评审 finding 5：ServiceOps 宣称生效但 PID 为 None（身份未证实）→ rc=1。"""
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_pid_none')
+    _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', None, True),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+
+    rc = mod.main()
+
+    assert rc == 1
+
+
+def test_restart_backend_fails_when_health_never_passes(monkeypatch):
+    """B1 验收链：重启生效但 90s 健康不通过 → rc=1（不能只因 PID 变了就报成功）。"""
+    mod = _wire_restart_module(monkeypatch, 'restart_backend_mg_health_timeout')
+    _install_fake_service_ops(
+        monkeypatch, ServiceRunResult(True, '4 RUNNING', 12345, True),
+    )
+    monkeypatch.setattr(mod, '_find_nssm', lambda: r'C:\nssm\nssm.exe')
+    monkeypatch.setattr(mod, '_health_ok', lambda: False)
+    monkeypatch.setattr(mod.time, 'sleep', lambda _s: None)
+
+    rc = mod.main()
+
+    assert rc == 1
+
+
+def test_service_ops_headless_gate_none_survives_wait_service():
+    """评审 H-2（2026-10-25 复核修正）：gate=None 必须真实穿过等待循环的 checkpoint 行。
+
+    原测试 state_fn 恒回 'RUNNING'，wait_service 首次状态检查即命中返回——
+    轮询体（含 ``if checkpoint and self._gate is not None``）从未执行，锁了个寂寞。
+    本版让状态**首次非目标态、随后才到目标态**，真实进入「gate 判定 → sleep → 再查」
+    循环；gate=None 时若恢复无条件 ``self._gate.checkpoint()`` 即 AttributeError，本测试必红。
     """
     import queue as _queue
 
@@ -157,10 +256,15 @@ def test_service_ops_headless_gate_none_survives_wait_service():
         project_dir=str(ROOT),
         log_message=lambda *_a, **_k: None,
     )
-    state = ops.wait_service(
-        'erp-prod', 'RUNNING', timeout=1, state_fn=lambda _name: 'RUNNING',
-    )
+    states = iter(['3 STOP_PENDING', '3 STOP_PENDING', '4 RUNNING'])
+
+    def state_fn(_name):
+        return next(states, '4 RUNNING')
+
+    state = ops.wait_service('erp-prod', 'RUNNING', timeout=5, interval=0.01, state_fn=state_fn)
     assert 'RUNNING' in state.upper()
+    # 至少轮询过一轮非目标态，证明 checkpoint 行真实执行过（否则断言退化为原假覆盖）
+    assert next(states, 'exhausted') == 'exhausted', '状态序列必须被真实消费（进入轮询循环）'
 
 
 def test_restart_backend_refuses_on_guard_denial(monkeypatch):

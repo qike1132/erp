@@ -32,3 +32,4 @@ scripts/_selftest_hook.py
 scripts/prod_audit/tests/test_scan_secrets.py
 # 2026-10-24 审计修复（I2-04 BOM）曾登记两安装脚本；同日把示例占位串改为
 # <...> 尖括号形式后命中归零，条目按「冗余即删」原则移除（allowlist_effectiveness 锁）。
+

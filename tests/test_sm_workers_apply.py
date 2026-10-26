@@ -21,7 +21,7 @@ import pytest
 
 from server_manager import git_guard
 from server_manager.constants import _SVC_API, _SVC_ARQ
-from server_manager.service_ops import ServiceOps
+from server_manager.service_ops import ServiceOps, ServiceRunResult
 
 NSSM = r'C:\nssm\nssm.exe'
 
@@ -193,8 +193,10 @@ def test_restart_one_service_restarts_only_the_named_one():
     fake = _FakeNssm({_SVC_API: CURRENT})
     ops = _svc(fake)
     ops.wait_service = lambda name, target, timeout, **kw: 'STOPPED'
-    ops.wait_service_running = lambda name, timeout=25, **kw: True
-    assert ops.restart_one_service(_SVC_API) is True
+    ops.wait_service_running = lambda name, timeout=25, **kw: ServiceRunResult(
+        True, '4 RUNNING', 4242, True)
+    res = ops.restart_one_service(_SVC_API)
+    assert res.ok and res.effective, f'重启结果必须 ok+effective，实际 {res}'
     touched = [(c[1], c[2]) for c in fake.calls
                if len(c) > 2 and c[1] in ('stop', 'start', 'restart')]
     assert touched == [('stop', _SVC_API), ('start', _SVC_API)], \

@@ -4,6 +4,7 @@
 包含排产计划 CRUD、批量上传预览、库存对比、出货进度追踪、
 月度汇总统计、时间轴查询、操作日志等功能。
 """
+import asyncio
 import calendar
 import io
 import json
@@ -223,20 +224,41 @@ async def get_customer_summary(db: AsyncSession, year: int, month: int) -> dict:
     result = await get_plans_with_inventory(db, year, month)
     return result['monthly_summary']
 
-async def upload_excel(db: AsyncSession, file_content: bytes, session_id: str) -> dict:
-    """
-    解析Excel文件，写入暂存表，返回预览数据
-    """
-    batch_id = str(uuid.uuid4())[:8]
+def _parse_plan_rows(file_content: bytes) -> list[tuple]:
+    """同步解析生产计划 Excel（线程池执行，配合 xlsx_budget 超时——M5）。"""
+    from fastapi_app.services.xlsx_budget import (
+        MAX_SHEET_COLS,
+        MAX_SHEET_ROWS,
+        XlsxBudgetError,
+        assert_zip_budget,
+        clip_iter_rows,
+    )
+
+    assert_zip_budget(file_content)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
     except (ValueError, OSError) as e:
         raise ValueError(f'Excel文件解析失败: {e}') from e
     try:
         ws = wb.active
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        rows = list(clip_iter_rows(ws))
     finally:
         wb.close()
+    if len(rows) > MAX_SHEET_ROWS:
+        raise XlsxBudgetError(f'工作表行数超过上限 {MAX_SHEET_ROWS}')
+    if max((len(r) for r in rows), default=0) > MAX_SHEET_COLS:
+        raise XlsxBudgetError(f'工作表列数超过上限 {MAX_SHEET_COLS}')
+    return rows
+
+
+async def upload_excel(db: AsyncSession, file_content: bytes, session_id: str) -> dict:
+    """
+    解析Excel文件，写入暂存表，返回预览数据
+    """
+    from fastapi_app.services.xlsx_budget import run_parse_with_timeout
+
+    batch_id = str(uuid.uuid4())[:8]
+    rows = await run_parse_with_timeout(asyncio.to_thread(_parse_plan_rows, file_content))
     if not rows:
         raise ValueError('Excel文件无数据行')
     staging_records = []

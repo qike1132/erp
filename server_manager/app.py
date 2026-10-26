@@ -101,7 +101,7 @@ def _activate_existing_window():
         if hwnd:
             user32.ShowWindow(hwnd, 9)
             user32.SetForegroundWindow(hwnd)
-    except Exception:
+    except Exception:  # noqa: S110 - 窗口已存在时前置失败可忽略（重复启动场景）
         pass
 
 def _get_project_dir():
@@ -174,7 +174,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     """ERP 服务器管理器 — 开发/生产模式"""
 
     # Apple/iOS 风格设计令牌：浅色分组卡片 + 系统色板 + 克制留白
-    _PALETTE = {
+    _PALETTE: 'dict[str, str]' = {  # noqa: RUF012 - 设计令牌只读，实例间共享无风险
         'bg_main': '#f5f5f7', 'bg_card': '#ffffff', 'bg_surface': '#f2f2f7', 'bg_header': '#fbfbfd', 'bg_log': '#f9f9fb', 'bg_input': '#f2f2f7',
         'text_primary': '#1d1d1f', 'text_secondary': '#48484d', 'text_dim': '#8e8e93',
         'border': '#e5e5ea', 'border_card': '#e8e8ed',
@@ -338,7 +338,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
             if icon_image:
                 self._window_icon = ImageTk.PhotoImage(icon_image.resize((32, 32)))
                 self.root.iconphoto(True, self._window_icon)
-        except Exception:
+        except Exception:  # noqa: S110 - 图标设置失败不影响主流程
             pass
 
     def _show_window(self, icon=None, item=None):
@@ -385,7 +385,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
             try:
                 import ctypes
                 ctypes.windll.kernel32.CloseHandle(_mutex_handle)
-            except Exception:
+            except Exception:  # noqa: S110 - 句柄已失效时关闭失败可忽略（进程即将退出）
                 pass
             _mutex_handle = None
         self.root.destroy()
@@ -439,11 +439,11 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         candidates = ('Microsoft YaHei Mono', 'Microsoft YaHei UI', 'NSimSun', 'SimSun', 'Consolas')
         for fam in candidates:
             try:
-                f = tkfont.Font(family=fam, size=9, exists=False)
+                tkfont.Font(family=fam, size=9, exists=False)  # 探测：字体不可用会在此抛错
                 # exists=False 不会抛错，用 families() 进一步确认系统接受了字体
                 if fam.lower() in (x.lower() for x in tkfont.families()):
                     return (fam, 9)
-            except Exception:
+            except Exception:  # noqa: S112 - 该字体不可用则尝试下一个候选
                 continue
         return ('Microsoft YaHei UI', 9)
 
@@ -493,7 +493,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                         pending = self._after_ids.pop('hosting', None)
                         if pending:
                             self.root.after_cancel(pending)
-                    except Exception:
+                    except Exception:  # noqa: S110 - 回调 ID 已被消费/取消时清理失败可忽略
                         pass
                     self._refresh_hosting_status()
                 elif msg_type == 'service_action_accepted':
@@ -529,8 +529,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     self._update_all_ui()
                     # 全停窗口内丢弃过的采集结果在此补一轮（立即恢复真实状态显示）
                     self._refresh_hosting_status()
-            except Exception:
-                # 单条消息处理失败不能中断 poll 调度链，否则日志/状态更新全部停摆
+            except Exception:  # noqa: S110 - 单条消息处理失败不能中断 poll 调度链，否则日志/状态更新全部停摆
                 pass
             processed += 1
         # ★ 每轮 poll 结束时无条件 flush 一次（_do_flush 幂等且便宜）。
@@ -1213,7 +1212,14 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         if needs_restart:
             self._gate.checkpoint()
             self._msg_queue.put(('log', {'text': f'重启 {_SVC_API} 使 Worker={target} 生效...'}))
-            self.svc.restart_one_service(_SVC_API)
+            # B1 评审 finding 7：消费重启结果——停机未停成（effective=False）时
+            # Worker 数改动实际未生效，必须如实告知，不能只靠界面显示 RUNNING。
+            res = self.svc.restart_one_service(_SVC_API)
+            if not (res.ok and res.effective):
+                self._msg_queue.put(('log', {
+                    'text': f'{_SVC_API} 重启未确认生效（ok={res.ok}, effective={res.effective}, '
+                            f'PID={res.pid}）：Worker={target} 可能仍是旧值，请检查后重试',
+                    'level': 'WARNING'}))
         self._msg_queue.put(('hosting_refresh', {}))
 
     def _install_services(self):
@@ -1386,16 +1392,21 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         # （_log_size/_read_log_lines 已收编 log_ops（T9）：纯文件 IO 住 ops 层。）
         offsets = {name: log_ops.log_file_size(_PROJECT_DIR / 'logs' / f'{name}.log')
                    for name in (_SVC_API, _SVC_ARQ, _SVC_WEB)}
-        ok_api, api_state, api_pid = self._start_one_service(_SVC_API)
+        # B1（2026-10-25 上线前检查）：启动结果拆分 ok/effective，界面汇总按
+        # 「在跑且已验证生效」判定，避免把身份未证实的结果当启动成功。
+        api_res = self._start_one_service(_SVC_API)
+        ok_api, api_state, api_pid = api_res.ok and api_res.effective, api_res.state, api_res.pid
         if not broker_ok:
             # broker 未就绪时 erp-arq 起不来；仍尝试一次（让日志自己说话），
             # 但最终结论必须按失败上报，不能再用「启动完成」把它盖过去。
             self._msg_queue.put(('log', {'text': f'ARQ broker 未就绪，{_SVC_ARQ} 预计无法工作', 'level': 'ERROR'}))
-        ok_arq, arq_state, arq_pid = self._start_one_service(_SVC_ARQ)
+        arq_res = self._start_one_service(_SVC_ARQ)
+        ok_arq, arq_state, arq_pid = arq_res.ok and arq_res.effective, arq_res.state, arq_res.pid
         if ok_arq and not broker_ok:
             ok_arq = False
         # erp-web(nginx):与后端解耦,独立启动;失败只降级前端,不判整体失败
-        ok_web, web_state, web_pid = self._start_one_service(_SVC_WEB)
+        web_res = self._start_one_service(_SVC_WEB)
+        ok_web, web_state, _web_pid = web_res.ok and web_res.effective, web_res.state, web_res.pid
         if not ok_web:
             self._msg_queue.put(('log', {'text': f'{_SVC_WEB} 启动未确认(当前: {web_state})，前端静态服务可能不可用', 'level': 'WARNING'}))
         # 服务 stdout/stderr 由 NSSM 重定向到 logs\{name}.log —— 回灌本次新增输出，
@@ -1444,7 +1455,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         log_dir = _PROJECT_DIR / 'logs'
         log_dir.mkdir(exist_ok=True)
         try:
-            os.startfile(str(log_dir))
+            os.startfile(str(log_dir))  # noqa: S606 - 打开日志目录（资源管理器），无参数注入面
         except Exception as e:
             self.log_message(f'打开日志目录失败: {e}', 'ERROR')
 
@@ -1483,7 +1494,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                 self._mode_badge.set_state('unknown', '生产模式 · 状态未知')
             else:
                 self._mode_badge.set_state('stopped', '未运行')
-        except Exception:
+        except Exception:  # noqa: S110 - 状态徽章刷新失败不影响数据采集主流程
             pass
 
 def main():
@@ -1503,7 +1514,7 @@ def main():
             log_dir.mkdir(exist_ok=True)
             crash_file = log_dir / f'server_manager_crash_{datetime.now():%Y%m%d_%H%M%S}.log'
             crash_file.write_text(f"[CRASH] {datetime.now()}\n{tb_text}", encoding='utf-8')
-        except Exception:
+        except Exception:  # noqa: S110 - 崩溃转写失败无路可走（本身就在崩溃处理里）
             pass
         with contextlib.suppress(Exception):
             messagebox.showerror("启动失败", f"服务器管理器启动失败:\n{e!s}" + (f"\n\n日志: {crash_file}" if crash_file else ""))

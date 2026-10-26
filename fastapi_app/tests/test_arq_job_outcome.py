@@ -198,7 +198,49 @@ async def test_on_job_end_failed_writes_failed_and_dlq(monkeypatch) -> None:
     assert len(alerts) == 1
     assert alerts[0]['task_name'] == 'arq:demo_task'
     assert alerts[0]['severity'] == 'critical'
-    assert 'ValueError: boom' in alerts[0]['error']
+    # M4（2026-10-25）：外发告警只给类型名 + 关联 ID，异常原文（'boom'）不得外发——
+    # 截断不等于脱敏；原文保留在上方日志与死信条目（entry['exception'] == 'boom'）。
+    assert 'ValueError' in alerts[0]['error']
+    assert 'boom' not in alerts[0]['error']
+
+
+async def test_status_error_return_end_to_end_alerts_critical(monkeypatch) -> None:
+    """评审 finding 6：status='error' 返回（如巡检 DLQ unknown）端到端走失败链并外发 critical。
+
+    M1 验收「任务自身失败仍 critical」的完整链路：_tracked_job 把
+    ``{'status':'error'}`` 记 failed（P1-06）→ on_job_end → alert_service
+    critical。变异（on_job_end 跳过 critical 外发）本测试必红。
+    """
+    from fastapi_app.services.backup.metrics.alert_service import (
+        alert_service as _alert_singleton,
+    )
+
+    alerts: list[dict] = []
+
+    async def fake_send_alert(**kwargs):
+        alerts.append(kwargs)
+
+    async def noop(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(arq_callbacks, '_push_to_dead_letter', noop)
+    monkeypatch.setattr(arq_callbacks, '_emit_failure_metric', lambda _name: None)
+    monkeypatch.setattr(arq_callbacks, '_mark_schedule_outcome', noop)
+    monkeypatch.setattr(arq_callbacks, '_mark_daily_cron_success', noop)
+    monkeypatch.setattr(_alert_singleton, 'send_alert', fake_send_alert)
+
+    async def demo_error_task(ctx):
+        return {'status': 'error', 'error': 'Redis DLQ 状态不可知，本轮巡检结论无效'}
+
+    tracked = _tracked_job(demo_error_task, max_tries=3)
+    ctx = {'job_id': 'sched:9:9', 'job_try': 1}
+    await tracked(ctx)  # _tracked_job 写入 outcome=failed + _job_exception
+    await arq_callbacks.on_job_end(ctx)
+
+    assert ctx['_job_outcome'] == 'failed', "status='error' 必须被记为失败（P1-06）"
+    assert any(a['severity'] == 'critical' for a in alerts), (
+        f'status=error 任务必须触发失败链 critical 外发，实际 alerts={alerts}'
+    )
 
 
 async def test_on_job_end_without_outcome_keeps_legacy_success(monkeypatch) -> None:

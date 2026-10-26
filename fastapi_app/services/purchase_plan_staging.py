@@ -8,6 +8,7 @@
 
 从 purchase_plan_crud.py 拆分而来，保持函数签名不变。
 """
+import asyncio
 import io
 import uuid
 
@@ -37,16 +38,33 @@ from fastapi_app.shared_models import (
 
 
 def _load_excel_rows(file_content: bytes) -> list[tuple]:
-    """加载 Excel 文件并返回数据行(跳过表头)"""
+    """加载 Excel 文件并返回数据行(跳过表头)。
+
+    M5（2026-10-25）：前置 ZIP 预算 + 行列裁剪；调用方（upload_excel）已把本
+    函数放进线程池并以 ``run_parse_with_timeout`` 包裹。
+    """
+    from fastapi_app.services.xlsx_budget import (
+        MAX_SHEET_COLS,
+        MAX_SHEET_ROWS,
+        XlsxBudgetError,
+        assert_zip_budget,
+        clip_iter_rows,
+    )
+
+    assert_zip_budget(file_content)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
     except (OSError, ValueError) as e:
         raise ValueError(f'Excel文件解析失败: {e}') from e
     try:
         ws = wb.active
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        rows = list(clip_iter_rows(ws))
     finally:
         wb.close()
+    if len(rows) > MAX_SHEET_ROWS:
+        raise XlsxBudgetError(f'工作表行数超过上限 {MAX_SHEET_ROWS}')
+    if max((len(r) for r in rows), default=0) > MAX_SHEET_COLS:
+        raise XlsxBudgetError(f'工作表列数超过上限 {MAX_SHEET_COLS}')
     return rows
 
 
@@ -93,8 +111,11 @@ def _validate_excel_row(fields: dict, detected_month: str | None) -> tuple[str, 
 
 async def upload_excel(db: AsyncSession, file_content: bytes, session_id: str, created_by: str='') -> dict:
     """解析Excel文件，写入暂存表，返回预览数据"""
+    from fastapi_app.services.xlsx_budget import run_parse_with_timeout
+
     batch_id = str(uuid.uuid4())[:8]
-    rows = _load_excel_rows(file_content)
+    # M5：同步解析离场事件循环 + 统一超时（病态工作簿不得钉死 worker/请求）
+    rows = await run_parse_with_timeout(asyncio.to_thread(_load_excel_rows, file_content))
     if not rows:
         raise ValueError('Excel文件无数据行')
     detected_month = None

@@ -3,6 +3,7 @@
 
 包含手工部录入、包装部录入、汇总动态报表、数据导出等功能。
 """
+import asyncio
 import calendar
 import io
 import logging
@@ -217,17 +218,39 @@ async def delete_packaging_record(db: AsyncSession, record_id: int) -> None:
     await db.delete(record)
     await db.flush()
 
-async def upload_packaging_excel(db: AsyncSession, file_content: bytes, created_by: str='') -> dict:
-    """上传Excel文件，解析并批量创建包装部记录"""
+def _parse_packaging_rows(file_content: bytes) -> list[tuple]:
+    """同步解析包装部 Excel（线程池执行，配合 xlsx_budget 超时——M5）。"""
+    from fastapi_app.services.xlsx_budget import (
+        MAX_SHEET_COLS,
+        MAX_SHEET_ROWS,
+        XlsxBudgetError,
+        assert_zip_budget,
+        clip_iter_rows,
+    )
+
+    assert_zip_budget(file_content)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_content), read_only=True)
     except (ValueError, OSError) as e:
         raise ValueError(f'Excel文件解析失败: {e}') from e
     try:
         ws = wb.active
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        rows = list(clip_iter_rows(ws))
     finally:
         wb.close()
+    # 裁剪多读 1 行：物化后显式拒绝超限（绝不静默丢行/丢列）
+    if len(rows) > MAX_SHEET_ROWS:
+        raise XlsxBudgetError(f'工作表行数超过上限 {MAX_SHEET_ROWS}')
+    if max((len(r) for r in rows), default=0) > MAX_SHEET_COLS:
+        raise XlsxBudgetError(f'工作表列数超过上限 {MAX_SHEET_COLS}')
+    return rows
+
+
+async def upload_packaging_excel(db: AsyncSession, file_content: bytes, created_by: str='') -> dict:
+    """上传Excel文件，解析并批量创建包装部记录"""
+    from fastapi_app.services.xlsx_budget import run_parse_with_timeout
+
+    rows = await run_parse_with_timeout(asyncio.to_thread(_parse_packaging_rows, file_content))
     if not rows:
         raise ValueError('Excel文件无数据行')
     records_data = []
