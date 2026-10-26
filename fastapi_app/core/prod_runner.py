@@ -344,6 +344,129 @@ def _foreign_listeners(port: int, root_pid: int) -> set[int]:
     return foreign
 
 
+def _create_kill_on_close_job() -> int | None:
+    """Windows：建一个「持有者一死，成员全部被杀」的 Job Object。
+
+    为什么需要它（2026-10-26 实测四次孤儿）：
+
+    - NSSM 的 `erp-prod` 服务参数是 ``AppNoConsole=1``，**没有控制台** →
+      ``SetConsoleCtrlHandler`` 永远收不到控制台事件 → 停机时 ``shutdown()``
+      根本不会被调用；NSSM 只能 ``TerminateProcess`` 掉监督器。
+    - NSSM 未开 ``AppKillProcessTree`` → 它不会替我们杀子进程树。
+    - 结果：uvicorn 主进程 + 8 个 worker 变成孤儿，继续占着 :5002。
+      Windows 的 ``SO_REUSEADDR`` 允许新实例再绑同一端口，**两个 LISTEN 并存**，
+      连接被随机分给其中一方 —— 表现为「接口偶发挂死」「新实例收不到流量」。
+
+    Job Object 的 ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` 解决根因：把子进程放进
+    作业后，**监督器进程无论怎么死（正常退出 / TerminateProcess / 崩溃），
+    操作系统都会连带杀掉作业里的全部成员**。子进程会自动继承作业归属，
+    所以 worker 也一并在内。
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class _BasicLimit(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _ExtendedLimit(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BasicLimit),
+                ("IoInfo", _IoCounters),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            return None
+        info = _ExtendedLimit()
+        # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        info.BasicLimitInformation.LimitFlags = 0x00002000
+        ok = kernel32.SetInformationJobObject(
+            wintypes.HANDLE(job), 9, ctypes.byref(info), ctypes.sizeof(info),
+        )
+        if not ok:
+            kernel32.CloseHandle(wintypes.HANDLE(job))
+            return None
+        return int(job)
+    except Exception:  # defensive: 非 Windows / 权限不足时退回原有清理路径，不得阻断启动
+        return None
+
+
+def _assign_to_job(job: int | None, proc) -> bool:
+    """把子进程放进 kill-on-close 作业；失败返回 False（调用方保持原清理路径）。"""
+    if not job or os.name != "nt" or proc is None:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = getattr(proc, "_handle", None)
+        if handle is None:
+            return False
+        return bool(kernel32.AssignProcessToJobObject(
+            wintypes.HANDLE(int(job)), wintypes.HANDLE(int(handle))))
+    except Exception:  # defensive: 作业不可用时退回 taskkill 清理路径
+        return False
+
+
+def _last_win_error() -> str:
+    """最近一次 Win32 错误的可读描述（给告警用）。"""
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes
+
+        code = ctypes.get_last_error()
+        if not code:
+            return ""
+        return f"WinError {code}"
+    except Exception:  # defensive: 仅用于告警文案，取不到就不带错误码
+        return ""
+
+
+def _close_job(job: int | None) -> None:
+    """关闭作业句柄 → 触发 kill-on-close，回收任何残留成员。"""
+    if not job or os.name != "nt":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CloseHandle(wintypes.HANDLE(int(job)))
+    except Exception:  # defensive: 关闭句柄失败无可补救，不影响主流程
+        return
+
+
 def _iso_now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -486,7 +609,8 @@ class _Managed:
 
     def __init__(self, name: str, cmd: list[str], cwd: Path,
                  health_url: str | None = None, start_grace: float = 45.0,
-                 workers: int | None = None, verify_identity: bool = False):
+                 workers: int | None = None, verify_identity: bool = False,
+                 job: int | None = None):
         self.name = name
         self.cmd = cmd
         self.cwd = cwd
@@ -504,6 +628,9 @@ class _Managed:
         self.verify_identity = verify_identity
         self._identity_checked = False
         self.identity_problem: str | None = None
+        # kill-on-close 作业句柄（Windows）：监督器任何死法都会连带回收本进程树，
+        # 杜绝「NSSM TerminateProcess 监督器 → uvicorn 变孤儿继续占 :5002」。
+        self.job = job
         self.proc: subprocess.Popen | None = None
         self._logf: io.BufferedWriter | None = None
         self.delay = 2.0
@@ -548,6 +675,9 @@ class _Managed:
             self.started_at = time.monotonic()
             self.health_fail_start = None
             self.status = "running"
+            if self.job and not _assign_to_job(self.job, self.proc):
+                print(f"[prod_runner] 警告: {self.name} 未加入 kill-on-close 作业"
+                      f"（{_last_win_error()}）——监督器被强杀时它可能变成孤儿")
             # 注意：此处不重置 self.delay——退避在「健康检查恢复」时才清零，
             # 保证启动即崩的进程按 2→4→…→30s 指数退避，避免崩溃风暴
             print(f"[prod_runner] {self.name} 已启动 (PID {self.proc.pid}, 日志 {log_path.name})")
@@ -819,6 +949,10 @@ class Supervisor:
         self.broker_port = _broker_port()
         self.ready = False
         self._last_log_check = 0.0
+        # 2026-10-26：kill-on-close 作业（NSSM 用 AppNoConsole=1 停机时直接
+        # TerminateProcess 监督器，shutdown() 根本不会被调用 → uvicorn 变孤儿）。
+        # 作业在监督器进程死亡时由操作系统连带回收全部成员，根治孤儿。
+        self._job = _create_kill_on_close_job()
         # F4-7：Windows 控制台处理器在独立线程执行，shutdown 后主循环必须收到停止信号；
         # 否则 SetConsoleCtrlHandler 返回 True 阻止默认终止后，监督器进程永久存活。
         self._stop = threading.Event()
@@ -836,8 +970,10 @@ class Supervisor:
             workers=workers,
             # 2026-10-26：后端必须证实「应答者是我拉起的进程」，见 _verify_identity
             verify_identity=True,
+            job=self._job,
         )
-        self.arq = _Managed("ARQ worker", _cmd_arq(), PROJECT_ROOT) if with_arq else None
+        self.arq = (_Managed("ARQ worker", _cmd_arq(), PROJECT_ROOT, job=self._job)
+                    if with_arq else None)
         # 前端由独立 NSSM 服务 erp-web 托管,本监督器只观察不管理
         self.frontend_type = "erp-web"
 
@@ -990,8 +1126,13 @@ class Supervisor:
             # 运维依据「已停止」重启会撞上双实例。
             print(f"[prod_runner] 关闭未完成：{', '.join(failed)} 仍在运行，"
                   f"请手工 taskkill /F /T /PID 对应进程（端口可能仍被占用）")
-            return
-        print("[prod_runner] 已停止(前端 erp-web 为独立服务,不在此处理)")
+        else:
+            print("[prod_runner] 已停止(前端 erp-web 为独立服务,不在此处理)")
+        # 关闭作业句柄 → kill-on-close 触发，把任何漏网的成员一并回收
+        # （kill_tree 未确认成功时，这是第二道保险）。
+        # getattr 兜底：测试里用 object.__new__ 造过没有 __init__ 的 Supervisor
+        _close_job(getattr(self, "_job", None))
+        self._job = None
 
 
 # 控制台控制处理器回调**必须挂在模块级**。ctypes 回调对象一旦失去引用就被回收，而
