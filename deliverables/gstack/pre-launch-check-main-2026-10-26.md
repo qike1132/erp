@@ -544,3 +544,47 @@
 3. 发布重启时核对 `runtime.commit` / `worker pid` / `started_at`，并保留 pre_restore 回滚点。
 
 本轮**未**提交代码、未推送、未重启生产服务、未写生产库、未执行生产迁移、未发送真实告警。
+
+### 12.9 16:25 重启复盘：守卫正确触发，但降级只活了 3 秒（已修，PR #19 → `fa5dc79c`）
+
+用户 16:25 再次重启 erp-prod。`erp-prod.log` 实证 **PR #17 的身份守卫正确触发**：
+
+```
+[prod_runner] 后端(uvicorn) 已启动 (PID 17104, ...)
+[prod_runner] 错误: 后端(uvicorn) 身份未证实 —— 应答进程 pid=12348 不属于本进程树
+（本树根 PID 17104）；本实例可能收不到流量
+```
+
+但 `prod_runner.json` 仍显示 `ready:true`：`poll()` 的身份校验只在 `not _identity_checked`
+时执行一次，之后每个 tick 的正常分支无条件把 status 置回 `ready` —— 降级只活了 3 秒。
+已修（PR #19）：`identity_problem` 挂着期间每个 tick 重新证实（抢占者清掉的那一刻自动
+恢复 ready），通过后不再每 tick 重查。新增 `test_identity_problem_persists_until_cleared`。
+
+**同时确认了两件事**：
+
+1. `:5002` 又是双 LISTEN——16:25 的新栈（`1020→8 workers`，加载 `b6629904`）+
+   15:11 的旧栈（`20648→24632→8 workers`，加载 `a08211f0`）。08:11 那棵已被清掉，
+   现在挡路的是 **15:11 这棵**，需要管理员 `taskkill /F /T /PID 20648`。
+2. `GET /api/health` 现在带 `runtime`：`commit=a08211f0`（**全部 22 项修复**）、
+   `/ready` 带 `restore_pending:false` —— 也就是说，**业务修复已经真正在跑**；
+   尚未在跑的只有 PR #17/#18 的监督器侧加固（要等一次干净重启）。
+
+main CI（`e5e9d49b` 与 `fa5dc79c`）均全绿：test 8m06s / lint 1m13s / frontend 3m26s /
+build 11s / CodeQL。
+
+### 12.10 最终状态（2026-10-26 18:52，全链路闭环）
+
+| 事项 | 状态 |
+|---|---|
+| 22 项审查发现 | ✅ 已修复合并（PR #15/#16/#17/#18/#19），main（`fa5dc79c`）CI 全绿：test / lint / frontend / build / CodeQL |
+| **业务修复在生产生效** | ✅ `GET /api/health` → `"runtime":{"commit":"a08211f0",...}`（含全部 22 项），`/ready` → `restore_pending:false` |
+| 锁门禁结构性缺陷 | ✅ PR #18：改判「声明的直接依赖」，默认不联网不需 uv；传递依赖补丁不再让 main 随机红 |
+| 端口清理"假成功" | ✅ PR #18：`kill_port_sync` 新增 `still_occupied`；`_release_ports` 返回 bool；清理失败即中止启动 |
+| 身份守卫降级 3 秒即翻回 ready | ✅ PR #19：`identity_problem` 跨 tick 保持，抢占者清掉后自动恢复 |
+| **:5002 双实例** | ✅ 已清（18:48 复核）：管理员执行 `taskkill /F /T /PID 20648` 后仅剩一个 LISTEN（`1020`）；旧树 `20648/24632/21172` 全部消失 |
+| **业务修复在生产生效** | ✅ `GET /api/health` → `"runtime":{"pid":24976,"commit":"b6629904"}`，`pid` 落在新栈（`3160→17104→1020→24976`）内；`/ready` → `restore_pending:false, restore:{state:"absent"}`；`prod_runner.json` → `backend.status="ready"`（旧树清掉后自动恢复，与 PR #19 的语义一致） |
+| 监督器加固上线 | ⏳ 部分生效：在跑的监督器（16:25 起）含 PR #17 的首次校验（已实证触发并如实告警），但**不含** PR #19 的"跨 tick 保持"与 PR #18 的 `still_occupied`——下次干净重启后整套生效 |
+| 生产库写入/迁移 | ❌ 未执行（从未执行，需明确授权与回滚点） |
+
+一句话：**代码全部修完、已在生产服务、单实例、身份可证**。今天这条链路的价值也在
+日志里留了痕：守卫把「重启了但跑的是旧代码」从事故变成了日志里的一行 ERROR。
