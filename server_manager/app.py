@@ -660,6 +660,15 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                         # 端口仍被受管进程占用。若 nssm stop 全部确认成功，该占用会随服务
                         # 退出而消失（属正常过渡）；仅在服务停止也失败时才算真正未落地。
                         unresolved.append(port)
+                    elif state == 'still_occupied':
+                        # 2026-10-26：杀过了但端口还被占着（典型是提权进程拒绝 taskkill）。
+                        # 「停止服务」必须如实报，否则用户以为停了、其实旧进程还在服务。
+                        self._msg_queue.put(('log', {
+                            'text': f'端口 {port} 清理失败：仍被占用（可能是以更高权限启动的进程，'
+                                    f'taskkill 被拒绝）。请用管理员终端 taskkill /F /T /PID <PID>。',
+                            'level': 'ERROR',
+                        }))
+                        unresolved.append(port)
                 # ★ 汇总语必须与上面的告警**一致**：原实现在三个端口循环后**无条件**输出
                 #   「已清理所有残留进程和端口」，于是当 managed_unknown（端口实际仍被占用）时，
                 #   汇总语与紧邻的 WARNING 互相矛盾 —— 日志说「未能清理」，总结说「已清理」。
@@ -1010,7 +1019,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     def _ensure_development_stopped(self):
         return self.dev.ensure_development_stopped()
 
-    def _release_ports(self):
+    def _release_ports(self) -> bool:
         """清理 5002 与 3000 端口占用（复用 _kill_port_sync，其内部对多 PID 有 3 轮重试）。
 
         ★ 必须排除受管 PID：生产已在运行时点「启动服务」若做无差别清理，
@@ -1019,17 +1028,24 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         （2026-09-28 评审确认；stop_all 的同类调用本就带 exclude，此处曾漏）。
 
         ★ 必须消费 `_kill_port_sync` 的返回值：'managed_unknown' 意味着
-        「受管集合不可知、已 fail-safe 放弃清理」，此时端口**仍被占用**。
-        若不判返回值，调用方就会在「端口没清干净」的前提下继续启动新进程
-        → 新进程绑不上端口 → 起不来又查不出原因（静默失败）。
+        「受管集合不可知、已 fail-safe 放弃清理」，'still_occupied' 意味着
+        「杀过了但端口仍被占着」（典型是提权进程，taskkill 拒绝访问）——
+        两种情况下端口**仍被占用**。若不判返回值，调用方就会在「端口没清干净」
+        的前提下继续启动新进程 → 新进程绑不上端口（Windows 的 SO_REUSEADDR 甚至
+        允许它绑上却不收流量）→ 起不来又查不出原因，而界面上一切正常。
+
+        返回 True 表示两个端口都已确认清干净（受管进程除外，它们稍后由服务停止收走）。
+        2026-10-26：返回值改为 bool，调用方据此**中止启动**而不是假装成功。
         """
         managed = self._managed_service_pids()
+        ok = True
         for port in (_API_PORT, _WEB_PORT):
             try:
                 state = self._kill_port_sync(port, exclude=managed,
                                              managed_pids_fn=self._managed_service_pids)
             except Exception as e:
-                self.log_message(f'端口 {port} 清理异常: {e}', 'WARNING')
+                self.log_message(f'端口 {port} 清理异常: {e}', 'ERROR')
+                ok = False
                 continue
             if state == 'managed_unknown':
                 self.log_message(
@@ -1037,6 +1053,17 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                     f'已放弃清理以免误杀生产服务。请稍后重试，或用「停止服务」后再启动。',
                     'WARNING',
                 )
+                ok = False
+            elif state == 'still_occupied':
+                pids = self._find_port_pids(port)
+                self.log_message(
+                    f'端口 {port} 清理失败：仍被 PID {pids or "?"} 占用。'
+                    f'常见原因是该进程以更高权限启动（taskkill 拒绝访问），'
+                    f'请用管理员终端执行 taskkill /F /T /PID <PID> 后重试。',
+                    'ERROR',
+                )
+                ok = False
+        return ok
 
     def _build_prod_card(self, parent, row, col):
         """生产模式卡片（与开发卡并排）— Windows 服务 (NSSM) 托管"""
@@ -1379,7 +1406,18 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
             self._msg_queue.put(('log', {'text': '已自动停止开发模式', 'level': 'INFO'}))
         self._gate.checkpoint()
         self._msg_queue.put(('log', {'text': '正在清理端口...'}))
-        self._release_ports()
+        if not self._release_ports():
+            # 2026-10-26：端口没清干净就继续启动，等于让新实例去和一个还活着的旧实例
+            # 抢端口——Windows 的 SO_REUSEADDR 允许两个 socket 同时 LISTEN，新实例
+            # 日志照打「Uvicorn running」却一个请求都收不到，而界面/状态文件全绿。
+            # 宁可显式失败：告诉用户到底是哪个 PID 占着。
+            self._msg_queue.put(('log', {
+                'text': '端口清理失败，已中止启动：继续启动只会得到一个收不到流量的新实例'
+                        '（旧进程仍在前台服务）。请按上面提示清理占用进程后重试。',
+                'level': 'ERROR',
+            }))
+            self._msg_queue.put(('hosting_refresh', {}))
+            return
         # Redis 基础设施工况：缓存实例直接拉起（走服务），broker 必须在 erp-arq
         # 之前就绪——否则 erp-arq 连不上 6380 会陷入重启循环，而界面依旧全绿。
         if not self._start_redis():

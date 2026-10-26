@@ -64,11 +64,19 @@ def test_managed_pid_set_excluded_from_port_cleanup() -> None:
 
     2026-09-30 起 exclude= 改为关键字传参并附带 managed_pids_fn 兜底（受管集合
     不可知时 fail-safe 放弃清理），断言随之更新。
+
+    2026-10-26：原先用 `[TEXT.index(...)][:900]` 截断，docstring 一变长就把代码挤出
+    窗口 → 断言假红。改为切到**方法结尾**（同缩进的下一个 def/class），只测试语义。
     """
-    body = TEXT[TEXT.index("def _release_ports") :][:900]
+    start = TEXT.index("def _release_ports")
+    rest = TEXT[start + 1:]
+    end = rest.find("\n    def ")
+    body = rest if end == -1 else rest[:end]
     assert "exclude=managed" in body and "_managed_service_pids()" in body
     # 受管集合不可知时必须放弃清理而不是按空集照杀 —— fail-safe 闸门
     assert "managed_unknown" in body
+    # 2026-10-26：杀完必须确认结果（'still_occupied'），不能拿「发过 taskkill」当成功
+    assert "still_occupied" in body
 
 
 def test_substring_port_killer_is_gone() -> None:

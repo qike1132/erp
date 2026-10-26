@@ -133,12 +133,16 @@ def kill_port_sync(port, exclude=None, managed_pids_fn=None):
       · ``managed_pids_fn``：受管 PID 的**提供者**，由本函数自行调用；其返回 ``None``
         表示「受管集合不可知」（探测通道不可用），此时 fail-safe 放弃清理。
 
-    ★ 返回值（五态，**位标志**而非「两布尔按优先级」）：
+    ★ 返回值（六态，**位标志**而非「两布尔按优先级」）：
       - 'clean'                本轮本来就没有占用者，无事可做
       - 'killed'               只终止了非受管占用者
       - 'all_exempted'         占用者全是受管进程（受豁免，一个都没杀）
       - 'killed_and_exempted'  既杀了非受管，又剩下了受管（两件事**都**发生了）
       - 'managed_unknown'      受管集合**不可知** → fail-safe 放弃清理
+      - 'still_occupied'       终止动作做完了但**端口仍被非受管进程占着**（典型：提权进程
+                               taskkill 拒绝访问）。这是错误态，调用方**不得**继续启动 ——
+                               否则新实例绑在被占端口上、旧实例继续 accept，就是
+                               2026-10-26 那次「重启了但跑的是旧代码」。
 
     为什么必须用位标志：若写成「先判 killed 再判 all_exempted」，遇到「第一轮杀了
     非受管、第二轮只剩受管」时只会返回 'killed'，把「仍有受管进程占着端口」这个
@@ -168,6 +172,13 @@ def kill_port_sync(port, exclude=None, managed_pids_fn=None):
         taskkill_many(sorted(to_kill))
         flags |= 1
         time.sleep(0.5)
+    # 2026-10-26（重启实测事故）：taskkill_many 是 best-effort、异常全吞，**不确认结果**。
+    # 旧实现在这里直接按 flags 返回 'killed'——对提权进程（taskkill 报"拒绝访问"）同样
+    # 如此，调用方据此认为端口已清空，于是新实例绑在被占用的端口上、旧实例继续 accept，
+    # 「重启成功」而线上跑的还是旧代码。必须复扫确认，仍有人占着就如实上报。
+    survivors = {int(p) for p in find_port_pids(port) if str(p).strip().isdigit()} - exempt
+    if survivors:
+        return 'still_occupied'
     if flags == 3:
         return 'killed_and_exempted'
     if flags == 1:

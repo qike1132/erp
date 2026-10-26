@@ -97,6 +97,22 @@ class TestStartServicesFlow:
         }, f'闸门拒绝后仍有副作用: {hooks}'
         assert any('拒绝启动' in t for t in _texts(app)), _texts(app)
 
+    def test_flow_aborts_when_port_release_fails(self, monkeypatch):
+        """2026-10-26：端口没清干净必须中止启动。
+
+        继续启动只会得到一个「绑上了端口但收不到流量」的新实例（Windows SO_REUSEADDR
+        允许两个 LISTEN，旧进程继续 accept），界面上一切正常、线上跑的还是旧代码。
+        """
+        app, hooks = _wire_flow_app(monkeypatch)
+        app._release_ports = lambda *a, **k: False
+
+        app._start_services_flow()
+
+        assert hooks['start_one'] == 0, '端口未清干净时不得启动任何服务'
+        assert hooks['redis_started'] == 0
+        texts = _texts(app)
+        assert any('中止启动' in t for t in texts), texts
+
 
 def _wire_flow_app(monkeypatch, *, redis_ok=True, broker_ok=True):
     """构造一个只跑逻辑的 ServerManagerApp，并记录流程中的关键副作用。"""
@@ -116,7 +132,9 @@ def _wire_flow_app(monkeypatch, *, redis_ok=True, broker_ok=True):
     app._ensure_development_stopped = (
         lambda *a, **k: hooks.__setitem__('dev_stopped', hooks['dev_stopped'] + 1) or True)
     app._release_ports = (
-        lambda *a, **k: hooks.__setitem__('release_ports', hooks['release_ports'] + 1))
+        # 2026-10-26：_release_ports 改为返回 bool（False = 端口没清干净，流程必须中止）。
+        # 替身要按新契约返回 True，否则每个用例都会走"中止"分支。
+        lambda *a, **k: hooks.__setitem__('release_ports', hooks['release_ports'] + 1) or True)
     app._ensure_redis_broker = lambda *a, **k: broker_ok
 
     class _FakeRedis:
