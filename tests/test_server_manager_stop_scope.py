@@ -46,8 +46,13 @@ def test_stop_paths_use_svc_all() -> None:
 
 
 def test_start_path_keeps_dedicated_redis_helpers() -> None:
-    """启动流程不得改用 _SVC_ALL:Redis 由专属助手先起,复用会重复启动。"""
-    body = TEXT[TEXT.index("def _start_services_flow") :][:1600]
+    """启动流程不得改用 _SVC_ALL:Redis 由专属助手先起,复用会重复启动。
+
+    2026-10-26：原先用 `TEXT.index(...)[:1600]` 截断，流程体一变长（新增"端口清理
+    失败即中止"分支）就把 `self._start_redis()` 挤出窗口 → 假红。改用本文件既有的
+    AST 定位（与上面三条断言同口径），不依赖任何长度假设。
+    """
+    body = _func_src("app.py", "_start_services_flow")
     assert "for name in _SVC_ALL" not in body
     assert "_start_redis()" in body
 
