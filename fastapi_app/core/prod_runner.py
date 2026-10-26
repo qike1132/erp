@@ -34,6 +34,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from datetime import datetime
@@ -246,6 +247,7 @@ def _log_health_fail(err: BaseException) -> None:
 def _http_ok(
     url: str, timeout: float = 5.0, expect_substr: str | None = None,
     opener: urllib.request.OpenerDirector | None = None,
+    body_out: list[str] | None = None,
 ) -> bool:
     """探测 url 是否可用。
 
@@ -255,19 +257,91 @@ def _http_ok(
     既有调用方（后端/ARQ 探针）不传该参数，行为与修复前完全一致。
 
     opener 非空时改用它发起请求（前端探针在 https 端口上需要容忍自签证书的 opener）。
+
+    body_out 非空时把响应体有界前缀塞进该列表（身份校验要读 ``runtime.pid``）。
+    复用本函数的 opener / 异常口径，避免为读一次 body 再开一个 urllib 调用点
+    （每多一处 ``urlopen`` 就多一条安全扫描豁免，nosec 预算是硬约束）。
     """
     try:
         with (opener or _OPENER_DIRECT).open(url, timeout=timeout) as resp:  # nosec B310
             if resp.status != 200:
                 return False
-            if expect_substr is None:
+            if expect_substr is None and body_out is None:
                 return True
             # 只读有界前缀（探针目标响应都很小），避免万一命中大体积 body 时的内存放大
             body = resp.read(8192).decode("utf-8", errors="replace")
-            return expect_substr in body
+            if body_out is not None:
+                body_out.append(body)
+            return True if expect_substr is None else expect_substr in body
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         _log_health_fail(e)
         return False
+
+
+def _http_json(url: str, timeout: float = 3.0) -> dict | None:
+    """取健康端点的 JSON 体（用于身份校验）；拿不到/不是 JSON 返回 None。"""
+    if not url:
+        return None
+    chunks: list[str] = []
+    if not _http_ok(url, timeout=timeout, body_out=chunks):
+        return None
+    try:
+        data = json.loads(chunks[0] if chunks else "")
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _port_of(url: str) -> int | None:
+    """从 health_url 取端口（用于端口归属校验）。"""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    return parsed.port
+
+
+def _pid_in_tree(pid: int, root_pid: int) -> bool:
+    """pid 是否属于 root_pid 的进程树（含 root 自身）；psutil 不可用时返回 True。"""
+    if pid == root_pid:
+        return True
+    try:
+        import psutil
+    except ImportError:  # pragma: no cover - base 依赖
+        return True
+    try:
+        return any(child.pid == pid for child in psutil.Process(root_pid).children(recursive=True))
+    except (psutil.Error, OSError):
+        return True
+
+
+def _foreign_listeners(port: int, root_pid: int) -> set[int]:
+    """端口上**不属于** root_pid 进程树的 LISTEN 进程集合；取证失败返回空集。
+
+    Windows 的 SO_REUSEADDR 允许同一端口出现多个 LISTEN（不报 10048）。实测事故：
+    08:11 的孤儿实例与 15:11 的新实例同时 LISTEN，孤儿继续 accept，新实例日志
+    照打「Uvicorn running」却收不到请求 —— 只看健康码永远发现不了。
+    """
+    try:
+        import psutil
+    except ImportError:  # pragma: no cover
+        return set()
+    try:
+        conns = psutil.net_connections(kind="tcp")
+        own = {root_pid, *[c.pid for c in psutil.Process(root_pid).children(recursive=True)]}
+    except (psutil.Error, OSError):
+        return set()
+    foreign: set[int] = set()
+    for conn in conns:
+        try:
+            if conn.status != psutil.CONN_LISTEN or not conn.laddr or conn.laddr.port != port:
+                continue
+        except (AttributeError, IndexError):
+            continue
+        pid = conn.pid
+        if pid and pid not in own:
+            foreign.add(pid)
+    return foreign
 
 
 def _iso_now() -> str:
@@ -412,7 +486,7 @@ class _Managed:
 
     def __init__(self, name: str, cmd: list[str], cwd: Path,
                  health_url: str | None = None, start_grace: float = 45.0,
-                 workers: int | None = None):
+                 workers: int | None = None, verify_identity: bool = False):
         self.name = name
         self.cmd = cmd
         self.cwd = cwd
@@ -421,6 +495,15 @@ class _Managed:
         # 故 poll() 不再据此判定（见 poll 内注释）。
         self.start_grace = start_grace
         self.workers = workers
+        # 2026-10-26（重启实测事故）：健康 200 只说明**有人**在应答，不说明是**我**的
+        # 进程在应答。Windows 的 SO_REUSEADDR 允许第二个 socket 绑同一端口而不报
+        # 10048：孤儿实例继续 accept，新实例日志照样打「Uvicorn running」却收不到
+        # 一个请求，而本监督器看到 200 就判 ready —— 上线等于没上。
+        # 置 True 的服务在首次健康通过时校验「应答体的 runtime.pid 属于本进程树」
+        # 与「端口没有非本树的 LISTEN」，不成立即降级（ready:false）而不是假装成功。
+        self.verify_identity = verify_identity
+        self._identity_checked = False
+        self.identity_problem: str | None = None
         self.proc: subprocess.Popen | None = None
         self._logf: io.BufferedWriter | None = None
         self.delay = 2.0
@@ -447,6 +530,10 @@ class _Managed:
         old_proc = getattr(self, 'proc', None)
         if old_proc is not None and old_proc.poll() is not None:
             old_proc.wait()
+        # 每次拉起都要重新证实身份（上一轮可能是别人在应答）；放在 Popen 之前，
+        # 保证「本次启动尝试」一开始就不带着上一轮的结论。
+        self._identity_checked = False
+        self.identity_problem = None
         env = dict(os.environ)
         env.update({"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         LOGS_DIR.mkdir(exist_ok=True)
@@ -555,6 +642,42 @@ class _Managed:
         print(f"[prod_runner] {self.name} 进程树未确认终止，{int(seconds)}s 后重试；"
               f"期间不启动新进程（避免同端口双实例），状态={self.status}")
 
+    def _verify_identity(self) -> str | None:
+        """证实「应答健康检查的就是我自己拉起的进程」。返回问题描述，None 表示通过。
+
+        两道判据（任一不成立即降级，见 ``verify_identity`` 的注释）：
+
+        1. 应答体带 ``runtime`` 时，``runtime.pid`` 必须落在本进程树内。缺 ``runtime``
+           说明对方不提供身份指纹（旧代码，或同端口的别的程序）——**也算不通过**，
+           这正是 2026-10-26 那次「重启了但跑的是旧代码」的指纹。
+        2. 端口上不允许存在**非本进程树**的 LISTEN。Windows 的 SO_REUSEADDR 允许两个
+           socket 绑同一端口，谁先绑谁收流量；多出来的那个监听者迟早把请求抢走。
+
+        取证失败（无 psutil / 拿不到 JSON）时返回 None —— 宁可放过，不能因为探针
+        能力缺失把正常服务判成故障。
+        """
+        root_pid = self.proc.pid if self.proc else None
+        if root_pid is None:
+            return None
+        payload = _http_json(self.health_url or "", timeout=3.0)
+        if payload is None:
+            return None
+        runtime = payload.get("runtime") if isinstance(payload, dict) else None
+        if not isinstance(runtime, dict):
+            return ("健康响应缺少 runtime 身份指纹（应答的是不提供指纹的旧代码，"
+                    "或同端口上的其它程序）")
+        pid = runtime.get("pid")
+        if not isinstance(pid, int) or isinstance(pid, bool) or not _pid_in_tree(pid, root_pid):
+            return f"应答进程 pid={pid} 不属于本进程树（本树根 PID {root_pid}）"
+        port = _port_of(self.health_url or "")
+        if port is None:
+            return None
+        foreign = _foreign_listeners(port, root_pid)
+        if foreign:
+            return (f"端口 {port} 上还有非本进程树的监听者 {sorted(foreign)}"
+                    f"（本树根 PID {root_pid}）——新实例可能收不到流量")
+        return None
+
     def _probe_health(self) -> tuple[bool, float]:
         """探测健康端点：单次超时 5s，同一 tick 内失败则重试 1 次。
 
@@ -604,6 +727,18 @@ class _Managed:
         # 复检进程存活：探针最长可耗时 ~10s，期间 master 可能已经死掉
         proc_alive = self.proc.poll() is None
         if healthy:
+            # 2026-10-26：健康 200 只证明「有人应答」。首次健康通过时证实应答者身份，
+            # 不成立则降级（ready:false）并保持进程存活——问题不在我的子进程，
+            # 重启它也没用，得先清掉抢占端口的那个监听者。
+            if self.verify_identity and not self._identity_checked:
+                self._identity_checked = True
+                self.identity_problem = self._verify_identity()
+                if self.identity_problem:
+                    self.status = "degraded"
+                    self.last_health = _iso_now()
+                    print(f"[prod_runner] 错误: {self.name} 身份未证实 —— "
+                          f"{self.identity_problem}；本实例可能收不到流量")
+                    return
             self.status = "ready"
             self.last_health = _iso_now()
             self.health_fail_start = None
@@ -693,6 +828,8 @@ class Supervisor:
             "后端(uvicorn)", _cmd_uvicorn(api_port, workers), PROJECT_ROOT,
             health_url=f"http://127.0.0.1:{api_port}/api/health",
             workers=workers,
+            # 2026-10-26：后端必须证实「应答者是我拉起的进程」，见 _verify_identity
+            verify_identity=True,
         )
         self.arq = _Managed("ARQ worker", _cmd_arq(), PROJECT_ROOT) if with_arq else None
         # 前端由独立 NSSM 服务 erp-web 托管,本监督器只观察不管理
