@@ -48,6 +48,10 @@ def _managed(status='ready', fail_window_s=None):
     m.health_fail_start = None if fail_window_s is None else time.monotonic() - fail_window_s
     # H2（2026-10-26）：杀树失败后的重试时刻（poll 会读它）
     m._kill_retry_at = 0.0
+    # 2026-10-26：身份校验只对后端开启；本文件的替身不涉及，置 False 保持原语义
+    m.verify_identity = False
+    m._identity_checked = True
+    m.identity_problem = None
     m.delay = 2.0
     m.backoff_step = 0
     m.workers = 4
