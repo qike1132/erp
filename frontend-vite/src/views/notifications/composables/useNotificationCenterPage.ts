@@ -113,8 +113,11 @@ export function useNotificationCenterPage() {
       // 即时刷新未读数，保持头部徽章同步
       fetchUnreadCount()
       toast.success(`已标记 ${ids.length} 条为已读`)
-    } catch {
-      toast.error('批量操作失败，请重试')
+    } catch (e) {
+      // M8：部分失败时 composable 会回滚失败项并抛出带计数的错误——
+      // 如实透出（「已标记 X 条，Y 条失败」），不要笼统说「操作失败」。
+      const msg = e instanceof Error && e.message ? e.message : '批量操作失败，请重试'
+      toast.error(msg)
     }
   }
 

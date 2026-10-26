@@ -40,13 +40,17 @@ _FULL_SUFFIXES = BACKUP_CLEANUP_SUFFIXES
 _WRITE_GRACE_SECONDS = 120
 
 
+class BackupScanError(RuntimeError):
+    """备份目录扫描失败：**不等于**「没有备份文件」，调用方不得报 success。"""
+
+
 def ensure_backup_dir() -> None:  # log-context: internal helper 无请求上下文
     """确保备份目录存在。**必须定义在本模块**（用本模块 BACKUP_DIR），
     否则从 records 导入会让测试的 monkeypatch(BACKUP_DIR) 失效、在真实目录建目录。"""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper 无请求上下文
+def _backup_created_time(f: Path, st=None) -> datetime:  # log-context: internal helper 无请求上下文
     """备份文件真实创建时间：优先 .meta.created_at，缺则 mtime。"""
     meta_path = f.parent / (f.name + '.meta')
     if meta_path.exists():
@@ -57,7 +61,9 @@ def _backup_created_time(f: Path) -> datetime:  # log-context: internal helper �
                 return datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             pass  # defensive: 异常静默处理,不影响主流程
-    return datetime.fromtimestamp(f.stat().st_mtime)
+    if st is None:
+        st = f.stat()
+    return datetime.fromtimestamp(st.st_mtime)
 
 
 class BackupCleanupService:
@@ -65,6 +71,8 @@ class BackupCleanupService:
 
     def __init__(self):
         self.cleanup_config = self._load_cleanup_config()
+        # M2：本轮扫描中元信息不可读的文件（不参与清理决策，但必须在报告里可见）
+        self._last_unreadable_files: list[dict[str, str]] = []
 
     def _load_cleanup_config(self) -> dict[str, Any]:
         """清理服务配置。
@@ -90,7 +98,6 @@ class BackupCleanupService:
             if not backup_files:
                 return {'success': True, 'message': '没有找到备份文件',
                         'cleaned_files': [], 'kept_files': [], 'disk_info': disk_info}
-
             cutoff = datetime.now() - timedelta(days=self._retention_days())
             files_to_keep = {f['name'] for f in backup_files if f['mtime'] >= cutoff}
             files_to_delete = {f['name'] for f in backup_files if f['name'] not in files_to_keep}
@@ -103,11 +110,22 @@ class BackupCleanupService:
             cleanup_result = await self._execute_cleanup(files_to_delete)
             report = await self._generate_cleanup_report(
                 backup_files, files_to_keep, files_to_delete, cleanup_result, disk_info)
+            if self._last_unreadable_files:
+                # M2：扫描到了但读不懂的文件必须出现在成功报告里，否则「少算了几个」
+                # 永远没人发现（它们不会过期，只会在磁盘上越堆越多）。
+                report['unreadable_files'] = list(self._last_unreadable_files)
             if cleanup_result['deleted_count'] > 0:
                 await self._send_cleanup_notification(report)
             logger.info('备份清理完成: 删除 %d，保留 %d',
                         cleanup_result['deleted_count'], len(files_to_keep))
             return report
+        except BackupScanError as e:
+            # M2：扫描失败 ≠ 没有备份；必须失败并告警，不得返回干净的成功报告。
+            logger.error('备份清理未执行：备份目录扫描失败: %s', e)
+            await alert_service.send_alert(task_name='smart_cleanup',
+                                           error=f'备份目录扫描失败: {e}',
+                                           task_type='cleanup', severity='error')
+            return {'success': False, 'error': str(e), 'message': '备份目录扫描失败，未执行清理'}
         except Exception as e:  # defensive: cleanup task must report failure but not crash
             logger.error('备份清理失败: %s', e)
             # M4：外发只给类型名，异常原文已在上方 logger.error 留痕
@@ -132,30 +150,47 @@ class BackupCleanupService:
             return {'error': str(e)}
 
     async def _get_backup_files_info(self) -> list[dict[str, Any]]:
-        """扫描全量备份文件（不含增量）。"""
+        """扫描全量备份文件（不含增量）。
+
+        M2（2026-10-26）：扫描失败必须抛 ``BackupScanError``，不能返回空列表。
+        空列表在调用方等价于「没有备份文件」，于是「看不到备份」（权限、挂载丢失、
+        IO 故障）会被报成 ``success=True`` 的干净结果 —— 磁盘满 + 备份全被删光
+        与「本来就没备份」给出同一个绿灯。单个文件 stat 失败同样不静默丢弃：
+        它既不进保留集也不进删除集（不会误删），但计入 ``unreadable`` 供报告展示。
+        """
         try:
             ensure_backup_dir()
-            out: list[dict[str, Any]] = []
-            for fp in BACKUP_DIR.iterdir():
+        except OSError as e:
+            raise BackupScanError(f'备份目录不可用: {e}') from e
+
+        try:
+            entries = list(BACKUP_DIR.iterdir())
+        except OSError as e:
+            raise BackupScanError(f'备份目录无法枚举: {e}') from e
+
+        out: list[dict[str, Any]] = []
+        unreadable: list[dict[str, str]] = []
+        for fp in entries:
+            if not (fp.name.startswith(_FULL_PREFIXES) and fp.name.endswith(_FULL_SUFFIXES)):
+                continue
+            try:
                 if not fp.is_file():
                     continue
-                if not (fp.name.startswith(_FULL_PREFIXES) and fp.name.endswith(_FULL_SUFFIXES)):
-                    continue
-                try:
-                    if time.time() - fp.stat().st_mtime < _WRITE_GRACE_SECONDS:
-                        logger.debug('跳过仍在写入的备份文件: %s', fp.name)
-                        continue
-                except OSError:
-                    continue
-                out.append({'path': fp, 'name': fp.name,
-                            'size_bytes': fp.stat().st_size,
-                            'size_mb': round(fp.stat().st_size / 1024**2, 2),
-                            'mtime': _backup_created_time(fp)})
-            out.sort(key=lambda x: x['mtime'], reverse=True)
-            return out
-        except OSError as e:
-            logger.error('获取备份文件信息失败: %s', e)
-            return []
+                st = fp.stat()
+            except OSError as e:
+                unreadable.append({'name': fp.name, 'error': type(e).__name__})
+                logger.error('备份文件元信息不可读（不参与清理决策）: %s (%s)', fp.name, e)
+                continue
+            if time.time() - st.st_mtime < _WRITE_GRACE_SECONDS:
+                logger.debug('跳过仍在写入的备份文件: %s', fp.name)
+                continue
+            out.append({'path': fp, 'name': fp.name,
+                        'size_bytes': st.st_size,
+                        'size_mb': round(st.st_size / 1024**2, 2),
+                        'mtime': _backup_created_time(fp, st)})
+        out.sort(key=lambda x: x['mtime'], reverse=True)
+        self._last_unreadable_files = unreadable
+        return out
 
     def _enforce_count_ceiling(self, backup_files: list[dict[str, Any]],
                                files_to_keep: set[str]) -> set[str]:

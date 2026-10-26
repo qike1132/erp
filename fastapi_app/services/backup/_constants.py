@@ -36,6 +36,13 @@ BACKUP_LOCK_ID = 20240427
 # 灾难恢复演练互斥锁（第十四轮）：演练会建/删同名测试库，同秒两次触发会互毁。
 RECOVERY_TEST_LOCK_ID = 20240428
 BACKUP_OPERATION_TIMEOUT = int(os.environ.get('BACKUP_OPERATION_TIMEOUT', '1800'))
+# 恢复任务的**全阶段**总时限（H3，2026-10-26 上线前检查）。
+# 原先没有任何总预算：watchdog 只续 Redis 锁与心跳，既不终止卡在解压/stdin 的
+# psql，也不覆盖 pre_backup / rebuild / 校验各阶段。默认 3×阶段超时——
+# 安全备份 + 重建 + 导入 + 校验各占一段，单段 1800s，留足余量但不无限期挂着。
+RESTORE_TOTAL_TIMEOUT = int(
+    os.environ.get('RESTORE_TOTAL_TIMEOUT', str(BACKUP_OPERATION_TIMEOUT * 3))
+)
 _backup_in_progress: asyncio.Lock = asyncio.Lock()
 # 项目根目录：本文件位于 <root>/fastapi_app/services/backup/，故取 parents[3]。
 # 勿改成手写 parent 链——拆包时曾多算一层导致指向盘符根（D:\），

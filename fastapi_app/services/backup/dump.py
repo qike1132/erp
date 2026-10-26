@@ -415,9 +415,61 @@ def _resolve_db_env() -> dict:
     }
 
 
+def _kill_process_tree(proc) -> None:
+    """终止子进程及其整棵树（psql 的管道子进程也要一起收）。
+
+    仅 ``proc.kill()`` 只杀 psql 本体；Windows 下若 psql 再拉起辅助进程，它们会
+    继续持有管道与数据库连接，导致「已超时但连接仍被占用」。
+    用 psutil 递归子进程而不是 `taskkill /T`：跨平台一致，且不必在恢复链路里
+    再起一个子进程（安全扫描也不新增「子进程调用」发现）。
+    """
+    if proc.poll() is not None:
+        return
+    try:
+        import psutil
+    except ImportError:  # pragma: no cover - base 依赖，仅防最小环境
+        with contextlib.suppress(OSError):
+            proc.kill()
+        return
+    try:
+        parent = psutil.Process(proc.pid)
+        for child in parent.children(recursive=True):
+            with contextlib.suppress(psutil.Error):
+                child.kill()
+        parent.kill()
+    except (psutil.Error, OSError):
+        with contextlib.suppress(OSError):
+            proc.kill()
+
+
+def _arm_deadline_killer(proc, deadline: float) -> None:
+    """独立看门狗线程：到点无条件终止 psql 进程树。
+
+    H3（2026-10-26）：原先只在 ``stdin`` 写完后的 ``proc.wait(timeout=...)`` 上计时，
+    而 psql 一旦卡在锁等待/磁盘写满，``stdin_pipe.write`` 本身就会永久阻塞 ——
+    超时分支根本走不到（备份恢复可以无限期挂着）。看门狗覆盖「写入 + 等待」全过程，
+    且不随写线程异常退出而失效（daemon 线程独立存活）。
+    """
+    def _watch() -> None:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if proc.poll() is None:
+                    logger.error('psql 导入超过总时限（%.0fs），终止进程树 PID=%s',
+                                 BACKUP_OPERATION_TIMEOUT, proc.pid)
+                    _kill_process_tree(proc)
+                return
+            if proc.poll() is not None:
+                return
+            time.sleep(min(1.0, remaining))
+
+    threading.Thread(target=_watch, name='psql-deadline', daemon=True).start()
+
+
 def _psql_import_worker(psql_args: list[str], env: dict, gz_stream, first_chunk: bytes,
                         state: dict, result: dict) -> None:
     """工作线程（同步）：边解压边分块写 stdin，排空 stdout/stderr 防管道死锁。"""
+    deadline = time.monotonic() + BACKUP_OPERATION_TIMEOUT
 
     def _drain(stream, sink: list) -> None:
         while True:
@@ -437,6 +489,7 @@ def _psql_import_worker(psql_args: list[str], env: dict, gz_stream, first_chunk:
     except OSError as e:
         result['spawn_error'] = str(e)
         return
+    _arm_deadline_killer(proc_, deadline)
     # stdin 为 PIPE，管道对象必然存在；mypy 无法从 Popen 构造参数推断
     stdin_pipe = cast(IO[bytes], proc_.stdin)
     out_chunks: list[bytes] = []
@@ -457,16 +510,17 @@ def _psql_import_worker(psql_args: list[str], env: dict, gz_stream, first_chunk:
                 state['written'] += len(chunk)
         except BrokenPipeError:
             pass  # psql 提前退出（如 SQL 致命错误），结果由 rc/stderr 判定
-        except (OSError, EOFError) as e:
+        except (OSError, EOFError, ValueError) as e:
+            # ValueError：看门狗杀进程 / 外层取消后 gz_stream 被关闭
             result['stream_error'] = f'解压备份数据流失败: {e}'
         state['stream_done'] = True
-        with contextlib.suppress(BrokenPipeError):
+        with contextlib.suppress(BrokenPipeError, OSError):
             stdin_pipe.close()
         try:
-            proc_.wait(timeout=BACKUP_OPERATION_TIMEOUT)
+            proc_.wait(timeout=max(0.1, deadline - time.monotonic()))
             result['rc'] = proc_.returncode
         except subprocess.TimeoutExpired:
-            proc_.kill()
+            _kill_process_tree(proc_)
             proc_.wait()
             result['timeout'] = True
             result['timeout_seconds'] = BACKUP_OPERATION_TIMEOUT
@@ -634,15 +688,27 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
 
     await _report(0.14, '重建数据库')
     await asyncio.sleep(0)
-    # P0-5：DROP 之前落中断标记。导入结束（无论成败）在 finally 里清除；
-    # 若进程在两者之间被杀，标记会留到下次启动，由 main.lifespan 打 CRITICAL
-    # 并给出 pre_restore 回滚指引（见 restore_guard）。
+    # P0-5 / B2：DROP 之前落中断标记。写不进去就**不做破坏性操作**（历史行为是
+    # warning 后照样 DROP，等于完全没有中断保护）。成功后只有确认导入 ok 才清除；
+    # 失败保留标记并写回失败阶段，由下次启动 + readiness 消费。
     from fastapi_app.services.backup.restore_guard import (
+        RestoreMarkerError,
         mark_restore_finished,
         mark_restore_started,
     )
 
-    mark_restore_started(db_name, task_id)
+    try:
+        mark_restore_started(db_name, task_id)
+    except RestoreMarkerError as e:
+        gz_stream.close()
+        logger.error('恢复中断标记无法落盘，已在 DROP DATABASE 之前中止恢复: %s', e)
+        return {
+            'status': 'error',
+            'error': f'恢复中断标记无法落盘，已拒绝在无保护的情况下重建数据库: {e}',
+        }
+
+    succeeded = False
+    failure_stage = 'rebuild_db'
     try:
         rebuild_err = await _rebuild_database_with_admin(
             db_host=db_host, db_port=db_port, admin_user=cfg['admin_user'], admin_env=cfg['admin_env'],
@@ -653,6 +719,7 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
             gz_stream.close()
             return rebuild_err
 
+        failure_stage = 'import'
         psql_start_time = time_mod.monotonic()
         try:
             await _report(0.20, '开始导入数据库数据')
@@ -676,8 +743,13 @@ async def restore_database_via_psql(zf, db: AsyncSession, task_id: str | None = 
                 await _await_psql_progress(worker, state, counter, total_compressed, psql_start_time, _report)
             finally:
                 gz_stream.close()
-            return await _interpret_psql_result(result, _report)
+            outcome = await _interpret_psql_result(result, _report)
+            # 只有 'ok' 才算成功：'partial' 表示有语句失败，库内容不可信。
+            succeeded = outcome.get('status') == 'ok'
+            if succeeded:
+                failure_stage = 'done'
+            return outcome
         except (TimeoutError, OSError, ValueError) as e:
             return {'status': 'error', 'error': f'数据库恢复失败: {e}'}
     finally:
-        mark_restore_finished()
+        mark_restore_finished(success=succeeded, failure_stage=failure_stage)

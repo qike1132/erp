@@ -187,6 +187,9 @@ function triggerSearch(query: string) {
 
   // 已提交搜索后编辑输入框：不弹下拉（避免面板遮挡下方表格闪烁）
   if (suppressSearch.value) {
+    // M7（2026-10-26）：早退分支必须让在途请求失效。原先只清空列表、不清序号，
+    // 旧请求回来仍满足 `seq === requestSeq`，把结果写回一个被抑制的下拉。
+    requestSeq += 1
     internalSuggestions.value = []
     loading.value = false
     return
@@ -194,6 +197,9 @@ function triggerSearch(query: string) {
 
   // 静态建议列表
   if (props.suggestions && props.suggestions.length > 0) {
+    // 切换到静态模式：作废可能还在飞的远程请求，并收掉 loading
+    requestSeq += 1
+    loading.value = false
     const ql = q.toLowerCase()
     internalSuggestions.value = props.suggestions.filter((item) => {
       const label = (item as Record<string, unknown>)[props.optionLabel!]
@@ -230,7 +236,12 @@ function triggerSearch(query: string) {
 
   // 远程搜索
   if (!props.searchFn || q.length < props.minQueryLength!) {
+    // M7：短查询/无 searchFn 同样要作废在途请求并复位 loading，否则：
+    // ① 上一条长查询的慢响应会把结果塞进「已清空」的下拉；
+    // ② 早退不复位 loading，输入框 spinner 会一直转到下一个响应为止。
+    requestSeq += 1
     internalSuggestions.value = []
+    loading.value = false
     return
   }
 

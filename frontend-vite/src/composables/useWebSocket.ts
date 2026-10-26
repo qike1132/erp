@@ -15,6 +15,8 @@ interface UseWebSocketOptions {
 }
 
 const HEARTBEAT_INTERVAL_MS = 30_000
+/** ticket 请求的硬等待上限：任何「永不 settle」的 Promise 都不能把连接卡死。 */
+const TICKET_TIMEOUT_MS = 10_000
 
 export function useWebSocket(options: UseWebSocketOptions) {
   const { onMessage, isActive, maxReconnectAttempts = 20, reconnectBaseDelay = 3000 } = options
@@ -25,6 +27,28 @@ export function useWebSocket(options: UseWebSocketOptions) {
   let reconnectAttempts = 0
   let manuallyClosed = false
   let connecting = false
+
+  /**
+   * 取 WebSocket 一次性票据，带硬超时。
+   *
+   * M9（2026-10-26）：路由取消走 `_silenceCanceled()`，返回的是**永不 settle**
+   * 的 Promise（不是 reject）。只把它改成 `routeCancel:false` 是一层修补；
+   * 这里再加一层硬上限，保证将来任何调用方误用 tracked 请求也不会把
+   * `connecting` 永久钉在 true（那会让整个实例再也不可能重连）。
+   */
+  async function fetchTicketWithTimeout(): Promise<string> {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      return await Promise.race([
+        websocketApi.ticket().then((r) => r.ticket),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('ws ticket timeout')), TICKET_TIMEOUT_MS)
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
 
   function stopHeartbeat() {
     if (heartbeatTimer) {
@@ -42,7 +66,7 @@ export function useWebSocket(options: UseWebSocketOptions) {
     connecting = true
 
     try {
-      const { ticket } = await websocketApi.ticket()
+      const ticket = await fetchTicketWithTimeout()
 
       if (manuallyClosed) return
 

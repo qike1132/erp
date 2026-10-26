@@ -11,6 +11,9 @@ import json
 import logging
 import os
 import time
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import redis.exceptions
@@ -27,6 +30,67 @@ from fastapi_app.core.middleware import degraded_reasons_all
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
+
+
+def _read_loaded_commit(repo_root: Path | None = None) -> str | None:
+    """启动时记录当前工作区 HEAD，作为实际 worker 的版本指纹。
+
+    只在模块导入时读取一次：运行期间再读 HEAD 会把后续 checkout 误当成
+    已加载版本。生产直接运行工作区源码，因此该值能证明"本进程启动时看到的
+    代码基线"；打包运行没有 .git 时返回 None，发布脚本会失败关闭。
+
+    刻意**不用** `git rev-parse`：健康模块在每个 worker 导入时执行一次，起子进程
+    在 Windows 上要几十毫秒、还会给安全扫描新增一条「子进程」发现。直接读
+    `.git/HEAD`（含 packed-refs 与 linked worktree）是纯文件 I/O，语义等价。
+    """
+    root = repo_root or Path(__file__).resolve().parents[2]
+    git_dir = root / '.git'
+    try:
+        if git_dir.is_file():
+            # linked worktree / submodule：.git 是 "gitdir: <path>" 文本
+            text = git_dir.read_text(encoding='utf-8', errors='replace').strip()
+            if not text.startswith('gitdir:'):
+                return None
+            git_dir = (root / text.split(':', 1)[1].strip()).resolve()
+        head = (git_dir / 'HEAD').read_text(encoding='utf-8', errors='replace').strip()
+        if head.startswith('ref:'):
+            ref = head.split(':', 1)[1].strip()
+            ref_file = git_dir / ref
+            if ref_file.is_file():
+                commit = ref_file.read_text(encoding='utf-8', errors='replace').strip()
+            else:
+                commit = _packed_ref_commit(git_dir / 'packed-refs', ref)
+        else:
+            # detached HEAD：HEAD 本身就是 commit
+            commit = head
+    except OSError:
+        return None
+    if commit and len(commit) == 40 and all(c in '0123456789abcdef' for c in commit.lower()):
+        return commit.lower()
+    return None
+
+
+def _packed_ref_commit(packed_refs: Path, ref: str) -> str | None:
+    """从 packed-refs 里取 ref 的 commit（`<sha> <ref>` 每行一条）。"""
+    try:
+        for raw in packed_refs.read_text(encoding='utf-8', errors='replace').splitlines():
+            row = raw.strip()
+            if not row or row.startswith('#'):
+                continue
+            parts = row.split()
+            if len(parts) == 2 and parts[1] == ref:
+                return parts[0]
+    except OSError:
+        return None
+    return None
+
+
+# 每个 worker 进程只计算一次。健康端点被轮询时不得重新生成 boot_id，
+# 否则"启动代次发生变化"会退化成无意义的时间戳。
+_PROCESS_STARTED_AT = datetime.now(UTC).isoformat()
+_PROCESS_BOOT_ID = uuid.uuid4().hex
+_PROCESS_PID = os.getpid()
+_LOADED_COMMIT = _read_loaded_commit()
 
 _health_cache: dict = {"public_data": None, "internal_data": None, "cached_at": 0.0, "ttl": 10}
 
@@ -89,6 +153,28 @@ def _with_security_degraded(payload: dict, reasons: list[str]) -> dict:
     data["degraded"] = reasons
     data["security_degraded"] = bool(reasons)
     return data
+
+
+def _runtime_fingerprint() -> dict[str, Any]:
+    """当前 worker 的实际启动代次；只对回环请求暴露，避免扩大公网指纹面。"""
+    return {
+        "pid": _PROCESS_PID,
+        "boot_id": _PROCESS_BOOT_ID,
+        "started_at": _PROCESS_STARTED_AT,
+        "commit": _LOADED_COMMIT,
+        "version": settings.APP_VERSION,
+    }
+
+
+def _is_loopback_client(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in {"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"}
+
+
+def _attach_runtime(payload: Any, request: Request) -> Any:
+    if isinstance(payload, dict) and _is_loopback_client(request):
+        payload["runtime"] = _runtime_fingerprint()
+    return payload
 
 
 def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[str]):
@@ -187,12 +273,17 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str]):
     return health_data
 
 
-async def health_check(user_id: int | None = Depends(_get_optional_user)):
+async def health_check(
+    request: Request,
+    user_id: int | None = Depends(_get_optional_user),
+):
     reasons = await degraded_reasons_all()
     cached_public = _get_cached_health()
     if cached_public is not None:
-        return _health_from_cache(cached_public, user_id, reasons)
-    return await _build_fresh_health(user_id, reasons)
+        payload = _health_from_cache(cached_public, user_id, reasons)
+    else:
+        payload = await _build_fresh_health(user_id, reasons)
+    return _attach_runtime(payload, request)
 
 
 async def db_health_detail(
@@ -244,6 +335,10 @@ async def readiness_probe():
 
     失败时K8s将Pod从Service摘除，不接收流量。
     无缓存，实时检查DB+Redis。
+
+    B2（2026-10-26）：额外要求「没有悬而未决的数据库还原」——恢复中断标记存在
+    或不可读时，数据库可能是空壳，正常业务流量必须被挡住；进程与恢复端点保持
+    可用，运维才有受控通道回滚并清除标记。
     """
     db_ok = await verify_db_connectivity()
     redis_ok = True
@@ -257,11 +352,21 @@ async def readiness_probe():
     except (OSError, ConnectionError, ImportError, redis.exceptions.RedisError):
         redis_ok = False
 
-    ready = db_ok and redis_ok
+    try:
+        from fastapi_app.services.backup.restore_guard import restore_readiness
+
+        restore = restore_readiness()
+    except Exception as exc:  # defensive: readiness 不得因标记检查异常而 500
+        logger.error('恢复中断标记 readiness 判定失败（按未就绪处理）: %s', exc)
+        restore = {'ok': False, 'state': 'unknown', 'reason': 'check_failed'}
+
+    ready = db_ok and redis_ok and restore['ok']
     result = {
         "status": "ready" if ready else "not_ready",
         "database": db_ok,
         "redis": redis_ok,
+        "restore_pending": not restore['ok'],
+        "restore": restore,
     }
     if not ready:
         return Response(

@@ -334,6 +334,19 @@ jobs:
     - name: Install frontend dependencies
       run: npm ci
 
+    # M10（2026-10-26 上线前检查）：依赖审计必须可判定，且只针对**生产依赖树**。
+    # 此前前端 job 完全没有审计步骤：axios→follow-redirects 的 high 级公告
+    # 一直留在生产依赖里（能随 bundle 进浏览器），而「全量 npm audit」又被
+    # Vite/Vitest 等**只在开发服务器/构建期**存在的公告长期染红——两个方向都
+    # 无法作为发布判据。现按暴露面拆开：
+    #   · 本步骤 `--omit=dev --audit-level=high`：生产树出现 high/critical 即失败；
+    #   · 开发树（Vite/Vitest/launch-editor）不阻断发布，其风险面是开发服务器与
+    #     CI 构建输入，不随静态产物进浏览器；升级走独立 PR（跨 major 需验证构建）。
+    # 需要临时豁免时，必须在 PR 描述里写明公告 ID、可达性论证与到期日，并同步
+    # 加 `|| true` 的仅为**该条**的显式白名单——不允许整步跳过。
+    - name: Audit production dependencies
+      run: npm audit --omit=dev --audit-level=high
+
     # 原为 `npx playwright install --with-deps chromium`（:211-212）—— 已删除。
     # 全仓库无 playwright.config.*、无 e2e/ 目录、无 test:e2e 脚本，src/ 下也没有任何
     # `@playwright/test` import（playwright 仅出现在 package.json 与 lock 里），

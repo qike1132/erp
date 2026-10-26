@@ -3,7 +3,13 @@ import service from './request'
 import type { ApiResponse, LoginResponse, UserInfo } from '@/types'
 
 export const websocketApi = {
-  ticket: () => get<{ ticket: string }>('/notifications/ws-ticket'),
+  // M9（2026-10-26）：ticket 不是路由从属数据，必须 routeCancel:false。
+  // 原用默认 tracked 请求：切路由时 abortPendingRequests() 取消它，而
+  // _silenceCanceled() 返回的是**永不 settle** 的 Promise —— useWebSocket.connect()
+  // 的 await 永久挂起，connecting 卡在 true（finally 也永不执行），此后该
+  // composable 实例再也不会重连。路由守卫在「导航被取消/重定向且页面仍存活」
+  // 的窄条件下正好命中。与 unreadCount/list 同一处理口径。
+  ticket: () => get<{ ticket: string }>('/notifications/ws-ticket', undefined, { routeCancel: false }),
 }
 
 export const authApi = {

@@ -72,11 +72,16 @@ def _redirect_test_redis() -> None:
     env_path = os.path.join(_project_root, ".env")
     raw = None
     if os.path.exists(env_path):
-        with open(env_path, encoding="utf-8") as fh:
-            for line in fh:
-                if line.strip().startswith("REDIS_CACHE_URL="):
-                    raw = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
+        try:
+            with open(env_path, encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip().startswith("REDIS_CACHE_URL="):
+                        raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except OSError:
+            # .env 存在但不可读（生产机 ACL）时按「无 .env」处理，回落环境变量/默认值；
+            # 测试引导不应因读不到凭据文件而整体 ImportError。
+            raw = None
     if not raw:
         raw = os.getenv("REDIS_CACHE_URL") or os.getenv("REDIS_URL") or "redis://127.0.0.1:6379/0"
     test_url = _re.sub(r"/\d*$", "/15", raw)

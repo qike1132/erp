@@ -101,19 +101,36 @@ class BackupAlertService:
             # 通知渠道（邮件/Webhook）受失败阈值与冷却时间控制
             notify = self._should_send_alert(task_name, severity)
 
+            # M3（2026-10-26）：冷却只应在「真的投递出去了」之后生效。
+            # 原先只要 notify=True 就进入冷却 —— 两个渠道都没启用、或投递失败时，
+            # 下一条真实告警会被自己的冷却窗口吞掉（告警系统对故障失明）。
+            attempted = False
+
             # 2. 邮件通知
             if self.alert_config['email_enabled'] and notify:
+                attempted = True
                 email_success = await self._send_email_alert(alert_data)
                 success = success and email_success
 
             # 3. Webhook通知
             if self.alert_config['webhook_enabled'] and notify:
+                attempted = True
                 webhook_success = await self._send_webhook_alert(alert_data)
                 success = success and webhook_success
 
-            # 4. 更新最近告警时间（仅在真正发送通知后进入冷却期）
+            # 4. 更新最近告警时间（仅在真正投递成功后进入冷却期）
             if notify:
-                self.last_alert_times[task_name] = datetime.now()
+                if not attempted:
+                    logger.warning(
+                        '告警无可用通知渠道（邮件/Webhook 均未启用），仅落日志，'
+                        '不进入冷却期: %s', task_name,
+                    )
+                elif success:
+                    self.last_alert_times[task_name] = datetime.now()
+                else:
+                    logger.warning(
+                        '告警投递失败，不进入冷却期以便下轮重试: %s', task_name,
+                    )
 
             logger.info(f"告警发送完成: {task_name}, 严重级别: {severity}")
             return success
@@ -386,7 +403,14 @@ class BackupAlertService:
                     logger.info(f"Webhook告警发送成功: {alert_data['task_name']}")
                     return True
                 else:
-                    logger.error(f"Webhook告警发送失败: {response.status_code} - {response.text}")  # sql-safe: escape_like/绑定参数/常量片段
+                    # M4（2026-10-26）：不再回显响应正文。Webhook 接收端常在错误体里
+                    # 回显请求内容/令牌，原文进日志等于把告警载荷与凭据复制到
+                    # logs/（可被更低权限角色读取）。状态码 + 长度足够定位。
+                    logger.error(
+                        "Webhook告警发送失败: status=%s body_len=%s",
+                        response.status_code,
+                        len(response.text or ''),
+                    )
                     return False
 
         except httpx.RequestError as e:

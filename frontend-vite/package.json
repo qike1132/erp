@@ -27,6 +27,7 @@
     "format": "prettier --write \"src/**/*.{ts,vue,css,json}\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
     "test:coverage": "vitest run --coverage",
     "prepare": "husky"
   },
@@ -94,6 +95,7 @@
   "overrides": {
     "js-cookie": "^3.0.8",
     "form-data": "^4.0.6",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "follow-redirects": "^1.16.1"
   }
 }

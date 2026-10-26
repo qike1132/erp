@@ -44,61 +44,112 @@ class TestStartServicesFlow:
     def test_start_services_flow_reaches_redis_start(self, monkeypatch):
         """真的跑一遍 _start_services_flow，断言 Redis 启动被调用到。
 
-        只桩掉流程里的副作用（停开发/清端口/起服务/broker/日志），
-        唯独**不**桩 `_start_redis` —— 若它缺失或被删，这里会以
-        AttributeError 失败，正是线上那个缺陷。
+        M11（2026-10-26 上线前检查）：原测试名叫「flow」，实际只调了
+        `app._start_redis()` —— 流程入口 `_start_services_flow()` 一次都没执行。
+        删掉 `_start_services_flow` 里的 `self._start_redis()` 调用（或删掉转发本身），
+        该测试仍然全绿，正是线上那次事故的形状。现在桩掉流程里的所有副作用，
+        真正进入流程体。
         """
-        app = _make_app()
+        app, hooks = _wire_flow_app(monkeypatch)
 
-        calls = {'dev_stopped': 0, 'release_ports': 0, 'broker': 0, 'start_one': 0}
+        app._start_services_flow()
 
-        # 无副作用替身
-        monkeypatch.setattr(app, '_msg_queue', _FakeQueue(), raising=False)
-        monkeypatch.setattr(app, '_ensure_development_stopped', lambda *a, **k: (calls.__setitem__('dev_stopped', calls['dev_stopped'] + 1) or False), raising=False)
-        monkeypatch.setattr(app, '_release_ports', lambda *a, **k: calls.__setitem__('release_ports', calls['release_ports'] + 1), raising=False)
-        monkeypatch.setattr(app, '_ensure_redis_broker', lambda *a, **k: (calls.__setitem__('broker', calls['broker'] + 1) or True), raising=False)
-        # B1（2026-10-25）：启动结果改为 ServiceRunResult 形态（ok/state/pid/effective），
-        # _start_services_flow 按「在跑且已验证生效」汇总，替身须给全四个属性。
-        monkeypatch.setattr(
-            app, '_start_one_service',
-            lambda *a, **k: (calls.__setitem__('start_one', calls['start_one'] + 1)
-                             or SimpleNamespace(ok=True, state='4 RUNNING', pid=1, effective=True)),
-            raising=False)
-        monkeypatch.setattr(app, '_verify_installed_service_paths', lambda *a, **k: None, raising=False)
-        monkeypatch.setattr(app, 'log_message', lambda *a, **k: None, raising=False)
-
-        # 关键：给 app 挂一个真能记录调用的 redis 转发目标
-        redis_started = {'n': 0}
-
-        class _FakeRedis:
-            def start_redis(self):
-                redis_started['n'] += 1
-                return True
-
-            def ensure_redis_broker(self):
-                calls['broker'] = calls['broker'] + 1
-                return True
-
-        app.redis = _FakeRedis()
-        # _start_redis 若存在，它转发到 redis.start_redis —— 这里确认转发本身正确
-        app._start_redis()
-
-        assert redis_started['n'] == 1, '`_start_redis` 转发应调用 redis.start_redis 恰好一次'
+        assert hooks['redis_started'] == 1, '启动流程必须调用 Redis 启动'
+        assert hooks['start_one'] == 3, (
+            f'三个服务都必须被启动，实际 {hooks["start_one"]} 次')
+        assert hooks['logs_started'] == 1, '启动后必须拉起日志跟踪器'
+        texts = _texts(app)
+        assert any('生产模式启动完成' in t for t in texts), texts
 
     def test_flow_survives_redis_returning_false(self, monkeypatch):
-        """Redis 启动失败只应告警，不能让整条启动流程崩掉。"""
-        app = _make_app()
+        """Redis 启动失败只应告警，不能让整条启动流程崩掉（服务仍要起）。"""
+        app, hooks = _wire_flow_app(monkeypatch, redis_ok=False)
 
-        class _FakeRedis:
-            def start_redis(self):
-                return False
+        app._start_services_flow()
 
-            def ensure_redis_broker(self):
-                return True
+        assert hooks['redis_started'] == 1
+        assert hooks['start_one'] == 3, 'Redis 失败也必须继续启动三个服务'
+        texts = _texts(app)
+        assert any('Redis 未启动' in t and '警告' in t for t in texts), texts
 
-        app.redis = _FakeRedis()
-        # start_redis 返回 False 时流程继续（broker 仍要起），不抛异常
-        assert app._start_redis() is False
+    def test_flow_reports_incomplete_when_arq_broker_missing(self, monkeypatch):
+        """broker 未就绪：ARQ 不得计入成功，最终结论必须是「未完全成功」。"""
+        app, hooks = _wire_flow_app(monkeypatch, broker_ok=False)
+
+        app._start_services_flow()
+
+        texts = _texts(app)
+        assert any('未完全成功' in t for t in texts), texts
+        assert not any('生产模式启动完成' in t for t in texts), texts
+        assert hooks['start_one'] == 3, '仍要尝试启动 ARQ，让日志自己说话'
+
+    def test_flow_refuses_before_any_side_effect_on_branch_denial(self, monkeypatch):
+        """AUD-28：分支闸门拒绝时，不得停开发、不得清端口、不得启动任何服务。"""
+        app, hooks = _wire_flow_app(monkeypatch)
+        monkeypatch.setattr(sm.git_guard, 'check_production_branch',
+                            lambda _root: (False, '工作区不在 main 分支'))
+
+        app._start_services_flow()
+
+        assert hooks == {
+            'redis_started': 0, 'start_one': 0, 'logs_started': 0,
+            'dev_stopped': 0, 'release_ports': 0,
+        }, f'闸门拒绝后仍有副作用: {hooks}'
+        assert any('拒绝启动' in t for t in _texts(app)), _texts(app)
+
+
+def _wire_flow_app(monkeypatch, *, redis_ok=True, broker_ok=True):
+    """构造一个只跑逻辑的 ServerManagerApp，并记录流程中的关键副作用。"""
+    app = _make_app()
+    hooks = {
+        'redis_started': 0, 'start_one': 0, 'logs_started': 0,
+        'dev_stopped': 0, 'release_ports': 0,
+    }
+
+    app._msg_queue = _FakeQueue()
+    app._gate = _Gate()
+    app._prod_start_ts = 0.0
+    # prod_logs 是 log_view 的只读 property（懒建 ProdLogTailer），只能替换底层实例
+    app._prod_logs = SimpleNamespace(
+        ensure_started=lambda: hooks.__setitem__('logs_started', hooks['logs_started'] + 1))
+    app.log_message = lambda *a, **k: None
+    app._ensure_development_stopped = (
+        lambda *a, **k: hooks.__setitem__('dev_stopped', hooks['dev_stopped'] + 1) or True)
+    app._release_ports = (
+        lambda *a, **k: hooks.__setitem__('release_ports', hooks['release_ports'] + 1))
+    app._ensure_redis_broker = lambda *a, **k: broker_ok
+
+    class _FakeRedis:
+        def start_redis(self):
+            hooks['redis_started'] += 1
+            return redis_ok
+
+        def ensure_redis_broker(self):
+            return broker_ok
+
+    app.redis = _FakeRedis()
+
+    def _start_one(name, timeout=25):
+        hooks['start_one'] += 1
+        return SimpleNamespace(ok=True, state='4 RUNNING', pid=1000 + hooks['start_one'],
+                               effective=True)
+
+    app._start_one_service = _start_one
+
+    monkeypatch.setattr(sm.git_guard, 'check_production_branch', lambda _root: (True, 'ok'))
+    monkeypatch.setattr(sm.log_ops, 'log_file_size', lambda _p: 0)
+    monkeypatch.setattr(sm.log_ops, 'read_log_tail_lines', lambda _p, **_k: [])
+    return app, hooks
+
+
+def _texts(app) -> list[str]:
+    return [payload.get('text', '') for kind, payload in app._msg_queue.items
+            if kind == 'log' and isinstance(payload, dict)]
+
+
+class _Gate:
+    def checkpoint(self):
+        pass
 
 
 class _FakeQueue:

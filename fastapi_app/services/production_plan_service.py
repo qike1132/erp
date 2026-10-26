@@ -4,7 +4,6 @@
 包含排产计划 CRUD、批量上传预览、库存对比、出货进度追踪、
 月度汇总统计、时间轴查询、操作日志等功能。
 """
-import asyncio
 import calendar
 import io
 import json
@@ -165,7 +164,11 @@ def _calc_monthly_summary(plan_list: list) -> dict:
         total_plan_qty += p['quantity']
         total_inventory_qty += p['inventory_qty']
         _key = (p['customer_name'], p['product_name'])
-        if _key not in _counted_shipped:
+        # H1（2026-10-26）：首次键标志必须在**加入集合之前**求值，并在两级汇总里复用。
+        # 原实现在 total 循环里先 add、客户级再判 `_key not in _counted_shipped`——
+        # 该条件恒为 False，客户级 shipped_qty 永远不加（恒 0），而总计是对的。
+        is_new_shipped = _key not in _counted_shipped
+        if is_new_shipped:
             _counted_shipped.add(_key)
             total_shipped_qty += p['shipped_qty']
         if p['stock_status'] == 'warning':
@@ -176,9 +179,8 @@ def _calc_monthly_summary(plan_list: list) -> dict:
         cs = customer_summary[cn]
         cs['plan_qty'] += p['quantity']
         cs['inventory_qty'] += p['inventory_qty']
-        if _key not in _counted_shipped:
-            # _counted_shipped 在 total 循环里已加过本键 —— 客户级汇总同样只计一次
-            _counted_shipped.add(_key)
+        if is_new_shipped:
+            # 与总计同一语义：每个 (客户, 产品) 只计一次整月出货量
             cs['shipped_qty'] += p['shipped_qty']
         cs['remaining_qty'] += p['remaining_qty']
         if p['stock_status'] == 'warning':
@@ -255,10 +257,11 @@ async def upload_excel(db: AsyncSession, file_content: bytes, session_id: str) -
     """
     解析Excel文件，写入暂存表，返回预览数据
     """
-    from fastapi_app.services.xlsx_budget import run_parse_with_timeout
+    from fastapi_app.services.xlsx_budget import run_sync_with_timeout
 
     batch_id = str(uuid.uuid4())[:8]
-    rows = await run_parse_with_timeout(asyncio.to_thread(_parse_plan_rows, file_content))
+    # M1：专用有界线程池 + 可跟踪终态（不占默认 executor）
+    rows = await run_sync_with_timeout(_parse_plan_rows, file_content)
     if not rows:
         raise ValueError('Excel文件无数据行')
     staging_records = []

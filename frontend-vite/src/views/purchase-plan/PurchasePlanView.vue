@@ -65,7 +65,7 @@
     </div>
   </div>
 
-  <CreateShipmentPlanDialog v-model:open="showCreate" @created="onCreated" @imported="onImported" />
+  <CreateShipmentPlanDialog v-model:open="showCreate" @created="onCreated" @succeeded="refreshPlans" @imported="onImported" />
 </template>
 
 <script setup lang="ts">
@@ -233,7 +233,9 @@ function resetMonth() {
   y.value = now.getFullYear();
   m.value = now.getMonth() + 1;
 }
-function onCreated() { showCreate.value = false; qc.invalidateQueries({ queryKey: ['pp-agg'] }); }
+function onCreated() { showCreate.value = false; refreshPlans(); }
+/** 部分成功：只刷新列表，不关闭对话框（H6：失败草稿要留在表单里可重试）。 */
+function refreshPlans() { qc.invalidateQueries({ queryKey: ['pp-agg'] }); }
 
 /**
  * 批量导入完成。

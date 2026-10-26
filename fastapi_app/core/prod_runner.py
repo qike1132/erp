@@ -431,6 +431,8 @@ class _Managed:
         self.health_fail_start: float | None = None
         self.consecutive_health_fail = 0
         self.backoff_step = 0
+        # H2：杀树未确认成功后的重试时刻。窗口内不得再发杀树、更不得起新进程。
+        self._kill_retry_at = 0.0
 
     def start(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -469,8 +471,14 @@ class _Managed:
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
-    def kill_tree(self) -> None:
+    def kill_tree(self) -> bool:
         """终止整棵进程树：Windows 先软杀、超时才升级硬杀；非 Windows 用进程组 SIGTERM。
+
+        返回「是否已确认终止」：True = 进程树确认不在（含本来就没进程）；
+        False = 终止动作做完但 PID 仍存活。**H2（2026-10-26 上线前检查）**：
+        旧实现无论成没成都会 ``self.proc = None``，调用方随后 ``_mark_crashed()``
+        并安排重启——旧进程仍占着 :5002 时再拉一个新实例，同端口双进程、
+        而监督器已彻底失去旧进程句柄（再也杀不掉）。
 
         2026-10-11（复核 P1-9）：原先对 uvicorn 子进程一律 `taskkill /F /T`，
         TerminateProcess 使 lifespan 关停段从不执行（实测 84/160 次进入关停段
@@ -484,7 +492,7 @@ class _Managed:
         监督器能在 NSSM 的 console 窗口内自行退干净。
         """
         if not self.proc:
-            return
+            return True
         pid = self.proc.pid
         if os.name == "nt":
             soft = subprocess.run(  # nosec B603 B607
@@ -523,13 +531,29 @@ class _Managed:
         with contextlib.suppress(subprocess.TimeoutExpired):
             self.proc.wait(timeout=5)
         if self.proc.poll() is None:
-            print(f"[prod_runner] 警告: PID {pid} 在终止后仍存活，"
-                  f"它可能成为占用端口的孤儿进程，请手工确认")
+            # H2：未确认死亡 → 保留 proc/_logf 身份，让调用方能够重试杀树，
+            # 也避免「以为杀掉了」而再起一个同端口实例。
+            print(f"[prod_runner] 错误: PID {pid} 在终止后仍存活，"
+                  f"保留其身份以便重试（不安排新进程）——请手工确认孤儿进程")
+            return False
         if self._logf:
             with contextlib.suppress(OSError):
                 self._logf.close()
         self._logf = None
         self.proc = None
+        return True
+
+    def _defer_after_failed_kill(self, seconds: float = 30.0) -> None:
+        """杀树未确认成功：保留进程身份与状态，退避后重试（H2）。
+
+        不调用 ``_mark_crashed()``——那会把 ``next_start`` 提前并让 ``maybe_restart``
+        在同一端口再起一个实例，而旧进程仍在服务、监督器已丢失其句柄。
+        """
+        self._kill_retry_at = time.monotonic() + seconds
+        if self.status in ("ready", "running"):
+            self.status = "degraded"
+        print(f"[prod_runner] {self.name} 进程树未确认终止，{int(seconds)}s 后重试；"
+              f"期间不启动新进程（避免同端口双实例），状态={self.status}")
 
     def _probe_health(self) -> tuple[bool, float]:
         """探测健康端点：单次超时 5s，同一 tick 内失败则重试 1 次。
@@ -591,10 +615,16 @@ class _Managed:
         if self.health_fail_start is None:
             self.health_fail_start = time.monotonic()
         window = time.monotonic() - self.health_fail_start
+        if time.monotonic() < self._kill_retry_at:
+            # H2：上一次杀树未确认成功。退避窗口内既不重试杀树（避免 taskkill 风暴），
+            # 更不得起新进程（旧进程可能仍占着 :5002）。
+            return
         if _should_restart(self.consecutive_health_fail, window, proc_alive):
             print(f"[prod_runner] {self.name} 进程已死且健康检查持续失败"
                   f"(连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s)，强制重启进程树")
-            self.kill_tree()
+            if not self.kill_tree():
+                self._defer_after_failed_kill()
+                return
             self.health_fail_start = None
             self.consecutive_health_fail = 0
             self._mark_crashed()
@@ -608,7 +638,9 @@ class _Managed:
                   f"{int(_DEGRADED_RESTART_MIN_WINDOW_S)}s"
                   f"(连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s)，"
                   f"判定 worker 崩溃循环，强制重启进程树")
-            self.kill_tree()
+            if not self.kill_tree():
+                self._defer_after_failed_kill()
+                return
             self.health_fail_start = None
             self.consecutive_health_fail = 0
             self._mark_crashed()
@@ -806,9 +838,16 @@ class Supervisor:
             return
         self._shutdown_done = True
         print("[prod_runner] 正在关闭...")
+        failed: list[str] = []
         for svc in (self.arq, self.backend):
-            if svc:
-                svc.kill_tree()
+            if svc and not svc.kill_tree():
+                failed.append(svc.name)
+        if failed:
+            # H2：不得无条件打印「已停止」——未确认终止的子进程会继续占用端口，
+            # 运维依据「已停止」重启会撞上双实例。
+            print(f"[prod_runner] 关闭未完成：{', '.join(failed)} 仍在运行，"
+                  f"请手工 taskkill /F /T /PID 对应进程（端口可能仍被占用）")
+            return
         print("[prod_runner] 已停止(前端 erp-web 为独立服务,不在此处理)")
 
 
