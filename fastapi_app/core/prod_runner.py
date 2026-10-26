@@ -730,7 +730,13 @@ class _Managed:
             # 2026-10-26：健康 200 只证明「有人应答」。首次健康通过时证实应答者身份，
             # 不成立则降级（ready:false）并保持进程存活——问题不在我的子进程，
             # 重启它也没用，得先清掉抢占端口的那个监听者。
-            if self.verify_identity and not self._identity_checked:
+            #
+            # ⚠️ 身份问题**必须跨 tick 保持**：实测 16:25 重启时首次探针正确判了
+            # 「应答 pid=12348 不属于本树」，但后续 tick 走到下面的正常分支又把状态
+            # 改回 ready，prod_runner.json 于是显示 ready:true —— 降级只活了 3 秒。
+            # 所以只要 identity_problem 还挂着，每个 tick 都重新证实一次（拿回流量的
+            # 那一刻会自动恢复 ready）；期间不重置 health_fail 计数。
+            if self.verify_identity and (not self._identity_checked or self.identity_problem):
                 self._identity_checked = True
                 self.identity_problem = self._verify_identity()
                 if self.identity_problem:

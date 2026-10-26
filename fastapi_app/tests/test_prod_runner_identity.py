@@ -141,8 +141,29 @@ def test_poll_ready_when_identity_proven(monkeypatch):
     assert m.identity_problem is None
 
 
+def test_identity_problem_persists_until_cleared(monkeypatch):
+    """身份问题必须跨 tick 保持：不能下一次 poll 就翻回 ready（16:25 实测缺陷）。
+
+    16:25 重启时首次探针正确判了「应答 pid 不属于本树」，但后续 tick 走正常分支
+    把状态改回 ready，prod_runner.json 显示 ready:true —— 降级只活了 3 秒。
+    修复后：问题挂着期间每个 tick 都重新证实；一旦通过立即恢复 ready。
+    """
+    m = _managed(monkeypatch)
+    monkeypatch.setattr(m, "_probe_health", lambda: (True, 0.05))
+    verdicts = iter(["应答进程 pid=12348 不属于本进程树", None])
+    monkeypatch.setattr(m, "_verify_identity", lambda: next(verdicts))
+
+    m.poll()
+    assert m.status == "degraded" and m.identity_problem
+
+    # 抢占者清掉后（重新证实通过）自动恢复 ready
+    m.poll()
+    assert m.status == "ready"
+    assert m.identity_problem is None
+
+
 def test_identity_check_runs_once_per_start(monkeypatch):
-    """身份证实只做一次（每 tick 都去 net_connections 太贵），重启后重新证实。"""
+    """身份证实通过后不再每 tick 重查（net_connections/HTTP 有成本）。"""
     m = _managed(monkeypatch)
     monkeypatch.setattr(m, "_probe_health", lambda: (True, 0.05))
     calls = []
