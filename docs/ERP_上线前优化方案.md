@@ -580,11 +580,10 @@ async function logout() {
 
 结论：**纯外观性去重、零行为收益**，26 文件改动的风险与收益不成比例。若将来有人重提，请先反驳以上三点。
 
-**P1-2 收窄到 `/backup`。** 原方案对 `/users`、`/permissions`、`/backup` 三个前缀都接 strict。复审指出
-`redis_cache.init_app()` 失败后**永不重试**，故「Redis 启动即不可用」会让 strict 路由**永久 401**；
-而本仓库有过开机顺序事故史。故只保留 `/backup`（其还原路径本就对 Redis fail-closed，不引入新锁死），
-`/users`、`/permissions` 保留 fail-open 并在代码里注明理由。**前置条件（客户端自愈）现已完成**，
-三前缀统一 strict 可作为后续独立项（建议先上线观察自愈）。
+**P1-2 已扩展（2026-10-27）。** 早期因 `redis_cache.init_app()` 失败后不重试，只给 `/backup` 接 strict。
+客户端现已有 `ensure_client()` 惰性重建自愈，故 `/users`、`/permissions` 读写统一 strict；
+其余业务路由使用 `get_current_user_id_write_strict`：POST/PUT/PATCH/DELETE 在撤销状态不可判定时
+fail-closed，GET/HEAD/OPTIONS 保留可用性。回归见 `fastapi_app/tests/test_strict_auth_wiring.py`。
 
 **P1-1 的全局默认值改为"不设"。** 原码 `default_limits=["60/minute"]` 从未在真实流量下验证（限流长期被关闭），
 实测单次测试会话即 172 次 429。故默认不设，只让作者本就写好的端点级 `@limiter.limit` 生效，

@@ -1,47 +1,63 @@
-"""E2E 生产指纹守卫：指向生产库/生产端口必须拒绝运行（fail-fast）。"""
-from typing import ClassVar
+"""E2E 生产指纹守卫：指向生产库/生产入口必须拒绝运行（fail-fast）。"""
 
 import pytest
 
 import tests.e2e_api.conftest as e2e_conftest
 
 
-def test_unset_target_guards_trigger_skip_marker(monkeypatch):
-    # 未显式指定目标 → 指纹不命中，允许走到探活 skip 分支
-    monkeypatch.setattr(e2e_conftest, 'BASE_URL', 'http://127.0.0.1:9999')
-    monkeypatch.setenv('ERP_E2E_REAL_DATABASE_URL', 'postgresql://u:p@localhost/erp_system_test')
-    hit, reason = e2e_conftest._production_fingerprint_hit()
-    assert not hit, reason
+@pytest.mark.parametrize(
+    ('base_url', 'dsn', 'fragment'),
+    [
+        ('http://127.0.0.1:9999', 'postgresql://u:p@localhost/erp_system_test', None),
+        ('http://127.0.0.1:5002', 'postgresql://u:p@localhost/erp_system_test', '生产入口'),
+        ('http://127.0.0.1:3000', 'postgresql://u:p@localhost/erp_system_test', '生产入口'),
+        ('http://192.168.0.95:9999', 'postgresql://u:p@localhost/erp_system_test', '回环'),
+        ('http://127.0.0.1:9999', 'postgresql://u:p@localhost/erp_system', '非测试库'),
+        ('http://127.0.0.1:9999', 'postgresql://u:p@localhost/erp_e2e', '非测试库'),
+        (
+            'http://127.0.0.1:9999',
+            'postgresql://u:p@localhost/erp_system_test?database=erp_system',
+            'query 参数',
+        ),
+        ('http://127.0.0.1:9999', 'not-a-dsn', '无法解析'),
+    ],
+)
+def test_target_guard(base_url, dsn, fragment):
+    hit, reason = e2e_conftest._production_fingerprint_hit(base_url=base_url, db_url=dsn)
+    if fragment is None:
+        assert not hit, reason
+    else:
+        assert hit
+        assert fragment in reason
 
 
-def test_port_5002_is_fingerprint():
-    hit, _ = e2e_conftest._production_fingerprint_hit(
-        base_url='http://127.0.0.1:5002', db_url='postgresql://u:p@localhost/erp_system_test')
-    assert hit
-
-
-def test_db_erp_system_is_fingerprint():
-    hit, _ = e2e_conftest._production_fingerprint_hit(
-        base_url='http://127.0.0.1:9999', db_url='postgresql+psycopg://u:p@localhost:5432/erp_system')
-    assert hit
+@pytest.mark.parametrize(
+    ('actual', 'expected_dsn', 'fragment'),
+    [
+        ('erp_system_test', 'postgresql://u:p@localhost/erp_system_test', None),
+        ('erp_system', 'postgresql://u:p@localhost/erp_system_test', '非测试库'),
+        ('other_test', 'postgresql://u:p@localhost/erp_system_test', '不一致'),
+        ('', 'postgresql://u:p@localhost/erp_system_test', '未回报'),
+    ],
+)
+def test_backend_identity_must_match_dsn(actual, expected_dsn, fragment):
+    reason = e2e_conftest._identity_database_mismatch(actual, expected_dsn)
+    if fragment is None:
+        assert reason is None
+    else:
+        assert reason is not None
+        assert fragment in reason
 
 
 def test_fingerprint_checked_before_backend_alive(monkeypatch):
-    # 守卫必须先于探活：生产库+死端口 → fail-fast 而不是静默 skip
-    # （探活结果由模块级 _backend_alive() 固化，这里直接验证钩子函数逻辑）
     monkeypatch.setattr(e2e_conftest, '_ALIVE', False)
     monkeypatch.setattr(e2e_conftest, '_ALIVE_REASON', 'unreachable')
-    monkeypatch.setattr(e2e_conftest, 'BASE_URL', 'http://127.0.0.1:5002')
-    monkeypatch.setenv('ERP_E2E_REAL_DATABASE_URL', 'postgresql://u:p@localhost/erp_system')
+    monkeypatch.setattr(e2e_conftest, 'BASE_URL', 'http://127.0.0.1:3000')
+    monkeypatch.setenv(
+        'ERP_E2E_REAL_DATABASE_URL',
+        'postgresql://u:p@localhost/erp_system_test',
+    )
 
-    class _Item:
-        # ClassVar：这是 pytest item 的契约——类级可变列表（RUF012 要求显式声明）
-        own_markers: ClassVar[list] = []
-
-        def add_marker(self, m):
-            self.own_markers.append(m)
-
-    import pytest as _pytest
-    with pytest.raises(_pytest.exit.Exception) as excinfo:
-        e2e_conftest.pytest_collection_modifyitems(None, [_Item()])
-    assert '生产' in str(excinfo.value) or 'production' in str(excinfo.value)
+    with pytest.raises(pytest.exit.Exception) as excinfo:
+        e2e_conftest.pytest_collection_modifyitems(None, [])
+    assert '生产入口' in str(excinfo.value)

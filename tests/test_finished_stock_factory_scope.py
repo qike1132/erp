@@ -27,7 +27,11 @@ async def fs_api():
     """工厂隔离测试客户端：事务回滚隔离 + 当前用户 mock（factory 可翻转）。"""
     from fastapi_app.core import database as _db_mod
     from fastapi_app.core.database import get_async_db, get_async_read_db
-    from fastapi_app.core.deps import _get_user_with_permissions, get_current_user_id
+    from fastapi_app.core.deps import (
+        _get_user_with_permissions,
+        get_current_user_id,
+        get_current_user_id_write_strict,
+    )
     from fastapi_app.main import app
     from fastapi_app.shared_models import Base
     await _db_mod.ensure_engine_for_current_loop()
@@ -66,6 +70,7 @@ async def fs_api():
                 app.dependency_overrides[get_async_db] = override_db
                 app.dependency_overrides[get_async_read_db] = override_db
                 app.dependency_overrides[get_current_user_id] = override_user_id
+                app.dependency_overrides[get_current_user_id_write_strict] = override_user_id
                 app.dependency_overrides[_get_user_with_permissions] = override_user_with_perms
 
                 def set_current_user(factory, is_super=False):

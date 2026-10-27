@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any
 
 import redis.exceptions
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from sqlalchemy import text
-from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.exc import ArgumentError, DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
@@ -467,10 +467,30 @@ def _metrics_token_ok(authorization: str) -> bool:
     )
 
 
+async def e2e_target_identity() -> dict[str, str]:
+    """仅供隔离 E2E 验证目标后端身份（APP_ENV=test）。
+
+    API E2E 会按本端点回报的库名与 ``ERP_E2E_REAL_DATABASE_URL`` 比对，
+    防止“低端口 + 测试 DSN”实际代理到生产库的旁路。生产环境固定 404，
+    且不进入 OpenAPI，避免暴露任何运行环境信息。
+    """
+    env = os.getenv('APP_ENV', '').strip().lower()
+    if env != 'test':
+        raise HTTPException(status_code=404, detail='Not Found')
+    from sqlalchemy.engine import make_url
+
+    try:
+        database = make_url(str(settings.DATABASE_URL)).database or ''
+    except ArgumentError as exc:
+        raise HTTPException(status_code=503, detail='database identity unavailable') from exc
+    return {'app_env': 'test', 'database': database.rstrip('/')}
+
+
 def register_health_routes(app: FastAPI) -> None:
     """注册健康检查和监控路由"""
     app.get("/api/health", tags=["健康检查"])(health_check)
     app.get("/api/health/db", tags=["健康检查"])(db_health_detail)
+    app.get("/api/health/e2e-identity", include_in_schema=False)(e2e_target_identity)
 
     try:
         from fastapi_app.core.metrics import get_content_type, get_metrics

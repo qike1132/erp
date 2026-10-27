@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db
-from fastapi_app.core.deps import create_access_token, create_refresh_token, get_current_user_id
+from fastapi_app.core.deps import (
+    create_access_token,
+    create_refresh_token,
+    get_current_user_id,
+    get_current_user_id_write_strict,
+)
 from fastapi_app.core.limiter import limiter, memory_limiter, rate_limit_key
 from fastapi_app.core.response import success_response
 from fastapi_app.core.validators import require_upload_magic
@@ -130,7 +135,7 @@ async def get_current_user_info(
 async def log_frontend_error(
     data: FrontendErrorLogRequest,
     request: Request,
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_write_strict),
 ):
     """记录前端错误日志（需登录，防止日志洪泛攻击）
 
@@ -501,7 +506,7 @@ MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
 @router.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    user_id: int = Depends(get_current_user_id),
+    user_id: int = Depends(get_current_user_id_write_strict),
     db: AsyncSession = Depends(get_async_db),
 ):
     """图片上传API（限制5MB，需登录）"""

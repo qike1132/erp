@@ -420,6 +420,35 @@ def _isolate_memory_cache_fallback():
     redis_cache._fallback_timestamps.clear()
 
 
+@pytest.fixture(autouse=True)
+def _in_memory_token_revocation(monkeypatch):
+    """根集成套件的撤销存储替身（不绕过写鉴权接线）。
+
+    测试进程不跑 lifespan，Redis 客户端未初始化。这里替换的是**撤销存储**
+    本身，而不是业务路由的 ``get_current_user_id_write_strict`` 依赖：
+    所有写请求仍经过生产 fail-closed 依赖、token 解码、用户启用校验，
+    只是撤销状态由一个每次用例清空的内存集合判定。这样既避免测试依赖
+    本机 Redis，又不会让 5000+ 用例绕过新接线。
+
+    真正的 Redis 故障 fail-closed 语义由
+    ``fastapi_app/tests/test_strict_auth_wiring.py`` 与
+    ``test_blacklist_degradation.py`` 单独覆盖。
+    """
+    import fastapi_app.core.deps as deps
+
+    revoked: set[str] = set()
+
+    async def _is_token_revoked(jti, *, fail_closed: bool = False) -> bool:
+        return bool(jti and jti in revoked)
+
+    async def _revoke_token(jti: str, exp: int) -> None:
+        if jti:
+            revoked.add(jti)
+
+    monkeypatch.setattr(deps, 'is_token_revoked', _is_token_revoked)
+    monkeypatch.setattr(deps, 'revoke_token', _revoke_token)
+
+
 @pytest_asyncio.fixture
 async def async_client(test_engine, async_db_session):
     """httpx AsyncClient，连接 FastAPI app。

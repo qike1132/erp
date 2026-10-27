@@ -31,6 +31,7 @@ vi.mock('@/composables/useToast', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
+import { outsourceApi } from '@/api/outsource'
 import type { OutsourceProcessType } from '@/api/outsource'
 import OutsourcePresetTab from '@/views/outsource/components/OutsourcePresetTab.vue'
 
@@ -70,6 +71,8 @@ function mountWithSnapshot(snapshot: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // 新实现挂载即重取：旧信封快照不被采用，后台请求返回真实空列表后进入空态。
+  vi.mocked(outsourceApi.processTypes).mockResolvedValue({ success: true, data: [], total: 0 })
 })
 
 describe('OutsourcePresetTab — 旧缓存信封快照防御（OCR-4 H1）', () => {

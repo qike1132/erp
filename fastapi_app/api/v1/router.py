@@ -40,7 +40,10 @@ from fastapi_app.api.v1.endpoints.stock_return import router as stock_return_rou
 from fastapi_app.api.v1.endpoints.supplier import router as supplier_router
 from fastapi_app.api.v1.endpoints.tasks import router as tasks_router
 from fastapi_app.api.v1.endpoints.user import router as user_router
-from fastapi_app.core.deps import get_current_user_id, get_current_user_id_strict
+from fastapi_app.core.deps import (
+    get_current_user_id_strict,
+    get_current_user_id_write_strict,
+)
 
 api_router = APIRouter()
 
@@ -49,7 +52,7 @@ api_router.include_router(
     purchase_center_router,
     prefix="/purchase-center",
     tags=["采购中心"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 批量导入路由 - 前缀 /api/v1/batch
@@ -57,7 +60,7 @@ api_router.include_router(
     batch_router,
     prefix="/batch",
     tags=["批量导入"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 暂存订单路由 - 前缀 /api/v1/staging-orders
@@ -65,7 +68,7 @@ api_router.include_router(
     staging_order_router,
     prefix="/staging-orders",
     tags=["暂存订单"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 暂存备货路由 - 前缀 /api/v1/staging-stockins
@@ -73,7 +76,7 @@ api_router.include_router(
     staging_stockin_router,
     prefix="/staging-stockins",
     tags=["暂存备货"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 暂存出货路由 - 前缀 /api/v1/staging-stockouts
@@ -81,7 +84,7 @@ api_router.include_router(
     staging_stockout_router,
     prefix="/staging-stockouts",
     tags=["暂存出货"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 产品管理路由 - 前缀 /api/v1/products
@@ -89,7 +92,7 @@ api_router.include_router(
     product_router,
     prefix="/products",
     tags=["产品管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 订单管理路由 - 前缀 /api/v1/orders
@@ -97,7 +100,7 @@ api_router.include_router(
     order_router,
     prefix="/orders",
     tags=["订单管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 湖北外发路由 - 前缀 /api/v1/outsource
@@ -105,7 +108,7 @@ api_router.include_router(
     outsource_router,
     prefix="/outsource",
     tags=["湖北外发"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 订单批次号路由 - 前缀 /api/v1/order-batch
@@ -113,7 +116,7 @@ api_router.include_router(
     order_batch_router,
     prefix="/order-batch",
     tags=["订单批次号"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 库存管理路由 - 前缀 /api/v1/stock
@@ -121,7 +124,7 @@ api_router.include_router(
     stock_router,
     prefix="/stock",
     tags=["库存管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 退货管理路由 - 前缀 /api/v1/stock-returns
@@ -129,7 +132,7 @@ api_router.include_router(
     stock_return_router,
     prefix="/stock-returns",
     tags=["退货管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 用户管理路由 - 前缀 /api/v1/users
@@ -137,11 +140,10 @@ api_router.include_router(
     user_router,
     prefix="/users",
     tags=["用户管理"],
-    # 刻意保持 fail-open：strict 变体在「Redis 启动即不可用且本地撤销缓存未命中」时
-    # 会**永久** 401（redis_cache.init_app 失败后不重试，只能重启进程回正）。
-    # 本仓库有过开机顺序事故史，不值得用「管理员被锁在用户/权限页之外」换那点收益。
-    # 待 Redis 客户端具备自愈/重连后，再考虑改回 get_current_user_id_strict。
-    dependencies=[Depends(get_current_user_id)],
+    # 用户管理可修改账号与授权，读写都必须 fail-closed。Redis 客户端已具备
+    # ensure_client 自愈；真正故障期间暂时无法进入管理页，优先保证已吊销 token
+    # 不能创建用户或提权。
+    dependencies=[Depends(get_current_user_id_strict)],
 )
 
 # 客户管理路由 - 前缀 /api/v1/customers
@@ -149,7 +151,7 @@ api_router.include_router(
     customer_router,
     prefix="/customers",
     tags=["客户管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 供应商管理路由 - 前缀 /api/v1/suppliers
@@ -157,7 +159,7 @@ api_router.include_router(
     supplier_router,
     prefix="/suppliers",
     tags=["供应商管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 审批管理路由 - 前缀 /api/v1/approvals
@@ -165,7 +167,7 @@ api_router.include_router(
     approval_router,
     prefix="/approvals",
     tags=["审批管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 报表统计路由 - 前缀 /api/v1/reports
@@ -173,7 +175,7 @@ api_router.include_router(
     report_router,
     prefix="/reports",
     tags=["报表统计"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 皮套管理路由 - 前缀 /api/v1/cases
@@ -181,7 +183,7 @@ api_router.include_router(
     case_router,
     prefix="/cases",
     tags=["皮套管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 来料登记路由 - 前缀 /api/v1/material-registrations
@@ -189,7 +191,7 @@ api_router.include_router(
     material_reg_router,
     prefix="/material-registrations",
     tags=["来料登记"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 辅助API路由 - 前缀 /api/v1/aux
@@ -197,7 +199,7 @@ api_router.include_router(
     auxiliary_router,
     prefix="/aux",
     tags=["辅助接口"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 异步任务路由 - 前缀 /api/v1/tasks
@@ -205,7 +207,7 @@ api_router.include_router(
     tasks_router,
     prefix="/tasks",
     tags=["异步任务"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 认证与文件上传路由 - 前缀 /api/v1/auth (无默认认证，登录/登出需公开)
@@ -220,7 +222,7 @@ api_router.include_router(
     ocr_import_router,
     prefix="/ocr-import",
     tags=["OCR识别导入"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 排产计划路由 - 前缀 /api/v1/production-plans
@@ -228,7 +230,7 @@ api_router.include_router(
     production_plan_router,
     prefix="/production-plans",
     tags=["排产计划"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 采购计划路由(重构版) - 前缀 /api/v1/plans
@@ -236,7 +238,7 @@ api_router.include_router(
     purchase_plan_router,
     prefix="/plans",
     tags=["采购计划"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 生产报表路由（重构版）- 前缀 /api/v1/daily-production
@@ -244,7 +246,7 @@ api_router.include_router(
     daily_production_router,
     prefix="/daily-production",
     tags=["生产报表"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 生产计划路由 - 前缀 /api/v1/production-summary
@@ -252,7 +254,7 @@ api_router.include_router(
     production_summary_router,
     prefix="/production-summary",
     tags=["生产计划"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 仪表盘路由 - 前缀 /api/v1/dashboard
@@ -260,7 +262,7 @@ api_router.include_router(
     dashboard_router,
     prefix="/dashboard",
     tags=["仪表盘"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 权限管理路由 - 前缀 /api/v1/permissions
@@ -268,11 +270,8 @@ api_router.include_router(
     permission_router,
     prefix="/permissions",
     tags=["权限管理"],
-    # 刻意保持 fail-open：strict 变体在「Redis 启动即不可用且本地撤销缓存未命中」时
-    # 会**永久** 401（redis_cache.init_app 失败后不重试，只能重启进程回正）。
-    # 本仓库有过开机顺序事故史，不值得用「管理员被锁在用户/权限页之外」换那点收益。
-    # 待 Redis 客户端具备自愈/重连后，再考虑改回 get_current_user_id_strict。
-    dependencies=[Depends(get_current_user_id)],
+    # 权限定义决定全站授权边界：读写都 fail-closed，理由同 /users。
+    dependencies=[Depends(get_current_user_id_strict)],
 )
 
 # 数据备份路由 - 前缀 /api/v1/backup
@@ -297,7 +296,7 @@ api_router.include_router(
     dead_letter_router,
     prefix="/dead-letter",
     tags=["死信队列"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 按客户分类打样管理路由 - 前缀 /api/v1/pattern-room（保持路径不变，用户无感切换）
@@ -305,7 +304,7 @@ api_router.include_router(
     customer_sampling_router,
     prefix="/pattern-room",
     tags=["板房管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 版师管理路由 - 前缀 /api/v1/pattern-maker/pattern-makers
@@ -313,7 +312,7 @@ api_router.include_router(
     pattern_maker_router,
     prefix="/pattern-maker",
     tags=["板房管理"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 通知中心路由 - 前缀 /api/v1/notifications
@@ -321,7 +320,7 @@ api_router.include_router(
     notification_router,
     prefix="/notifications",
     tags=["notifications"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 编号巡检只读路由 - 前缀 /api/v1/numbering-audit
@@ -329,7 +328,7 @@ api_router.include_router(
     numbering_audit_router,
     prefix="/numbering-audit",
     tags=["编号巡检"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )
 
 # 成品库存（批次级）只读路由 - 前缀 /api/v1/finished-stock
@@ -337,5 +336,5 @@ api_router.include_router(
     finished_stock_router,
     prefix="/finished-stock",
     tags=["成品库存"],
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(get_current_user_id_write_strict)],
 )

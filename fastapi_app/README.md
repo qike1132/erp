@@ -5,9 +5,9 @@ ERP 系统的 FastAPI 后端，覆盖订单、产品、库存、采购、生产�
 ## 技术栈
 
 - **框架**: FastAPI（全异步）+ SQLAlchemy 2.0（asyncpg 驱动）
-- **数据库**: PostgreSQL 16（可选只读副本 + PgBouncer 连接池）
-- **缓存/消息**: Redis（缓存 / Celery Broker / Celery Results 三实例拆分）
-- **任务队列**: Celery（通用 worker + gevent I/O worker）+ ARQ
+- **数据库**: PostgreSQL 18（可选只读副本 + PgBouncer 连接池）
+- **缓存/消息**: Redis（缓存实例 + ARQ broker 实例 + broker 专用实例拆分）
+- **任务队列**: ARQ（独立 `erp-arq` 进程；历史 Celery 代码已退出运行链路）
 - **实时通知**: WebSocket + FCM 推送
 - **可观测性**: Prometheus + OpenTelemetry + Sentry + 结构化日志
 - **对象存储**: MinIO/S3（本地文件系统可切换）
@@ -31,7 +31,7 @@ fastapi_app/
 │   ├── middleware.py          # CSRF/CORS/TrustedHost/CSP/限流/链路追踪
 │   ├── cache.py / redis_wrapper.py / purchase_cache.py
 │   ├── exceptions.py          # AppError 体系 + db_transaction 事务上下文
-│   ├── celery_app.py          # Celery 应用与任务路由
+│   ├── arq_app.py             # ARQ 应用、任务注册与回调
 │   ├── metrics.py / telemetry.py / slow_query.py / health.py
 │   └── ...                    # 限流、审计、状态机、事件总线、号码生成等
 ├── schemas/                   # Pydantic 请求/响应模型
