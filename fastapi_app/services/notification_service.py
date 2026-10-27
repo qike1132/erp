@@ -257,7 +257,7 @@ class ConnectionManager:
                     websocket.send_json(event), timeout=_WS_SEND_TIMEOUT_SECONDS,
                 )
                 return None
-            except Exception:  # defensive: 单连接失败不得影响其他接收者
+            except (RuntimeError, TimeoutError, OSError):
                 logger.debug("WebSocket 发送失败，标记断开: user_id=%s", user_id, exc_info=True)
                 return user_id, websocket
 
