@@ -360,7 +360,7 @@ npm ci
 npm run build                 # vue-tsc -b && node scripts/vite-build.mjs → dist/
 ```
 
-- 生产 `${VITE_API_URL}`/`VITE_WS_URL` 保持为空 = 同源相对路径，走 nginx 反代。
+- 生产无需设置 API/WS 地址：`VITE_API_BASE_URL` 缺省 `/api/v1`，WebSocket 同源推导，统一走 nginx 反代。
 - 需要**原子替换**产物时用 `npm run build:atomic`（先构建到 `dist-new` 再替换 `dist`）。⚠️ 同机跑 vite dev server 时 watcher 会锁目录导致 EPERM —— 先停开发模式。
 - `frontend-vite/vite.config.js` 是 `vue-tsc -b` 编译 `vite.config.ts` 的设计产物，**不要手改/删除**（有回归测试断言两者一致）。
 

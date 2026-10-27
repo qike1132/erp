@@ -60,8 +60,12 @@ function ok(data: OutsourceProcessType[]) {
   return { success: true, data, total: data.length }
 }
 
-function mountTab(pendingProducts: PendingProduct[] = []) {
+function mountTab(
+  pendingProducts: PendingProduct[] = [],
+  seed?: { items: OutsourceProcessType[]; partial: string },
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  if (seed) queryClient.setQueryData(['outsource-process-types'], seed)
   return mount(OutsourcePresetTab, {
     props: { pendingProducts },
     global: {
@@ -131,10 +135,49 @@ describe('OutsourcePresetTab — 工序预设分页取全（P1-23）', () => {
 
     expect(outsourceApi.processTypes).toHaveBeenCalledTimes(20)
     expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+    // 极端数据不得一次性渲染成 DOM：首屏最多 50 个 chip，其余显式展开
+    expect(wrapper.findAll('.osp-proc-chip')).toHaveLength(50)
     // 护栏截断必须可观测（OCR-3 Low）：静默截断=同一种缺陷换个阈值重现
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('护栏'))
     warnSpy.mockRestore()
   }, 30_000)
+
+  it('单个产品工序过多时先渲染 50 个，可展开完整列表', async () => {
+    const manyProcesses = Array.from({ length: 60 }, (_, i) => ({
+      ...genPresets(i + 1, 1, 1)[0]!,
+    }))
+    vi.mocked(outsourceApi.processTypes).mockResolvedValue(ok(manyProcesses))
+
+    const wrapper = mountTab()
+    await flushPromises()
+
+    expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+    expect(wrapper.findAll('.osp-proc-chip')).toHaveLength(50)
+    const more = wrapper.find('.osp-chip-more')
+    expect(more.text()).toContain('+10 道工序')
+
+    await more.trigger('click')
+    expect(wrapper.findAll('.osp-proc-chip')).toHaveLength(60)
+    expect(wrapper.find('.osp-chip-more').text()).toBe('收起')
+  })
+
+  it('后续页失败时保留旧完整缓存，不用不完整新结果覆盖', async () => {
+    const oldComplete = genPresets(1000, 600, 1000)
+    const newPage1 = genPresets(1, PAGE_SIZE, 1)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(outsourceApi.processTypes).mockImplementation(async (params?: { page?: number }) => {
+      if (params?.page === 2) throw new Error('network down')
+      return { success: true, data: newPage1, total: PAGE_SIZE + 100 }
+    })
+
+    const wrapper = mountTab([], { items: oldComplete, partial: 'none' })
+    await flushPromises()
+
+    expect(outsourceApi.processTypes).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(600)
+    expect(wrapper.find('.osp-partial').exists()).toBe(true)
+    warnSpy.mockRestore()
+  })
 })
 
 describe('OutsourcePresetTab — 分页错误处理与 total 收口（OCR-3 M4/Low）', () => {

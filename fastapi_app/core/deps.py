@@ -107,7 +107,7 @@ async def invalidate_user_permission_cache(user_id: int | None=None) -> None:
         await _PERMISSION_CACHE.clear()
         with contextlib.suppress(AttributeError):
             await _USER_ACTIVE_CACHE.clear()
-__all__ = ['create_access_token', 'create_refresh_token', 'get_async_db', 'get_current_user_id', 'get_current_user_id_strict', 'get_current_user_strict', 'get_user_identity', 'is_token_revoked', 'require_permission', 'require_superuser', 'revoke_token']
+__all__ = ['create_access_token', 'create_refresh_token', 'get_async_db', 'get_current_user_id', 'get_current_user_id_strict', 'get_current_user_id_write_strict', 'get_current_user_strict', 'get_user_identity', 'is_token_revoked', 'require_permission', 'require_superuser', 'revoke_token']
 
 
 def get_user_identity(user: User) -> tuple[str, str]:
@@ -199,11 +199,10 @@ async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_clos
     fail_closed=True 时，黑名单校验在 Redis 故障且本地缓存未命中的情况下拒绝请求。
     """
     cached_payload = getattr(request.state, '_jwt_payload', None)
-    # fail_closed=True（get_current_user_id_strict）时**不走**这个早返回：否则同请求内若
-    # 已有非严格依赖先解过 token，strict 的黑名单 fail-closed 语义会被静默抹掉。
-    # 当前唯一 fail-closed 使用点是 /backup 的**路由级**依赖（router.py，FastAPI 先解算
-    # 路由级依赖），故当前不可利用；但把"fail-closed 是否生效"绑在依赖求值顺序上是脆的
-    # —— docs/round2-claim-verification-2026-10-01.md:167 已给过同一建议。
+    # fail_closed=True 时**不走**这个早返回：否则同请求内若已有非严格依赖先解过
+    # token，strict 的 fail-closed 语义会被静默抹掉。业务路由级 write_strict、
+    # 敏感前缀 strict 和 /backup strict 都依赖这一行为；把 fail-closed 是否生效
+    # 绑在依赖求值顺序上是脆的（round2-claim-verification 已给过同一建议）。
     if cached_payload is not None and not fail_closed:
         user_id = cached_payload.get('sub')
         if user_id:
@@ -260,6 +259,28 @@ async def get_current_user_id_strict(request: Request, db: AsyncSession=Depends(
     防止已撤销的 token 在 Redis 故障期间被放行。
     """
     return await _authenticate_user_id(request, db, fail_closed=True)
+
+
+_SAFE_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+
+
+async def get_current_user_id_write_strict(
+    request: Request,
+    db: AsyncSession = Depends(get_async_db),
+) -> int:
+    """业务路由认证：写操作 fail-closed，安全读方法保留可用性。
+
+    已登出/被吊销的 token 不得在 Redis 故障窗口内继续修改订单、库存、
+    采购等业务数据，因此 POST/PUT/PATCH/DELETE 一律要求撤销状态可判定。
+    GET/HEAD/OPTIONS 在撤销存储不可用时仍可只读，避免 Redis 短暂抖动导致
+    整个系统不可用；需要连同只读一起 fail-closed 的敏感前缀（用户、权限、
+    备份）应使用 :func:`get_current_user_id_strict`。
+    """
+    return await _authenticate_user_id(
+        request,
+        db,
+        fail_closed=request.method.upper() not in _SAFE_METHODS,
+    )
 
 async def _load_user_with_permissions(user_id: int, db: AsyncSession) -> User:
     """按 user_id 查询用户并预加载权限列表（带 L1 缓存）"""

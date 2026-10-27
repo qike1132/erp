@@ -13,8 +13,8 @@
    不验证"数据流是否真的通"（比如分页参数是否生效、筛选是否真的过滤了）。
    它是"防响应形态漂移"的门禁，不是端到端验证。
 
-3. ``tests/e2e/test_e2e_order_flow.py``
-   依赖 selenium + Chrome，CI 里被 ``--ignore=tests/e2e`` 排除 —— 等于不存在。
+3. ``frontend-vite/tests/e2e``
+   使用 Playwright + 模拟 API 覆盖前端登录/错误处理，不提交真实业务写请求。
 
 本套件补的正是「**鉴权后接口真的返回正确数据**」这一层。
 
@@ -130,27 +130,60 @@ def pytest_configure(config: pytest.Config) -> None:
 # ============================================================
 # 生产指纹守卫 —— 命中即拒绝运行（fail-fast，无绕过开关）
 # ============================================================
+_PRODUCTION_PORTS = {3000, 5002}
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
 def _production_fingerprint_hit(
     base_url: str | None = None,
     db_url: str | None = None,
 ) -> tuple[bool, str]:
-    """目标命中生产指纹 → (True, 原因)。无绕过开关（fail-fast 是刻意的）。"""
+    """目标不满足隔离条件 → (True, 原因)。无绕过开关（fail-fast 是刻意的）。
+
+    必须同时满足：
+    - API 只连本机回环地址，且显式端口不是生产 nginx(3000)/uvicorn(5002)；
+    - DSN 必须是可解析、无覆盖 query 参数、以 ``_test`` 结尾的测试库。
+
+    只看 5002 会漏掉经 nginx :3000 访问生产后端、却把 DSN 写成测试库的旁路。
+    """
     from urllib.parse import urlparse
+
+    from sqlalchemy.engine import make_url
 
     url = base_url if base_url is not None else BASE_URL
     dsn = db_url if db_url is not None else os.environ.get(_REAL_DB_ENV_KEY, "")
 
-    if url:
-        try:
-            if urlparse(url).port == 5002:
-                return True, f"E2E_API_BASE_URL 端口指向生产后端: {url}"
-        except ValueError:
-            pass
+    if not url:
+        return True, "未设置 E2E_API_BASE_URL"
     try:
-        if urlparse(dsn).path.lstrip('/') == 'erp_system':
-            return True, "ERP_E2E_REAL_DATABASE_URL 指向生产库 erp_system"
+        parsed_url = urlparse(url)
+        port = parsed_url.port
     except ValueError:
-        pass
+        return True, f"E2E_API_BASE_URL 不是合法 URL: {url}"
+    if parsed_url.scheme not in {"http", "https"}:
+        return True, f"E2E_API_BASE_URL 只允许 http/https: {url}"
+    if (parsed_url.hostname or "").lower() not in _LOOPBACK_HOSTS:
+        return True, f"E2E_API_BASE_URL 必须是本机回环隔离实例: {url}"
+    if port is None:
+        return True, f"E2E_API_BASE_URL 必须显式写出隔离实例端口: {url}"
+    if port in _PRODUCTION_PORTS:
+        return True, f"E2E_API_BASE_URL 端口命中生产入口: {url}"
+
+    if not dsn:
+        return True, "未设置 ERP_E2E_REAL_DATABASE_URL"
+    try:
+        parsed_db = make_url(dsn)
+    except Exception:
+        return True, "ERP_E2E_REAL_DATABASE_URL 无法解析"
+    forbidden = {"database", "host", "port"} & set(parsed_db.query.keys())
+    if forbidden:
+        return True, (
+            "ERP_E2E_REAL_DATABASE_URL 带会覆盖连接目标的 query 参数 "
+            f"{sorted(forbidden)}"
+        )
+    database = (parsed_db.database or "").rstrip("/")
+    if not database.endswith("_test"):
+        return True, f"ERP_E2E_REAL_DATABASE_URL 指向非测试库: {database!r}"
     return False, ""
 
 
@@ -214,11 +247,17 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     if hit:
         pytest.exit(
             f"拒绝运行 E2E：{reason}。E2E 不得指向生产。请同时设置 "
-            "E2E_API_BASE_URL（非 5002 的临时后端）与 "
-            "ERP_E2E_REAL_DATABASE_URL（测试库 DSN）。",
+            "E2E_API_BASE_URL（本机非 3000/5002 的隔离后端）与 "
+            "ERP_E2E_REAL_DATABASE_URL（*_test 测试库 DSN）。",
             returncode=2,
         )
     if _ALIVE:
+        identity_reason = _target_identity_mismatch()
+        if identity_reason:
+            # 不 abort 整个 pytest 会话：只跳过会写的 E2E 用例。
+            # 全量套件里的非 E2E 用例必须继续；专用 E2E 运行会在 skip 原因中
+            # 明确看到目标未证明为 APP_ENV=test，而不是把写入放行。
+            _skip_e2e_items(items, f"拒绝运行 E2E：{identity_reason}")
         return
     _skip_e2e_items(
         items,
@@ -248,6 +287,50 @@ def _backend_alive() -> tuple[bool, str]:
     if resp.status_code != 200:
         return False, f"/api/health 返回 {resp.status_code}"
     return True, "ok"
+
+
+def _identity_database_mismatch(actual: object, expected_dsn: str) -> str | None:
+    """后端自报库名与原定 DSN 不一致 → 返回拒绝原因。"""
+    from sqlalchemy.engine import make_url
+
+    try:
+        expected = (make_url(expected_dsn).database or "").rstrip("/")
+    except Exception:
+        return "无法解析 ERP_E2E_REAL_DATABASE_URL"
+    actual_db = str(actual or "").rstrip("/")
+    if not actual_db:
+        return "目标后端未回报 database"
+    if not actual_db.endswith("_test"):
+        return f"目标后端实际连接非测试库: {actual_db!r}"
+    if actual_db != expected:
+        return f"目标后端实际库 {actual_db!r} 与原定测试库 {expected!r} 不一致"
+    return None
+
+
+def _target_identity_mismatch() -> str | None:
+    """通过测试专用端点证明后端实际使用的库，而不是只信外部 DSN。
+
+    只校验“本机 + 非生产端口 + *_test DSN”仍可能被反向代理绕过；
+    这里把后端自报库名与 DSN 做一致性比对，且对未安装该端点的生产进程
+    直接 fail-closed。
+    """
+    if not _ALIVE:
+        return None
+    try:
+        with httpx.Client(base_url=BASE_URL, timeout=5.0, trust_env=False) as client:
+            resp = client.get("/api/health/e2e-identity")
+    except httpx.HTTPError as exc:
+        return f"E2E 身份端点不可达: {type(exc).__name__}: {exc}"
+    if resp.status_code != 200:
+        return (
+            "目标后端未提供 APP_ENV=test 的 E2E 身份端点"
+            f"（/api/health/e2e-identity={resp.status_code}），拒绝向不可证明的目标写入"
+        )
+    try:
+        payload = resp.json()
+    except ValueError:
+        return "E2E 身份端点返回非 JSON"
+    return _identity_database_mismatch(payload.get("database"), real_database_url())
 
 
 _ALIVE, _ALIVE_REASON = _backend_alive()

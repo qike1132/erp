@@ -147,7 +147,14 @@ def _commit_in_temp_repo(tmp_path: Path, body: str, filename: str = 'sample.py')
     shutil.copy(HOOK, repo / '.githooks' / 'pre-commit')
     (repo / '.githooks' / 'allowlist.txt').write_text('', encoding='utf-8')
     # 中和第 3 层：无论本机装没装 pre-commit，都不让无关门禁影响本测试的结论。
+    # 空配置只能约束已安装的 pre-commit；hook 找不到命令会降级直跑 ruff --fix，
+    # 反而因「自动修复后需重新暂存」把合法密钥样例判红。这里提供 no-op 可执行文件，
+    # 确保第 3 层真正短路，只验证密钥扫描第 2 层。
     (repo / '.pre-commit-config.yaml').write_text('repos: []\n', encoding='utf-8')
+    fake_pc = repo / '.venv' / 'Scripts' / 'pre-commit'
+    fake_pc.parent.mkdir(parents=True)
+    fake_pc.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    fake_pc.chmod(0o755)
     (repo / 'scripts').mkdir()
     (repo / 'scripts' / 'quality_gate.py').write_text('raise SystemExit(0)\n', encoding='utf-8')
 

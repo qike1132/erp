@@ -506,7 +506,7 @@ npm ci
 npm run build                 # vue-tsc -b && node scripts/vite-build.mjs → dist/
 ```
 
-- 生产 `${VITE_API_URL}`/`VITE_WS_URL` 保持为空 = 同源相对路径，走 nginx 反代（`.env.production` 已如此）。
+- 生产无需设置 API/WS 地址：`VITE_API_BASE_URL` 缺省 `/api/v1`，WebSocket 同源推导，统一走 nginx 反代。
 - 需要**原子替换**产物时用 `npm run build:atomic`（先构建到 `dist-new` 再替换 `dist`）。
   ⚠️ 若同机还在跑 vite dev server，watcher 会锁住目录导致替换 EPERM —— 先停开发模式，
   或把产物暂存到 **vite watch 树之外**再替换（详见 `docs/runbooks/service-lifecycle.md` §2）。
@@ -930,7 +930,7 @@ npm run check:routes                                   # 路由对齐检查
 
 1. **备份路径校验的盘根口径不稳**（上方盘根用例，A.1 表第 6 项）：可写探测 = 试建文件，结论随执行账户/进程而变；且 `_is_writable` 的 docstring（「失败不阻断」）与 `validate_path`（硬否决）矛盾。修法需先定语义：允许盘根 → 改探测方式（试建**子目录**）且让 docstring 与实现一致；拒绝 → 明确错误文案 + 把用例改成不依赖 Windows 盘根（否则 CI 永远抓不到）。
 2. **依赖漏洞**：现场 pip-audit 曾报 25 个包 172 条漏洞（其中 166 条已有修复版本），`pyproject.toml` 当前 **0 条豁免**。正确处理是升级依赖，而不是登记豁免；破坏面评估后再批量升级。
-3. **`fastapi_app/README.md` 仍陈旧**：第 8–10 行写 PostgreSQL 16 / Celery（含 `celery_app.py`），与实际（PG 18 / ARQ）不符；同文件第 156 行已自我纠正，前后矛盾，可另行修订。
+3. ~~**`fastapi_app/README.md` 仍陈旧**：第 8–10 行写 PostgreSQL 16 / Celery~~ —— **已于 2026-10-27 对齐**为 PostgreSQL 18 / ARQ，并修正目录树中的 `arq_app.py`。
 4. ~~**CI `Run Ruff gate` 步骤存量即红**~~ —— **已于 `cf0fc743` 修复**（清掉 24 条存量违规，lint job 全绿，见 §9）。
 5. **`README_DEPLOY.txt` 曾与 README.md 互相矛盾**（写 v5.33 而实际 v5.34；口令口径写成「≥8 位 + 字母数字」）。已于 2026-10-06 对齐并互链，今后**单一真相源为 README.md**。
 

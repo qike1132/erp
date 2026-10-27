@@ -29,7 +29,11 @@ if _project_root not in sys.path:
 from conftest import TEST_DATABASE_URL
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import _get_user_with_permissions, get_current_user_id
+from fastapi_app.core.deps import (
+    _get_user_with_permissions,
+    get_current_user_id,
+    get_current_user_id_write_strict,
+)
 from fastapi_app.main import app
 from fastapi_app.services.customer_sampling_service import get_part_field_candidates
 
@@ -169,6 +173,7 @@ async def cs_api():
                 app.dependency_overrides[get_async_db] = override_db
                 app.dependency_overrides[get_async_read_db] = override_db
                 app.dependency_overrides[get_current_user_id] = override_user_id
+                app.dependency_overrides[get_current_user_id_write_strict] = override_user_id
                 app.dependency_overrides[_get_user_with_permissions] = override_user_with_perms
 
                 transport = ASGITransport(app=app)

@@ -27,6 +27,7 @@
     "format": "prettier --write \"src/**/*.{ts,vue,css,json}\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "node --test tests/e2e/login-flow.e2e.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "test:coverage": "vitest run --coverage",
     "prepare": "husky"

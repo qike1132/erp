@@ -113,21 +113,14 @@ jobs:
       #   其中两条静态守卫（快照存在性、不得夹带原始响应体）在本 job 真的会跑；
       #   "与真实后端比对"那条因 CI 无常驻后端而自动 skip。
       #   本地要跑完整契约比对：CONTRACT_BASE_URL=http://127.0.0.1:5002 pytest tests/contract -v
-      # 2026-09-29 收口：已移除 `-m "not flask_legacy"`。该标记原先把 9 个测试文件整批反选，
-      #   连 skip 记录都不出现在日志里（掩盖，而非挂起）。现状：
-      #     · 5 个文件（test_{api,order,product,customer}_routes、performance/test_performance）
-      #       改为带具体 reason 的 `pytest.mark.skip` —— 其被测目标根 `app/`（Flask 应用）
-      #       已在 Flask→FastAPI 迁移中删除，reason 里写明跟踪项；
-      #     · 4 个文件（test_{order,product,approval}_management、test_models_coverage）
-      #       摘除标记，恢复被 pytest 正常收集。
-      #   注意：requirements/*.txt 内**没有任何 Flask 条目**，故上述 4 个文件在 CI 里仍会
-      #   自行 skip（只有装了残留 Flask 的本地开发机才真正执行）。收口后这些 skip 计数
-      #   在 CI 日志与 junit xml 中真实可见，是有效信号而不是被 marker 反选隐藏。
+      # 2026-10-27：自建 Flask/SQLite 模型、不触达生产代码的旧“功能测试”已删除，
+      #   避免绿色假覆盖。仍在收集的 Flask 路由兼容用例会按具体 reason skip，
+      #   skip 计数保留在 CI 日志与 junit xml 中。tests/e2e 只含 fail-closed 目标
+      #   守卫（无 Selenium、无默认生产地址），因此不再整目录忽略。
       run: |
         pytest \
           tests fastapi_app/tests \
           --ignore=tests/qa \
-          --ignore=tests/e2e \
           --ignore=tests/stress \
           --ignore=tests/performance \
           --cov=fastapi_app \
@@ -347,13 +340,6 @@ jobs:
     - name: Audit production dependencies
       run: npm audit --omit=dev --audit-level=high
 
-    # 原为 `npx playwright install --with-deps chromium`（:211-212）—— 已删除。
-    # 全仓库无 playwright.config.*、无 e2e/ 目录、无 test:e2e 脚本，src/ 下也没有任何
-    # `@playwright/test` import（playwright 仅出现在 package.json 与 lock 里），
-    # 该步骤下载的浏览器无人使用，纯耗时。仓库真实的 e2e 在 Python 侧
-    # （tests/e2e、tests/e2e_api），且 tests/e2e 正是上面 pytest 步骤的 --ignore 目标。
-    # 若将来落地 Playwright e2e，需同时补 playwright.config.ts + spec + test:e2e 脚本，
-    # 再恢复本步骤（见 ITER-4 决策项 D-2）。
     - name: Run frontend lint
       run: npm run lint
 
@@ -365,15 +351,21 @@ jobs:
     # `--outputFile.junit=...` 当成它自己的 cli config 吞掉
     # （打印 "npm warn Unknown cli config \"--outputFile.junit\"" 且不产出报告），
     # 故必须绕开 npm 的参数解析。`test` 脚本本身就是 `vitest run`，二者等价。
-    - name: Run frontend unit tests
-      run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=test-results.xml
+    # 覆盖率阈值定义在 vitest.config.ts；低于阈值直接失败，避免只产出报告不判定。
+    - name: Run frontend unit tests with coverage
+      run: npx vitest run --coverage --reporter=default --reporter=junit --outputFile.junit=test-results.xml
 
     - name: Run frontend build
       run: npm run build
 
-    # 原为 `npm run test:e2e` —— 该脚本在 package.json 中不存在、也没有
-    # playwright.config.* 与 e2e/ 目录，步骤必然失败。改为执行真实存在的跨端
-    # 对齐检查；Playwright e2e 落地后恢复（见 ITER-4 决策项 D-2）。
+    # 使用真实构建产物 + 模拟 API 的浏览器 E2E。路由拦截保证不触达真实账号、
+    # 后端或数据库；tests/e2e 的 Python 目标守卫另由上面的 pytest job 执行。
+    - name: Install Playwright Chromium
+      run: npx playwright install --with-deps chromium
+
+    - name: Run browser E2E
+      run: npm run test:e2e
+
     # P1-12：跨层对齐四件套。check:dto 此前只写在 package.json 里、CI 从不执行，
     # 移动端重复声明 DTO（绕过 @/types）就能一路绿灯；这里补上引用。
     - name: Run frontend cross-layer alignment checks
@@ -395,7 +387,9 @@ jobs:
       with:
         name: frontend-test-artifacts
         if-no-files-found: error
-        path: frontend-vite/test-results.xml
+        path: |
+          frontend-vite/test-results.xml
+          frontend-vite/coverage/
 
   build:
     needs: [test, lint, frontend]

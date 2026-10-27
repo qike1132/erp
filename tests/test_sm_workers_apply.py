@@ -192,6 +192,9 @@ def test_restart_one_service_restarts_only_the_named_one():
     """
     fake = _FakeNssm({_SVC_API: CURRENT})
     ops = _svc(fake)
+    # 2026-10-25 起重启前必须用 svc_pid_ex 三态探测旧 PID；测试必须打桩，
+    # 否则会落到真实 SCM（当前 shell 无权限）并在任何 stop 之前 PID_UNKNOWN 拒绝。
+    ops.svc_pid_ex = lambda name: (4242, True)
     ops.wait_service = lambda name, target, timeout, **kw: 'STOPPED'
     ops.wait_service_running = lambda name, timeout=25, **kw: ServiceRunResult(
         True, '4 RUNNING', 4242, True)

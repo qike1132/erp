@@ -34,6 +34,12 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.{ts,vue}'],
       exclude: ['src/test/**', 'src/auto-imports.d.ts', 'src/components.d.ts'],
+      thresholds: {
+        statements: 45,
+        branches: 40,
+        functions: 40,
+        lines: 45,
+      },
     },
   },
 })

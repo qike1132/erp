@@ -1,13 +1,20 @@
 <template>
   <div class="osp-inventory">
     <div class="osp-card-main">
+      <div v-if="partial !== 'none'" class="osp-partial" role="status">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        <span>{{ partialInfo.banner }}</span>
+        <button v-if="partialInfo.retryable" class="osp-retry-btn" aria-label="重试加载完整列表" @click="manualRetry">
+          重试
+        </button>
+      </div>
       <!-- 错误态判据用 presets（不含搜索选中产品）：pendingProducts 非空时拉取失败不得被「未配置」表格掩盖（OCR-4 M4） -->
       <div v-if="isError && presets.length === 0" class="osp-empty osp-error">
         <FontAwesomeIcon icon="exclamation-circle" aria-hidden="true" />
         <span>工序预设加载失败</span>
-        <button class="osp-retry-btn" aria-label="重试" @click="() => void refetch()">重试</button>
+        <button class="osp-retry-btn" aria-label="重试" @click="manualRetry">重试</button>
       </div>
-      <div v-else-if="isLoading && productCards.length === 0" class="osp-empty">
+      <div v-else-if="isFetching && productCards.length === 0" class="osp-empty">
         <UiSpinner />
       </div>
       <div v-else-if="productCards.length === 0" class="osp-empty">
@@ -40,7 +47,7 @@
                   <div class="osp-proc-inner">
                     <div class="osp-proc-chips">
                       <div
-                        v-for="pt in card.processes"
+                        v-for="pt in visibleProcesses(card)"
                         :key="pt.id"
                         :class="['osp-proc-chip', pt.is_active ? 'osp-proc-on' : 'osp-proc-off']"
                         :title="`${pt.process_type}${pt.remark ? ' · ' + pt.remark : ''}（顺序 ${pt.sort_order}）`"
@@ -56,6 +63,14 @@
                         </button>
                       </div>
                       <span v-if="card.processes.length === 0" class="osp-no-proc">未配置</span>
+                      <button
+                        v-else-if="card.processes.length > INITIAL_VISIBLE_PROCESSES"
+                        class="osp-chip-more"
+                        :aria-label="expandedProducts.has(card.product_id) ? '收起部分工序' : `展开其余 ${card.processes.length - INITIAL_VISIBLE_PROCESSES} 道工序`"
+                        @click="toggleProcesses(card.product_id)"
+                      >
+                        {{ expandedProducts.has(card.product_id) ? '收起' : `+${card.processes.length - INITIAL_VISIBLE_PROCESSES} 道工序` }}
+                      </button>
                     </div>
                     <div v-if="canManage" class="osp-add-bar">
                       <button class="osp-add-btn" :disabled="saving" aria-label="添加工序" @click="openAddDialog(card)">
@@ -92,7 +107,6 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
 import { outsourceApi } from '@/api'
 import type { OutsourceProcessType } from '@/api/outsource'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
@@ -100,8 +114,8 @@ import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import OutsourceAddProcessDialog from './OutsourceAddProcessDialog.vue'
 import { useApiMutation } from '@/composables/useApiMutation'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
-import { toast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { PARTIAL_META, useOutsourcePresetTypes } from '../composables/useOutsourcePresetTypes'
 
 const props = defineProps<{
   pendingProducts: { product_id: number; product_name: string; product_barcode: string | null; factory: string | null }[]
@@ -114,60 +128,32 @@ const emit = defineEmits<{
 const authStore = useAuthStore()
 const canManage = computed(() => authStore.hasPermission('outsource_manage'))
 
-/** 列表端点单页上限（后端 per_page 上限 500）——与 useOrderImport 同口径 */
-const PRESET_PAGE_SIZE = 500
-/** 分页护栏：最多 20 页（= 10000 条预设），防异常响应（恒满页）导致死循环 */
-const PRESET_MAX_PAGES = 20
+const {
+  presets,
+  partial,
+  isError,
+  isFetching,
+  refetchAfterMutation,
+  manualRetry,
+} = useOutsourcePresetTypes()
 
-/**
- * 分页拉全部工序预设（2026-10-19 审计 P1-23）。
- * 此前单页 per_page=500 不翻页、不校验 total——记录超 500 后多出的产品卡
- * 静默缺失。照 useOrderImport.fetchAllStaged 的模式：逐页取满页即续拉，
- * 页不满即止，页数护栏兜底。OCR-3：首屏失败上抛（isError+重试），后续页
- * 失败保留已取数据；total 收口避免整数倍记录多拉空页；护栏截断须可观测。
- */
-async function fetchAllProcessTypes(): Promise<OutsourceProcessType[]> {
-  const all: OutsourceProcessType[] = []
-  let truncatedByGuard = true
-  for (let page = 1; page <= PRESET_MAX_PAGES; page += 1) {
-    let items: OutsourceProcessType[] = []
-    let total = 0
-    try {
-      const res = await outsourceApi.processTypes({ page, per_page: PRESET_PAGE_SIZE })
-      items = res.data ?? []
-      total = res.total ?? 0
-    } catch (e) {
-      if (page === 1) throw e // 首屏失败：交给上层 isError + 重试（OCR-3 M4）
-      console.warn(`工序预设第 ${page} 页拉取失败，已保留前 ${all.length} 条`)
-      toast.warning('工序预设列表加载不完整，请刷新重试') // isError 仍 false、无重试按钮，须用户可感知（OCR-4 M139）
-      truncatedByGuard = false // 部分失败不是护栏截断，不误报
-      break // 后续页失败：保留已取到的预设，不清空整表（M4）
-    }
-    all.push(...items)
-    if (items.length < PRESET_PAGE_SIZE || (total > 0 && all.length >= total)) {
-      truncatedByGuard = false
-      break
-    }
-  }
-  if (truncatedByGuard) console.warn(`工序预设达 ${PRESET_MAX_PAGES * PRESET_PAGE_SIZE} 条护栏上限，超出部分未加载`)
-  return all
+const partialInfo = computed(() => PARTIAL_META[partial.value] ?? PARTIAL_META.none)
+
+/** 单产品首屏最多渲染的工序 chip；其余需用户显式展开，避免万级 DOM 卡死 */
+const INITIAL_VISIBLE_PROCESSES = 50
+const expandedProducts = ref<Set<number>>(new Set())
+
+function visibleProcesses(card: ProductCard): OutsourceProcessType[] {
+  if (expandedProducts.value.has(card.product_id)) return card.processes
+  return card.processes.slice(0, INITIAL_VISIBLE_PROCESSES)
 }
 
-const {
-  data: listData,
-  isLoading,
-  isError,
-  refetch,
-} = useQuery({
-  queryKey: ['outsource-process-types'],
-  queryFn: fetchAllProcessTypes,
-  staleTime: 15_000,
-})
-
-/** 旧缓存快照防御（OCR-4 H1）：persistQueryClient 的 buster 未升级（main.ts:87），sessionStorage 会恢复分页信封 {success,data,total} 形态的旧快照——非数组一律视为空，待后台 refetch 替换 */
-const presets = computed<OutsourceProcessType[]>(() =>
-  Array.isArray(listData.value) ? listData.value : [],
-)
+function toggleProcesses(productId: number): void {
+  const next = new Set(expandedProducts.value)
+  if (next.has(productId)) next.delete(productId)
+  else next.add(productId)
+  expandedProducts.value = next
+}
 
 interface ProductCard {
   product_id: number
@@ -230,7 +216,7 @@ function openAddDialog(card: ProductCard) {
 async function refreshAfterAdd() {
   saving.value = true
   try {
-    await refetch()
+    await refetchAfterMutation()
   } finally {
     saving.value = false
   }
@@ -240,7 +226,7 @@ const deleteMutation = useApiMutation((id: number) => outsourceApi.deleteProcess
   successMsg: '工序已删除',
   errorMsg: '删除失败',
   onSuccess: async () => {
-    await refetch()
+    await refetchAfterMutation()
   },
 })
 
@@ -377,6 +363,13 @@ const confirmDialog = useConfirmDialog()
 .osp-add-btn:hover { background: var(--color-primary-50); border-color: var(--color-primary-400); transform: translateY(-1px); }
 .osp-add-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+.osp-partial { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12.5px;
+  border-bottom: 1px solid var(--color-warning-200, #fde68a);
+  background: var(--color-warning-50, #fffbeb); color: var(--color-warning-800, #92400e); }
+.osp-partial span { flex: 1; min-width: 0; }
+.osp-partial .osp-retry-btn { margin-top: 0; padding: 3px 12px; }
+.osp-chip-more { border: 1px dashed var(--color-primary-300); border-radius: 7px;
+  background: transparent; color: var(--color-primary-700); font-size: 12px; padding: 4px 9px; cursor: pointer; }
 .osp-empty {
   flex: 1;
   display: flex;
