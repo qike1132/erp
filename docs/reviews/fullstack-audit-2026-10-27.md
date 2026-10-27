@@ -5,7 +5,7 @@
 - 审查范围：`fastapi_app/`、`frontend-vite/`、`tests/`、迁移、配置、CI、构建与部署脚本
 - 安全边界：未重启服务、未修改生产配置、未向生产库写入。只使用 `*_test` 测试库、隔离 Redis 库 15、隔离前端产物和模拟 HTTP
 - 原始审查结论：**打回（测试与发布证据不通过）**。未在业务源码中证实 Blocker 或 High 级功能缺陷，但存在 3 项 High 级测试安全问题/失真问题
-- **修复后结论（2026-10-27，见 §7）：全部已列问题已关闭；真实 PostgreSQL 全量 pytest 已通过（5046 passed / 0 failed），本次范围内通过**。首次 GitHub Actions 远端执行仍属发布流程待办，不是已知代码缺陷
+- **修复后结论（2026-10-27，见 §7）：全部已列问题已关闭；本地真实 PostgreSQL 全量、首次 GitHub Actions 远端门禁和独立只读复审均通过，本次范围内通过**
 
 > §3 保留原始审查快照；实际处置与回归证据以 §7 为准。
 
@@ -220,9 +220,14 @@
 | 依赖锁 | 七档同步；`test.lock` 已移除 Selenium 及其传递依赖 |
 | Python 依赖审计 | 177 个依赖，0 个已知漏洞 |
 | `scripts/prod_audit/tests` | 钩子测试文件修复前 12/16（4 项因缺失 `pre-commit` 降级跑 Ruff）；修复夹具后 **16/16 通过** |
-| 真实 PostgreSQL 全量 pytest | **5109 收集；5046 passed / 0 failed / 63 skipped；EXITCODE=0；561.50s** |
-| 后端全量覆盖率 | **71.02%**（39837 行中覆盖 28291 行），高于 40% 门槛 |
+| 真实 PostgreSQL 全量 pytest（本地管理员） | **5109 收集；5046 passed / 0 failed / 63 skipped；EXITCODE=0；561.50s** |
+| 后端全量覆盖率（本地） | **71.02%**（39837 行中覆盖 28291 行），高于 40% 门槛 |
 | 修复合集编译 | `compileall` 通过 |
+| **GitHub Actions run 40472413989（PR #21）** | **全部 SUCCESS**：lint / frontend / test / build / CodeQL |
+| 远端 test job | **5034 passed / 0 failed / 83 skipped**（CI 环境额外跳过外部依赖项）；覆盖率 **70.83%** |
+| 远端 Chromium / 浏览器 E2E | Chromium 148 下载成功；**5/5 pass，0 fail** |
+| 远端前端覆盖率门禁 | 232 文件；语句 53.55% / 分支 46.30% / 函数 47.70% / 行 54.84%，阈值通过 |
+| 独立只读复审 | 两轮；4 个 Medium 与最终 1 个 AST 接线漏检全部修复，最终 **VERDICT: PASS** |
 
 全量首次运行暴露 **124 failed**，归因为 123 项根测试套件未适配新的写鉴权依赖、1 项服务重启测试缺少 `svc_pid_ex` 打桩。修复 `tests/conftest.py` 测试装配与 `tests/test_sm_workers_apply.py` 后，第二次全量运行 **0 failed**。
 
@@ -230,9 +235,10 @@
 
 前端全量覆盖率在本机因宿主批量删除保护无法清理 233 个 coverage 临时文件，测试和覆盖率报告均已生成、阈值数值全部达标；CI 的 Linux runner 不加载该本机 shim，不构成产品失败。
 
-### 7.3 发布流程待办
+### 7.3 后续发布动作
 
-1. 首次 GitHub Actions 执行新增的 Chromium 安装、浏览器 E2E 和覆盖率门禁，确认远端 runner 环境。
-2. 上线前按项目流程做一次独立“新眼睛”复审和提交前全量门禁。
+1. 代码已在独立分支 `fix/fullstack-audit-20261027`，PR #21：https://github.com/qike1132/erp/pull/21
+2. 远端 CI 已全绿且 PR 可合并；是否合并、何时上线由项目负责人决定，本次未合并、未部署。
+3. 生产服务未重启，未写生产库。
 
-**修复后结论：通过（本地全量证据）。** 已无未处置的 Blocker/High/Medium；真实 PostgreSQL 全量套件 0 失败、后端覆盖率 71.02%，剩余事项仅为首次远端 CI 验证与发布前独立复审。生产服务未重启，改动未提交。
+**修复后结论：通过（本地全量 + 远端 CI + 独立复审）。** 已无未处置的 Blocker/High/Medium；本地真实 PostgreSQL 全量 0 失败、覆盖率 71.02%，GitHub Actions run 40472413989 全绿（覆盖率 70.83%），独立复审 PASS。
