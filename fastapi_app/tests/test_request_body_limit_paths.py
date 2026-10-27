@@ -56,6 +56,11 @@ def test_unlisted_path_keeps_default_limit():
     assert MAX_REQUEST_BODY_SIZE == 10 * 1024 * 1024
 
 
+def test_anonymous_vitals_has_small_dedicated_body_limit():
+    """匿名指标上报不得继承通用 10MB 预算，避免内存/日志放大。"""
+    assert max_body_size_for_path('/api/v1/monitoring/vitals') == 64 * 1024
+
+
 def test_endpoint_level_declared_limits_within_effective_middleware_limit():
     """端点级文件上限（batch 七端点 / packaging 上传）必须小于中间件有效 body 上限。
 

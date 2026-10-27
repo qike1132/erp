@@ -14,7 +14,7 @@ WebSocket 实时通知端点
 
 2026-10-11（复核 P2-14）结构拆分：websocket_notifications 原 155 行（C901 31+30），
 三次 close-break 泄漏修复史使其成为全仓风险最高的函数。现提取
-_authenticate / _verify_user_active / _message_loop 三个单元，主协程只保留
+_authenticate / _load_ws_user / _message_loop 三个单元，主协程只保留
 接线顺序；行为不变（现有 test_ws_ticket_auth.py 全量回归）。
 """
 
@@ -30,9 +30,11 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select as ws_select
 from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import async_engine
+from fastapi_app.shared_models import Permission
 from fastapi_app.shared_models import User as WSUser
 
 logger = logging.getLogger(__name__)
@@ -45,32 +47,37 @@ _WS_HEARTBEAT_TIMEOUT = 60
 _WS_RATE_LIMIT = 30
 _WS_VERIFY_INTERVAL = 60
 
-# 进程内票据表：value = (user_id, issued_monotonic)。
-# 第十轮审计：原只存 user_id —— 无时间戳无清理，票据在进程内**永久有效**（Redis 侧
-# 才有 30s TTL），且未消费的票据使内存单调增长。补时间戳 + 消费时校验年龄 + 签发时清理过期项。
-_WS_PENDING_TICKETS: dict[str, tuple[int, float]] = {}
+# 进程内票据表：value = (user_id, issued_monotonic, 原会话 jti/exp)。
+# 票据只是短期握手凭据，长连接必须继承原会话的撤销/过期语义。
+_WS_PENDING_TICKETS: dict[str, tuple[int, float, dict]] = {}
 
 
-async def _issue_ws_ticket(user_id: int) -> str:
+def _clean_auth_payload(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    return {key: payload[key] for key in ('jti', 'exp') if payload.get(key) is not None}
+
+
+async def _issue_ws_ticket(user_id: int, auth_payload: dict | None = None) -> str:
     from fastapi_app.core.redis_wrapper import safe_set
 
     ticket = secrets.token_urlsafe(32)
     now = time.monotonic()
-    # 顺手清掉过期票据，防止内存单调增长
-    expired = [t for t, (_, ts) in _WS_PENDING_TICKETS.items() if now - ts > _WS_TICKET_TTL_SECONDS]
+    auth = _clean_auth_payload(auth_payload)
+    expired = [t for t, entry in _WS_PENDING_TICKETS.items() if now - entry[1] > _WS_TICKET_TTL_SECONDS]
     for t in expired:
         _WS_PENDING_TICKETS.pop(t, None)
     await safe_set(
         _WS_TICKET_PREFIX + ticket,
-        str(user_id),
+        _json.dumps({'user_id': user_id, 'auth': auth}),
         timeout=_WS_TICKET_TTL_SECONDS,
         context="WebSocket认证票据",
     )
-    _WS_PENDING_TICKETS[ticket] = (user_id, now)
+    _WS_PENDING_TICKETS[ticket] = (user_id, now, auth)
     return ticket
 
 
-async def _consume_ws_ticket(ticket: str) -> int | None:
+async def _consume_ws_ticket(ticket: str) -> tuple[int, dict] | None:
     from fastapi_app.core.redis_wrapper import safe_delete, safe_get
 
     if not ticket:
@@ -78,23 +85,29 @@ async def _consume_ws_ticket(ticket: str) -> int | None:
 
     entry = _WS_PENDING_TICKETS.pop(ticket, None)
     if entry is not None:
-        user_id, issued_at = entry
-        # 进程内票据同样遵守 30s TTL（与 Redis 侧一致）——超龄一律作废
+        user_id, issued_at = entry[0], entry[1]
+        auth = entry[2] if len(entry) > 2 else {}
         if time.monotonic() - issued_at > _WS_TICKET_TTL_SECONDS:
             await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
             return None
         await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
-        return user_id
+        return user_id, auth
 
     value = await safe_get(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
     if value is None:
         return None
     try:
-        user_id = int(value)
-    except (TypeError, ValueError):
+        if isinstance(value, str) and value.startswith('{'):
+            parsed = _json.loads(value)
+            user_id = int(parsed['user_id'])
+            auth = _clean_auth_payload(parsed.get('auth'))
+        else:
+            # 兼容滚动发布前 30 秒内的旧票据；新票据必带 auth。
+            user_id, auth = int(value), {}
+    except (TypeError, ValueError, KeyError, _json.JSONDecodeError):
         return None
     await safe_delete(_WS_TICKET_PREFIX + ticket, context="WebSocket认证票据")
-    return user_id
+    return user_id, auth
 
 
 def _origin_allowed(origin: str | None) -> bool:
@@ -123,72 +136,67 @@ def _safe_disconnect(manager, websocket: WebSocket, user_id: int) -> None:
         logger.warning("WebSocket disconnect 连接未注册: user_id=%s, %s", user_id, e)
 
 
-async def _authenticate(websocket: WebSocket) -> tuple[int | None, str | None]:
-    """票据 → Cookie → 首条消息三级认证。
-
-    返回 (user_id, pending_message)。user_id None = 未认证（调用方 close 4001）；
-    pending_message 是首条非认证消息（进入消息循环后补处理，如 ping）。
-    认证流程中连接自身的异常（如 HTTPException）不向上传播——在此消费并返回 None。
-    """
+async def _authenticate(websocket: WebSocket) -> tuple[int | None, str | None, dict]:
+    """票据 → Cookie → 首条消息认证，并保留原会话 jti/exp。"""
+    auth_payload: dict = {}
     ticket = websocket.query_params.get("ticket")
-    user_id = await _consume_ws_ticket(ticket) if ticket else None
+    ticket_result = await _consume_ws_ticket(ticket) if ticket else None
+    user_id = ticket_result[0] if ticket_result else None
+    if ticket_result:
+        auth_payload = ticket_result[1]
 
     if not user_id:
-        user_id, _closed = await _auth_via_cookie(websocket)
-        if _closed:
-            return None, None
+        user_id, closed, auth_payload = await _auth_via_cookie(websocket)
+        if closed:
+            return None, None, {}
 
     pending_message: str | None = None
     if not user_id:
-        user_id, pending_message = await _auth_via_first_message(websocket)
+        user_id, pending_message, auth_payload = await _auth_via_first_message(websocket)
 
-    return user_id, pending_message
+    return user_id, pending_message, auth_payload
 
 
-async def _auth_via_cookie(websocket: WebSocket) -> tuple[int | None, bool]:
-    """Cookie JWT 认证。返回 (user_id, 是否已 close 连接)。"""
+async def _auth_via_cookie(websocket: WebSocket) -> tuple[int | None, bool, dict]:
+    """Cookie JWT 认证。返回 (user_id, 是否已 close, 原会话上下文)。"""
     cookie_token = websocket.cookies.get("access_token")
     if not cookie_token:
-        return None, False
+        return None, False, {}
     try:
         from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
-        # expected_type='access'：与 HTTP 侧（deps.py 的三处解码）同口径。
-        # 不传时 refresh token（寿命按 REFRESH_TOKEN_EXPIRE_DAYS，远长于 access）
-        # 也能直接认证 WebSocket，扩大了凭据的可用面。
         payload = _decode_jwt_token(cookie_token, expected_type='access')
         jti = payload.get("jti")
         if jti and await is_token_revoked(jti):
             logger.warning("WebSocket Cookie认证失败: token已撤销")
             await websocket.close(code=4001, reason="Token revoked")
-            return None, True
+            return None, True, {}
         uid = payload.get("sub")
         if uid:
-            return int(uid), False
+            return int(uid), False, _clean_auth_payload(payload)
     except (ValueError, TypeError) as e:
         logger.warning("WebSocket Cookie认证失败: %s | exc_type=%s", e, type(e).__name__)
     except Exception as e:  # 认证流程异常（如 HTTPException）不应中断连接建立  # broad-except: WebSocket 连接容错，异常时关闭连接
         logger.warning("WebSocket Cookie认证异常: exc_type=%s msg=%s", type(e).__name__, e)
-    return None, False
+    return None, False, {}
 
 
-async def _auth_via_first_message(websocket: WebSocket) -> tuple[int | None, str | None]:
-    """首条消息认证。返回 (user_id, 非认证消息原样回传)。"""
+async def _auth_via_first_message(websocket: WebSocket) -> tuple[int | None, str | None, dict]:
+    """首条消息认证。返回 (user_id, 非认证消息, 原会话上下文)。"""
     try:
         initial_data = await asyncio.wait_for(
             websocket.receive_text(), timeout=_WS_AUTH_TIMEOUT
         )
     except TimeoutError:
         logger.warning("WebSocket等待认证消息超时")
-        return None, None
+        return None, None, {}
 
     try:
         msg: Any = _json.loads(initial_data)
         if msg.get("type") == "auth" and msg.get("token"):
-            ticket_user_id = await _consume_ws_ticket(str(msg["token"]))
-            if ticket_user_id is not None:
-                return ticket_user_id, None
+            ticket_result = await _consume_ws_ticket(str(msg["token"]))
+            if ticket_result is not None:
+                return ticket_result[0], None, ticket_result[1]
             from fastapi_app.core.deps import _decode_jwt_token, is_token_revoked
-            # expected_type='access'：同 HTTP 侧，禁止用 refresh token 认证
             payload = _decode_jwt_token(msg["token"], expected_type='access')
             jti = payload.get("jti")
             if jti and await is_token_revoked(jti):
@@ -196,13 +204,31 @@ async def _auth_via_first_message(websocket: WebSocket) -> tuple[int | None, str
             else:
                 uid = payload.get("sub")
                 if uid:
-                    return int(uid), None
+                    return int(uid), None, _clean_auth_payload(payload)
         else:
-            return None, initial_data
+            return None, initial_data, {}
     except (ValueError, TypeError, _json.JSONDecodeError) as e:
         logger.warning("WebSocket首条消息认证失败: %s", e)
-        return None, initial_data
-    return None, None
+        return None, initial_data, {}
+    return None, None, {}
+
+
+async def _token_auth_valid(payload: dict) -> bool:
+    """长连接周期复核：原会话过期或撤销后立即失效。"""
+    if not payload:
+        return True
+    try:
+        exp = payload.get('exp')
+        if exp is not None and time.time() >= float(exp):
+            return False
+    except (TypeError, ValueError):
+        return False
+    jti = payload.get('jti')
+    if jti:
+        from fastapi_app.core.deps import is_token_revoked
+        if await is_token_revoked(jti):
+            return False
+    return True
 
 
 def _engine_or_none():
@@ -212,19 +238,23 @@ def _engine_or_none():
     return engine
 
 
-async def _verify_user_active(user_id: int) -> bool | None:
-    """查询用户有效状态。True=有效 False=无效 None=查询失败（容错放行）。"""
+async def _load_ws_user(user_id: int) -> tuple[WSUser | None, bool]:
+    """一次查询取回启用状态与完整权限，供建连和周期复核共用。"""
     engine = _engine_or_none()
     async with engine.connect() as conn:
         try:
             result = await conn.execute(
-                ws_select(WSUser.id, WSUser.status).where(WSUser.id == user_id)
+                ws_select(WSUser)
+                .options(joinedload(WSUser.permissions).joinedload(Permission.children))
+                .where(WSUser.id == user_id)
             )
-            ws_user = result.first()
+            user = result.unique().scalar_one_or_none()
         except (OperationalError, DisconnectionError) as e:
-            logger.warning("WebSocket 用户状态查询失败: %s", e)
-            return None
-    return bool(ws_user and ws_user[1])
+            logger.warning("WebSocket 用户与权限查询失败: %s", e)
+            return None, False
+    if user is None or not user.status:
+        return None, True
+    return user, True
 
 
 def _bump_rate_window(now: float, msg_count: int, msg_window_start: float) -> tuple[int, float, bool]:
@@ -236,8 +266,11 @@ def _bump_rate_window(now: float, msg_count: int, msg_window_start: float) -> tu
     return msg_count, msg_window_start, msg_count > _WS_RATE_LIMIT
 
 
-async def _message_loop(websocket: WebSocket, user_id: int, pending_message: str | None) -> None:
-    """心跳 / 限频 / 周期性用户状态复核 / ping-pong 消息循环。
+async def _message_loop(
+    websocket: WebSocket, user_id: int, pending_message: str | None,
+    *, manager, auth_payload: dict,
+) -> None:
+    """心跳、限频及周期性会话/用户/权限复核。
 
     所有 close+break 路径都在本函数内完成，连接清理由调用方 finally 统一处理。
     """
@@ -268,14 +301,18 @@ async def _message_loop(websocket: WebSocket, user_id: int, pending_message: str
                 await websocket.close(code=4008, reason="消息频率超限")
                 break
 
-            # Periodic user active verification
             if now - last_verify_time > _WS_VERIFY_INTERVAL:
                 last_verify_time = now
-                active = await _verify_user_active(user_id)
-                if active is False:
+                if not await _token_auth_valid(auth_payload):
+                    await websocket.close(code=4001, reason="会话已过期或撤销")
+                    break
+                principal, query_ok = await _load_ws_user(user_id)
+                if query_ok and principal is None:
                     await websocket.close(code=4003, reason="用户已被禁用")
                     break
-                # None = 查询失败，容错放行（与原行内 except 路径一致）
+                if principal is not None:
+                    manager.update_principal(websocket, principal)
+                # 查询失败沿用已验证主体；下次心跳周期继续复核。
 
             if data == "ping":
                 await websocket.send_text("pong")
@@ -297,7 +334,7 @@ def register_websocket(app: FastAPI) -> None:
 
         await websocket.accept()
 
-        user_id, pending_message = await _authenticate(websocket)
+        user_id, pending_message, auth_payload = await _authenticate(websocket)
         if user_id is None:
             # Cookie 撤销路径已自行 close；其余未认证路径在此统一 close。
             # 已断开时 close 会抛——与原实现的隐式容错等价，这里显式 suppress。
@@ -305,19 +342,25 @@ def register_websocket(app: FastAPI) -> None:
                 await websocket.close(code=4001, reason="未认证")
             return
 
-        active = await _verify_user_active(user_id)
-        if active is None:
+        if not await _token_auth_valid(auth_payload):
+            await websocket.close(code=4001, reason="会话已过期或撤销")
+            return
+        principal, query_ok = await _load_ws_user(user_id)
+        if not query_ok:
             await websocket.close(code=4503, reason="服务暂时不可用")
             return
-        if not active:
+        if principal is None:
             await websocket.close(code=4001, reason="用户不存在或已禁用")
             return
 
         from fastapi_app.services.notification_service import manager
-        manager.connect_existing(websocket, int(user_id))
+        manager.connect_existing(websocket, int(user_id), principal=principal)
 
         try:
-            await _message_loop(websocket, int(user_id), pending_message)
+            await _message_loop(
+                websocket, int(user_id), pending_message,
+                manager=manager, auth_payload=auth_payload,
+            )
         finally:
             # 第八轮审计：心跳超时/频率超限/用户禁用三条路径都是 close 后 `break`（正常退出
             # try），此前 _safe_disconnect 只在 except 里 → 这些路径不清连接，socket 永久留在

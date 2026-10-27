@@ -163,23 +163,14 @@ class TestMaterialForm:
 class TestBackupForm:
     @pytest.mark.asyncio
     async def test_backup_list(self, client, auth_headers):
-        """/api/v1/backup 的路由级依赖刻意是 fail-closed strict（router.py:283）：
-        Redis 客户端不可用且本地撤销缓存未命中时，**合法令牌**也一律 401。
+        """合法令牌在根集成套件的内存撤销存储下应可读备份列表。
 
-        测试进程不跑 app lifespan → ``redis_cache.init_app()`` 从未执行 →
-        ``get_client()`` 恒为 None → 必然落到 fail-closed 分支（生产 Redis 正常时
-        是 200）。两种环境下的正确结局不同，故按客户端可用性分别断言：既守住
-        「无 Redis 必须 fail-closed」，也守住「Redis 可用时合法令牌读得到」。
+        根 conftest 的 ``_in_memory_token_revocation`` 为每次用例提供独立、可判定的
+        撤销存储，因此这里不是「Redis 故障且状态不可判定」场景。真正的 Redis 故障
+        fail-closed 由 fastapi_app/tests/test_strict_auth_wiring.py 等专项测试覆盖。
         """
-        from fastapi_app.core.redis_wrapper import get_client
-
         resp = await client.get("/api/v1/backup/list", headers=auth_headers)
-        if get_client() is None:
-            assert resp.status_code == 401, (
-                f"Redis 客户端不可用时路由级 strict 依赖必须 fail-closed 401，实际 {resp.status_code}"
-            )
-        else:
-            assert resp.status_code == 200, f"合法令牌应可读备份列表，实际 {resp.status_code}"
+        assert resp.status_code == 200, f"合法令牌应可读备份列表，实际 {resp.status_code}"
 
     @pytest.mark.asyncio
     async def test_backup_list_requires_auth(self, client):

@@ -134,6 +134,8 @@ _EXCEL_UPLOAD_BODY_LIMIT = int(os.environ.get(
     'MAX_EXCEL_UPLOAD_BODY_BYTES', str(10 * 1024 * 1024 + _MULTIPART_OVERHEAD_BYTES)))
 
 _PATH_BODY_LIMITS: tuple[tuple[str, int], ...] = (
+    # 匿名 Web Vitals：小 JSON 即可，禁止借通用 10MB 预算放大内存与日志。
+    ('/api/v1/monitoring/vitals', 64 * 1024),
     ('/api/v1/backup/', _BACKUP_UPLOAD_BODY_LIMIT),
     ('/api/v1/tasks/import-', _IMPORT_UPLOAD_BODY_LIMIT),
     # batch 七个导入端点 + packaging 上传：端点内文件上限 10MiB
@@ -164,13 +166,11 @@ def _body_too_large_response(limit: int) -> Response:
         media_type="application/json",
     )
 
-# Prometheus endpoint 归一化：纯数字 ID / UUID / 长 hex token 统一折叠为 {id}，
-# 防止订单号等非数字动态路径段造成指标 label 基数爆炸
-_PATH_ID_SEGMENT_RE = re.compile(
-    r'^(?:\d+'
-    r'|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-    r'|[0-9a-fA-F]{16,})$'
-)
+def _route_metric_endpoint(request: Request) -> str:
+    """只使用路由模板作为指标标签；未匹配请求统一归入固定桶。"""
+    route = request.scope.get('route')
+    path = getattr(route, 'path', None)
+    return path if isinstance(path, str) and path else '{unmatched}'
 
 
 def setup_middleware(app: FastAPI) -> None:
@@ -567,17 +567,10 @@ def _setup_prometheus(app: FastAPI) -> None:
             return await call_next(request)
 
         method = request.method
-        path = request.url.path
-        parts = path.rstrip("/").split("/")
-        normalized_parts = []
-        for part in parts:
-            if _PATH_ID_SEGMENT_RE.match(part):
-                normalized_parts.append("{id}")
-            else:
-                normalized_parts.append(part)
-        endpoint = "/".join(normalized_parts)
-
-        REQUESTS_IN_PROGRESS.labels(method=method, endpoint=endpoint).inc()
+        # 路由匹配发生在 call_next 内；匹配前不能使用原始 URL，否则任意 404 路径
+        # 都会创建永久 label。in-progress 在匹配前统一归入固定 pending 桶。
+        pending_endpoint = '{pending}'
+        REQUESTS_IN_PROGRESS.labels(method=method, endpoint=pending_endpoint).inc()
         start_time = time.time()
 
         try:
@@ -588,9 +581,10 @@ def _setup_prometheus(app: FastAPI) -> None:
             raise
         finally:
             elapsed = time.time() - start_time
+            endpoint = _route_metric_endpoint(request)
             REQUEST_COUNT.labels(method=method, endpoint=endpoint, status=status).inc()
             REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(elapsed)
-            REQUESTS_IN_PROGRESS.labels(method=method, endpoint=endpoint).dec()
+            REQUESTS_IN_PROGRESS.labels(method=method, endpoint=pending_endpoint).dec()
             if elapsed > 3.0:
                 logger.warning(
                     "慢请求: %s %s → %s (%.2fs)",

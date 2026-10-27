@@ -26,6 +26,7 @@ from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.services.notification_service import StockEvent
+from fastapi_app.services.xlsx_budget import run_sync_with_timeout
 from fastapi_app.shared.stock_concurrency import (
     apply_stock_delta_locked,
     assert_stock_available,
@@ -134,6 +135,7 @@ async def _apply_production_stock(
             'change_type': '生产入库' if delta > 0 else '生产入库冲销',
             'quantity': delta,
             'current_stock': product.current_stock,
+            'factory': getattr(product, 'factory', None),
         },
         context="生产事件发布",
     )
@@ -899,6 +901,18 @@ async def get_trend(
 
 # ==================== 导出 ====================
 
+def _summarize_export_departments(records, effective_unit_price) -> dict[str, dict]:
+    """按部门汇总导出数量与产值，保持与明细行相同的价格口径。"""
+    summary: dict[str, dict] = {}
+    for record in records:
+        dept = record.department
+        if dept not in summary:
+            summary[dept] = {'quantity': 0, 'value': 0.0}
+        summary[dept]['quantity'] += record.quantity
+        summary[dept]['value'] += effective_unit_price(record) * record.quantity
+    return summary
+
+
 async def export_records(
     db: AsyncSession,
     *,
@@ -960,110 +974,106 @@ async def export_records(
             return float(price_fallback[r.product_id])
         return 0.0
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = '生产报表'
+    def _render_workbook() -> bytes:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = '生产报表'
 
-    # 样式定义
-    header_fill = PatternFill(start_color='B0E0E6', end_color='B0E0E6', fill_type='solid')
-    header_font = Font(bold=True, size=11, color='5A4A4A')
-    header_align = Alignment(horizontal='center', vertical='center')
-    thin_border = Border(
-        left=Side(style='thin', color='D4F1F4'),
-        right=Side(style='thin', color='D4F1F4'),
-        top=Side(style='thin', color='D4F1F4'),
-        bottom=Side(style='thin', color='D4F1F4'),
-    )
-    summary_fill = PatternFill(start_color='F0F9FF', end_color='F0F9FF', fill_type='solid')
-    summary_font = Font(bold=True, size=11, color='1d4ed8')
+        # 样式定义
+        header_fill = PatternFill(start_color='B0E0E6', end_color='B0E0E6', fill_type='solid')
+        header_font = Font(bold=True, size=11, color='5A4A4A')
+        header_align = Alignment(horizontal='center', vertical='center')
+        thin_border = Border(
+            left=Side(style='thin', color='D4F1F4'),
+            right=Side(style='thin', color='D4F1F4'),
+            top=Side(style='thin', color='D4F1F4'),
+            bottom=Side(style='thin', color='D4F1F4'),
+        )
+        summary_fill = PatternFill(start_color='F0F9FF', end_color='F0F9FF', fill_type='solid')
+        summary_font = Font(bold=True, size=11, color='1d4ed8')
 
-    # 标题行
-    headers = ['生产日期', '部门', '产品名称', '69码', '单价', '数量', '产值', '备注', '创建人', '创建时间']
-    ws.append(headers)
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = header_align
-        cell.border = thin_border
-
-    # 数据行
-    total_qty = 0
-    total_val = 0.0
-    for r in records:
-        up = effective_unit_price(r)
-        val = round_money(up * r.quantity)
-        total_qty += r.quantity
-        total_val += val
-        ws.append([
-            r.production_date.isoformat() if r.production_date else '',
-            DEPARTMENT_LABELS.get(r.department, r.department),
-            _sanitize_excel_value(r.product_name),
-            _sanitize_excel_value(r.barcode or ''),
-            up,
-            r.quantity,
-            val,
-            _sanitize_excel_value(r.remark or ''),
-            _sanitize_excel_value(r.created_by or ''),
-            fmt_business(r.create_time, '%Y-%m-%d %H:%M:%S'),
-        ])
-
-    # 数据行样式
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-        for cell in row:
+        # 标题行
+        headers = ['生产日期', '部门', '产品名称', '69码', '单价', '数量', '产值', '备注', '创建人', '创建时间']
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_align
             cell.border = thin_border
-            cell.alignment = Alignment(vertical='center')
 
-    # 空数据提示
-    if not records:
-        ws.append(['暂无数据', '', '', '', '', '', '', '', '', ''])
-
-    # 汇总行
-    summary_label = '全部门合计' if departments is None else '合计'
-    ws.append([summary_label, '', '', '', '', total_qty, round_money(total_val), '', '', ''])
-    for cell in ws[ws.max_row]:
-        cell.fill = summary_fill
-        cell.font = summary_font
-        cell.border = thin_border
-
-    # 按部门汇总
-    ws.append([])
-    ws.append(['部门汇总', '生产数量', '产值', '', '', '', '', '', '', ''])
-    for cell in ws[ws.max_row]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.border = thin_border
-
-    dept_summary: dict[str, dict] = {}
-    for r in records:
-        dept = r.department
-        if dept not in dept_summary:
-            dept_summary[dept] = {'quantity': 0, 'value': 0.0}
-        dept_summary[dept]['quantity'] += r.quantity
-        dept_summary[dept]['value'] += effective_unit_price(r) * r.quantity
-
-    for dept_key in ('filling', 'handcraft', 'packaging'):
-        if dept_key in dept_summary:
+        # 数据行
+        total_qty = 0
+        total_val = 0.0
+        for r in records:
+            up = effective_unit_price(r)
+            val = round_money(up * r.quantity)
+            total_qty += r.quantity
+            total_val += val
             ws.append([
-                DEPARTMENT_LABELS.get(dept_key, dept_key),
-                dept_summary[dept_key]['quantity'],
-                round_money(dept_summary[dept_key]['value']),
-                '', '', '', '', '', '', '',
+                r.production_date.isoformat() if r.production_date else '',
+                DEPARTMENT_LABELS.get(r.department, r.department),
+                _sanitize_excel_value(r.product_name),
+                _sanitize_excel_value(r.barcode or ''),
+                up,
+                r.quantity,
+                val,
+                _sanitize_excel_value(r.remark or ''),
+                _sanitize_excel_value(r.created_by or ''),
+                fmt_business(r.create_time, '%Y-%m-%d %H:%M:%S'),
             ])
-            for cell in ws[ws.max_row]:
+
+        # 数据行样式
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+            for cell in row:
                 cell.border = thin_border
+                cell.alignment = Alignment(vertical='center')
 
-    # 列宽
-    col_widths = [12, 10, 32, 15, 10, 10, 12, 24, 10, 20]
-    for i, w in enumerate(col_widths, 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+        # 空数据提示
+        if not records:
+            ws.append(['暂无数据', '', '', '', '', '', '', '', '', ''])
 
-    # 冻结首行
-    ws.freeze_panes = 'A2'
+        # 汇总行
+        summary_label = '全部门合计' if departments is None else '合计'
+        ws.append([summary_label, '', '', '', '', total_qty, round_money(total_val), '', '', ''])
+        for cell in ws[ws.max_row]:
+            cell.fill = summary_fill
+            cell.font = summary_font
+            cell.border = thin_border
 
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output.getvalue()
+        # 按部门汇总
+        ws.append([])
+        ws.append(['部门汇总', '生产数量', '产值', '', '', '', '', '', '', ''])
+        for cell in ws[ws.max_row]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.border = thin_border
+
+        dept_summary = _summarize_export_departments(records, effective_unit_price)
+
+        for dept_key in ('filling', 'handcraft', 'packaging'):
+            if dept_key in dept_summary:
+                ws.append([
+                    DEPARTMENT_LABELS.get(dept_key, dept_key),
+                    dept_summary[dept_key]['quantity'],
+                    round_money(dept_summary[dept_key]['value']),
+                    '', '', '', '', '', '', '',
+                ])
+                for cell in ws[ws.max_row]:
+                    cell.border = thin_border
+
+        # 列宽
+        col_widths = [12, 10, 32, 15, 10, 10, 12, 24, 10, 20]
+        for i, w in enumerate(col_widths, 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+        ws.freeze_panes = 'A2'
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
+
+    # openpyxl 为 CPU 密集型同步库：使用项目专用有界线程池，避免堵住 API 事件循环。
+    return await run_sync_with_timeout(_render_workbook)
 
 
 # ==================== 产品清单集成 ====================

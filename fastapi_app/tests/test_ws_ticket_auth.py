@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,6 +16,15 @@ def app(monkeypatch):
     class Result:
         def first(self):
             return (1, True)
+
+        def unique(self):
+            return self
+
+        def scalar_one_or_none(self):
+            return SimpleNamespace(
+                status=True, is_super=True, factory=None,
+                has_permission=lambda _code: True,
+            )
 
     class Connection:
         async def __aenter__(self):

@@ -34,7 +34,7 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -66,12 +66,13 @@ _PERSIST_ERRORS = (SQLAlchemyError, RuntimeError, OSError, ValueError)
 
 
 class VitalEntry(BaseModel):
-    name: str
-    value: float
-    rating: str
-    delta: float
-    navigationType: str
-    timestamp: int
+    # 匿名入口：字段上界同时约束进程内 key、日志与 DB，禁止超长字符串放大。
+    name: str = Field(max_length=16)
+    value: float = Field(allow_inf_nan=False)
+    rating: str = Field(max_length=24)
+    delta: float = Field(allow_inf_nan=False)
+    navigationType: str = Field(max_length=24)
+    timestamp: int = Field(ge=0)
 
 
 class VitalsPayload(BaseModel):
@@ -97,9 +98,14 @@ _last_cleanup_at: float = 0.0
 _persist_disabled_until: float = 0.0
 
 
+def _safe_log_text(value: str, limit: int) -> str:
+    """匿名日志字段统一截断并转义换行，避免磁盘放大与日志伪造。"""
+    return value.replace('\r', '\\r').replace('\n', '\\n')[:limit]
+
+
 def _remember(entry: VitalEntry) -> None:
     """写入进程内统计（/summary 的降级数据源）。"""
-    key = f"{entry.name}:{entry.rating}"
+    key = f"{entry.name[:16]}:{entry.rating[:24]}"
     if key not in _vital_stats:
         if len(_vital_stats) >= _MAX_KEYS:
             return
@@ -217,7 +223,9 @@ async def receive_vitals(payload: VitalsPayload, request: Request):
         if v.rating in ("poor", "needs-improvement"):
             logger.warning(
                 "WebVitals: name=%s value=%.1fms rating=%s nav=%s path=%s",
-                v.name, v.value, v.rating, v.navigationType, referer,
+                _safe_log_text(v.name, 16), v.value,
+                _safe_log_text(v.rating, 24), _safe_log_text(v.navigationType, 24),
+                _safe_log_text(referer, 500),
             )
         _remember(v)
 

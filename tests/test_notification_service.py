@@ -4,6 +4,7 @@ notification_service 模块单元测试
 覆盖：ConnectionManager 连接/断开/广播/定向发送、publish_stock_event
 """
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +15,13 @@ from fastapi_app.services.notification_service import (
     StockEvent,
     publish_stock_event,
 )
+
+
+def _superuser():
+    return SimpleNamespace(
+        is_super=True, factory=None, has_permission=lambda _code: True,
+    )
+
 
 # ============================================================
 # ConnectionManager — 连接管理
@@ -69,10 +77,10 @@ class TestConnectionManagerBroadcast:
     async def test_broadcast_sends_to_all(self):
         ws1 = AsyncMock()
         ws2 = AsyncMock()
-        self.mgr.active_connections[1] = [ws1]
-        self.mgr.active_connections[2] = [ws2]
+        self.mgr.connect_existing(ws1, 1, principal=_superuser())
+        self.mgr.connect_existing(ws2, 2, principal=_superuser())
 
-        event = {"type": "test", "data": {}}
+        event = {"type": "stock_changed", "data": {}}
         await self.mgr.broadcast_event(event)
 
         ws1.send_json.assert_awaited_once_with(event)
@@ -83,9 +91,10 @@ class TestConnectionManagerBroadcast:
         ws_good = AsyncMock()
         ws_bad = AsyncMock()
         ws_bad.send_json.side_effect = RuntimeError('Cannot call "send" once a close message has been sent.')
-        self.mgr.active_connections[1] = [ws_good, ws_bad]
+        self.mgr.connect_existing(ws_good, 1, principal=_superuser())
+        self.mgr.connect_existing(ws_bad, 1, principal=_superuser())
 
-        await self.mgr.broadcast_event({"type": "test"})
+        await self.mgr.broadcast_event({"type": "stock_changed"})
         assert ws_bad not in self.mgr.active_connections.get(1, [])
 
     @pytest.mark.asyncio

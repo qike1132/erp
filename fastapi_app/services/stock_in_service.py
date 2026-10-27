@@ -96,7 +96,7 @@ async def create_stockin(db: AsyncSession, product_id: int, quantity: int, custo
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, product_id)
     if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '入库', 'quantity': quantity, 'current_stock': product.current_stock}, context="入库事件发布")
+        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '入库', 'quantity': quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="入库事件发布")
     else:
         logger.warning('入库事件发布失败：产品ID %s 不存在', product_id)
     logger.info(f'入库添加成功：{stockin.stockin_no}，客户：{customer}，产品ID：{product_id}，数量：{quantity}')
@@ -144,7 +144,7 @@ async def update_stockin(db: AsyncSession, stockin_id: int, quantity: int, custo
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     notify_product = await db.get(Product, stockin_obj.product_id)
     if notify_product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': notify_product.name, 'change_type': '入库编辑', 'quantity': quantity, 'current_stock': notify_product.current_stock}, context="入库编辑事件发布")
+        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': notify_product.name, 'change_type': '入库编辑', 'quantity': quantity, 'current_stock': notify_product.current_stock, 'factory': getattr(notify_product, 'factory', None)}, context="入库编辑事件发布")
     logger.info(f'入库编辑成功：{old_stockin_no}，数量变更：{old_quantity} -> {quantity}')
 
 
@@ -172,7 +172,7 @@ async def delete_stockin(db: AsyncSession, stockin_id: int, operator_id: int | N
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockin_obj.product_id)
     if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库删除', 'quantity': -stockin_obj.quantity, 'current_stock': product.current_stock}, context="入库删除事件发布")
+        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockin_obj.product_id, 'product_name': product.name, 'change_type': '入库删除', 'quantity': -stockin_obj.quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="入库删除事件发布")
     logger.info(f'入库删除成功：{stockin_no}，数量：{stockin_obj.quantity}')
     # 备货记录没了 → 撤销引用它的 pending 采购单（与客户订单删除走 ORDER_DELETED 清理同款；
     # 备货删除此前漏了这条，会留下拿着已不存在来源的采购单）。
