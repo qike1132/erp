@@ -29,11 +29,12 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from sqlalchemy import select as ws_select
-from sqlalchemy.exc import DisconnectionError, OperationalError
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import async_engine
+from fastapi_app.core.database import get_async_db_context
 from fastapi_app.shared_models import Permission
 from fastapi_app.shared_models import User as WSUser
 
@@ -231,30 +232,29 @@ async def _token_auth_valid(payload: dict) -> bool:
     return True
 
 
-def _engine_or_none():
-    """引擎在模块导入时即初始化（fastapi_app/core/database.py:149），此处收窄 Optional。"""
-    engine = async_engine
-    assert engine is not None  # noqa: S101
-    return engine
+async def _load_ws_user_from_session(
+    db: AsyncSession, user_id: int,
+) -> tuple[WSUser | None, bool]:
+    """从 ORM 会话取回启用用户与权限；供生产加载和数据库回归共用。"""
+    result = await db.execute(
+        ws_select(WSUser)
+        .options(joinedload(WSUser.permissions).joinedload(Permission.children))
+        .where(WSUser.id == user_id)
+    )
+    user = result.unique().scalar_one_or_none()
+    if user is None or not user.status:
+        return None, True
+    return user, True
 
 
 async def _load_ws_user(user_id: int) -> tuple[WSUser | None, bool]:
     """一次查询取回启用状态与完整权限，供建连和周期复核共用。"""
-    engine = _engine_or_none()
-    async with engine.connect() as conn:
-        try:
-            result = await conn.execute(
-                ws_select(WSUser)
-                .options(joinedload(WSUser.permissions).joinedload(Permission.children))
-                .where(WSUser.id == user_id)
-            )
-            user = result.unique().scalar_one_or_none()
-        except (OperationalError, DisconnectionError) as e:
-            logger.warning("WebSocket 用户与权限查询失败: %s", e)
-            return None, False
-    if user is None or not user.status:
-        return None, True
-    return user, True
+    try:
+        async with get_async_db_context() as db:
+            return await _load_ws_user_from_session(db, user_id)
+    except SQLAlchemyError as e:
+        logger.warning("WebSocket 用户与权限查询失败: %s", e)
+        return None, False
 
 
 def _bump_rate_window(now: float, msg_count: int, msg_window_start: float) -> tuple[int, float, bool]:

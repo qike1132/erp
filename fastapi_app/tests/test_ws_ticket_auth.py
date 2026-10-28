@@ -26,7 +26,7 @@ def app(monkeypatch):
                 has_permission=lambda _code: True,
             )
 
-    class Connection:
+    class Session:
         async def __aenter__(self):
             return self
 
@@ -36,7 +36,7 @@ def app(monkeypatch):
         async def execute(self, *_args, **_kwargs):
             return Result()
 
-    monkeypatch.setattr(ws_module, "async_engine", type("Engine", (), {"connect": Connection})())
+    monkeypatch.setattr(ws_module, "get_async_db_context", lambda: Session())
     return application
 
 
