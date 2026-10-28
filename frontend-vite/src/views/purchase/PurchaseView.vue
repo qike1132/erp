@@ -62,6 +62,19 @@
       </div>
 
       <div class="page-card-body">
+        <div
+          v-if="bomResume.phase.value !== 'IDLE' && bomResume.message.value"
+          class="pc-resume-status"
+          role="status"
+        >
+          <span>{{ bomResume.message.value }}</span>
+          <button
+            v-if="bomResume.phase.value === 'RESUME_FAILED'"
+            class="pc-btn pc-btn-primary pc-btn-sm"
+            :disabled="bomResume.resumeInFlight.value"
+            @click="bomResume.retryResume"
+          >重试续提</button>
+        </div>
         <!-- P1-9: v-if 替代 v-show，非当前 tab 卸载 DOM 减轻 paint；
              数据层在 usePurchaseHandlers 顶层 composable（不随 Panel 卸载），
              配合 Vue Query 缓存切回秒出 -->
@@ -80,6 +93,10 @@
             :total-pages="purchaseOrders.pages"
             :selected-ids="purchaseOrders.selectedIds"
             :all-selected="purchaseOrders.allSelected"
+            :can-manage-bom="bomResume.canManageBom.value"
+            :resume-source-id="bomResume.resumeSourceId.value"
+            :resume-in-flight="bomResume.resumeInFlight.value"
+            @configure-bom="bomResume.startConfiguration"
             @toggle-all="purchaseOrders.toggleAll"
             @toggle-selection="purchaseOrders.toggleSelection"
             @complete-order="handleCompleteOrder"
@@ -191,6 +208,7 @@ const {
   handleExport,
   handleExportSupplier,
   exporting,
+  bomResume,
 } = usePurchaseHandlers()
 
 /**
@@ -307,6 +325,19 @@ function handleDetailSaved(orderId: number) {
   font-weight: 700;
   border-radius: 9px;
   line-height: 1;
+}
+
+/* === BOM 续提状态 === */
+.pc-resume-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  color: var(--color-text-secondary);
+  background: var(--color-primary-50, #eff6ff);
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 13px;
 }
 
 /* === Body === */

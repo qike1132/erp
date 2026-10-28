@@ -77,6 +77,15 @@ vi.mock('@tanstack/vue-query', async () => {
   }
 })
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ user: { id: 1 }, hasPermission: () => true }),
+}))
+
 vi.mock('@/composables/useToast', () => ({
   showToast: vi.fn(),
 }))

@@ -1171,7 +1171,7 @@
           "采购中心"
         ],
         "summary": "Api One Click Generate Order",
-        "description": "一键审核并生成采购订单。\n\n接收可选的 X-Idempotency-Key 请求头。同键的请求在 10 分钟内会复用上次结果，\n避免前端重试 / 网络重发导致的重复创建。\n\n唯一约束 uq_po_pending_dedup 是数据库层的最后防线。并发命中该约束时\n由服务层用 savepoint 回滚本段写入并回查已有 pending 单，以幂等方式返回。\n事务边界遵守 docs/TRANSACTION_BOUNDARY_GUIDE.md：端点层不做 commit/rollback。\n\nArgs:\n    data: 一键生成请求，包含复合 ID 列表。\n    db: 异步数据库会话。\n    _current_user: 当前登录用户（权限校验依赖）。\n    x_idempotency_key: 幂等键，同键请求复用结果。\n\nReturns:\n    dict[str, Any]: 包含 success 标志、创建数量及订单列表的字典。\n\nRaises:\n    HTTPException 400: 业务校验失败。\n    HTTPException 500: 生成采购订单失败。",
+        "description": "一键审核并生成采购订单。\n\n接收可选的 X-Idempotency-Key 请求头。成功结果按当前用户与键持久化重放；\n来源锁与任意状态 typed 关联预查覆盖自动生成、人工续提及旧请求并发。\n\n唯一约束 uq_po_pending_dedup 仅作最后防线，不再删除重建已有 pending 单。\n事务边界遵守 docs/TRANSACTION_BOUNDARY_GUIDE.md：端点层不做 commit/rollback。\n\nArgs:\n    data: 一键生成请求，包含复合 ID 列表。\n    db: 异步数据库会话。\n    _current_user: 当前登录用户（权限校验依赖）。\n    x_idempotency_key: 幂等键，同键请求复用结果。\n\nReturns:\n    dict[str, Any]: 包含 success 标志、创建数量及订单列表的字典。\n\nRaises:\n    HTTPException 400: 业务校验失败。\n    HTTPException 500: 生成采购订单失败。",
         "operationId": "api_one_click_generate_order_api_v1_purchase_center_orders_one_click_generate_post",
         "parameters": [
           {
@@ -27762,6 +27762,24 @@
         "type": "object",
         "title": "MaterialRegistrationUpdate"
       },
+      "MissingBomProduct": {
+        "properties": {
+          "product_id": {
+            "type": "integer",
+            "title": "Product Id"
+          },
+          "product_name": {
+            "type": "string",
+            "title": "Product Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id",
+          "product_name"
+        ],
+        "title": "MissingBomProduct"
+      },
       "MobileDashboardData": {
         "properties": {
           "stock": {
@@ -32704,6 +32722,17 @@
             ],
             "title": "Message"
           },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
           "orders": {
             "anyOf": [
               {
@@ -32752,6 +32781,20 @@
               }
             ],
             "title": "Idempotent"
+          },
+          "missing_bom": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MissingBomProduct"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Bom"
           }
         },
         "type": "object",

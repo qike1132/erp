@@ -593,6 +593,9 @@
     "migrations/versions/pg_standalone_104_dedup_default_bom_rows.py": [
       "execute:DROP INDEX IF EXISTS uq_product_material_default_scope"
     ],
+    "migrations/versions/pg_standalone_105_purchase_order_generate_idempotency.py": [
+      "drop_table:purchase_order_generate_attempt"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

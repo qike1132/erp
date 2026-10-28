@@ -764,7 +764,8 @@ class TestPurchaseCenterEndpoints:
             'created_count': 1,
             'orders': [{'id': 20, 'order_no': 'CG-20'}],
         }
-        async def _fake_svc(db, composite_ids, idempotency_key=''):
+        async def _fake_svc(db, composite_ids, idempotency_key='', actor_id=None):
+            assert actor_id == 1
             return expected
         with patch(
             'fastapi_app.services.purchase_center_service.generate_purchase_orders_from_customer_orders',
@@ -778,6 +779,26 @@ class TestPurchaseCenterEndpoints:
             data = resp.json()
             assert data['success'] is True
             assert data['created_count'] == 1
+
+    @pytest.mark.asyncio
+    async def test_one_click_generate_idempotency_conflict(self, client):
+        """同键不同来源必须 409，不能被默认 ValueError→400 吞掉。"""
+        from fastapi_app.services.purchase_order_idempotency import IdempotencyConflictError
+
+        async def _conflict(db, composite_ids, idempotency_key='', actor_id=None):
+            raise IdempotencyConflictError()
+
+        with patch(
+            'fastapi_app.services.purchase_center_service.generate_purchase_orders_from_customer_orders',
+            new=_conflict,
+        ):
+            resp = await client.post(
+                "/api/v1/purchase-center/orders/one-click-generate",
+                json={'composite_ids': ['order:5']},
+                headers={'X-Idempotency-Key': 'po-resume:conflict'},
+            )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()['detail']['code'] == 'IDEMPOTENCY_CONFLICT'
 
     @pytest.mark.asyncio
     async def test_cleanup_orphan_includes_stockin(self):

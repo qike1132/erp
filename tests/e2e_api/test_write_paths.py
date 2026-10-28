@@ -11,11 +11,9 @@
 2. **出库扣减库存**：库存扣减、FIFO 摊销、订单状态派生三者必须一致。
    单测用 mock 断言「调用了扣减函数」，无法发现 select_for_update 下的
    真实竞态或状态重算遗漏。
-3. **采购订单一键生成**：一键生成会先清理旧 pending 单、再重建、
-   并把订单状态改写为「已备货」。X-Idempotency-Key 的语义必须锁定 ——
-   当前实现**不做请求结果重放**，同键重试因为源订单已非「待备货」而 400。
-   这是刻意与"假幂等"区分的行为，必须有回归锁：若哪天有人真的加了重放，
-   这条用例会红，提醒同步前端与文档。
+3. **采购订单一键生成**：保留已有采购单、不删重建，并把来源订单状态改写为
+   「已备货」。X-Idempotency-Key 必须按当前用户持久化重放首次成功结果，
+   同键重试返回同一采购单、0 新增，不得再退回来源状态 400。
 
 本文件补的正是「**写请求真的改变了数据库状态**」这一层，且全部用
 **运行时造数 + 用例内自清理**，不依赖任何生产数据、不留下垃圾行。
@@ -124,6 +122,13 @@ def _cleanup(product_ids: list[int], order_ids: list[int]) -> None:
                     if isinstance(ids, list) and any(i in order_ids for i in ids):
                         po_ids.append(po_id)
 
+            conn.execute(
+                text(
+                    "DELETE FROM purchase_order_generate_attempt "
+                    "WHERE idempotency_key LIKE :key_prefix"
+                ),
+                {"key_prefix": f"{_PREFIX}%"},
+            )
             if po_ids:
                 item_ids = [
                     r[0]
@@ -598,18 +603,13 @@ class TestOneClickGenerate:
         finally:
             _cleanup([product_id], [order_id])
 
-    async def test_idempotency_key_does_not_replay_result(
+    async def test_idempotency_key_replays_same_po_with_zero_created(
         self, write_api: httpx.AsyncClient, write_headers: dict[str, str]
     ) -> None:
-        """同键重试**不复用**首次结果：源订单已非「待备货」，重试被 400 拒绝。
+        """同键重试复用首次成功响应的 PO 集合，当前调用 0 新增。
 
-        这是与"假幂等"划清界限的回归锁。当前 ``X-Idempotency-Key`` 只是
-        被端点接收（长度 ≤64 校验），真正的去重靠数据库唯一约束
-        ``uq_po_pending_dedup`` + 生成前清理旧 pending 单 —— **并非**
-        键级结果重放。断言 400 而不是 200，是为了让"有人真的实现了重放"
-        这件事在 CI 里立即可见：那时应同步更新本用例与接口文档。
-
-        同时验证：重试失败**不会**新建第二张采购单（不重复落库）。
+        首次采购单与登记同事务提交，因此即使首次响应未知，重试也不得因来源已
+        「已备货」而 400，更不能删除重建 pending 单。
         """
         from sqlalchemy import text
 
@@ -635,11 +635,12 @@ class TestOneClickGenerate:
                 json={"composite_ids": [f"order:{order_id}"]},
                 headers={**write_headers, "X-Idempotency-Key": key},
             )
-            assert second.status_code == 400, (
-                "同键重试当前 **不应** 返回 200：实现里没有键级结果重放，"
-                "源订单已非「待备货」应被拒绝。若此断言失败，说明幂等语义变了 —— "
-                f"请同步更新本用例与文档。status={second.status_code} body={second.text[:300]}"
-            )
+            assert second.status_code == 200, second.text[:300]
+            replay = second.json()
+            assert replay["success"] is True
+            assert replay["idempotent"] is True
+            assert replay["created_count"] == 0
+            assert int(replay["orders"][0]["id"]) == first_po_id
 
             # 重试不得新建第二张采购单
             with _sync_engine().connect() as conn:

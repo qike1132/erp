@@ -40,6 +40,7 @@ from fastapi_app.schemas.purchase_center import (
     UnprocessedOrdersResponse,
 )
 from fastapi_app.services import purchase_center_service as svc
+from fastapi_app.services.purchase_order_idempotency import IdempotencyConflictError
 
 router = APIRouter()
 
@@ -121,11 +122,10 @@ async def api_one_click_generate_order(
 ) -> dict[str, Any]:
     """一键审核并生成采购订单。
 
-    接收可选的 X-Idempotency-Key 请求头。同键的请求在 10 分钟内会复用上次结果，
-    避免前端重试 / 网络重发导致的重复创建。
+    接收可选的 X-Idempotency-Key 请求头。成功结果按当前用户与键持久化重放；
+    来源锁与任意状态 typed 关联预查覆盖自动生成、人工续提及旧请求并发。
 
-    唯一约束 uq_po_pending_dedup 是数据库层的最后防线。并发命中该约束时
-    由服务层用 savepoint 回滚本段写入并回查已有 pending 单，以幂等方式返回。
+    唯一约束 uq_po_pending_dedup 仅作最后防线，不再删除重建已有 pending 单。
     事务边界遵守 docs/TRANSACTION_BOUNDARY_GUIDE.md：端点层不做 commit/rollback。
 
     Args:
@@ -141,6 +141,10 @@ async def api_one_click_generate_order(
         HTTPException 400: 业务校验失败。
         HTTPException 500: 生成采购订单失败。
     """
+    def _idempotency_conflict_to_http(exc: Exception) -> HTTPException:
+        detail = exc.detail if isinstance(exc, IdempotencyConflictError) else str(exc)
+        return HTTPException(status_code=409, detail=detail)
+
     def _value_error_to_http(exc: Exception) -> HTTPException:
         return HTTPException(status_code=400, detail=str(exc))
 
@@ -149,11 +153,15 @@ async def api_one_click_generate_order(
         return HTTPException(status_code=500, detail='生成采购订单失败，请稍后重试')
 
     async with db_transaction(db, error_map={
+        IdempotencyConflictError: _idempotency_conflict_to_http,
         ValueError: _value_error_to_http,
         (SQLAlchemyError, RuntimeError): _error_to_http,
     }):
         result = await svc.generate_purchase_orders_from_customer_orders(
-            db, data.composite_ids, idempotency_key=x_idempotency_key or '',
+            db,
+            data.composite_ids,
+            idempotency_key=x_idempotency_key or '',
+            actor_id=_current_user.id,
         )
     await _invalidate_orders_cache()
     # 一键生成会将客户订单状态从'待备货'改为'已备货'，需同时失效未处理列表缓存

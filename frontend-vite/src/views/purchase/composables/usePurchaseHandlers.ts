@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { usePurchaseOrders } from './usePurchaseOrders'
 import { useUnprocessedOrders } from './useUnprocessedOrders'
@@ -8,6 +9,7 @@ import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { usePurchaseDetail } from './usePurchaseDetail'
 import { usePurchaseActions } from './usePurchaseActions'
+import { useBomOrderResume } from './useBomOrderResume'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 
@@ -26,6 +28,9 @@ import { getErrorMessage } from '@/types/errors'
  */
 export function usePurchaseHandlers() {
   const queryClient = useQueryClient()
+  const route = useRoute()
+  const resumeRequested = typeof route.query.resume === 'string' && route.query.resume.length > 0
+  const queriesEnabled = ref(!resumeRequested)
   const activeTab = ref<'active' | 'history'>('active')
   const ordersTabActive = computed(() => activeTab.value === 'active')
 
@@ -33,9 +38,11 @@ export function usePurchaseHandlers() {
   // unprocessed 常驻 30s：待生产 tab 的「待生成」区块依赖它，实时反映新单 / BOM 补齐。
   const unprocessed = useUnprocessedOrders({
     refetchInterval: () => 30_000,
+    enabled: queriesEnabled,
   })
   const purchaseOrders = usePurchaseOrders({
     refetchInterval: () => (activeTab.value === 'active' ? 30_000 : false),
+    enabled: queriesEnabled,
   })
   const completed = useCompletedOrders()
   const summary = useSummaryModal()
@@ -60,6 +67,7 @@ export function usePurchaseHandlers() {
     confirm,
     queryClient,
   })
+  const bomResume = useBomOrderResume({ activeTab, unprocessed, purchaseOrders })
 
   useWebSocket({
     onMessage: (data) => {
@@ -74,10 +82,16 @@ export function usePurchaseHandlers() {
     isActive: ordersTabActive,
   })
 
-  // 初始化加载默认 tab（待生产订单）+ 待生成区块的数据源。
-  // tab badge 数量在切到对应 tab 时显示；F5 刷新命中 sessionStorage 持久化缓存时秒出。
-  unprocessed.load()
-  purchaseOrders.load()
+  // resume 回程禁用普通初始加载，由状态机先恢复视图并显式 await 强制刷新，
+  // 避免旧列表请求与续提判定竞态；流程结束后恢复轮询/WebSocket 的正常取数。
+  if (resumeRequested) {
+    void bomResume.initializeFromRoute().finally(() => {
+      queriesEnabled.value = true
+    })
+  } else {
+    unprocessed.load()
+    purchaseOrders.load()
+  }
 
   /**
    * 2026-10-17 审计 P2-40：导出供应商失败时此前无 catch，异常进入 Vue
@@ -104,6 +118,7 @@ export function usePurchaseHandlers() {
     switchTab,
     handleViewDetail,
     handleExportSupplier,
+    bomResume,
     ...actions,
   }
 }

@@ -256,15 +256,21 @@ class PurchaseOrderDetailResponse(BaseModel):
     order: dict | None = None
 
 
+class MissingBomProduct(BaseModel):
+    product_id: int
+    product_name: str
+
+
 class PurchaseOrderActionResponse(BaseModel):
     success: bool = True
     message: str | None = None
+    code: str | None = None
     orders: list[dict] | None = None
     order: dict | None = None
-    # 一键生成时返回的创建数量
+    # 当前 HTTP 调用真实新增数；任意幂等返回恒为 0
     created_count: int | None = None
-    # 是否命中唯一约束后回查的幂等结果
     idempotent: bool | None = None
+    missing_bom: list[MissingBomProduct] | None = None
 
 
 class OneClickGenerateRequest(BaseModel):

@@ -277,8 +277,15 @@ async function executeWriteWithRetry<T>(
   }
 }
 
-export function post<T>(url: string, data?: unknown, opts?: { retryable?: boolean }): Promise<T> {
-  return executeWriteWithRetry(() => service.post(url, data) as Promise<T>, opts?.retryable === true)
+export function post<T>(
+  url: string,
+  data?: unknown,
+  opts?: { retryable?: boolean; headers?: Record<string, string> },
+): Promise<T> {
+  return executeWriteWithRetry(
+    () => service.post(url, data, { headers: opts?.headers }) as Promise<T>,
+    opts?.retryable === true,
+  )
 }
 
 export function put<T>(url: string, data?: unknown, opts?: { retryable?: boolean }): Promise<T> {

@@ -15,9 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.float_utils import round_qty
-from fastapi_app.services.purchase_order_crud import (
-    cleanup_orphan_pending_purchase_orders,
-    create_purchase_order,
+from fastapi_app.services.purchase_order_crud import create_purchase_order
+from fastapi_app.services.purchase_order_idempotency import (
+    LegacySourceAmbiguityError,
+    acquire_key_lock,
+    acquire_source_locks,
+    find_existing_by_source,
+    load_replay,
+    normalize_composite_ids,
+    request_hash,
+    save_result,
 )
 from fastapi_app.services.purchase_order_sku import write_po_sku_rows
 from fastapi_app.shared_models import (
@@ -202,22 +209,25 @@ def _split_composite_ids(composite_ids: list[str]) -> tuple[list[int], list[int]
 
 async def _load_source_records(
     db: AsyncSession, order_ids: list[int], stockin_ids: list[int],
+    *, for_update: bool = False,
 ) -> tuple[list, list]:
-    """按类型分别加载源记录（Order 预加载 items 以支持多 SKU）。"""
+    """按类型加载源记录；生成临界区内以 FOR UPDATE 防止并发改删。"""
     from fastapi_app.shared_models import StockIn
 
     cust_orders: list = []
     if order_ids:
-        cust_result = await db.execute(
-            select(Order).options(selectinload(Order.items)).where(Order.id.in_(order_ids))
-        )
+        order_stmt = select(Order).options(selectinload(Order.items)).where(Order.id.in_(order_ids))
+        if for_update:
+            order_stmt = order_stmt.with_for_update()
+        cust_result = await db.execute(order_stmt)
         cust_orders = list(cust_result.scalars().all())
 
     stockins: list = []
     if stockin_ids:
-        stockin_result = await db.execute(
-            select(StockIn).where(StockIn.id.in_(stockin_ids))
-        )
+        stockin_stmt = select(StockIn).where(StockIn.id.in_(stockin_ids))
+        if for_update:
+            stockin_stmt = stockin_stmt.with_for_update()
+        stockin_result = await db.execute(stockin_stmt)
         stockins = list(stockin_result.scalars().all())
     return cust_orders, stockins
 
@@ -312,22 +322,6 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
     return ctx
 
 
-async def _cleanup_pending_for(
-    db: AsyncSession, order_ids: list[int], stockin_ids: list[int],
-) -> None:
-    """幂等性前置：清理关联这些客户订单/备货记录的旧 pending 采购单。
-
-    不清理会导致重复审核产生重复订单。
-    """
-    if not (order_ids or stockin_ids):
-        return
-    await cleanup_orphan_pending_purchase_orders(
-        db, order_ids=order_ids or None, stockin_ids=stockin_ids or None
-    )
-    # 强制 flush，让 DELETE 在后续 INSERT 之前实际执行，避免唯一约束冲突
-    await db.flush()
-
-
 def _group_by_customer(records: list) -> dict[str, list]:
     groups: dict[str, list] = defaultdict(list)
     for rec in records:
@@ -357,7 +351,10 @@ async def _generate_per_customer(
         result = await one_click_generate_order(
             db, cust_items,
             customer_name=customer_name,
-            source_order_ids=[r.id for r in records],
+            # source_order_ids 只表示客户订单；备货来源由 purchase_order_sku 的
+            # typed 快照关联。混入 stockin ID 会与同号 Order 在同一 pending
+            # 唯一索引上碰撞，导致另一来源无法生成采购单。
+            source_order_ids=[r.id for r in records if isinstance(r, Order)],
             product_name='、'.join(product_names) if len(product_names) > 1 else (product_names[0] if product_names else ''),
             product_quantity=total_qty,
         )
@@ -374,75 +371,148 @@ async def _generate_per_customer(
     return generated_orders
 
 
-async def generate_purchase_orders_from_customer_orders(
-    db: AsyncSession, composite_ids: list[str], idempotency_key: str = '',
-) -> dict:
-    """根据复合 ID 列表生成采购单
+def _business_failure(code: str, message: str, missing_bom: list[dict] | None = None) -> dict:
+    """构造可由同一幂等键重新校验的预期业务结果。"""
+    return {
+        'success': False,
+        'code': code,
+        'message': message,
+        'created_count': 0,
+        'idempotent': False,
+        'orders': [],
+        'missing_bom': missing_bom or [],
+    }
 
-    composite_ids 格式为 ['order:5', 'stockin:3', ...]，确保 Order 和 StockIn
-    的 ID 不会碰撞。
 
-    idempotency_key 为可选的幂等键，当前由数据库唯一约束 uq_po_pending_dedup
-    和 endpoint 层的 IntegrityError 处理保证幂等，此参数保留用于未来扩展。
-
-    BOM 口径：**产品所有 BOM 作用域（默认BOM + 各角色）的物料都会落入采购单**，
-    每个作用域都用该 SKU 的完整数量计算（不做分摊），与物料计算器一致。
-    多角色 SKU 因此会把同一个「哈哈」按不同角色各算一次，采购明细按
-    (物料名, 规格, 单位) 合并后数量累加 —— 即该产品的**总采购需求**。
-    """
-    if not composite_ids:
-        raise ValueError('未选择任何订单')
-
-    try:
-        # savepoint 隔离：命中 uq_po_pending_dedup 时只回滚本段写入，
-        # 使调用方（端点）仍能以幂等方式回查已存在的 pending 单返回。
-        async with db.begin_nested():
-            order_ids, stockin_ids = _split_composite_ids(composite_ids)
-            cust_orders, stockins = await _load_source_records(db, order_ids, stockin_ids)
-            _assert_orders_generatable(cust_orders)
-
-            all_source_records = list(cust_orders) + list(stockins)
-            product_ids = _collect_product_ids(all_source_records)
-            pid_name_map = await _load_product_names(db, product_ids)
-            ctx = await _load_bom_context(db, product_ids)
-
-            await _cleanup_pending_for(db, order_ids, stockin_ids)
-
-            all_items = _build_material_items(all_source_records, ctx, pid_name_map)
-            if not all_items:
-                raise ValueError('所选订单的产品未配置BOM物料，无法生成采购单')
-
-            generated_orders = await _generate_per_customer(
-                db, _group_by_customer(all_source_records), ctx, pid_name_map
+def _validate_current_sources(
+    cust_orders: list, stockins: list, order_ids: list[int], stockin_ids: list[int],
+) -> dict | None:
+    """比对实读来源全集，并在生成前拒绝软删、删除或无效状态。"""
+    if {o.id for o in cust_orders} != set(order_ids) or {s.id for s in stockins} != set(stockin_ids):
+        return _business_failure('SOURCE_INVALID', '来源记录已删除或不存在，未生成采购单')
+    for order in cust_orders:
+        if order.is_deleted:
+            return _business_failure('SOURCE_INVALID', f'order:{order.id} 已删除，未生成采购单')
+        if order.status != ORDER_STATUS_PENDING_STOCK:
+            return _business_failure(
+                'SOURCE_INVALID',
+                f'order:{order.id} 当前状态为 {order.status}，仅待备货状态可生成',
             )
+    return None
 
-            # 更新订单状态
-            for o in cust_orders:
-                o.status = ORDER_STATUS_STOCKED
 
-            # 不在此处 commit，由外层 db_transaction 统一管理事务原子性
-            await db.flush()
-    except IntegrityError as e:
-        msg = str(getattr(e, 'orig', e) or '')
-        if 'uq_po_pending_dedup' not in msg:
-            raise
-        # 并发幂等：唯一约束命中，回查已存在的 pending 单并以 200 返回，避免报错
-        logger.warning('命中 uq_po_pending_dedup，回查现有 pending 单（并发幂等）', exc_info=True)
-        existing = await fetch_existing_pending_for_composite_ids(db, composite_ids)
-        return {
-            'success': True,
-            'message': f'已存在 {len(existing)} 个对应采购单（并发幂等）',
-            'created_count': len(existing),
-            'orders': existing,
-            'idempotent': True,
-        }
+def _missing_bom_products(records: list, ctx: _BomContext, names: dict[int, str]) -> list[dict]:
+    """逐 SKU 校验 BOM，不能因其他 SKU 有物料而提前生成整单。"""
+    configured = {
+        row.product_id
+        for bucket in (ctx.filling, ctx.fabric, ctx.accessory)
+        for rows in bucket.values()
+        for row in rows
+    }
+    product_ids = dict.fromkeys(pid for record in records for pid, _qty in _iter_source_skus(record))
+    return [
+        {'product_id': pid, 'product_name': names.get(pid, '未知产品')}
+        for pid in product_ids if pid not in configured
+    ]
 
+
+async def _generate_remaining_sources(db: AsyncSession, composite_ids: list[str]) -> list | dict:
+    """在当前来源行锁与全 SKU BOM 门控后调用既有生成算法。"""
+    order_ids, stockin_ids = _split_composite_ids(composite_ids)
+    cust_orders, stockins = await _load_source_records(
+        db, order_ids, stockin_ids, for_update=True,
+    )
+    invalid = _validate_current_sources(cust_orders, stockins, order_ids, stockin_ids)
+    if invalid:
+        return invalid
+    records = list(cust_orders) + list(stockins)
+    product_ids = _collect_product_ids(records)
+    names = await _load_product_names(db, product_ids)
+    ctx = await _load_bom_context(db, product_ids)
+    missing = _missing_bom_products(records, ctx, names)
+    if missing:
+        names_text = '、'.join(item['product_name'] for item in missing)
+        return _business_failure('MISSING_BOM', f'产品 {names_text} 未配置 BOM', missing)
+    generated = await _generate_per_customer(db, _group_by_customer(records), ctx, names)
+    if not generated:
+        raise RuntimeError('生成服务未产出采购单，已回滚以避免 0 单假成功')
+    for order in cust_orders:
+        order.status = ORDER_STATUS_STOCKED
+    await db.flush()
+    return generated
+
+
+def _success_result(existing: dict[str, list[dict]], generated: list) -> dict:
+    """合并已有单与真实新单，并强制成功响应的非空订单不变量。"""
+    merged: dict[int, dict] = {}
+    for order in [order for orders in existing.values() for order in orders] + list(generated):
+        merged.setdefault(int(order['id']), order)
+    orders = [merged[key] for key in sorted(merged)]
+    created_count = len(generated)
+    idempotent = created_count == 0
+    if not orders or (created_count == 0 and not idempotent):
+        raise RuntimeError('采购单生成响应违反非空订单不变量')
+    message = (
+        f'已存在 {len(orders)} 个对应采购单，无需重复下单'
+        if idempotent else f'成功生成 {created_count} 个采购订单'
+    )
     return {
         'success': True,
-        'message': f'成功生成 {len(generated_orders)} 个采购订单',
-        'created_count': len(generated_orders),
-        'orders': generated_orders,
+        'code': 'OK',
+        'message': message,
+        'created_count': created_count,
+        'idempotent': idempotent,
+        'orders': orders,
+        'missing_bom': [],
     }
+
+
+async def _generate_with_source_locks(db: AsyncSession, composite_ids: list[str]) -> dict:
+    """在来源锁内先做任意状态预查，再生成仍无关联的来源。"""
+    await acquire_source_locks(db, composite_ids)
+    try:
+        existing = await find_existing_by_source(db, composite_ids)
+    except LegacySourceAmbiguityError as exc:
+        return _business_failure('SOURCE_INVALID', str(exc))
+    remaining = [cid for cid in composite_ids if not existing.get(cid)]
+    if not remaining:
+        return _success_result(existing, [])
+    try:
+        async with db.begin_nested():
+            generated = await _generate_remaining_sources(db, remaining)
+    except IntegrityError as exc:
+        if 'uq_po_pending_dedup' not in str(getattr(exc, 'orig', exc) or ''):
+            raise
+        logger.warning('命中 pending 唯一防线，重新按 typed 来源预查', exc_info=True)
+        existing = await find_existing_by_source(db, composite_ids)
+        if any(not existing.get(cid) for cid in remaining):
+            raise
+        return _success_result(existing, [])
+    if isinstance(generated, dict):
+        return generated
+    return _success_result(existing, generated)
+
+
+async def generate_purchase_orders_from_customer_orders(
+    db: AsyncSession,
+    composite_ids: list[str],
+    idempotency_key: str = '',
+    actor_id: int | None = None,
+) -> dict:
+    """自动与人工共用的权威生成入口，提供同键重放和 typed 来源防重。"""
+    normalized = normalize_composite_ids(composite_ids)
+    fingerprint = request_hash(normalized)
+    if idempotency_key:
+        if actor_id is None:
+            raise ValueError('使用幂等键时必须提供操作者 ID')
+        await acquire_key_lock(db, actor_id, idempotency_key)
+        replay = await load_replay(db, actor_id, idempotency_key, fingerprint)
+        if replay is not None:
+            return replay
+    result = await _generate_with_source_locks(db, normalized)
+    if idempotency_key and actor_id is not None:
+        await save_result(db, actor_id, idempotency_key, fingerprint, result)
+    return result
 
 
 async def auto_generate_purchase_orders(db: AsyncSession) -> dict:

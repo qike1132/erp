@@ -2,7 +2,7 @@ import { get, post, put, del, postDownload } from './request'
 import type { MaterialCalcRow as GenMaterialCalcRow, SearchSuggestionResponse as GenSearchSuggestionResponse } from '@/types/api'
 import type {
   Product, PurchaseOrder, UnprocessedOrder, QueryParams, ExportResponse,
-  WithItems, WithRequired,
+  WithItems, WithRequired, OneClickGenerateRequest, OneClickGenerateResponse,
 } from '@/types'
 
 // === 物料计算器相关类型（与后端 schemas/purchase_center.py 对齐）===
@@ -153,7 +153,14 @@ export const purchaseApi = {
    */
   updateItemPrices: (id: number, itemPrices: { id: number; unit_price: number }[]) =>
     put(`/purchase-center/orders/${id}`, { item_prices: itemPrices }),
-  oneClickGenerate: (data: { composite_ids: string[] }) => post<{ success: boolean; message?: string; created_count?: number; orders?: { id: number; order_no: string }[]; idempotent?: boolean }>('/purchase-center/orders/one-click-generate', data),
+  oneClickGenerate: (
+    data: OneClickGenerateRequest,
+    options?: { headers?: Record<string, string> },
+  ) => post<OneClickGenerateResponse>(
+    '/purchase-center/orders/one-click-generate',
+    data,
+    { headers: options?.headers },
+  ),
   orderDetail: (id: number) => get<{ success: boolean; order?: PurchaseOrder; message?: string }>(`/purchase-center/orders/${id}`),
   completed: (params?: QueryParams) => get<{ orders: PurchaseOrder[]; total: number; pages: number; total_pages?: number }>('/purchase-center/orders/completed', params),
   exportCompleted: (params?: QueryParams) => post<CompletedOrderExportResponse>('/purchase-center/orders/completed/export', params),

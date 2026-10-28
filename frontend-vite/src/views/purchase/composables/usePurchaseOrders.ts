@@ -1,4 +1,4 @@
-import { ref, computed, reactive, watch, onScopeDispose } from 'vue'
+import { ref, computed, reactive, watch, onScopeDispose, type Ref } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -8,12 +8,15 @@ import type { ApiResponse, PurchaseOrder } from '@/types'
 /** Vue Query 缓存 key */
 export const PURCHASE_ORDERS_QUERY_KEY = 'purchase-orders-list'
 
-export function usePurchaseOrders(options?: { refetchInterval?: () => number | false }) {
+export function usePurchaseOrders(options?: {
+  refetchInterval?: () => number | false
+  enabled?: Ref<boolean>
+}) {
   const queryClient = useQueryClient()
   const page = ref(1)
   const selectedIds = ref<number[]>([])
 
-  const { data, isLoading, isFetching, isError } = useQuery({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [PURCHASE_ORDERS_QUERY_KEY, () => page.value],
     queryFn: async () => {
       try {
@@ -32,6 +35,7 @@ export function usePurchaseOrders(options?: { refetchInterval?: () => number | f
     placeholderData: keepPreviousData,
     retry: false,
     refetchInterval: options?.refetchInterval,
+    enabled: () => options?.enabled?.value ?? true,
   })
 
   // 前端加载超时兜底：后端异常导致 query 长时间停在"加载中"时，20s 后强制转错误态。
@@ -83,6 +87,11 @@ export function usePurchaseOrders(options?: { refetchInterval?: () => number | f
     return queryClient.invalidateQueries({ queryKey: [PURCHASE_ORDERS_QUERY_KEY] })
   }
 
+  async function refresh() {
+    loadingTimedOut.value = false
+    await refetch()
+  }
+
   function toggleSelection(id: number) {
     const idx = selectedIds.value.indexOf(id)
     if (idx >= 0) selectedIds.value.splice(idx, 1)
@@ -130,6 +139,7 @@ export function usePurchaseOrders(options?: { refetchInterval?: () => number | f
     selectedIds,
     allSelected,
     load,
+    refresh,
     toggleSelection,
     toggleAll,
     clearSelection,

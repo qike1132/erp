@@ -90,7 +90,18 @@
                 </td>
                 <td class="pc-td-center">
                   <span v-if="u.has_bom" class="pc-gen-tag">生成中…</span>
-                  <span v-else class="pc-gen-tag pc-gen-tag--nobom">未配置BOM，无法下单</span>
+                  <div v-else class="pc-nobom-action">
+                    <span class="pc-gen-tag pc-gen-tag--nobom">未配置BOM，无法下单</span>
+                    <button
+                      v-if="canManageBom"
+                      class="pc-btn pc-btn-primary pc-btn-sm"
+                      :disabled="resumeInFlight"
+                      @click="$emit('configureBom', u)"
+                    >
+                      {{ resumeSourceId === u.composite_id ? '继续配置 BOM' : '配置 BOM 并下单' }}
+                    </button>
+                    <span v-else class="pc-gen-tag">请联系产品管理员</span>
+                  </div>
                 </td>
               </tr>
 
@@ -189,8 +200,14 @@ const props = withDefaults(defineProps<{
   allSelected: boolean
   /** 待生成行（尚未生成采购单；同表并列在待生产行之上，无颜色区分） */
   unprocessedOrders?: UnprocessedOrder[]
+  canManageBom?: boolean
+  resumeSourceId?: string
+  resumeInFlight?: boolean
 }>(), {
   unprocessedOrders: () => [],
+  canManageBom: false,
+  resumeSourceId: '',
+  resumeInFlight: false,
 })
 
 // P2-12: 已评估——computed(() => new Set(...)) 是最优实现。
@@ -202,6 +219,7 @@ defineEmits<{
   toggleAll: [checked: boolean]
   toggleSelection: [id: number]
   completeOrder: [id: number]
+  configureBom: [row: UnprocessedOrder]
   'update:currentPage': [page: number]
   retry: []
 }>()
@@ -244,6 +262,13 @@ defineEmits<{
 
 .pc-gen-tag--nobom {
   color: var(--color-danger-600, #dc2626);
+}
+
+.pc-nobom-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
 .pc-sku-deduct {

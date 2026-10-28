@@ -41,7 +41,11 @@
     </UiDialog>
 
     <!-- BOM配置模态框 -->
-    <BomEditor ref="bomEditorRef" />
+    <BomEditor
+      ref="bomEditorRef"
+      @saved="handleBomResumeSaved"
+      @closed="handleBomResumeClosed"
+    />
 
     <!-- 编辑产品模态框 -->
     <ProductEditDialog ref="editDialogRef" :factory-options="FACTORY_OPTIONS" @open-image="openImageModal" />
@@ -71,6 +75,7 @@ import ProductForm from './components/ProductForm.vue'
 import ProductTable from './components/ProductTable.vue'
 import BomEditor from './components/BomEditor.vue'
 import ProductEditDialog from './components/ProductEditDialog.vue'
+import { useProductBomResume } from './composables/useProductBomResume'
 
 interface Product {
   id: number
@@ -92,6 +97,16 @@ const confirmDialog = useConfirmDialog()
 
 const bomEditorRef = ref<InstanceType<typeof BomEditor> | null>(null)
 const editDialogRef = ref<InstanceType<typeof ProductEditDialog> | null>(null)
+const bomResume = useProductBomResume(bomEditorRef)
+bomResume.watchResumeRoute()
+
+async function handleBomResumeSaved(payload: { product_id: number }) {
+  await bomResume.onSaved(payload.product_id)
+}
+
+async function handleBomResumeClosed() {
+  await bomResume.onClosed()
+}
 
 // ===== 删除产品 =====
 async function handleDelete(row: Product) {

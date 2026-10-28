@@ -13,6 +13,11 @@ interface ProductLike {
   name: string
 }
 
+export interface ProductListActionHooks {
+  onBomSaved?: (productId: number) => void
+  onBomClosed?: (productId: number | null) => void
+}
+
 /** loadBom 返回的物料原始记录 */
 interface BomMaterialRecord {
   id?: number
@@ -39,7 +44,10 @@ type BomScope = Record<BomCategory, BomItem[]>
  * 一个 SKU 可关联多个角色，每个角色拥有独立物料清单，点击角色标签切换 BOM）；
  * 快速复制（useBomQuickCopy）与复制对话框（useBomCopyDialog）已抽离为独立 composable。
  */
-export function useProductListActions(confirmDialog: ConfirmDialogLike) {
+export function useProductListActions(
+  confirmDialog: ConfirmDialogLike,
+  hooks: ProductListActionHooks = {},
+) {
   // ===== BOM模态框 =====
   const bomDialogVisible = ref(false)
   const bomProductName = ref('')
@@ -183,6 +191,7 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
       if (!ok) return
     }
     bomDialogVisible.value = false
+    hooks.onBomClosed?.(currentProductId.value)
   }
 
   async function openBomModal(row: ProductLike) {
@@ -345,147 +354,121 @@ export function useProductListActions(confirmDialog: ConfirmDialogLike) {
     if (selectedRole.value === role) selectedRole.value = null
   }
 
-  async function saveBom() {
-    if (bomSaving.value) return
-    // 与复制互斥是双向的：复制在途时保存同样会与随后的 reloadBom 互相覆盖
-    if (copyInFlight()) {
-      showToast('复制进行中，请稍候再保存', 'warning')
-      return
-    }
-    // 2026-10-17 审计 F-FE-WS-A-01：BOM 未加载成功时基线是空集，
-    // 提交会按「全量替换」语义删光该 SKU 整张 BOM —— 禁止保存。
-    if (bomLoadFailed.value) {
-      showToast('BOM 未加载成功，禁止保存。请关闭弹窗后重试', 'error')
-      return
-    }
-    // 校验：角色名必填
-    const invalidRole = bomRoles.value.find(r => !(r.name || '').trim())
-    if (invalidRole) {
-      showToast('请填写角色名称', 'warning')
-      return
-    }
-    // 校验：所有作用域物料必填项
-    const allItems: BomItem[] = []
-    Object.values(bomByScope).forEach(scope => allItems.push(...scope.fabric, ...scope.filling, ...scope.accessory))
-    const invalidItems = allItems.filter(item => !item.name || !item.specification || !item.unit || !item.supplier_name)
-    if (invalidItems.length > 0) {
-      showToast('请填写所有必填项（物料名称、规格型号、计量单位、默认供应商）', 'warning')
-      return
-    }
+  function allBomItems(): BomItem[] {
+    const items: BomItem[] = []
+    Object.values(bomByScope).forEach(scope => {
+      items.push(...scope.fabric, ...scope.filling, ...scope.accessory)
+    })
+    return items
+  }
 
-    // 空基线覆盖非空 BOM 的二次确认（防误清空整张 BOM）
-    if (allItems.length === 0 && currentProductId.value != null) {
-      // 2026-10-18 OCR 评审：进入异步确认前就上锁，否则双击会并发走完确认；
-      // loadBom 失败时必须解锁，否则 bomSaving 永久为 true、后续保存全部被吞。
-      bomSaving.value = true
-      let existing: { success: boolean; materials?: BomMaterialRecord[] }
-      try {
-        existing = await productApi.loadBom(currentProductId.value) as { success: boolean; materials?: BomMaterialRecord[] }
-      } catch {
-        bomSaving.value = false
-        showToast('读取现有 BOM 失败，已取消保存', 'error')
-        return
+  function validateBomItems(items: BomItem[]): boolean {
+    if (bomRoles.value.some(role => !(role.name || '').trim())) {
+      showToast('请填写角色名称', 'warning')
+      return false
+    }
+    if (items.some(item => !item.name || !item.specification || !item.unit || !item.supplier_name)) {
+      showToast('请填写所有必填项（物料名称、规格型号、计量单位、默认供应商）', 'warning')
+      return false
+    }
+    return true
+  }
+
+  async function confirmEmptyOverwrite(items: BomItem[]): Promise<boolean> {
+    if (items.length > 0 || currentProductId.value == null) return true
+    bomSaving.value = true
+    try {
+      const existing = await productApi.loadBom(currentProductId.value) as {
+        success: boolean; materials?: BomMaterialRecord[]
       }
-      // 2026-10-18 OCR 评审：复查失败（异常 / success=false / 返回体异常）都必须解锁。
-      // 此前只 catch 了异常，success=false 时 nonEmpty 恒为 false → 直接跳过确认，
-      // 等于「无法确认是否在删数据」的情况下把空 BOM 存了进去。
       if (!existing.success) {
-        bomSaving.value = false
         showToast('读取现有 BOM 失败，已取消保存', 'error')
-        return
+        return false
       }
       const nonEmpty = (existing.materials || []).some(m => (m.category || 'accessory') !== 'packaging')
-      if (nonEmpty) {
-        const ok = await confirmDialog.confirm(
-          '当前 BOM 为空，但该产品已存在物料清单。保存将删除全部物料，确定继续吗？',
-          '危险操作确认',
-          'danger',
-        )
-        if (!ok) {
-          bomSaving.value = false
-          return
-        }
-      }
+      if (!nonEmpty) return true
+      return await confirmDialog.confirm(
+        '当前 BOM 为空，但该产品已存在物料清单。保存将删除全部物料，确定继续吗？',
+        '危险操作确认',
+        'danger',
+      )
+    } catch {
+      showToast('读取现有 BOM 失败，已取消保存', 'error')
+      return false
+    } finally {
+      bomSaving.value = false
     }
+  }
 
-    // 角色负载：id（既有行）/ role_key（新建）两条路径（角色为产品私有）
-    const rolesPayload = buildRolePayload(bomRoles.value)
-
+  function buildBomSavePayload(): Record<string, unknown> {
     const fabrics: unknown[] = []
     const accessories: unknown[] = []
     const fillings: unknown[] = []
-
     for (const [key, scope] of Object.entries(bomByScope)) {
       const role = bomRoles.value.find(r => scopeKeyOf(r) === key) ?? null
-      const roleRef = role
-        ? (role.id != null ? { role_id: role.id } : { role_key: role.role_key })
-        : {}
+      const roleRef = role ? (role.id != null ? { role_id: role.id } : { role_key: role.role_key }) : {}
       scope.fabric.forEach(item => fabrics.push({
-        id: item.id,
-        fabric_name: item.name,
-        specification: item.specification,
-        unit: item.unit,
-        quantity: item.usage,
-        supplier_id: item.supplier_id,
-        supplier_name: item.supplier_name,
-        remark: item.remark,
-        category: 'fabric',
-        ...roleRef,
+        id: item.id, fabric_name: item.name, specification: item.specification,
+        unit: item.unit, quantity: item.usage, supplier_id: item.supplier_id,
+        supplier_name: item.supplier_name, remark: item.remark, category: 'fabric', ...roleRef,
       }))
       scope.accessory.forEach(item => accessories.push({
-        id: item.id,
-        accessory_name: item.name,
-        specification: item.specification,
-        unit: item.unit,
-        quantity: item.usage,
-        supplier_id: item.supplier_id,
-        supplier_name: item.supplier_name,
-        remark: item.remark,
-        category: 'accessory',
-        ...roleRef,
+        id: item.id, accessory_name: item.name, specification: item.specification,
+        unit: item.unit, quantity: item.usage, supplier_id: item.supplier_id,
+        supplier_name: item.supplier_name, remark: item.remark, category: 'accessory', ...roleRef,
       }))
       if (scope.filling.length > 0) {
         const filling = scope.filling[0]!
         fillings.push({
-          id: filling.id,
-          cotton_usage: filling.usage,
-          specification: filling.specification,
-          supplier_id: filling.supplier_id,
-          supplier_name: filling.supplier_name,
-          unit: filling.unit,
-          remark: filling.remark,
-          ...roleRef,
+          id: filling.id, cotton_usage: filling.usage, specification: filling.specification,
+          supplier_id: filling.supplier_id, supplier_name: filling.supplier_name,
+          unit: filling.unit, remark: filling.remark, ...roleRef,
         })
       }
     }
+    return {
+      fabrics, accessories, fillings, roles: buildRolePayload(bomRoles.value), packagings: [],
+      default_bom_label: defaultScopeName.value === '默认BOM' ? null : defaultScopeName.value,
+    }
+  }
 
+  async function persistBom(productId: number, payload: Record<string, unknown>): Promise<boolean> {
     try {
       bomSaving.value = true
-      const payload = {
-        fabrics,
-        accessories,
-        fillings,
-        roles: rolesPayload,
-        packagings: [],
-        default_bom_label: defaultScopeName.value === '默认BOM' ? null : defaultScopeName.value,
-      }
-      const res = (await productApi.saveBom(currentProductId.value!, payload)) as { success: boolean; error?: string }
-      if (res.success) {
-        showToast('保存成功', 'success')
-        bomDialogVisible.value = false
-        // 审计 F5-5：保存成功即把当前状态认作新的编辑基线（此刻 == 服务端状态）
-        bomBaselineSignature.value = bomStateSignature()
-        // BOM 一改，「待生成」列表的 has_bom 与后续采购单生成都变了；采购相关查询
-        // 被 persistQueryClient 持久化到 sessionStorage，不失效就会命中旧快照。
-        invalidateOrderDerivedQueries(queryClient)
-      } else {
+      const res = await productApi.saveBom(productId, payload) as { success: boolean; error?: string }
+      if (!res.success) {
         showToast(res.error || '保存失败', 'error')
+        return false
       }
+      showToast('保存成功', 'success')
+      bomDialogVisible.value = false
+      bomBaselineSignature.value = bomStateSignature()
+      invalidateOrderDerivedQueries(queryClient)
+      return true
     } catch {
       showToast('保存BOM失败', 'error')
+      return false
     } finally {
       bomSaving.value = false
     }
+  }
+
+  async function saveBom() {
+    if (bomSaving.value) return
+    if (copyInFlight()) {
+      showToast('复制进行中，请稍候再保存', 'warning')
+      return
+    }
+    if (bomLoadFailed.value) {
+      showToast('BOM 未加载成功，禁止保存。请关闭弹窗后重试', 'error')
+      return
+    }
+    const productId = currentProductId.value
+    if (productId == null) return
+    const items = allBomItems()
+    if (!validateBomItems(items) || !(await confirmEmptyOverwrite(items))) return
+    const saved = await persistBom(productId, buildBomSavePayload())
+    if (saved) hooks.onBomSaved?.(productId)
   }
 
   // ===== 快速复制 BOM（抽离至 useBomQuickCopy） =====

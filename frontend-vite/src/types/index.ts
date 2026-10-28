@@ -1,4 +1,4 @@
-import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate, BatchQueryItem as GenBatchQueryItem, InventoryResponse as GenInventoryResponse, ProductionRecordListResponse as GenProductionRecordListResponse, UserUpdate as GenUserUpdate, BackupScheduleTask as GenBackupScheduleTask } from '@/types/api'
+import type { BatchImportResult as GenBatchImportResult, FinishedStockItem as GenFinishedStockItem, UserCreate as GenUserCreate, BatchQueryItem as GenBatchQueryItem, InventoryResponse as GenInventoryResponse, ProductionRecordListResponse as GenProductionRecordListResponse, UserUpdate as GenUserUpdate, BackupScheduleTask as GenBackupScheduleTask, OneClickGenerateRequest as GenOneClickGenerateRequest, MissingBomProduct as GenMissingBomProduct } from '@/types/api'
 // ===== 基础 API 响应类型 =====
 
 /**
@@ -320,6 +320,31 @@ export interface UnprocessedOrder {
   record_type?: 'order' | 'stockin'
   items?: UnprocessedOrderItem[]
   sku_count?: number
+  source_order_id?: number
+  product_id?: number | null
+  customer_name?: string
+}
+
+export type OneClickGenerateRequest = GenOneClickGenerateRequest
+
+export interface GeneratedOrderRef {
+  id: number
+  order_no: string
+  status?: string
+}
+
+export type MissingBomProduct = GenMissingBomProduct
+
+export type OneClickGenerateCode = 'OK' | 'MISSING_BOM' | 'SOURCE_INVALID'
+
+export interface OneClickGenerateResponse {
+  success: boolean
+  message?: string
+  code?: OneClickGenerateCode
+  created_count: number
+  idempotent: boolean
+  orders: GeneratedOrderRef[]
+  missing_bom: MissingBomProduct[]
 }
 
 export interface ApprovalItem {

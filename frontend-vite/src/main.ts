@@ -71,7 +71,7 @@ if (queryPersister) {
   const [, restorePromise] = persistQueryClient({
     queryClient,
     persister: queryPersister,
-    buster: 'binfa-erp-v3',
+    buster: 'binfa-erp-v4',
     // 24h 上限；sessionStorage 随标签页关闭自动清除
     maxAge: 1000 * 60 * 60 * 24,
     // 实时任务、用户/权限、审计流水不落盘；普通列表/报表继续享受跨刷新 SWR。

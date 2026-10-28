@@ -121,11 +121,11 @@ class TestRealWorldShapes:
         existing = [{'id': 1}, {'id': 2}]
         body = success_response(
             message=f'已存在 {len(existing)} 个对应采购单（并发幂等）',
-            created_count=len(existing),
+            created_count=0,
             orders=existing,
             idempotent=True,
         )
         assert body['success'] is True
-        assert body['created_count'] == 2
+        assert body['created_count'] == 0
         assert body['idempotent'] is True
         assert body['orders'] == existing

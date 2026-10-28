@@ -210,6 +210,22 @@ describe('写操作重试（默认关闭）', () => {
     spy.mockRestore()
   })
 
+  it('post 透传幂等头但不隐式开启写重试', async () => {
+    const request = await import('@/api/request')
+    const service = (await import('@/api/request')).default
+    const spy = vi.spyOn(service, 'post').mockResolvedValue({ success: true } as never)
+
+    await request.post('/resume', { composite_ids: ['order:1'] }, {
+      headers: { 'X-Idempotency-Key': 'po-resume:test' },
+    })
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledWith('/resume', { composite_ids: ['order:1'] }, {
+      headers: { 'X-Idempotency-Key': 'po-resume:test' },
+    })
+    spy.mockRestore()
+  })
+
   it('显式 retryable:true 时才重试一次（幂等写可用）', async () => {
     vi.useFakeTimers()
     const request = await import('@/api/request')

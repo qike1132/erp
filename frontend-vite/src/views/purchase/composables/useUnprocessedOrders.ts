@@ -1,4 +1,4 @@
-import { ref, reactive, computed, watch, onScopeDispose } from 'vue'
+import { ref, reactive, computed, watch, onScopeDispose, type Ref } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import { purchaseApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -25,14 +25,17 @@ export const UNPROCESSED_QUERY_KEY = 'unprocessed-orders'
  * 「待生成」区块展示「尚未生成采购单」的客户订单 / 备货记录（未配置BOM的会在
  * 该区块标红提示）。不再包含勾选与生成动作。
  */
-export function useUnprocessedOrders(options?: { refetchInterval?: () => number | false }) {
+export function useUnprocessedOrders(options?: {
+  refetchInterval?: () => number | false
+  enabled?: Ref<boolean>
+}) {
   const queryClient = useQueryClient()
   const currentPage = ref(1)
   // 待生成行已并入「待生产订单」同一张表、不再单独分页，故一次多取以避免漏行。
   // 正常情况下待生成行≈0（订单秒级自动生成），只有缺 BOM 的会滞留，量很小。
   const perPage = ref(100)
 
-  const { data, isLoading, isFetching, isError } = useQuery({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [UNPROCESSED_QUERY_KEY, () => currentPage.value, () => perPage.value],
     queryFn: async () => {
       try {
@@ -53,6 +56,7 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
     placeholderData: keepPreviousData,
     retry: false,
     refetchInterval: options?.refetchInterval,
+    enabled: () => options?.enabled?.value ?? true,
   })
 
   // 前端加载超时兜底：后端异常导致 query 长时间停在"加载中"时（axios 层最差约 15s），
@@ -81,6 +85,11 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
   async function retry() {
     loadingTimedOut.value = false
     await queryClient.invalidateQueries({ queryKey: [UNPROCESSED_QUERY_KEY] })
+  }
+
+  async function refresh() {
+    loadingTimedOut.value = false
+    await refetch()
   }
 
   const orders = computed<UnprocessedOrder[]>(() => data.value?.orders ?? [])
@@ -120,6 +129,7 @@ export function useUnprocessedOrders(options?: { refetchInterval?: () => number 
     fetching: isFetching,
     error: loadError,
     retry,
+    refresh,
     total,
     currentPage,
     totalPages,

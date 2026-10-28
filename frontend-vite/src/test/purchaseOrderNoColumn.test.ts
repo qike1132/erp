@@ -94,6 +94,18 @@ describe('采购中心 · 待生成行（并入待生产面板同表）', () => 
     const text = mountActive([], [{ ...unprocessedRow, has_bom: false }]).text()
     expect(text).toContain('PO-20260929-0014')
     expect(text).toContain('未配置BOM，无法下单')
+    expect(text).toContain('请联系产品管理员')
+  })
+
+  it('有 product_manage 时才渲染配置入口，并按行发出续提事件', async () => {
+    const wrapper = mountActive([], [{ ...unprocessedRow, has_bom: false }])
+    await wrapper.setProps({ canManageBom: true })
+    const button = wrapper.find('.pc-nobom-action button')
+    expect(button.text()).toBe('配置 BOM 并下单')
+    await button.trigger('click')
+    expect(wrapper.emitted('configureBom')?.[0]?.[0]).toMatchObject({
+      composite_id: 'c1', has_bom: false,
+    })
   })
 })
 

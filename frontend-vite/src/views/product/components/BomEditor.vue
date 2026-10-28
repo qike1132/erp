@@ -233,183 +233,42 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useProductListActions } from '../composables/useProductListActions'
-import type { Role } from '../composables/bomTypes'
+import { useBomRoleMenu } from '../composables/useBomRoleMenu'
 import BomCopyDialog from './BomCopyDialog.vue'
 import BomSupplierSelect from './BomSupplierSelect.vue'
 
+const emit = defineEmits<{
+  saved: [payload: { product_id: number }]
+  closed: [payload: { product_id: number | null }]
+}>()
 const confirmDialog = useConfirmDialog()
-
 const {
   bomDialogVisible, bomProductName, currentBomCategory,
   bomTabs, currentBomItems, currentBomTabLabel, currentScopeLabel, currentScopeCount,
   switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
-  requestCloseBom, bomDirty,
-  bomSupplierOptions,
-  bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems, selectRole, addRole, renameRole, renameDefaultScope, removeRole,
-  quickCopyKeyword, quickCopyLoading,
-  quickCopyProgress,
+  requestCloseBom, bomDirty, bomSupplierOptions,
+  bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems,
+  selectRole, addRole, renameRole, renameDefaultScope, removeRole,
+  quickCopyKeyword, quickCopyLoading, quickCopyProgress,
   searchProductsForBom, selectAutocompleteItem, quickCopyBom,
   copyBomDialogVisible, copyBomSearchKeyword, copyBomProducts,
   copyBomSourceProductId, copyBomPreview, copyBomOverwrite, copyBomProgress,
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
-} = useProductListActions(confirmDialog)
-
-// ===== 角色页签管理：右键菜单（重命名 / 删除角色）+ 内联重命名 =====
-// 与 pattern-room RoleTabs 同形态：删除入口不再挂在页签上的「⋯」按钮，改为右键弹出。
-// ⚠️ F1b-09（2026-10-24 审计）：两套并行实现仅靠注释人工同步，已存在行为分叉
-// （本文件菜单多「重命名」、keydown 处理多一处冒泡特判）——改任一侧必须逐行
-// 核对另一侧（frontend-vite/src/views/pattern-room/components/RoleTabs.vue），
-// 或抽公共 useContextMenu/RoleTabsBase 抽象。
-type TabKey = Role | 'default'
-const roleMenu = ref<{ key: TabKey; x: number; y: number } | null>(null)
-const menuTriggerEl = ref<HTMLElement | null>(null)
-const menuItemEl = ref<HTMLButtonElement | null>(null)
-const renamingTarget = ref<TabKey | null>(null)
-const renameInput = ref('')
-const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null)
-
-/** 关闭菜单；restoreFocus 仅用于键盘路径（不抢鼠标用户刚点的位置） */
-function closeMenu(restoreFocus = false) {
-  if (!roleMenu.value) return
-  roleMenu.value = null
-  if (restoreFocus) menuTriggerEl.value?.focus()
-}
-
-/** 打开菜单（贴近视口边缘时向内收拢），并把焦点移入首个菜单项 */
-async function openRoleMenu(key: TabKey, x: number, y: number, trigger: HTMLElement) {
-  const MENU_WIDTH = 148
-  const MENU_HEIGHT = 82 // 重命名 + 分隔线 + 删除角色
-  const MARGIN = 8
-  menuTriggerEl.value = trigger
-  roleMenu.value = {
-    key,
-    // Math.max 兜底：视口比菜单还小时也要留在可点击范围内（不能出负坐标）
-    x: Math.max(MARGIN, Math.min(x, window.innerWidth - MENU_WIDTH - MARGIN)),
-    y: Math.max(MARGIN, Math.min(y, window.innerHeight - MENU_HEIGHT - MARGIN)),
-  }
-  await nextTick()
-  menuItemEl.value?.focus()
-}
-
-function onRoleContextMenu(e: MouseEvent, key: TabKey) {
-  e.preventDefault()
-  openRoleMenu(key, e.clientX, e.clientY, e.currentTarget as HTMLElement)
-}
-
-/**
- * 页签键盘入口。
- *
- * - ContextMenu 键 / Shift+F10 → 打开右键菜单（与 RoleTabs 同）；
- * - Enter / Space → 切换作用域：页签是 div（重命名时要内联渲染 input，button 不能嵌 input），
- *   所以原生按钮的「Enter/Space 触发 click」得显式补上。
- */
-function onRoleTabKeydown(e: KeyboardEvent, key: TabKey) {
-  if ((e.target as HTMLElement | null)?.closest('input')) return
-  // 内联重命名 input 是页签 div 的子节点，keydown 会冒泡到这里。参照页 RoleTabs 的页签是
-  // button、内部永远没有 input，所以那边不需要这层判断；这里必须放行——否则空格被
-  // preventDefault 吞掉，含空格的角色名（「裁床 1 组」）根本输不进去。
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault()
-    selectRole(key === 'default' ? null : key)
-    closeMenu()
-    return
-  }
-  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-    e.preventDefault()
-    const trigger = e.currentTarget as HTMLElement
-    const rect = trigger.getBoundingClientRect()
-    openRoleMenu(key, rect.left + 12, rect.bottom + 4, trigger)
-  }
-}
-
-function onMenuRename() {
-  const key = roleMenu.value?.key
-  closeMenu(true)
-  if (key === undefined) return
-  if (key === 'default') startRename('default', defaultScopeName.value)
-  else if (bomRoles.value.includes(key)) startRename(key, key.name)
-}
-
-function onMenuRemove() {
-  const key = roleMenu.value?.key
-  closeMenu(true)
-  // 菜单打开期间角色可能已被其他操作删掉，别对不存在的角色发起删除
-  if (key && key !== 'default' && bomRoles.value.includes(key)) void removeRole(key)
-}
-
-function onDocumentKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') closeMenu(true)
-}
-
-/** 窗口尺寸或滚动变化后菜单会与页签错位，直接关闭 */
-function onViewportChange() {
-  closeMenu()
-}
-
-onMounted(() => {
-  document.addEventListener('keydown', onDocumentKeydown)
-  window.addEventListener('resize', onViewportChange)
-  // scroll 不冒泡，需 capture 才能收到任意滚动容器（含键盘翻页滚动）的事件
-  window.addEventListener('scroll', onViewportChange, true)
+} = useProductListActions(confirmDialog, {
+  onBomSaved: (productId) => emit('saved', { product_id: productId }),
+  onBomClosed: (productId) => emit('closed', { product_id: productId }),
 })
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onDocumentKeydown)
-  window.removeEventListener('resize', onViewportChange)
-  window.removeEventListener('scroll', onViewportChange, true)
-})
-
-function startRename(key: TabKey, name: string) {
-  renamingTarget.value = key
-  renameInput.value = name
-  closeMenu()
-  nextTick(() => {
-    const list = Array.isArray(renameInputRef.value) ? renameInputRef.value : [renameInputRef.value]
-    list[0]?.focus()
-  })
-}
-async function commitRename() {
-  const target = renamingTarget.value
-  if (!target) return
-  const value = renameInput.value
-  // 先收起内联输入，避免 blur 再次触发；再异步提交（全局角色走 PUT，A-13）
-  renamingTarget.value = null
-  if (target === 'default') renameDefaultScope(value)
-  else await renameRole(target, value)
-}
-function cancelRename() {
-  renamingTarget.value = null
-}
-
-// ===== 添加角色：与 pattern-room RoleTabs 的「新增角色」同口径 =====
-// 常驻图标按钮 → 内联输入框；回车/失焦确认，Esc 取消；trim 后非空才新增。
-const addingRole = ref(false)
-const newRoleName = ref('')
-const roleAddInputRef = ref<HTMLInputElement | null>(null)
-
-async function startAddRole() {
-  addingRole.value = true
-  newRoleName.value = ''
-  await nextTick()
-  roleAddInputRef.value?.focus()
-}
-function commitAddRole() {
-  const name = newRoleName.value.trim()
-  if (name) addRole(name)
-  addingRole.value = false
-  newRoleName.value = ''
-}
-function cancelAddRole() {
-  addingRole.value = false
-  newRoleName.value = ''
-}
-// 收起时清空输入（兜底：Esc 后 input 被卸载，不一定再触发 blur）
-watch(addingRole, (v) => {
-  if (!v) newRoleName.value = ''
+const {
+  roleMenu, menuItemEl, renamingTarget, renameInput, renameInputRef,
+  addingRole, newRoleName, roleAddInputRef,
+  closeMenu, onRoleContextMenu, onRoleTabKeydown, onMenuRename, onMenuRemove,
+  commitRename, cancelRename, startAddRole, commitAddRole, cancelAddRole,
+} = useBomRoleMenu({
+  bomRoles, defaultScopeName, selectRole, addRole,
+  renameRole, renameDefaultScope, removeRole,
 })
 
 defineExpose({ open: openBomModal, bomDirty })

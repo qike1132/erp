@@ -83,6 +83,7 @@ from fastapi_app.shared_models.purchase_order import (
     PurchaseOrderSku,
     PurchaseOrderStatus,
 )
+from fastapi_app.shared_models.purchase_order_generate_attempt import PurchaseOrderGenerateAttempt
 from fastapi_app.shared_models.purchase_plan import PurchasePlan, PurchasePlanDetail, ShipmentRecord
 from fastapi_app.shared_models.staging_order import StagingOrder
 from fastapi_app.shared_models.staging_stock_in import StagingStockIn
@@ -154,6 +155,7 @@ __all__ = [
     'ProductionPlan',
     'ProductionPlanLog',
     'PurchaseOrder',
+    'PurchaseOrderGenerateAttempt',
     'PurchaseOrderItem',
     'PurchaseOrderSku',
     'PurchaseOrderStatus',

@@ -1396,6 +1396,11 @@ export interface MaterialRegistrationUpdate {
   items?: Array<Record<string, unknown>> | null
 }
 
+export interface MissingBomProduct {
+  product_id: number
+  product_name: string
+}
+
 export interface MobileDashboardData {
   stock: MobileStockData
   production: MobileProductionData
@@ -2223,10 +2228,12 @@ export interface ProjectUpdateRequest {
 export interface PurchaseOrderActionResponse {
   success?: boolean
   message?: string | null
+  code?: string | null
   orders?: Array<Record<string, unknown>> | null
   order?: Record<string, unknown> | null
   created_count?: number | null
   idempotent?: boolean | null
+  missing_bom?: Array<MissingBomProduct> | null
 }
 
 export interface PurchaseOrderCreateRequest {
