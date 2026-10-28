@@ -61,11 +61,16 @@ async def batch_delete_purchase_orders(db: AsyncSession, order_ids: list, userna
     deleted_info = []
     deleted_order_nos: list[str] = []
     try:
+        count_rows = (await db.execute(
+            select(PurchaseOrderItem.order_id, func.count(PurchaseOrderItem.id))
+            .where(PurchaseOrderItem.order_id.in_([o.id for o in orders_to_delete]))
+            .group_by(PurchaseOrderItem.order_id)
+        )).all()
+        item_counts: dict[int, int] = {
+            int(order_id): int(count) for order_id, count in count_rows
+        }
         for order in orders_to_delete:
-            count_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
-                select(func.count(PurchaseOrderItem.id)).where(PurchaseOrderItem.order_id == order.id)
-            )
-            item_count = count_result.scalar()
+            item_count = item_counts.get(order.id, 0)
             deleted_info.append({
                 'order_no': order.order_no,
                 'supplier_name': order.supplier_name or '',

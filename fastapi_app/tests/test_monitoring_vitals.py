@@ -83,6 +83,20 @@ class TestMemoryStats:
         assert len(monitoring._vital_stats) <= _MAX_KEYS
 
 
+class TestVitalInputBounds:
+    def test_overlong_and_non_finite_values_are_rejected(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            _entry(name='x' * 17)
+        with pytest.raises(ValidationError):
+            _entry(rating='r' * 25)
+        with pytest.raises(ValidationError):
+            _entry(nav='n' * 25)
+        with pytest.raises(ValidationError):
+            _entry(value=float('nan'))
+
+
 class TestPersistFailSafe:
     """落库失败必须不影响上报链路"""
 

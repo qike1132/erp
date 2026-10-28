@@ -133,7 +133,9 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                             domain='stock',
                             payload={
                                 'customer': customer,
+                                'product_id': product_id,
                                 'product_name': product_name,
+                                'factory': getattr(product, 'factory', None),
                                 'plan_month': now_month,
                             },
                         ))
@@ -158,6 +160,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                             'change_type': '出库',
                             'quantity': total_qty,
                             'current_stock': product.current_stock,
+                            'factory': getattr(product, 'factory', None),
                         },
                         context="批量出库事件发布",
                     )

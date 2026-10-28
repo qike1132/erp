@@ -113,13 +113,13 @@ async def test_batch_delete_without_registration_succeeds() -> None:
     db.execute.side_effect = [
         _Scalars([_order(1, 'PO-1'), _order(2, 'PO-2')]),
         _Rows([]),
-        _Scalar(2),
-        _Scalar(3),
+        _Rows([(1, 2), (2, 3)]),
     ]
 
     result = await batch_delete_purchase_orders(db, [1, 2])
 
     assert result['deleted_count'] == 2
+    assert db.execute.await_count == 3, '明细计数必须一次 GROUP BY，不得逐单查询'
     assert db.delete.await_count == 2
     assert db.flush.await_count == 1
 
@@ -129,7 +129,7 @@ async def test_batch_delete_translates_integrity_error_to_conflict() -> None:
     db.execute.side_effect = [
         _Scalars([_order(1, 'PO-1')]),
         _Rows([]),
-        _Scalar(0),
+        _Rows([(1, 0)]),
     ]
     db.flush.side_effect = IntegrityError('DELETE', {}, Exception('fk'))
 

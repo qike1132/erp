@@ -12,7 +12,7 @@ import json
 import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy import Row, func, select, update
 from sqlalchemy.engine import CursorResult
@@ -93,6 +93,43 @@ EVENT_DISPLAY_MESSAGES = {
     "case_stock_changed": "皮套仓储数据已更新",
 }
 
+# 实时事件的服务端授权边界。未知事件默认拒绝，新增事件必须同步登记权限码。
+_EVENT_REQUIRED_PERMISSIONS: dict[str, tuple[str, ...]] = {
+    StockEvent.STOCK_CHANGED: (
+        'stock_view', 'stockin_manage', 'stockout_manage', 'order_manage',
+        'production_plan_view', 'production_plan_manage',
+        'production_summary_view', 'production_summary_manage',
+        'production_summary_view_filling', 'production_summary_view_handcraft',
+        'production_summary_view_packaging', 'production_summary_manage_filling',
+        'production_summary_manage_handcraft', 'production_summary_manage_packaging',
+    ),
+    StockEvent.SHIPMENT_PLAN_UPLOADED: (
+        'production_plan_view', 'production_plan_manage', 'stockout_manage',
+    ),
+    StockEvent.ORDER_LOCKED: ('order_manage',),
+    StockEvent.ORDER_UNLOCKED: ('order_manage',),
+    StockEvent.ORDER_CREATED: (
+        'order_manage', 'beile_order_view', 'purchase_center_manage',
+        'production_plan_view', 'production_plan_manage', 'stockout_manage',
+    ),
+    StockEvent.ORDER_UPDATED: (
+        'order_manage', 'beile_order_view', 'purchase_center_manage',
+        'production_plan_view', 'production_plan_manage', 'stockout_manage',
+    ),
+    StockEvent.ORDER_DELETED: (
+        'order_manage', 'beile_order_view', 'purchase_center_manage',
+        'production_plan_view', 'production_plan_manage', 'stockout_manage',
+    ),
+    StockEvent.PURCHASE_ORDER_CREATED: ('purchase_center_manage', 'product_manage'),
+    StockEvent.BATCH_NO_UPDATED: ('batch_manage', 'order_manage'),
+    StockEvent.BATCH_COMPLETED: ('batch_manage', 'order_manage'),
+    StockEvent.SHIPMENT_COMPLETED: ('order_manage', 'beile_order_view', 'stockout_manage'),
+    StockEvent.MATERIAL_UPDATED: ('product_manage', 'material_registration'),
+    StockEvent.CASE_STOCK_CHANGED: ('case_manage',),
+}
+_SUPER_ONLY_EVENTS = {StockEvent.APPROVAL_REQUESTED, StockEvent.APPROVAL_RESOLVED}
+_WS_SEND_TIMEOUT_SECONDS = 2.0
+
 # 共享异步 Redis 客户端已上提至 core.redis_client（批次1 解耦 core↔services）：
 # 本模块保留兼容转发供既有调用方渐进迁移；新代码请直接使用 core.redis_client。
 
@@ -150,29 +187,34 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: dict[int, list] = {}
+        self._principals: dict[object, Any] = {}
         self._redis_task: asyncio.Task | None = None
         self._async_redis = None
         self._pubsub = None
         self._redis_url = None
 
-    async def connect(self, websocket, user_id: int):
+    async def connect(self, websocket, user_id: int, *, principal=None):
         await websocket.accept()
-        self._register(websocket, user_id)
+        self._register(websocket, user_id, principal)
 
-    def connect_existing(self, websocket, user_id: int):
-        self._register(websocket, user_id)
+    def connect_existing(self, websocket, user_id: int, *, principal=None):
+        self._register(websocket, user_id, principal)
 
-    def _register(self, websocket, user_id: int):
+    def _register(self, websocket, user_id: int, principal=None):
         if user_id not in self.active_connections:
             self.active_connections[user_id] = []
         self.active_connections[user_id].append(websocket)
+        self._principals[websocket] = principal
         logger.info("WebSocket 连接: user_id=%s, 当前连接数=%s", user_id, len(self.active_connections))
 
+    def update_principal(self, websocket, principal) -> None:
+        """周期性复核后刷新权限与工厂范围，避免长连接长期使用旧授权。"""
+        if websocket in self._principals:
+            self._principals[websocket] = principal
+
     def disconnect(self, websocket, user_id: int):
-        # 必须幂等：本方法与端点 ws.py 的 _safe_disconnect 都会移除同一个 socket，
-        # 广播的 `await ws.send_json` 期间客户端断开时二者交错 → 二次 remove 抛 ValueError。
-        # 该 ValueError 不在 INFRA_EXCEPTIONS 内，会**逃出 _listen_loop 的 while True**
-        # 打死监听任务且不重连 —— 此后所有实时通知静默失效直到进程重启（2026-10-02 P3 审计）。
+        # 必须幂等：广播发送失败与端点 finally 可重复进入本方法。
+        self._principals.pop(websocket, None)
         conns = self.active_connections.get(user_id)
         if conns is not None:
             with contextlib.suppress(ValueError):
@@ -181,27 +223,61 @@ class ConnectionManager:
                 del self.active_connections[user_id]
         logger.info("WebSocket 断开: user_id=%s, 当前连接数=%s", user_id, len(self.active_connections))
 
+    def _event_allowed(self, websocket, event: dict) -> bool:
+        principal = self._principals.get(websocket)
+        if principal is None:
+            return False
+        event_type = event.get('type', '')
+        is_super = bool(getattr(principal, 'is_super', False))
+        if event_type in _SUPER_ONLY_EVENTS:
+            return is_super
+        required = _EVENT_REQUIRED_PERMISSIONS.get(event_type)
+        if not required:
+            return False
+        if not is_super and not any(principal.has_permission(code) for code in required):
+            return False
+
+        raw_data = event.get('data')
+        data: dict = raw_data if isinstance(raw_data, dict) else {}
+        factories = data.get('factories')
+        if factories is None:
+            factory = data.get('factory')
+            factories = [factory] if factory else []
+        user_factory = getattr(principal, 'factory', None)
+        return is_super or not (user_factory and factories and user_factory not in factories)
+
+    async def _send_to_targets(self, targets: list[tuple[int, Any]], event: dict) -> None:
+        """并发发送并限制单连接等待；慢客户端不得堵住 Redis 监听协程。"""
+        if not targets:
+            return
+
+        async def _send(user_id: int, websocket):
+            try:
+                await asyncio.wait_for(
+                    websocket.send_json(event), timeout=_WS_SEND_TIMEOUT_SECONDS,
+                )
+                return None
+            except (RuntimeError, TimeoutError, OSError):
+                logger.debug("WebSocket 发送失败，标记断开: user_id=%s", user_id, exc_info=True)
+                return user_id, websocket
+
+        disconnected = await asyncio.gather(*(_send(uid, ws) for uid, ws in targets))
+        for item in disconnected:
+            if item is not None:
+                self.disconnect(item[1], item[0])
+
     async def broadcast_event(self, event: dict):
-        snapshot = list(self.active_connections.items())
-        disconnected = []
-        for user_id, connections in snapshot:
-            for ws in connections:
-                try:
-                    await ws.send_json(event)
-                except RuntimeError:
-                    logger.debug("WebSocket 广播发送失败，标记断开: user_id=%s", user_id)
-                    disconnected.append((user_id, ws))
-        for user_id, ws in disconnected:
-            self.disconnect(ws, user_id)
+        targets = [
+            (user_id, ws)
+            for user_id, connections in list(self.active_connections.items())
+            for ws in list(connections)
+            if self._event_allowed(ws, event)
+        ]
+        await self._send_to_targets(targets, event)
 
     async def send_to_user(self, user_id: int, event: dict):
-        connections = self.active_connections.get(user_id, [])
-        for ws in list(connections):
-            try:
-                await ws.send_json(event)
-            except RuntimeError:
-                logger.debug("WebSocket 定向发送失败，断开: user_id=%s", user_id)
-                self.disconnect(ws, user_id)
+        targets = [(user_id, ws) for ws in list(self.active_connections.get(user_id, []))]
+        await self._send_to_targets(targets, event)
 
     def _build_redis_url(self):
         from fastapi_app.core.config import settings

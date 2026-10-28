@@ -19988,7 +19988,7 @@
           "notifications"
         ],
         "summary": "Create Websocket Ticket",
-        "description": "签发 30 秒有效的一次性 WebSocket 认证票据。",
+        "description": "签发 30 秒有效的一次性票据，并继承原会话撤销/过期语义。",
         "operationId": "create_websocket_ticket_api_v1_notifications_ws_ticket_get",
         "responses": {
           "200": {
@@ -38021,6 +38021,7 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 16,
             "title": "Name"
           },
           "value": {
@@ -38029,6 +38030,7 @@
           },
           "rating": {
             "type": "string",
+            "maxLength": 24,
             "title": "Rating"
           },
           "delta": {
@@ -38037,10 +38039,12 @@
           },
           "navigationType": {
             "type": "string",
+            "maxLength": 24,
             "title": "Navigationtype"
           },
           "timestamp": {
             "type": "integer",
+            "minimum": 0.0,
             "title": "Timestamp"
           }
         },
