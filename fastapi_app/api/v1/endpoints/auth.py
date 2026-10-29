@@ -539,6 +539,9 @@ async def upload_file(
         original_filename=file.filename,
         db=db,
         uploader_id=user_id,
+        # 产品列表按 原图key + .thumb.webp 读取缩略图；/auth/upload 是产品新增/编辑
+        # 的图片入口，必须同步生成，否则只存原图，刷新后列表出现 404。
+        generate_thumbnail=True,
     )
     return success_response(url=result["url"], filename=result["storage_key"], file_id=result["id"])
 

@@ -30,6 +30,18 @@ async def _upload(client, filename: str, content: bytes, content_type: str = 'im
 
 
 @pytest.mark.asyncio
+async def test_upload_generates_thumbnail_variants(client):
+    """产品图片上传必须同步生成缩略图，避免列表按后缀派生 URL 后 404。"""
+    save = AsyncMock(return_value=SAVE_RESULT)
+    with patch('fastapi_app.services.storage_service.save_upload', new=save):
+        resp = await _upload(client, 'product-image.png', PNG_BYTES)
+
+    assert resp.status_code == 200
+    assert save.await_args is not None
+    assert save.await_args.kwargs['generate_thumbnail'] is True
+
+
+@pytest.mark.asyncio
 async def test_upload_pasted_filename_with_extension_ok(client):
     """前端补名后的粘贴文件名（pasted-<ts>.png）应上传成功"""
     with patch('fastapi_app.services.storage_service.save_upload', new=AsyncMock(return_value=SAVE_RESULT)):
