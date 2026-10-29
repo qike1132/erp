@@ -100,7 +100,7 @@
                     <div
                       class="pc-bom-status"
                       :class="{
-                        'pc-bom-status--active': isActiveBom(u) && configuredSku(u) > 0,
+                        'pc-bom-status--active': isActiveBom(u),
                         'pc-bom-status--locked': !canManageBom,
                       }"
                     >
@@ -115,6 +115,7 @@
                     <button
                       v-if="canManageBom"
                       class="pc-bom-cta"
+                      type="button"
                       :class="{ 'pc-bom-cta--secondary': isActiveBom(u) }"
                       :disabled="resumeInFlight"
                       @click="$emit('configureBom', u)"

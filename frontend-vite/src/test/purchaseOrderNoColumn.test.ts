@@ -140,6 +140,8 @@ describe('采购中心 · 待生成行（并入待生产面板同表）', () => 
     const button = wrapper.find('.pc-bom-cta')
     expect(button.text()).toBe('继续配置 BOM')
     expect(button.classes()).toContain('pc-bom-cta--secondary')
+    expect(wrapper.find('.pc-bom-status--active').exists()).toBe(true)
+    expect(button.attributes('type')).toBe('button')
   })
 
   it('BOM 已齐备时只显示生成状态，不再渲染按钮', () => {
