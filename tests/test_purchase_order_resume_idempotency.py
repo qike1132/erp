@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.core.pg_locks import acquire_advisory_lock_async, number_lock_key
+from fastapi_app.services import purchase_order_generate as generate_module
 from fastapi_app.services.purchase_order_generate import (
     generate_purchase_orders_from_customer_orders,
 )
@@ -129,6 +130,21 @@ async def _linked_po(
     return po
 
 
+async def _legacy_po(db: AsyncSession, source_id: int) -> PurchaseOrder:
+    """模拟无 typed SKU 快照、只有裸 JSON 的历史采购单。"""
+    po = PurchaseOrder(
+        order_no=_unique("RESUME-LEGACY")[:30],
+        customer_name="续提测试客户",
+        supplier_name="续提测试供应商",
+        status="completed",
+        source_order_ids=json.dumps([source_id]),
+        product_quantity=3,
+    )
+    db.add(po)
+    await db.flush()
+    return po
+
+
 async def _generate(
     db: AsyncSession,
     composite_ids: list[str],
@@ -158,6 +174,100 @@ async def test_same_key_replays_first_success_without_new_po(
     assert second["created_count"] == 0
     assert "复用首次生成结果" in second["message"]
     assert [o["id"] for o in second["orders"]] == [o["id"] for o in first["orders"]]
+
+
+async def test_cross_transaction_same_key_replays_after_commit(
+    async_db_session, test_product, test_engine, admin_user
+):
+    """模拟首次已提交但响应丢失：新事务同键只能重放，不得重新生成。"""
+    db = async_db_session
+    await _ensure_bom(db, test_product.id)
+    order = await _new_order(db, test_product.id)
+    composite_id = f"order:{order.id}"
+    key = _unique("resume-cross-tx")
+    await db.commit()
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with factory() as first_session:
+        async with first_session.begin():
+            first = await _generate(
+                first_session, [composite_id], key=key, actor_id=admin_user.id,
+            )
+    async with factory() as retry_session:
+        async with retry_session.begin():
+            second = await _generate(
+                retry_session, [composite_id], key=key, actor_id=admin_user.id,
+            )
+
+    assert first["created_count"] == 1
+    assert second["idempotent"] is True and second["created_count"] == 0
+    assert "复用首次生成结果" in second["message"]
+    assert [o["id"] for o in second["orders"]] == [o["id"] for o in first["orders"]]
+
+
+async def test_legacy_ambiguous_source_fails_closed(
+    async_db_session, test_product,
+):
+    """同号 Order/StockIn 且历史单无 typed SKU 时不得猜测来源。"""
+    db = async_db_session
+    await _ensure_bom(db, test_product.id)
+    source_id = 800_000 + (uuid4().int % 10_000)
+    order = await _new_order(db, test_product.id, order_id=source_id)
+    await _new_stockin(db, test_product.id, stockin_id=source_id)
+    await _legacy_po(db, source_id)
+
+    result = await _generate(db, [f"order:{source_id}"])
+
+    assert result["success"] is False
+    assert result["code"] == "SOURCE_INVALID"
+    assert result["created_count"] == 0
+    assert order.status == "待备货"
+
+
+async def test_zero_generated_orders_roll_back(
+    async_db_session, test_product, monkeypatch,
+):
+    """算法未产出订单时必须抛错回滚，不得返回成功 0 单。"""
+    db = async_db_session
+    await _ensure_bom(db, test_product.id)
+    order = await _new_order(db, test_product.id)
+
+    async def _empty(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(generate_module, "_generate_per_customer", _empty)
+
+    with pytest.raises(RuntimeError, match="0 单"):
+        await _generate(db, [f"order:{order.id}"])
+    assert order.status == "待备货"
+    count = await db.scalar(
+        select(func.count()).select_from(PurchaseOrderSku).where(
+            PurchaseOrderSku.source_record_type == "order",
+            PurchaseOrderSku.source_order_id == order.id,
+        )
+    )
+    assert count == 0
+
+
+async def test_non_pending_source_is_invalid_without_writes(
+    async_db_session, test_product,
+):
+    db = async_db_session
+    await _ensure_bom(db, test_product.id)
+    order = await _new_order(db, test_product.id)
+    order.status = "已备货"
+    await db.flush()
+
+    result = await _generate(db, [f"order:{order.id}"])
+
+    assert result["success"] is False and result["code"] == "SOURCE_INVALID"
+    count = await db.scalar(
+        select(func.count()).select_from(PurchaseOrderSku).where(
+            PurchaseOrderSku.source_record_type == "order",
+            PurchaseOrderSku.source_order_id == order.id,
+        )
+    )
+    assert count == 0
 
 
 async def test_same_key_different_payload_conflicts_before_writing(
@@ -355,6 +465,37 @@ async def test_concurrent_generators_create_only_one_po(
             select(func.count(func.distinct(PurchaseOrderSku.po_id))).where(
                 PurchaseOrderSku.source_record_type == "order",
                 PurchaseOrderSku.source_order_id == order.id,
+            )
+        )
+    assert count == 1
+
+
+async def test_concurrent_stockin_generators_use_source_lock_not_unique_index(
+    async_db_session, test_product, test_engine
+):
+    """备货来源的 source_order_ids 为 NULL，去重只能依赖 typed 预查 + 来源锁。"""
+    db = async_db_session
+    await _ensure_bom(db, test_product.id)
+    stockin_id = 700_000 + (uuid4().int % 10_000)
+    stockin = await _new_stockin(db, test_product.id, stockin_id=stockin_id)
+    composite_id = f"stockin:{stockin.id}"
+    await db.commit()
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def run_one() -> dict:
+        async with factory() as session:
+            async with session.begin():
+                return await _generate(session, [composite_id])
+
+    first, second = await asyncio.gather(run_one(), run_one())
+
+    assert first["orders"][0]["id"] == second["orders"][0]["id"]
+    assert first["created_count"] + second["created_count"] == 1
+    async with factory() as check:
+        count = await check.scalar(
+            select(func.count(func.distinct(PurchaseOrderSku.po_id))).where(
+                PurchaseOrderSku.source_record_type == "stockin",
+                PurchaseOrderSku.source_order_id == stockin.id,
             )
         )
     assert count == 1

@@ -218,7 +218,7 @@ async def _load_source_records(
     if order_ids:
         order_stmt = select(Order).options(selectinload(Order.items)).where(Order.id.in_(order_ids))
         if for_update:
-            order_stmt = order_stmt.with_for_update()
+            order_stmt = order_stmt.with_for_update().order_by(Order.id)
         cust_result = await db.execute(order_stmt)
         cust_orders = list(cust_result.scalars().all())
 
@@ -226,7 +226,7 @@ async def _load_source_records(
     if stockin_ids:
         stockin_stmt = select(StockIn).where(StockIn.id.in_(stockin_ids))
         if for_update:
-            stockin_stmt = stockin_stmt.with_for_update()
+            stockin_stmt = stockin_stmt.with_for_update().order_by(StockIn.id)
         stockin_result = await db.execute(stockin_stmt)
         stockins = list(stockin_result.scalars().all())
     return cust_orders, stockins
@@ -450,7 +450,7 @@ def _success_result(existing: dict[str, list[dict]], generated: list) -> dict:
     orders = [merged[key] for key in sorted(merged)]
     created_count = len(generated)
     idempotent = created_count == 0
-    if not orders or (created_count == 0 and not idempotent):
+    if not orders:
         raise RuntimeError('采购单生成响应违反非空订单不变量')
     message = (
         f'已存在 {len(orders)} 个对应采购单，无需重复下单'
@@ -543,6 +543,12 @@ async def auto_generate_purchase_orders(db: AsyncSession) -> dict:
     for customer, composite_ids in groups.items():
         try:
             result = await generate_purchase_orders_from_customer_orders(db, composite_ids)
+            if result.get('success') is False:
+                logger.warning(
+                    '采购订单自动生成未完成（客户=%s，来源=%s，code=%s）：%s',
+                    customer, composite_ids, result.get('code'), result.get('message'),
+                )
+                continue
             generated_count += int(result.get('created_count') or 0)
         except Exception:  # broad-except: 单组失败隔离，其余组继续（兜底任务会重试）
             logger.exception('采购订单自动生成失败（客户=%s，来源=%s）', customer, composite_ids)

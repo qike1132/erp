@@ -17,7 +17,7 @@ def upgrade() -> None:
     op.create_table(
         'purchase_order_generate_attempt',
         sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('actor_id', sa.Integer(), nullable=False),
+        sa.Column('actor_id', sa.Integer(), nullable=False, comment='发起人工生成的用户ID'),
         sa.Column('idempotency_key', sa.String(length=64), nullable=False),
         sa.Column('request_hash', sa.String(length=64), nullable=False),
         sa.Column('response_body', postgresql.JSONB(astext_type=sa.Text()), nullable=True),

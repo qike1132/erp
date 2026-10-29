@@ -64,6 +64,15 @@ function errorStatus(error: unknown): number | null {
   return typeof status === 'number' ? status : null
 }
 
+function resumeErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } } | null)?.response?.data?.detail
+  if (detail && typeof detail === 'object') {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === 'string' && message) return message
+  }
+  return getErrorMessage(error, fallback)
+}
+
 function trustedSuccess(response: OneClickGenerateResponse): boolean {
   if (!response.success || response.code !== 'OK' || !Array.isArray(response.orders)) return false
   if (response.orders.length === 0 || typeof response.created_count !== 'number') return false
@@ -232,10 +241,10 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
     } catch (error) {
       const status = errorStatus(error)
       if (status === 403 || status === 409) {
-        await finish(attempt, 'ABORTED', getErrorMessage(error, '续提被服务器拒绝'))
+        await finish(attempt, 'ABORTED', resumeErrorMessage(error, '续提被服务器拒绝'))
         return
       }
-      attempt.last_error = getErrorMessage(error, '续提失败，请手动重试')
+      attempt.last_error = resumeErrorMessage(error, '续提失败，请手动重试')
       persist(attempt, 'RESUME_FAILED')
       message.value = attempt.last_error
     }

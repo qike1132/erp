@@ -43,7 +43,7 @@ function harness(options: {
 } = {}) {
   const generate = vi.fn().mockResolvedValue({
     success: true, code: 'OK', created_count: 1, idempotent: false,
-    orders: [{ id: 88, order_no: 'PO-88' }],
+    orders: [{ id: 88, order_no: 'PO-88' }], missing_bom: [],
   })
   const push = vi.fn().mockResolvedValue(undefined)
   const replace = vi.fn().mockResolvedValue(undefined)
@@ -174,6 +174,81 @@ describe('采购返回：先恢复并强制刷新，再决定是否写', () => {
     expect(readResumeAttempt(ATTEMPT_ID, 7)).toBeNull()
     await h.resume.initializeFromRoute()
     expect(h.generate).not.toHaveBeenCalled()
+    h.scope.stop()
+  })
+
+  it('已有采购单/同键重放显示无需重复下单，不伪造新增', async () => {
+    const h = harness()
+    h.generate.mockResolvedValue({
+      success: true, code: 'OK', created_count: 0, idempotent: true,
+      orders: [{ id: 88, order_no: 'PO-88' }], missing_bom: [],
+    })
+    await h.resume.initializeFromRoute()
+    expect(h.resume.phase.value).toBe('DONE')
+    expect(h.resume.message.value).toContain('无需重复下单')
+    expect(readResumeAttempt(ATTEMPT_ID, 7)).toBeNull()
+    h.scope.stop()
+  })
+
+  it('后端返回 MISSING_BOM 时更新缺失 SKU，不自动连跳', async () => {
+    const h = harness()
+    h.generate.mockResolvedValue({
+      success: false, code: 'MISSING_BOM', created_count: 0, idempotent: false,
+      orders: [], missing_bom: [{ product_id: 6, product_name: '产品六' }],
+    })
+    await h.resume.initializeFromRoute()
+    expect(h.resume.phase.value).toBe('WAITING_NEXT_BOM')
+    expect(h.resume.pendingProducts.value).toEqual([{ product_id: 6, product_name: '产品六' }])
+    expect(h.push).not.toHaveBeenCalled()
+    h.scope.stop()
+  })
+
+  it('后端返回 SOURCE_INVALID 时中止并消费上下文', async () => {
+    const h = harness()
+    h.generate.mockResolvedValue({
+      success: false, code: 'SOURCE_INVALID', message: '来源已删除',
+      created_count: 0, idempotent: false, orders: [], missing_bom: [],
+    })
+    await h.resume.initializeFromRoute()
+    expect(h.resume.phase.value).toBe('ABORTED')
+    expect(h.resume.message.value).toContain('来源已删除')
+    expect(readResumeAttempt(ATTEMPT_ID, 7)).toBeNull()
+    h.scope.stop()
+  })
+
+  it('409 的结构化 detail 显示可读 message，而不是 [object Object]', async () => {
+    const h = harness()
+    h.generate.mockRejectedValue({
+      response: {
+        status: 409,
+        data: { detail: { code: 'IDEMPOTENCY_CONFLICT', message: '同键不同来源' } },
+      },
+    })
+    await h.resume.initializeFromRoute()
+    expect(h.resume.phase.value).toBe('ABORTED')
+    expect(h.resume.message.value).toContain('同键不同来源')
+    expect(h.resume.message.value).not.toContain('[object Object]')
+    h.scope.stop()
+  })
+
+  it('成功但 0 单且非幂等时判为不可信响应，保留同键可人工重试', async () => {
+    const h = harness()
+    h.generate.mockResolvedValue({
+      success: true, code: 'OK', created_count: 0, idempotent: false,
+      orders: [{ id: 88, order_no: 'PO-88' }], missing_bom: [],
+    })
+    await h.resume.initializeFromRoute()
+    expect(h.resume.phase.value).toBe('RESUME_FAILED')
+    expect(readResumeAttempt(ATTEMPT_ID, 7)?.phase).toBe('RESUME_FAILED')
+    h.scope.stop()
+  })
+
+  it('来源行已消失时仍按同来源续提，不把消失当成功或跳过', async () => {
+    const h = harness()
+    h.unprocessed.orders = []
+    await h.resume.initializeFromRoute()
+    expect(h.generate).toHaveBeenCalledTimes(1)
+    expect(h.resume.phase.value).toBe('DONE')
     h.scope.stop()
   })
 })

@@ -13,6 +13,7 @@
 4. 生成后失效采购缓存并广播 ``purchase_order_created``（无生成则不广播）；
 5. 候选只包含「全部 SKU 有 BOM」的未处理单（缺 BOM 的单不生成）。
 """
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -438,3 +439,34 @@ async def test_existing_pending_lookup_filters_in_sql():
     sql = str(stmt.compile())
     assert 'JSONB' in sql.upper()
     assert '@>' in sql, f'匹配未下推到 SQL：{sql}'
+
+
+async def test_auto_generation_logs_expected_business_failure(monkeypatch, caplog):
+    """预期业务失败是 dict 而非异常；自动任务仍必须留下可定位的 warning。"""
+    from fastapi_app.services.purchase_order_generate import auto_generate_purchase_orders
+
+    candidates = AsyncMock(return_value=[{
+        'composite_id': 'order:7', 'customer': '客户甲', 'order_no': 'SO-7',
+        'record_type': 'order', 'source_id': 7,
+    }])
+    generate = AsyncMock(return_value={
+        'success': False, 'code': 'SOURCE_INVALID', 'message': '历史来源歧义',
+        'created_count': 0, 'idempotent': False, 'orders': [], 'missing_bom': [],
+    })
+    monkeypatch.setattr(
+        'fastapi_app.services.purchase._unprocessed.list_auto_generate_candidates',
+        candidates,
+    )
+    monkeypatch.setattr(
+        'fastapi_app.services.purchase_order_generate.'
+        'generate_purchase_orders_from_customer_orders',
+        generate,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = await auto_generate_purchase_orders(AsyncMock())
+
+    assert result == {'success': True, 'generated_count': 0, 'customer_count': 1}
+    assert 'SOURCE_INVALID' in caplog.text
+    assert '历史来源歧义' in caplog.text
+    generate.assert_awaited_once()
