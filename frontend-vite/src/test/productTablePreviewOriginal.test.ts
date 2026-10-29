@@ -92,13 +92,16 @@ describe('产品列表点图预览', () => {
 
     let img = wrapper.find('.pd-thumb-img')
     expect(img.attributes('src')).toBe('/static/uploads/x.webp.thumb.webp')
-    await img.trigger('error')
+    // 非冒泡 error：证明父容器 .pd-thumb-box 的 capture 监听能收到；
+    // 旧实现只改状态、等下一轮渲染才换 src，这里会在 immediate 断言变红。
+    img.element.dispatchEvent(new Event('error', { bubbles: false }))
+    expect(img.element.getAttribute('src')).toBe('/static/uploads/x.webp')
     await nextTick()
     img = wrapper.find('.pd-thumb-img')
     expect(img.attributes('src')).toBe('/static/uploads/x.webp')
     expect(wrapper.find('.pd-no-image').exists()).toBe(false)
 
-    await img.trigger('error')
+    img.element.dispatchEvent(new Event('error', { bubbles: false }))
     await nextTick()
     expect(wrapper.find('.pd-no-image').exists()).toBe(true)
     wrapper.unmount()
