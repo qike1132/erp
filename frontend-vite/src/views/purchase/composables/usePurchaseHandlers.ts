@@ -12,6 +12,12 @@ import { usePurchaseActions } from './usePurchaseActions'
 import { useBomOrderResume } from './useBomOrderResume'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
+import type { ResumeProduct } from '@/utils/bomOrderResume'
+
+export interface PurchaseHandlersOptions {
+  /** 采购页内直接打开 BOM 弹窗；不注入时沿用旧的路由跳转。 */
+  openBomEditor?: (product: ResumeProduct) => Promise<void> | void
+}
 
 /**
  * usePurchaseHandlers — 采购页面顶层协调器
@@ -26,7 +32,7 @@ import { getErrorMessage } from '@/types/errors'
  * 页面只剩「待生产订单」「记录查询」两个 tab；`unprocessed` 仅用于「待生成」只读区块
  * （未配置BOM的订单在此展示，配好 BOM 后自动生成）。
  */
-export function usePurchaseHandlers() {
+export function usePurchaseHandlers(options: PurchaseHandlersOptions = {}) {
   const queryClient = useQueryClient()
   const route = useRoute()
   const resumeRequested = typeof route.query.resume === 'string' && route.query.resume.length > 0
@@ -67,7 +73,9 @@ export function usePurchaseHandlers() {
     confirm,
     queryClient,
   })
-  const bomResume = useBomOrderResume({ activeTab, unprocessed, purchaseOrders })
+  const bomResume = useBomOrderResume({
+    activeTab, unprocessed, purchaseOrders, openBomEditor: options.openBomEditor,
+  })
 
   useWebSocket({
     onMessage: (data) => {

@@ -53,6 +53,8 @@ export interface BomOrderResumeOptions {
   router?: ResumeRouterLike
   auth?: ResumeAuthLike
   generate?: Generate
+  /** 采购页内直接打开 BOM 弹窗；未注入时保留旧路由跳转（兼容产品页测试/旧入口）。 */
+  openBomEditor?: (product: ResumeProduct) => Promise<void> | void
 }
 
 function singleQueryValue(value: unknown): string | null {
@@ -157,6 +159,10 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
       attempt.current_product_id = product.product_id
       attempt.pending_products = nextPending
       persist(attempt, 'CONFIGURING')
+      if (options.openBomEditor) {
+        await options.openBomEditor(product)
+        return
+      }
       await router.push({
         path: '/product',
         query: { product_id: String(product.product_id), resume_attempt_id: attempt.attempt_id },
@@ -203,6 +209,7 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
   }
 
   async function clearResumeQuery(): Promise<void> {
+    if (!('resume' in route.query)) return
     const query = Object.fromEntries(
       Object.entries(route.query)
         .filter(([key]) => key !== 'resume')
@@ -260,8 +267,46 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
     }
   }
 
-  async function initialize(attemptId: string, ownerId: number): Promise<void> {
-    const attempt = readResumeAttempt(attemptId, ownerId)
+  /**
+   * 同页 BOM 弹窗保存成功：不再跳 /product，直接刷新采购列表并走同一权威续提。
+   * ProductList 的路由回程仍保留给旧入口，不经过这里。
+   */
+  async function completeConfiguration(productId: number): Promise<void> {
+    const attempt = activeAttempt.value
+    if (!attempt || attempt.phase !== 'CONFIGURING' || attempt.current_product_id !== productId) return
+    attempt.phase = 'RETURNING'
+    attempt.pending_products = attempt.pending_products.filter(
+      (item) => item.product_id !== productId,
+    )
+    attempt.updated_at = Date.now()
+    writeResumeAttempt(attempt)
+    phase.value = attempt.phase
+    message.value = '正在校验并继续下单'
+    resumeInFlight.value = true
+    try {
+      await refreshLists()
+      await runGeneration(attempt)
+    } catch (error: unknown) {
+      attempt.last_error = resumeErrorMessage(error, '刷新校验失败，请重试')
+      persist(attempt, 'RESUME_FAILED')
+      message.value = attempt.last_error
+    } finally {
+      resumeInFlight.value = false
+    }
+  }
+
+  /** 同页弹窗取消：只结束本次尝试，不写采购单、不离开采购页。 */
+  function cancelConfiguration(): void {
+    const attempt = activeAttempt.value
+    if (!attempt || attempt.phase !== 'CONFIGURING') return
+    consumeResumeAttempt(attempt.attempt_id)
+    activeAttempt.value = null
+    pendingProducts.value = []
+    phase.value = 'CANCELLED'
+    message.value = '已取消 BOM 配置，未发起下单'
+  }
+
+  async function initialize(attemptId: string, ownerId: number): Promise<void> {    const attempt = readResumeAttempt(attemptId, ownerId)
     if (!attempt) {
       phase.value = 'IDLE'
       message.value = '续提上下文不存在、已过期或已消费'
@@ -317,6 +362,7 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
   return {
     phase, message, pendingProducts, resumeInFlight, activeAttempt,
     canManageBom, resumeSourceId,
-    startConfiguration, initializeFromRoute, retryResume,
+    startConfiguration, completeConfiguration, cancelConfiguration,
+    initializeFromRoute, retryResume,
   }
 }

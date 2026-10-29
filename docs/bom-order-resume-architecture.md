@@ -155,7 +155,16 @@ interface BomResumeAttemptV1 {
 - 普通 `/product` 未传监听时保持原行为。
 - 快速复制/复制弹窗的既有直接写行为不在本任务改写；续提自动返回只认明确的“保存 BOM”成功事件。
 
-### 3.4 产品页编排 `useProductBomResume`
+### 3.5.1 采购页同页 BOM 弹窗（2026-10-29 调整）
+
+- `PurchaseView` 挂载现有 `BomEditor`，通过 `usePurchaseHandlers({ openBomEditor })` 注入打开函数；采购页不再 push `/product`。
+- `useBomOrderResume.startConfiguration` 仍创建/复用 attempt、计算首个缺失 SKU；有 `openBomEditor` 时直接调用弹窗，无注入时保留旧路由跳转以兼容产品页测试/历史入口。
+- 弹窗保存成功后调用 `completeConfiguration(productId)`：标记 RETURNING、从 pending 移除当前 SKU、刷新两类列表、调用权威生成校验；不经过路由回程。
+- 弹窗取消调用 `cancelConfiguration()`：消费 attempt、置 CANCELLED、不写采购单、不离开采购页。
+- 多 SKU 保存一个后，下一次必须用服务端 `missing_bom`/attempt `pending_products` 的下一项；不能从旧 `unprocessed.items` 重算。
+- 历史 `/product?resume_attempt_id=...` 路径与 `useProductBomResume` 保留，仅作为旧入口兼容。
+
+### 3.6 产品页编排 `useProductBomResume`
 
 - watch 路由查询并以 `attempt_id:product_id` 单飞打开；先读并校验上下文，再 `productApi.detail(product_id)`，最后 `bomEditorRef.open({id,name})`。
 - 要求 `phase=CONFIGURING`、URL 产品等于 `current_product_id`、来源/返回路由合法、上下文属于当前用户且未过期。

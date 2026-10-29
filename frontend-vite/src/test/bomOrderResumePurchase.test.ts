@@ -32,12 +32,17 @@ function attempt(
   return value
 }
 
-function row(hasBom: boolean) {
+function row(hasBom: boolean, extraItems: Array<{
+  id: number; product_id: number; product_name: string; quantity: number; has_bom: boolean
+}> = []) {
   return {
     id: 42, composite_id: 'order:42', record_type: 'order' as const,
     source_order_id: 42, order_no: 'SO-42', customer: '客户', product_id: 5,
     product_name: '产品五', quantity: 2, order_date: '', status: '待备货', has_bom: hasBom,
-    items: [{ id: 1, product_id: 5, product_name: '产品五', quantity: 2, has_bom: hasBom }],
+    items: [
+      { id: 1, product_id: 5, product_name: '产品五', quantity: 2, has_bom: hasBom },
+      ...extraItems,
+    ],
   }
 }
 
@@ -47,6 +52,7 @@ function harness(options: {
   hasPermission?: boolean
   withContext?: boolean
   pendingProducts?: ResumeProduct[]
+  openBomEditor?: (product: ResumeProduct) => Promise<void> | void
 } = {}) {
   const generate = vi.fn().mockResolvedValue({
     success: true, code: 'OK', created_count: 1, idempotent: false,
@@ -81,6 +87,7 @@ function harness(options: {
       hasPermission: vi.fn().mockReturnValue(options.hasPermission ?? true),
     },
     generate,
+    openBomEditor: options.openBomEditor,
   }))!
   return { resume, generate, push, replace, unprocessed, purchaseOrders, scope }
 }
@@ -117,6 +124,59 @@ describe('采购缺 BOM 入口', () => {
     await Promise.all([first, second])
     expect(h.push).toHaveBeenCalledTimes(1)
     expect(sessionStorage.length).toBe(1)
+    h.scope.stop()
+  })
+
+  it('采购页配置 BOM 直接打开同页弹窗，不跳 /product', async () => {
+    const openBomEditor = vi.fn().mockResolvedValue(undefined)
+    const h = harness({ withContext: false, openBomEditor })
+    await h.resume.startConfiguration(row(false) as never)
+    expect(openBomEditor).toHaveBeenCalledTimes(1)
+    expect(openBomEditor).toHaveBeenCalledWith(expect.objectContaining({
+      product_id: 5, product_name: '产品五',
+    }))
+    expect(h.push).not.toHaveBeenCalled()
+    h.scope.stop()
+  })
+
+  it('同页弹窗保存后刷新并按权威 MISSING_BOM 切到下一个 SKU，不跳 /product', async () => {
+    const h = harness({ withContext: false, openBomEditor: vi.fn() })
+    const twoMissing = row(false, [{
+      id: 2, product_id: 6, product_name: '产品六', quantity: 3, has_bom: false,
+    }])
+    await h.resume.startConfiguration(twoMissing as never)
+    h.generate.mockResolvedValue({
+      success: false, code: 'MISSING_BOM', created_count: 0, idempotent: false,
+      orders: [], missing_bom: [PRODUCT_SIX],
+    })
+    await h.resume.completeConfiguration(5)
+    expect(h.resume.phase.value).toBe('WAITING_NEXT_BOM')
+    expect(h.resume.pendingProducts.value).toEqual([PRODUCT_SIX])
+    expect(h.push).not.toHaveBeenCalled()
+    h.scope.stop()
+  })
+
+  it('同页弹窗保存后齐备时直接生成并结束，不跳 /product', async () => {
+    const h = harness({ withContext: false, openBomEditor: vi.fn() })
+    await h.resume.startConfiguration(row(false) as never)
+    h.generate.mockResolvedValue({
+      success: true, code: 'OK', created_count: 1, idempotent: false,
+      orders: [{ id: 88, order_no: 'PO-88' }], missing_bom: [],
+    })
+    await h.resume.completeConfiguration(5)
+    expect(h.resume.phase.value).toBe('DONE')
+    expect(h.resume.message.value).toContain('PO-88')
+    expect(h.push).not.toHaveBeenCalled()
+    h.scope.stop()
+  })
+
+  it('同页弹窗取消只结束尝试，不生成采购单', async () => {
+    const h = harness({ withContext: false, openBomEditor: vi.fn() })
+    await h.resume.startConfiguration(row(false) as never)
+    h.resume.cancelConfiguration()
+    expect(h.resume.phase.value).toBe('CANCELLED')
+    expect(readResumeAttempt(ATTEMPT_ID, 7)).toBeNull()
+    expect(h.generate).not.toHaveBeenCalled()
     h.scope.stop()
   })
 })

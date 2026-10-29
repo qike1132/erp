@@ -169,19 +169,33 @@
       @print-factory="summary.printFactory"
       @print-supplier="summary.printSupplier"
     />
+
+    <!-- 同页 BOM 配置：不再跳 /product；保存/关闭直接回到本页续提状态机 -->
+    <component
+      :is="bomEditorComponent"
+      v-if="bomEditorComponent"
+      ref="bomEditorRef"
+      @saved="bomResume.completeConfiguration($event.product_id)"
+      @closed="bomResume.cancelConfiguration()"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import {
+  computed, defineAsyncComponent,
+} from 'vue'
 import ActiveOrdersPanel from './components/ActiveOrdersPanel.vue'
 import CompletedOrdersPanel from './components/CompletedOrdersPanel.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import CompletedOrdersFilterInputs from './components/CompletedOrdersFilterInputs.vue'
+import { usePurchaseBomModal } from './composables/usePurchaseBomModal'
 // P1-5: 模态框懒加载，减小 purchase 主 chunk（用户不点开则不加载）
 const OrderDetailModal = defineAsyncComponent(() => import('./components/OrderDetailModal.vue'))
 const SummaryModal = defineAsyncComponent(() => import('./components/SummaryModal.vue'))
 import { usePurchaseHandlers } from './composables/usePurchaseHandlers'
+
+const { bomEditorRef, bomEditorComponent, openBomEditor } = usePurchaseBomModal()
 
 const {
   activeTab,
@@ -209,10 +223,9 @@ const {
   handleExportSupplier,
   exporting,
   bomResume,
-} = usePurchaseHandlers()
+} = usePurchaseHandlers({ openBomEditor })
 
-/**
- * 待生产订单 TAB 徽标 = 表格实际行数口径：待生成行（unprocessed）+ 待生产行（purchaseOrders）。
+/** 待生产订单 TAB 徽标 = 表格实际行数口径：待生成行（unprocessed）+ 待生产行（purchaseOrders）。
  * 二者同表并列渲染，只取 purchaseOrders.total 会漏掉待生成行，徽标小于可见行数。
  */
 const activeOrderCount = computed(() => unprocessed.total + purchaseOrders.total)
