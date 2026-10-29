@@ -125,6 +125,11 @@ export function useProductBomResume(
     const attempt = ownerId ? readResumeAttempt(attemptId, ownerId) : null
     if (!attempt || attempt.phase !== 'CONFIGURING' || attempt.current_product_id !== productId) return
     attempt.phase = 'RETURNING'
+    // 已保存的 SKU 先从前端待配置列表移除：即使返回后的采购列表仍是旧缓存，
+    // 也不会再次把刚配置完的产品当成“下一份”。
+    attempt.pending_products = attempt.pending_products.filter(
+      (item) => item.product_id !== productId,
+    )
     attempt.updated_at = Date.now()
     writeResumeAttempt(attempt)
     await backToPurchase(attemptId)

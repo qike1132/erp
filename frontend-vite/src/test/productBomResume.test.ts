@@ -44,13 +44,16 @@ function q(selector: string): DOMWrapper<Element> {
   return new DOMWrapper(element)
 }
 
-function seedAttempt() {
+function seedAttempt(
+  pending = [{ product_id: 5, product_name: '产品五' }],
+  currentProductId = 5,
+) {
   const attempt = createResumeAttempt({
     attempt_id: ATTEMPT_ID,
     owner_id: 7,
     source: { composite_id: 'order:42', record_type: 'order', source_order_id: 42, order_no: 'SO-42' },
-    pending_products: [{ product_id: 5, product_name: '产品五' }],
-    current_product_id: 5,
+    pending_products: pending,
+    current_product_id: currentProductId,
     view: {
       active_tab: 'active', purchase_page: 1, unprocessed_page: 1,
       selected_ids: [], main_scroll_top: 0, table_scroll_left: 0,
@@ -147,6 +150,20 @@ describe('产品页 resume 路由门控', () => {
     seedAttempt()
     await h.resume.onClosed()
     expect(readResumeAttempt(ATTEMPT_ID, 7)?.phase).toBe('CANCELLED')
+    h.scope.stop()
+  })
+
+  it('保存一个 SKU 后立即从待配置列表移除，下一份指向另一个 SKU', async () => {
+    seedAttempt([
+      { product_id: 5, product_name: '产品五' },
+      { product_id: 6, product_name: '产品六' },
+    ])
+    const h = setup()
+    await flushPromises()
+    await h.resume.onSaved(5)
+    const saved = readResumeAttempt(ATTEMPT_ID, 7)
+    expect(saved?.phase).toBe('RETURNING')
+    expect(saved?.pending_products).toEqual([{ product_id: 6, product_name: '产品六' }])
     h.scope.stop()
   })
 })

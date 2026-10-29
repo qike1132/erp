@@ -126,26 +126,36 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
         return
       }
       const source = parseResumeSource(row)
-      const product = firstMissingProduct(row)
-      if (!source || !product || row.has_bom !== false) {
+      if (!source) {
         showToast('来源或缺 BOM 产品信息已变化，请刷新后重试', 'warning')
         return
       }
+      const rowMissing = missingProducts(row)
       const reusable = activeAttempt.value
         && activeAttempt.value.source.composite_id === source.composite_id
         && ['CONFIGURING', 'RETURNING', 'WAITING_NEXT_BOM', 'RESUME_FAILED'].includes(
           activeAttempt.value.phase,
         )
         ? activeAttempt.value : null
+      // 返回采购页的列表可能仍是 BOM 保存前的 30s 快照；此时必须以上一轮
+      // 服务端 MISSING_BOM/onSaved 已维护的 pending_products 为准，不能从旧
+      // items 重新取 firstMissingProduct，否则会反复打开刚配置完的第一个 SKU。
+      const nextPending = reusable?.pending_products?.length
+        ? reusable.pending_products : rowMissing
+      const product = nextPending[0] ?? firstMissingProduct(row)
+      if (!product || row.has_bom !== false) {
+        showToast('来源或缺 BOM 产品信息已变化，请刷新后重试', 'warning')
+        return
+      }
       const attempt = reusable ?? createResumeAttempt({
         owner_id: ownerId,
         source,
-        pending_products: missingProducts(row),
+        pending_products: nextPending,
         current_product_id: product.product_id,
         view: captureView(),
       })
       attempt.current_product_id = product.product_id
-      attempt.pending_products = missingProducts(row)
+      attempt.pending_products = nextPending
       persist(attempt, 'CONFIGURING')
       await router.push({
         path: '/product',
@@ -272,13 +282,9 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
     persist(attempt, 'RESTORING_REVALIDATING')
     message.value = '正在校验并继续下单'
     await restoreAndRefresh(attempt)
-    const current = options.unprocessed.orders.find(
-      (row) => row.composite_id === attempt.source.composite_id,
-    )
-    if (current && current.has_bom === false) {
-      updateMissing(attempt, missingProducts(current))
-      return
-    }
+    // 不在这里根据 unprocessed 快照提前返回：该列表有 30s 缓存，BOM 刚保存
+    // 时可能仍显示旧 has_bom。生成端点会返回权威的 missing_bom 列表（且缺 BOM
+    // 时 0 写入），以它作为下一份 BOM 的选择依据。
     await runGeneration(attempt)
   }
 

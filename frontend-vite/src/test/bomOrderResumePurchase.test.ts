@@ -3,7 +3,7 @@ import { effectScope, reactive, ref } from 'vue'
 import { useBomOrderResume } from '@/views/purchase/composables/useBomOrderResume'
 import {
   createResumeAttempt, readResumeAttempt, writeResumeAttempt,
-  type BomResumeAttemptV1, type PurchaseViewSnapshot,
+  type BomResumeAttemptV1, type PurchaseViewSnapshot, type ResumeProduct,
 } from '@/utils/bomOrderResume'
 
 const ATTEMPT_ID = '22222222-2222-4222-8222-222222222222'
@@ -12,13 +12,19 @@ const snapshot: PurchaseViewSnapshot = {
   selected_ids: [11, 99], main_scroll_top: 0, table_scroll_left: 0,
 }
 
-function attempt(phase: BomResumeAttemptV1['phase'] = 'RETURNING') {
+const PRODUCT_FIVE: ResumeProduct = { product_id: 5, product_name: '产品五', product_barcode: null }
+const PRODUCT_SIX: ResumeProduct = { product_id: 6, product_name: '产品六', product_barcode: null }
+
+function attempt(
+  phase: BomResumeAttemptV1['phase'] = 'RETURNING',
+  pendingProducts: ResumeProduct[] = [PRODUCT_FIVE],
+) {
   const value = createResumeAttempt({
     attempt_id: ATTEMPT_ID,
     owner_id: 7,
     source: { composite_id: 'order:42', record_type: 'order', source_order_id: 42, order_no: 'SO-42' },
-    pending_products: [{ product_id: 5, product_name: '产品五' }],
-    current_product_id: 5,
+    pending_products: pendingProducts,
+    current_product_id: pendingProducts[0]?.product_id ?? 5,
     view: snapshot,
     now: Date.now(),
   })
@@ -40,6 +46,7 @@ function harness(options: {
   hasBom?: boolean
   hasPermission?: boolean
   withContext?: boolean
+  pendingProducts?: ResumeProduct[]
 } = {}) {
   const generate = vi.fn().mockResolvedValue({
     success: true, code: 'OK', created_count: 1, idempotent: false,
@@ -59,7 +66,9 @@ function harness(options: {
     page: 1, selectedIds: [11, 99],
     refresh: vi.fn().mockResolvedValue(undefined), load: vi.fn(),
   })
-  if (options.withContext !== false) writeResumeAttempt(attempt(options.phase))
+  if (options.withContext !== false) {
+    writeResumeAttempt(attempt(options.phase, options.pendingProducts))
+  }
   const scope = effectScope()
   const resume = scope.run(() => useBomOrderResume({
     activeTab: ref<'active' | 'history'>('history'),
@@ -141,8 +150,13 @@ describe('采购返回：先恢复并强制刷新，再决定是否写', () => {
 
   it('仍缺 BOM 为 WAITING_NEXT_BOM 且 0 写，不自动连跳', async () => {
     const h = harness({ hasBom: false })
+    h.generate.mockResolvedValue({
+      success: false, code: 'MISSING_BOM', created_count: 0, idempotent: false,
+      orders: [], missing_bom: [PRODUCT_FIVE],
+    })
     await h.resume.initializeFromRoute()
-    expect(h.generate).not.toHaveBeenCalled()
+    // 列表快照仍缺 BOM 时也要调用权威端点：它会返回精确 missing_bom 且 0 写入。
+    expect(h.generate).toHaveBeenCalledTimes(1)
     expect(h.push).not.toHaveBeenCalled()
     expect(h.resume.phase.value).toBe('WAITING_NEXT_BOM')
     expect(h.resume.pendingProducts.value.map((p) => p.product_id)).toEqual([5])
@@ -249,6 +263,36 @@ describe('采购返回：先恢复并强制刷新，再决定是否写', () => {
     await h.resume.initializeFromRoute()
     expect(h.generate).toHaveBeenCalledTimes(1)
     expect(h.resume.phase.value).toBe('DONE')
+    h.scope.stop()
+  })
+
+  it('列表快照仍把首个 SKU 标为缺 BOM 时，下一份必须用服务端权威列表，不能回跳第一个', async () => {
+    const h = harness({ pendingProducts: [PRODUCT_FIVE, PRODUCT_SIX] })
+    h.generate.mockResolvedValue({
+      success: false, code: 'MISSING_BOM', created_count: 0, idempotent: false,
+      orders: [], missing_bom: [PRODUCT_SIX],
+    })
+    const staleRow = {
+      ...row(false),
+      items: [
+        { id: 1, product_id: 5, product_name: '产品五', quantity: 2, has_bom: false },
+        { id: 2, product_id: 6, product_name: '产品六', quantity: 3, has_bom: false },
+      ],
+    }
+    h.unprocessed.orders = [staleRow as never]
+
+    await h.resume.initializeFromRoute()
+    expect(h.resume.phase.value).toBe('WAITING_NEXT_BOM')
+    expect(h.resume.pendingProducts.value).toEqual([PRODUCT_SIX])
+
+    await h.resume.startConfiguration(staleRow as never)
+    expect(h.push).toHaveBeenCalledWith({
+      path: '/product',
+      query: { product_id: '6', resume_attempt_id: expect.any(String) },
+    })
+    const saved = readResumeAttempt(ATTEMPT_ID, 7)
+    expect(saved?.current_product_id).toBe(6)
+    expect(saved?.pending_products).toEqual([PRODUCT_SIX])
     h.scope.stop()
   })
 })
