@@ -30,6 +30,7 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from fastapi_app.core.cache_invalidation import InvalidationStrategy
 from fastapi_app.core.database import get_async_db
 from fastapi_app.main import app
 from fastapi_app.shared_models import Base, ModificationLog, Role
@@ -118,10 +119,11 @@ async def test_stale_role_id_returns_400_end_to_end(_real_session_engine):
             assert left == [], f'400 后不应残留 ProductRole，实得 {left}'
 
             # --- 2) 对照：合法 payload（新角色名）→ 200，证明 400 确由陈旧 id 触发 ---
+            invalidate = AsyncMock()
             with patch(
                 'fastapi_app.api.v1.endpoints.purchase_center.product_routes'
                 '.cache_mgr.invalidate',
-                new_callable=AsyncMock,
+                new=invalidate,
             ):
                 ok = await _post(client, 1, {
                     'roles': [{'role_name': '端点回归角色'}],
@@ -129,6 +131,9 @@ async def test_stale_role_id_returns_400_end_to_end(_real_session_engine):
                 })
             assert ok.status_code == 200, (
                 f'合法 payload 应得 200，实得 {ok.status_code}: {ok.text[:200]}'
+            )
+            invalidate.assert_any_call(
+                InvalidationStrategy.PATTERN, 'orders:unprocessed:*',
             )
             created = (await session.execute(select(ProductRole))).scalars().all()
             assert [r.role_name for r in created] == ['端点回归角色']

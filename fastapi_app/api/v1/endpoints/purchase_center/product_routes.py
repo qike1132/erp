@@ -234,9 +234,9 @@ async def api_save_product_bom(
         raise HTTPException(status_code=500, detail='保存失败，请稍后重试') from e
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.PRODUCT)
     # BOM 保存改变了 unprocessed 行的逐 SKU has_bom；该列表有 30s Redis 缓存。
-    # 自动生成副作用可能失败或尚未完成，这里显式失效采购域，避免返回采购页
-    # 仍拿到旧 items 而再次打开刚配置完的 SKU。
-    await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
+    # 自动生成副作用可能失败或尚未完成，这里显式失效采购列表的 L2 缓存
+    # （PURCHASE 策略只清当前 worker 的 L1，不能跨进程清 Redis）。
+    await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'orders:unprocessed:*')
     return success_response(message=msg)
 
 
