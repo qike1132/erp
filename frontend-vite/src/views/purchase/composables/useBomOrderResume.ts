@@ -267,6 +267,21 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
     }
   }
 
+  async function resumeActiveAttempt(attempt: BomResumeAttemptV1): Promise<void> {
+    resumeInFlight.value = true
+    message.value = '正在校验并继续下单'
+    try {
+      await refreshLists()
+      await runGeneration(attempt)
+    } catch (error: unknown) {
+      attempt.last_error = resumeErrorMessage(error, '刷新校验失败，请重试')
+      persist(attempt, 'RESUME_FAILED')
+      message.value = attempt.last_error
+    } finally {
+      resumeInFlight.value = false
+    }
+  }
+
   /**
    * 同页 BOM 弹窗保存成功：不再跳 /product，直接刷新采购列表并走同一权威续提。
    * ProductList 的路由回程仍保留给旧入口，不经过这里。
@@ -281,18 +296,8 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
     attempt.updated_at = Date.now()
     writeResumeAttempt(attempt)
     phase.value = attempt.phase
-    message.value = '正在校验并继续下单'
-    resumeInFlight.value = true
-    try {
-      await refreshLists()
-      await runGeneration(attempt)
-    } catch (error: unknown) {
-      attempt.last_error = resumeErrorMessage(error, '刷新校验失败，请重试')
-      persist(attempt, 'RESUME_FAILED')
-      message.value = attempt.last_error
-    } finally {
-      resumeInFlight.value = false
-    }
+    pendingProducts.value = attempt.pending_products
+    await resumeActiveAttempt(attempt)
   }
 
   /** 同页弹窗取消：只结束本次尝试，不写采购单、不离开采购页。 */
@@ -356,6 +361,13 @@ export function useBomOrderResume(options: BomOrderResumeOptions) {
   }
 
   async function retryResume(): Promise<void> {
+    const attempt = activeAttempt.value
+    // 同页弹窗流程没有 ?resume= 查询参数；不能只依赖 initializeFromRoute，
+    // 否则保存后网络失败的重试按钮无效。
+    if (attempt && !('resume' in route.query)) {
+      await resumeActiveAttempt(attempt)
+      return
+    }
     await initializeFromRoute()
   }
 

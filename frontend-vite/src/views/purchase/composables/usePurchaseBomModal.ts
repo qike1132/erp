@@ -22,7 +22,10 @@ export function usePurchaseBomModal() {
       await nextTick()
       if (!bomEditorRef.value) await nextTick()
     }
-    await bomEditorRef.value?.open({ id: product.product_id, name: product.product_name })
+    if (!bomEditorRef.value) {
+      throw new Error('BOM 编辑器加载失败，请重试')
+    }
+    await bomEditorRef.value.open({ id: product.product_id, name: product.product_name })
   }
 
   return { bomEditorRef, bomEditorComponent, openBomEditor }

@@ -53,6 +53,7 @@ function harness(options: {
   withContext?: boolean
   pendingProducts?: ResumeProduct[]
   openBomEditor?: (product: ResumeProduct) => Promise<void> | void
+  routeWithResume?: boolean
 } = {}) {
   const generate = vi.fn().mockResolvedValue({
     success: true, code: 'OK', created_count: 1, idempotent: false,
@@ -80,7 +81,7 @@ function harness(options: {
     activeTab: ref<'active' | 'history'>('history'),
     unprocessed,
     purchaseOrders,
-    route: { query: { resume: ATTEMPT_ID } },
+    route: { query: options.routeWithResume === false ? {} : { resume: ATTEMPT_ID } },
     router: { push, replace },
     auth: {
       user: { id: 7 },
@@ -177,6 +178,27 @@ describe('采购缺 BOM 入口', () => {
     expect(h.resume.phase.value).toBe('CANCELLED')
     expect(readResumeAttempt(ATTEMPT_ID, 7)).toBeNull()
     expect(h.generate).not.toHaveBeenCalled()
+    h.scope.stop()
+  })
+
+  it('同页流程失败后的重试不依赖 resume 查询参数，复用同 key 继续', async () => {
+    const h = harness({
+      withContext: false, openBomEditor: vi.fn(), routeWithResume: false,
+    })
+    await h.resume.startConfiguration(row(false) as never)
+    h.generate.mockRejectedValueOnce(new Error('network'))
+    await h.resume.completeConfiguration(5)
+    expect(h.resume.phase.value).toBe('RESUME_FAILED')
+
+    h.generate.mockResolvedValue({
+      success: true, code: 'OK', created_count: 1, idempotent: false,
+      orders: [{ id: 88, order_no: 'PO-88' }], missing_bom: [],
+    })
+    await h.resume.retryResume()
+    expect(h.generate).toHaveBeenCalledTimes(2)
+    expect(h.generate.mock.calls[1]![1].headers['X-Idempotency-Key'])
+      .toBe(h.generate.mock.calls[0]![1].headers['X-Idempotency-Key'])
+    expect(h.resume.phase.value).toBe('DONE')
     h.scope.stop()
   })
 })
