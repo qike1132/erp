@@ -41,7 +41,7 @@
                 <th style="text-align:left">条码</th>
                 <th style="text-align:left">产品名称</th>
                 <th style="text-align:right">数量</th>
-                <th style="text-align:center">操作</th>
+                <th style="width:210px;text-align:left">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -88,19 +88,43 @@
                   </template>
                   <template v-else>{{ formatNumber(u.quantity) }}</template>
                 </td>
-                <td class="pc-td-center">
-                  <span v-if="u.has_bom" class="pc-gen-tag">生成中…</span>
-                  <div v-else class="pc-nobom-action">
-                    <span class="pc-gen-tag pc-gen-tag--nobom">未配置BOM，无法下单</span>
+                <td class="pc-bom-cell">
+                  <div v-if="u.has_bom" class="pc-bom-action pc-bom-action--done">
+                    <div class="pc-bom-status pc-bom-status--done"><i aria-hidden="true" />BOM 已齐备</div>
+                    <div class="pc-bom-generating">
+                      <span class="pc-bom-generating-left"><span class="pc-bom-spinner" aria-hidden="true" />正在生成采购单</span>
+                      <span class="pc-bom-generating-count">{{ totalSku(u) }}/{{ totalSku(u) }}</span>
+                    </div>
+                  </div>
+                  <div v-else class="pc-bom-action">
+                    <div
+                      class="pc-bom-status"
+                      :class="{
+                        'pc-bom-status--active': isActiveBom(u) && configuredSku(u) > 0,
+                        'pc-bom-status--locked': !canManageBom,
+                      }"
+                    >
+                      <i aria-hidden="true" />
+                      <template v-if="!canManageBom">需产品管理员</template>
+                      <template v-else-if="isActiveBom(u) && configuredSku(u) > 0">
+                        已配置 <b>{{ configuredSku(u) }}/{{ totalSku(u) }}</b>
+                      </template>
+                      <template v-else-if="isActiveBom(u)">BOM 配置中</template>
+                      <template v-else>还差 <b>{{ missingSku(u) }}</b> 个 SKU</template>
+                    </div>
                     <button
                       v-if="canManageBom"
-                      class="pc-btn pc-btn-primary pc-btn-sm"
+                      class="pc-bom-cta"
+                      :class="{ 'pc-bom-cta--secondary': isActiveBom(u) }"
                       :disabled="resumeInFlight"
                       @click="$emit('configureBom', u)"
                     >
-                      {{ resumeSourceId === u.composite_id ? '继续配置 BOM' : '配置 BOM 并下单' }}
+                      <span class="pc-bom-cta-label">
+                        <svg v-if="!isActiveBom(u)" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6" /></svg>
+                        {{ isActiveBom(u) ? '继续配置 BOM' : '配置 BOM 并下单' }}
+                      </span>
+                      <svg class="pc-bom-cta-arrow" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                     </button>
-                    <span v-else class="pc-gen-tag">请联系产品管理员</span>
                   </div>
                 </td>
               </tr>
@@ -215,6 +239,23 @@ const props = withDefaults(defineProps<{
 // 远小于模板 diff 开销。无需进一步优化。
 const selectedSet = computed(() => new Set(props.selectedIds))
 
+function totalSku(row: UnprocessedOrder): number {
+  return Math.max(1, row.sku_count || row.items?.length || 1)
+}
+
+function missingSku(row: UnprocessedOrder): number {
+  const missing = row.items?.filter((item) => item.has_bom === false).length ?? 0
+  return missing > 0 ? missing : 1
+}
+
+function configuredSku(row: UnprocessedOrder): number {
+  return Math.max(0, totalSku(row) - missingSku(row))
+}
+
+function isActiveBom(row: UnprocessedOrder): boolean {
+  return props.resumeSourceId === row.composite_id
+}
+
 defineEmits<{
   toggleAll: [checked: boolean]
   toggleSelection: [id: number]
@@ -227,6 +268,7 @@ defineEmits<{
 
 <style scoped lang="scss">
 @use './order-panels.scss' as *;
+@use './bom-action.scss' as *;
 
 .pc-type-badge {
   display: inline-flex;
@@ -251,24 +293,6 @@ defineEmits<{
 .pc-type-badge--stockin {
   background: var(--color-warning-50, #fff3e6);
   color: var(--color-warning-600, #e88e2e);
-}
-
-/* 待生成行的操作列提示（缺 BOM 红字；排队中灰字） */
-.pc-gen-tag {
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.pc-gen-tag--nobom {
-  color: var(--color-danger-600, #dc2626);
-}
-
-.pc-nobom-action {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
 }
 
 .pc-sku-deduct {

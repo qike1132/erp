@@ -90,22 +90,63 @@ describe('采购中心 · 待生成行（并入待生产面板同表）', () => 
     expect(headers.indexOf('订单号')).toBe(headers.indexOf('下单时间') + 1)
   })
 
-  it('行内渲染客户订单号；缺 BOM 时操作列提示无法下单', () => {
+  it('行内渲染客户订单号；缺 BOM 时操作列给出可读状态', () => {
     const text = mountActive([], [{ ...unprocessedRow, has_bom: false }]).text()
     expect(text).toContain('PO-20260929-0014')
-    expect(text).toContain('未配置BOM，无法下单')
-    expect(text).toContain('请联系产品管理员')
+    expect(text).toContain('需产品管理员')
+    expect(text).not.toContain('未配置BOM，无法下单')
   })
 
   it('有 product_manage 时才渲染配置入口，并按行发出续提事件', async () => {
     const wrapper = mountActive([], [{ ...unprocessedRow, has_bom: false }])
     await wrapper.setProps({ canManageBom: true })
-    const button = wrapper.find('.pc-nobom-action button')
+    const button = wrapper.find('.pc-bom-cta')
     expect(button.text()).toBe('配置 BOM 并下单')
     await button.trigger('click')
     expect(wrapper.emitted('configureBom')?.[0]?.[0]).toMatchObject({
       composite_id: 'c1', has_bom: false,
     })
+  })
+
+  it('多 SKU 缺 BOM 显示剩余数量，仍只保留一个主操作', async () => {
+    const row = {
+      ...unprocessedRow,
+      has_bom: false,
+      sku_count: 2,
+      items: [
+        { id: 1, product_id: 5, product_name: 'A', quantity: 1, has_bom: false },
+        { id: 2, product_id: 6, product_name: 'B', quantity: 2, has_bom: false },
+      ],
+    }
+    const wrapper = mountActive([], [row])
+    await wrapper.setProps({ canManageBom: true })
+    expect(wrapper.text()).toContain('还差 2 个 SKU')
+    expect(wrapper.findAll('.pc-bom-cta')).toHaveLength(1)
+  })
+
+  it('进行中订单显示已配置进度，按钮切换为继续配置', async () => {
+    const row = {
+      ...unprocessedRow,
+      has_bom: false,
+      sku_count: 2,
+      items: [
+        { id: 1, product_id: 5, product_name: 'A', quantity: 1, has_bom: true },
+        { id: 2, product_id: 6, product_name: 'B', quantity: 2, has_bom: false },
+      ],
+    }
+    const wrapper = mountActive([], [row])
+    await wrapper.setProps({ canManageBom: true, resumeSourceId: 'c1' })
+    expect(wrapper.text()).toContain('已配置 1/2')
+    const button = wrapper.find('.pc-bom-cta')
+    expect(button.text()).toBe('继续配置 BOM')
+    expect(button.classes()).toContain('pc-bom-cta--secondary')
+  })
+
+  it('BOM 已齐备时只显示生成状态，不再渲染按钮', () => {
+    const wrapper = mountActive([], [{ ...unprocessedRow, has_bom: true, sku_count: 2 }])
+    expect(wrapper.text()).toContain('BOM 已齐备')
+    expect(wrapper.text()).toContain('正在生成采购单')
+    expect(wrapper.find('.pc-bom-cta').exists()).toBe(false)
   })
 })
 

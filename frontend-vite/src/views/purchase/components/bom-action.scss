@@ -1,0 +1,177 @@
+// 待生成行 BOM 操作列：状态辅助、实心主按钮优先
+/* 待生成行操作列：状态辅助、实心主按钮优先 */
+.pc-bom-cell {
+  padding: 8px 14px !important;
+  cursor: default;
+}
+
+.pc-bom-action {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+
+.pc-bom-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 14px;
+  font-size: 11px;
+  color: var(--color-warning-600, #b26a00);
+  white-space: nowrap;
+}
+
+.pc-bom-status i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--color-warning-500, #d99a22);
+}
+
+.pc-bom-status b {
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-weight: 600;
+  color: var(--color-text, #1d2939);
+}
+
+.pc-bom-status--active {
+  color: var(--color-primary-700, #2d5ab8);
+}
+
+.pc-bom-status--active i {
+  background: var(--color-primary-600, #3a6bd6);
+}
+
+.pc-bom-status--done {
+  color: var(--color-success-600, #1e9e55);
+}
+
+.pc-bom-status--done i {
+  background: var(--color-success-500, #34b56f);
+}
+
+.pc-bom-status--locked {
+  color: var(--color-text-secondary, #7b8798);
+}
+
+.pc-bom-status--locked i {
+  background: var(--color-text-tertiary, #b4bdc9);
+}
+
+.pc-bom-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-primary-600, #3a6bd6);
+  border-radius: 7px;
+  background: var(--color-primary-600, #3a6bd6);
+  color: #fff;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.pc-bom-cta:hover:not(:disabled) {
+  background: var(--color-primary-700, #2d5ab8);
+  border-color: var(--color-primary-700, #2d5ab8);
+}
+
+.pc-bom-cta:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.pc-bom-cta:focus-visible {
+  outline: 2px solid var(--color-primary-300, #8babf5);
+  outline-offset: 2px;
+}
+
+.pc-bom-cta:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pc-bom-cta--secondary {
+  background: #fff;
+  color: var(--color-primary-700, #2d5ab8);
+  border-color: var(--color-primary-200, #b8ccff);
+}
+
+.pc-bom-cta--secondary:hover:not(:disabled) {
+  background: var(--color-primary-50, #eff5ff);
+  border-color: var(--color-primary-300, #8babf5);
+}
+
+.pc-bom-cta-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.pc-bom-cta-arrow {
+  flex: 0 0 auto;
+  transition: transform 0.16s ease;
+}
+
+.pc-bom-cta:hover:not(:disabled) .pc-bom-cta-arrow {
+  transform: translateX(2px);
+}
+
+.pc-bom-generating {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-success-200, #b7e4c8);
+  border-radius: 7px;
+  background: var(--color-success-50, #e8f9ef);
+  color: var(--color-success-600, #1e9e55);
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
+.pc-bom-generating-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.pc-bom-generating-count {
+  color: var(--color-text-tertiary, #8a97a8);
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 10.5px;
+}
+
+.pc-bom-spinner {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--color-success-200, #b7e4c8);
+  border-top-color: var(--color-success-600, #1e9e55);
+  border-radius: 50%;
+  animation: pc-bom-spin 1s linear infinite;
+}
+
+@keyframes pc-bom-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-bom-spinner { animation: none; }
+  .pc-bom-cta, .pc-bom-cta-arrow { transition: none; }
+}
