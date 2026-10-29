@@ -350,6 +350,28 @@ async def test_deleted_source_without_po_is_invalid_and_writes_nothing(
     assert count == 0
 
 
+async def test_soft_deleted_source_without_po_is_invalid(
+    async_db_session, test_product,
+):
+    """生产删除订单走 is_deleted 软删，不能只测试物理删除。"""
+    db = async_db_session
+    await _ensure_bom(db, test_product.id)
+    order = await _new_order(db, test_product.id)
+    order.is_deleted = True
+    await db.flush()
+
+    result = await _generate(db, [f"order:{order.id}"])
+
+    assert result["success"] is False and result["code"] == "SOURCE_INVALID"
+    count = await db.scalar(
+        select(func.count()).select_from(PurchaseOrderSku).where(
+            PurchaseOrderSku.source_record_type == "order",
+            PurchaseOrderSku.source_order_id == order.id,
+        )
+    )
+    assert count == 0
+
+
 async def test_deleted_source_with_existing_po_is_still_idempotent(
     async_db_session, test_product
 ):
