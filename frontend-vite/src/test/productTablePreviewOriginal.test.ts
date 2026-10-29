@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 import PrimeVue from 'primevue/config'
 import { plushCutePT } from '@/styles/primevue-pt'
@@ -72,5 +73,34 @@ describe('产品列表点图预览', () => {
     await box.trigger('click')
 
     expect(wrapper.emitted('open-image')?.[0]).toEqual(['/static/uploads/x.png'])
+  })
+
+  it('缩略图 404 时立即回退原图；原图也失败才显示占位', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = mount(ProductTable, {
+      props: { actionId: null },
+      global: {
+        plugins: [
+          [VueQueryPlugin, { queryClient: client }],
+          [PrimeVue, { unstyled: true, pt: plushCutePT }],
+        ],
+        stubs: { UiSelect: true, FontAwesomeIcon: true },
+      },
+    })
+    await new Promise((r) => setTimeout(r, 400))
+    await flushPromises()
+
+    let img = wrapper.find('.pd-thumb-img')
+    expect(img.attributes('src')).toBe('/static/uploads/x.webp.thumb.webp')
+    await img.trigger('error')
+    await nextTick()
+    img = wrapper.find('.pd-thumb-img')
+    expect(img.attributes('src')).toBe('/static/uploads/x.webp')
+    expect(wrapper.find('.pd-no-image').exists()).toBe(false)
+
+    await img.trigger('error')
+    await nextTick()
+    expect(wrapper.find('.pd-no-image').exists()).toBe(true)
+    wrapper.unmount()
   })
 })

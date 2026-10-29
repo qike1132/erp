@@ -33,8 +33,8 @@
           </div>
         </template>
         <template #column-body-image="{ row }">
-          <div v-if="(row as Product).image && !failedImageIds.has((row as Product).id)" class="pd-thumb-box" @click="emit('open-image', (row as Product).image_original ?? (row as Product).image!)">
-            <img loading="lazy" :src="thumbSrc(row as Product)" class="pd-thumb-img" :alt="(row as Product).name" @error="handleImageError(row as Product)" />
+          <div v-if="(row as Product).image && !failedImageIds.has((row as Product).id)" class="pd-thumb-box" @click="emit('open-image', (row as Product).image_original ?? (row as Product).image!)" @error.capture="handleImageError($event, row as Product)">
+            <img loading="lazy" :src="thumbSrc(row as Product)" class="pd-thumb-img" :alt="(row as Product).name" />
           </div>
           <div v-else class="pd-thumb-box">
             <div class="pd-no-image"><FontAwesomeIcon icon="image" aria-hidden="true" /></div>
@@ -166,10 +166,14 @@ function thumbSrc(row: Product): string {
   return resolveStaticUrl(row.image ?? '')
 }
 
-function handleImageError(row: Product) {
-  // 缩略图失败 → 先退回原图；原图也失败 → 显示占位
-  if (row.image_thumb && !thumbFallbackIds.value.has(row.id)) {
+function handleImageError(event: Event, row: Product) {
+  const target = event.target as HTMLImageElement | null
+  const original = resolveStaticUrl(row.image ?? '')
+  // 缩略图失败 → 直接切到原图。不能只改 ref 等下一次渲染：
+  // 刷新时 404 可能来自缓存，error 会在 Vue 完成 patch 前触发，单靠状态更新会漏掉回退。
+  if (row.image_thumb && !thumbFallbackIds.value.has(row.id) && original) {
     thumbFallbackIds.value = new Set(thumbFallbackIds.value).add(row.id)
+    if (target) target.src = original
     return
   }
   failedImageIds.value = new Set(failedImageIds.value).add(row.id)
