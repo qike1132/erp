@@ -18,6 +18,7 @@ from fastapi_app.services.purchase_order_generate import (
 )
 from fastapi_app.shared_models import (
     Order,
+    OrderItem,
     ProductMaterial,
     PurchaseOrder,
     PurchaseOrderSku,
@@ -98,6 +99,23 @@ async def _new_product_without_bom(db: AsyncSession):
     db.add(product)
     await db.flush()
     return product
+
+
+async def _new_multi_sku_order(
+    db: AsyncSession, products: list, *, quantities: list[int],
+) -> Order:
+    order = await _new_order(db, products[0].id)
+    order.product_id = products[0].id
+    order.quantity = sum(quantities)
+    for product, quantity in zip(products, quantities, strict=True):
+        db.add(OrderItem(
+            order_id=order.id,
+            product_id=product.id,
+            product_name=product.name,
+            quantity=quantity,
+        ))
+    await db.flush()
+    return order
 
 
 async def _linked_po(
@@ -436,6 +454,44 @@ async def test_missing_bom_is_explicit_and_writes_nothing(
         "missing_bom": [{"product_id": product.id, "product_name": product.name}],
     }
     assert order.status == "待备货"
+
+
+async def test_multi_sku_missing_list_then_success_after_all_bom_ready(
+    async_db_session, test_product,
+):
+    db = async_db_session
+    await _ensure_bom(db, test_product.id)
+    missing_product = await _new_product_without_bom(db)
+    order = await _new_multi_sku_order(
+        db, [test_product, missing_product], quantities=[2, 3],
+    )
+
+    missing = await _generate(db, [f"order:{order.id}"])
+
+    assert missing["success"] is False and missing["code"] == "MISSING_BOM"
+    assert missing["missing_bom"] == [{
+        "product_id": missing_product.id,
+        "product_name": missing_product.name,
+    }]
+    assert order.status == "待备货"
+
+    await _ensure_bom(db, missing_product.id)
+    result = await _generate(db, [f"order:{order.id}"])
+
+    assert result["success"] is True and result["created_count"] == 1
+    sku_rows = list((await db.execute(
+        select(PurchaseOrderSku).where(
+            PurchaseOrderSku.po_id == result["orders"][0]["id"],
+            PurchaseOrderSku.source_record_type == "order",
+            PurchaseOrderSku.source_order_id == order.id,
+        )
+    )).scalars().all())
+    assert {row.product_name for row in sku_rows} == {
+        test_product.name, missing_product.name,
+    }
+    assert {row.product_name: float(row.order_qty) for row in sku_rows} == {
+        test_product.name: 2.0, missing_product.name: 3.0,
+    }
 
 
 async def test_generation_waits_for_source_advisory_lock(
