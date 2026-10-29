@@ -129,6 +129,7 @@ CORE_CLEAR_TABLES = (
     # 采购中心
     'material_registration_item',
     'material_registration',
+    'purchase_order_generate_attempt',
     'purchase_order_sku',
     'purchase_order_item',
     'purchase_order',

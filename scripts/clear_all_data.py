@@ -163,6 +163,9 @@ def clear_purchase_center(db: Session, dry_run: bool = True) -> dict:
     results['material_registration_item'] = affected_rows(db, "DELETE FROM material_registration_item", dry_run=dry_run)
     results['material_registration'] = affected_rows(db, "DELETE FROM material_registration", dry_run=dry_run)
     # P1-35：采购单 SKU 快照此前漏清（FK 到 purchase_order，须在其之前显式删除）
+    results['purchase_order_generate_attempt'] = affected_rows(
+        db, "DELETE FROM purchase_order_generate_attempt", dry_run=dry_run,
+    )
     results['purchase_order_sku'] = affected_rows(db, "DELETE FROM purchase_order_sku", dry_run=dry_run)
     results['purchase_order_item'] = affected_rows(db, "DELETE FROM purchase_order_item", dry_run=dry_run)
     results['purchase_order'] = affected_rows(db, "DELETE FROM purchase_order", dry_run=dry_run)
