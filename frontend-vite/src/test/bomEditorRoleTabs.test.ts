@@ -88,6 +88,19 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+describe('BomEditor 顶部工具条：分类 Tabs 合并到摘要位置', () => {
+  it('Tabs 位于摘要工具条内，左侧分类/默认BOM/物料总数文案已移除', async () => {
+    await mountOpened()
+    const bar = q('.bom-summary-bar')
+    expect(bar.element.querySelector('.bom-tabs-container--toolbar')).not.toBeNull()
+    expect(bar.text()).not.toContain('物料总数')
+    expect(document.querySelector('.bom-modal-body > .bom-tabs-container')).toBeNull()
+    expect(qa('.bom-tab-v2').map((tab) => tab.text().trim())).toEqual([
+      '面料类', '填充类', '辅料类',
+    ])
+  })
+})
+
 describe('BomEditor 角色页签：删除入口改为右键菜单（对齐 RoleTabs）', () => {
   it('页签上不再渲染「⋯」按钮，管理入口只在右键菜单里', async () => {
     await mountOpened()

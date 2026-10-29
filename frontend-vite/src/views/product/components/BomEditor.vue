@@ -13,16 +13,12 @@
           <button class="bom-modal-close" aria-label="关闭" @click="requestCloseBom()"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
         </div>
         <div class="bom-modal-body">
-          <div class="bom-tabs-container">
-            <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" :aria-label="tab.label" @click="switchBomTab(tab.key)">
-              <FontAwesomeIcon :icon="tab.icon" aria-hidden="true" /> {{ tab.label }}
-            </button>
-          </div>
           <div class="bom-main-content">
             <div class="bom-summary-bar">
-              <div class="bom-summary-left">
-                <span class="bom-summary-text"><FontAwesomeIcon icon="list" aria-hidden="true" />{{ currentBomTabLabel }} · {{ currentScopeLabel }}</span>
-                <span class="bom-summary-count">物料总数：<span class="count-value">{{ currentScopeCount }}</span></span>
+              <div class="bom-tabs-container bom-tabs-container--toolbar">
+                <button v-for="tab in bomTabs" :key="tab.key" class="bom-tab-v2" :class="{ active: currentBomCategory === tab.key }" :aria-label="tab.label" @click="switchBomTab(tab.key)">
+                  <FontAwesomeIcon :icon="tab.icon" aria-hidden="true" /> {{ tab.label }}
+                </button>
               </div>
               <div class="bom-summary-center">
                 <div class="pd-input-wrap autocomplete-wrapper">
@@ -247,8 +243,7 @@ const emit = defineEmits<{
 const confirmDialog = useConfirmDialog()
 const {
   bomDialogVisible, bomProductName, currentBomCategory,
-  bomTabs, currentBomItems, currentBomTabLabel, currentScopeLabel, currentScopeCount,
-  switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
+  bomTabs, currentBomItems, currentScopeLabel, switchBomTab, openBomModal, addBomItem, deleteBomItem, saveBom,
   requestCloseBom, bomDirty, bomSupplierOptions,
   bomRoles, selectedRole, defaultScopeName, defaultScopeHasItems,
   selectRole, addRole, renameRole, renameDefaultScope, removeRole,
