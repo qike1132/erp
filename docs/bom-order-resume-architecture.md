@@ -169,8 +169,8 @@ interface BomResumeAttemptV1 {
 | 状态/事件 | 必须行为 |
 |---|---|
 | 新入口 | 校验权限和来源 → 捕获页签、两类页码、选择、滚动 → 写上下文 → 单飞导航 |
-| `RETURNING/RESUMING/RESUME_FAILED` 挂载或手动重试 | 恢复快照 → await 新鲜待生成/采购列表 → 再判定 |
-| 行存在且仍缺 BOM | `WAITING_NEXT_BOM`，展示最新缺失项，0 次生成调用 |
+| `RETURNING/RESUMING/RESUME_FAILED` 挂载或手动重试 | 恢复快照 → await 新鲜待生成/采购列表 → 以同 attempt 同 key 调用权威生成校验 |
+| 行仍缺 BOM | 后端返回 `MISSING_BOM`、0 写入；`WAITING_NEXT_BOM` 以响应 `missing_bom` 展示剩余项，下一份从该列表取，不读旧列表快照 |
 | 行存在且 BOM 齐 / 行消失 | `RESUMING`，同 attempt 同 key 调一次；行消失不等于成功 |
 | 本次新建 | `DONE`，`created_count>0`，展示订单号，刷新派生查询并消费上下文 |
 | 已有/重放 | `DONE`，`idempotent=true`、`created_count=0`，提示无需重复下单并消费上下文 |
@@ -513,7 +513,7 @@ sequenceDiagram
 - 无权限不跳；无效/不匹配产品不打开；重复路由 watch 只 open 一次。
 - 多 SKU 首项选择、旧数据顶层回退、无法解析停止。
 - 保存成功一次才返回，且只 emit 一次 saved、绝不再 emit closed；`success=false`/异常/校验失败不返回且草稿保留；dirty 拒绝取消无 closed。
-- 返回必须先完成强制刷新再决定写；仍缺 BOM 0 写，BOM 齐/行消失才调用。
+- 返回必须先完成强制刷新，再以同尝试同 key 调用权威生成校验；仍缺 BOM 时后端 0 写入返回 `MISSING_BOM`，前端按响应更新下一份，不能凭旧列表跳过或回跳首个 SKU。
 - 多 SKU 每次回采购页，不自动连跳；最新缺失由后端/新列表重算。
 - 双击入口/保存/续提各自单飞；网络未知后手动重试仍同 key；不启用写自动重试。
 - 新建、已有、缺 BOM、来源失效、0 单异常响应的 UI 状态正确。
