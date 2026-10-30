@@ -111,8 +111,10 @@ export const backupApi = {
   },
   downloadByName: (filename: string) => download(`/backup/download/${encodeURIComponent(filename)}`, filename),
   deleteServerBackup: (filename: string) => del(`/backup/delete-by-name/${encodeURIComponent(filename)}`),
-  asyncImport: (formData: FormData, opts?: RestoreOptions) => {
-    const q = new URLSearchParams({ confirm: 'true' })
+  asyncImport: (formData: FormData, opts?: RestoreOptions & { confirm?: boolean }) => {
+    // 不再硬编码 confirm=true：调用方必须先完成确认流再显式传 confirm（2026-10-30 审计 A-H4）
+    const q = new URLSearchParams()
+    if (opts?.confirm) q.set('confirm', 'true')
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
     // H3：multipart 上传场景密码经 X-Backup-Password 请求头传递，不进 URL
     const headers = opts?.password ? { 'X-Backup-Password': opts.password } : undefined

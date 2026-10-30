@@ -405,11 +405,19 @@ async function onUploadRestore(e: Event) {
   }
   const fd = new FormData()
   fd.append('file', file)
+  // 上传还原是全库覆盖：必须先让用户明确确认文件与影响，再调用后端确认闸门。
+  // 旧实现选文件即直发、API 层硬编码 confirm=true，误选即覆盖（2026-10-30 审计 A-H4）。
+  const ok = await confirmDialog.confirm(
+    `从文件「${file.name}」还原将覆盖当前数据库`,
+    '还原期间停止写入并重建数据库，无法撤销。确认继续？',
+    'danger',
+  )
+  if (!ok) return
   uploadRestoring.value = true
   busy.value = true
   taskKind.value = '还原'
   try {
-    const res = await backupApi.asyncImport(fd)
+    const res = await backupApi.asyncImport(fd, { confirm: true })
     activeTaskId.value = res.task_id ?? null
   } catch (err) {
     uploadRestoring.value = false

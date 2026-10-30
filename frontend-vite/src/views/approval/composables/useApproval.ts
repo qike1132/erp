@@ -59,7 +59,9 @@ export function useApproval() {
     queryKey: ['approvals', () => statusFilter.value, () => debouncedSearch.value, () => currentPage.value],
     queryFn: () =>
       approvalApi.list({
-        status: statusFilter.value || undefined,
+        // 空串表示「全部」：不能省略参数，否则后端默认 status=pending，
+        // 页面显示「全部」却只查待审批（2026-10-30 审计 FE 跨区线索）。
+        status: statusFilter.value || 'all',
         search: debouncedSearch.value || undefined,
         page: currentPage.value,
         per_page: perPage,

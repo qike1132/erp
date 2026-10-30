@@ -49,11 +49,19 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { stockApi } from '@/api'
-import type { ApiResponse, Product, StagedStockout } from '@/types'
+import type { Product, StagedStockout } from '@/types'
 import OcrPasteImport from '@/components/ocr/OcrPasteImport.vue'
 import { buildStockoutStagedItems } from '../composables/useStockoutOcrStaging'
 import type { OcrDraftItem, OcrStagingContext } from '@/components/ocr/types'
 import { showToast } from '@/composables/useToast'
+
+/** 暂存出货确认响应（后端 StagingStockOutConfirmResult） */
+interface StagingConfirmResult {
+  success?: boolean
+  message?: string
+  confirmed?: number
+  errors?: string[]
+}
 
 const props = defineProps<{
   /** 表单当前选中的客户：识别结果缺客户时的兜底 */
@@ -142,20 +150,32 @@ async function handleImportExcel() {
     fd.append('file', excelFile.value)
     const sessionId = `stg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const res = await stockApi.stagingStockouts.importExcel(fd, sessionId)
-    if (res.success) {
-      showToast(`成功导入 ${res.imported ?? 0} 条记录到暂存区`, 'success')
-      excelFile.value = null
-      if (res.imported) {
-        try {
-          const confirmRes = await stockApi.stagingStockouts.confirm(sessionId) as ApiResponse
-          if (confirmRes.success) {
-            showToast('暂存出货已确认提交', 'success')
-            emit('imported')
-          }
-        } catch { /* staging confirm optional */ }
-      }
-    } else {
+    if (!res.success) {
       showToast(res.message || '导入失败', 'error')
+      return
+    }
+    showToast(`成功导入 ${res.imported ?? 0} 条记录到暂存区`, 'success')
+    excelFile.value = null
+    if (!res.imported) return
+    // 导入成功 ≠ 出货成功：确认失败时后端会删掉失败行并返回 success:false，
+    // 旧实现把这一路完全吞掉，用户以为已出货、库存实际未减（2026-10-30 审计 A-H3）。
+    try {
+      const confirmRes = await stockApi.stagingStockouts.confirm(sessionId) as StagingConfirmResult
+      if (confirmRes.success) {
+        const n = confirmRes.confirmed
+        showToast(`暂存出货已确认提交${n ? `（${n} 条）` : ''}`, 'success')
+      } else {
+        const detail = confirmRes.errors?.length
+          ? `；失败 ${confirmRes.errors.length} 条：${confirmRes.errors.slice(0, 3).join('；')}`
+          : ''
+        showToast((confirmRes.message || '暂存出货确认失败，记录仍在暂存区') + detail, 'error')
+      }
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } }
+      showToast(error.response?.data?.detail || '暂存出货确认失败，请到暂存区检查后重试', 'error')
+    } finally {
+      // 无论确认成败都要刷新：成功要显示新出货，失败要让暂存行可见
+      emit('imported')
     }
   } catch (err: unknown) {
     const error = err as { response?: { data?: { detail?: string } } }
