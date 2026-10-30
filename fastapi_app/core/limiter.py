@@ -125,6 +125,11 @@ class MemorySlidingWindowLimiter:
             self._cleanup(now)
             return len(timestamps) <= limit
 
+    def reset(self) -> None:
+        """清空全部计数桶（测试隔离用；生产不得调用）。"""
+        with self._lock:
+            self._buckets.clear()
+
     def _cleanup(self, now: float) -> None:
         """桶数超上限时清理长期不活跃的桶；仍超限则移除最早写入的桶"""
         if len(self._buckets) <= self.MAX_BUCKETS:

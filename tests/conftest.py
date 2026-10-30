@@ -438,6 +438,14 @@ def _isolate_memory_cache_fallback():
 
     redis_cache._fallback_cache.clear()
     redis_cache._fallback_timestamps.clear()
+    # 登录内存限流器是进程级单例：跨用例累计会把后续 auth_headers 打成 429，
+    # 再级联成 401（2026-10-30 CI 实测）。逐用例清空，等价独立限流库。
+    from fastapi_app.core.limiter import memory_limiter
+
+    memory_limiter.reset()
+    # Redis 客户端可能绑定在上一个已关闭的事件循环上；丢弃引用让 ensure_client()
+    # 在当前 loop 重建（health 用例 "Event loop is closed" 的根因）。
+    redis_cache.redis_client = None
     yield
     redis_cache._fallback_cache.clear()
     redis_cache._fallback_timestamps.clear()
