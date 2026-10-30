@@ -12,9 +12,11 @@
   "shape": [
     "approved_count:int",
     "data:array[0]",
+    "pages:int",
     "pending_count:int",
     "rejected_count:int",
-    "success:bool"
+    "success:bool",
+    "total:int"
   ],
   "value_checks": {},
   "recorded_at": "2026-10-30T05:01:57Z"

@@ -28,6 +28,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+# `--confcutdir=tests/contract` 时 pytest 只把 tests/contract 放进 sys.path，
+# `scripts` 包不可见；显式把仓库根加入，保证纯函数回归可导入。
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 CONTRACT_DIR = ROOT / "tests" / "contract"
 SNAPSHOT_DIR = CONTRACT_DIR / "snapshots"
 

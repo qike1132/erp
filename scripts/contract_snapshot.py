@@ -155,6 +155,10 @@ def _type_name(value: Any) -> str:
         return "bool"
     if value is None:
         return "null"
+    if value == "":
+        # 空字符串是「本次无值」的占位（如库存 0 显示 ''），不是稳定的 str 契约；
+        # 与 null 同口径容忍，否则空库录制 str / 有数据 int 会互报类型变化。
+        return "empty"
     if isinstance(value, int):
         return "int"
     if isinstance(value, float):
@@ -291,7 +295,7 @@ def _shape_map(shape: list[str]) -> dict[str, str]:
 # 对应的"反向"情况（实际为空、基线有结构）同样容忍 —— 结构无从观测时，
 # 任何一方都不该断言另一方"少字段"。
 # ============================================================
-_EMPTY_SHAPE_TYPES = ("null", "array[0]", "object{}")
+_EMPTY_SHAPE_TYPES = ("null", "empty", "array[0]", "object{}")
 
 
 def _tolerant_paths(shape_map: dict[str, str]) -> list[str]:
