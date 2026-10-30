@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # 全量 pytest（5124 条）+ 隔离 API E2E + 契约 + 全栈浏览器冒烟已超过 10 分钟；
+    # 基线 job 恰好在 10:00 完成，新增用例后会被 job 超时截断（表现为无失败步骤的 failure）。
+    timeout-minutes: 25
 
     services:
       postgres:
