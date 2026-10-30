@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "purchase_center_calculate",
+  "method": "POST",
+  "path": "/api/v1/purchase-center/calculate",
+  "query": {},
+  "auth": true,
+  "http_status": 200,
+  "shape": [
+    "accessory:array[0]",
+    "fabric:array[0]",
+    "filling:array[0]",
+    "groups:array[0]",
+    "message:null",
+    "packaging:array[0]",
+    "success:bool",
+    "total_categories:null"
+  ],
+  "value_checks": {},
+  "recorded_at": "2026-10-30T05:01:57Z"
+}

@@ -99,7 +99,18 @@ def _cleanup(product_ids: list[int], order_ids: list[int]) -> None:
     from tests.e2e_api.conftest import _mask_dsn, real_database_url
 
     dsn = real_database_url()
-    if '/erp_system' in dsn and 'erp_system_test' not in dsn:
+    # 与 conftest 的收集期指纹守卫同一口径：**任何** ``*_test`` 库都允许，
+    # 其余一律拒绝。此前写死 ``erp_system_test``，会把 ``erp_system_e2e_test``
+    # 这类隔离库误判成生产库，导致 6 条写路径用例在清理阶段假失败。
+    from sqlalchemy.engine import make_url
+
+    try:
+        database = (make_url(dsn).database or '').rstrip('/')
+    except Exception:
+        raise RuntimeError(
+            f"E2E 清理无法解析目标库，拒绝执行: {_mask_dsn(dsn)}"
+        ) from None
+    if not database.endswith('_test'):
         raise RuntimeError(f"E2E 清理拒绝连接生产库: {_mask_dsn(dsn)}")
 
     with suppress(Exception):
@@ -195,6 +206,13 @@ def _cleanup(product_ids: list[int], order_ids: list[int]) -> None:
 
             if product_ids:
                 conn.execute(
+                    text(
+                        "DELETE FROM stock_return "
+                        "WHERE product_id = ANY(:p) OR order_id = ANY(:o)"
+                    ),
+                    {"p": product_ids, "o": order_ids or [0]},
+                )
+                conn.execute(
                     text("DELETE FROM stock_out WHERE product_id = ANY(:p)"),
                     {"p": product_ids},
                 )
@@ -251,14 +269,26 @@ async def _create_product(
     stock: int,
     factory: str,
     headers: dict[str, str],
+    pack_in: bool = False,
 ) -> int:
-    """经真实端点建产品，返回其 id（写请求需带 Origin 过 CSRF）。"""
+    """经真实端点建产品，返回其 id（写请求需带 Origin 过 CSRF）。
+
+    ``initial_stock`` 只写产品表余额；**出库闸门**看的是「库存（结余）」=
+    生产日报 ``department='packaging'`` 的入库 − 已出货（见
+    ``stock_inventory_service.get_inventory_balance``）。需要出货的用例必须传
+    ``pack_in=True``：此时产品初始余额留 0，再由生产日报补一笔包装部入库，
+    使 ``current_stock`` 与结余都等于 ``stock``，与真实「生产即入库」一致。
+
+    注意别用 ``/production-summary/packaging/create``：那是独立的包装部记录表
+    （报表用），不参与库存结余计算。
+    """
+    barcode = f"WP{int(time.time() * 1000) % 10**9}"
     resp = await api.post(
         "/api/v1/products/create",
         json={
             "name": name,
-            "barcode": f"WP{int(time.time() * 1000) % 10**9}",
-            "initial_stock": stock,
+            "barcode": barcode,
+            "initial_stock": 0 if pack_in else stock,
             "factory": factory,
         },
         headers=headers,
@@ -268,7 +298,27 @@ async def _create_product(
     assert found.status_code == 200, found.text[:200]
     items = found.json()
     assert items, f"刚创建的产品搜不到：{name}"
-    return int(items[0]["id"])
+    product_id = int(items[0]["id"])
+
+    if pack_in:
+        packed = await api.post(
+            "/api/v1/daily-production/records",
+            json={
+                "department": "packaging",
+                "product_id": product_id,
+                "product_name": name,
+                "barcode": barcode,
+                "unit_price": 0,
+                "quantity": stock,
+                "production_date": date.today().isoformat(),
+                "remark": "E2E 包装部入库",
+            },
+            headers=headers,
+        )
+        assert packed.status_code == 200, (
+            f"包装部生产入库失败：{packed.status_code} {packed.text[:300]}"
+        )
+    return product_id
 
 
 async def _create_order(
@@ -412,6 +462,26 @@ class TestOrderConfirmFlow:
             )
             assert confirmed.json().get("success") is True
 
+            # 确认只写 confirmed_at/by，不改派生状态（订单仍「已备货」）。
+            first_detail = await _order_detail(write_api, order_id)
+            assert first_detail["status"] == "已备货", first_detail
+
+            # 订单详情响应**不暴露** confirmed_at（schema 无该字段），
+            # 所以确认时间必须回库核对：否则「接口 200 但没落库」会被漏掉。
+            def _confirmed_at() -> object:
+                from sqlalchemy import text
+
+                with _sync_engine().connect() as conn:
+                    return conn.execute(
+                        text('SELECT confirmed_at FROM "order" WHERE id = :i'),
+                        {"i": order_id},
+                    ).scalar()
+
+            first_confirmed_at = _confirmed_at()
+            assert first_confirmed_at is not None, (
+                "确认接口返回 200，但 order.confirmed_at 仍为空（未落库）"
+            )
+
             # 4) 幂等：重复确认仍 200（CR-1 回归锁）
             again = await write_api.post(
                 f"/api/v1/orders/{order_id}/confirm", headers=write_headers
@@ -421,9 +491,10 @@ class TestOrderConfirmFlow:
                 f"status={again.status_code} body={again.text[:300]}"
             )
 
-            # 5) 确认只写 confirmed_at/by，不改派生状态（订单仍「已备货」）
-            detail = await _order_detail(write_api, order_id)
-            assert detail["status"], detail
+            # 幂等重放不得二次改写确认时间或派生状态。
+            replayed_detail = await _order_detail(write_api, order_id)
+            assert replayed_detail["status"] == "已备货", replayed_detail
+            assert _confirmed_at() == first_confirmed_at
         finally:
             _cleanup([product_id], [order_id])
 
@@ -458,32 +529,46 @@ class TestStockOutDeduction:
         customer = _unique("客户")
         product_id = order_id = 0
         try:
-            product_id = await _create_product(write_api, name, stock=100, factory="东莞", headers=write_headers)
+            product_id = await _create_product(
+                write_api, name, stock=100, factory="东莞",
+                headers=write_headers, pack_in=True,
+            )
             order_id = await _create_order(write_api, product_id, 10, customer, headers=write_headers)
 
             before = await _product_stock(write_api, product_id)
             assert before == 100, f"初始库存应为 100，实际 {before}"
 
-            shipped = await write_api.post(
-                "/api/v1/stock/out/create",
-                json={
-                    "product_id": product_id,
-                    "quantity": 10,
-                    "customer": customer,
-                    "stockout_date": date.today().isoformat(),
-                    "order_type": "regular",
-                },
-                headers=write_headers,
-            )
-            assert shipped.status_code == 200, (
-                f"出库失败：{shipped.status_code} {shipped.text[:300]}"
-            )
-            assert shipped.json().get("success") is True
+            async def _ship(quantity: int) -> None:
+                shipped = await write_api.post(
+                    "/api/v1/stock/out/create",
+                    json={
+                        "product_id": product_id,
+                        "quantity": quantity,
+                        "customer": customer,
+                        "stockout_date": date.today().isoformat(),
+                        "order_type": "regular",
+                    },
+                    headers=write_headers,
+                )
+                assert shipped.status_code == 200, (
+                    f"出库失败：{shipped.status_code} {shipped.text[:300]}"
+                )
+                assert shipped.json().get("success") is True
 
+            # 部分出货必须进入「待出货」，不能仅检查状态字段非空。
+            await _ship(4)
+            partial_detail = await _order_detail(write_api, order_id)
+            assert partial_detail["status"] == "待出货", partial_detail
+            assert await _product_stock(write_api, product_id) == before - 4
+
+            # 累计出满订单量后必须精确推进为「已出货」。
+            await _ship(6)
             after = await _product_stock(write_api, product_id)
             assert after == before - 10, (
-                f"出库 10 后库存应 100→90，实际 {before}→{after}：库存未被真实扣减"
+                f"累计出库 10 后库存应 100→90，实际 {before}→{after}：库存未被真实扣减"
             )
+            detail = await _order_detail(write_api, order_id)
+            assert detail["status"] == "已出货", detail
 
             # 出货量受订单量约束：订单仅 10 且已出完，再出货必须 400
             over = await write_api.post(
@@ -509,17 +594,16 @@ class TestStockOutDeduction:
                 rows = conn.execute(
                     text(
                         "SELECT order_id, stockin_id, quantity FROM stock_out "
-                        "WHERE product_id = :p"
+                        "WHERE product_id = :p ORDER BY id"
                     ),
                     {"p": product_id},
                 ).fetchall()
-            assert len(rows) == 1, f"应只落一条出库记录，实际 {rows}"
-            assert rows[0][0] == order_id, f"出库应绑定订单 {order_id}，实际 {rows[0]}"
-            assert rows[0][1] is None, f"独立出库不应绑定备货，实际 {rows[0]}"
-
-            # 非 5xx 即可：订单状态派生在真实数据上不应把请求打成 500
-            detail = await _order_detail(write_api, order_id)
-            assert detail.get("status"), detail
+            assert len(rows) == 2, f"分批出库应落两条记录，实际 {rows}"
+            assert [row[2] for row in rows] == [4, 6], rows
+            assert all(row[0] == order_id for row in rows), (
+                f"两条出库都应绑定订单 {order_id}，实际 {rows}"
+            )
+            assert all(row[1] is None for row in rows), f"独立出库不应绑定备货，实际 {rows}"
         finally:
             _cleanup([product_id], [order_id])
 
@@ -554,7 +638,94 @@ class TestStockOutDeduction:
 
 
 # ============================================================
-# c) 采购订单一键生成 + X-Idempotency-Key
+# c) 出库 → 退货 → 取消退货 全链
+# ============================================================
+class TestReturnFlow:
+    async def test_stockout_return_cancel_keeps_stock_and_status_consistent(
+        self, write_api: httpx.AsyncClient, write_headers: dict[str, str]
+    ) -> None:
+        name = _unique("return")
+        customer = _unique("客户")
+        product_id = order_id = 0
+        try:
+            product_id = await _create_product(
+                write_api, name, stock=20, factory="东莞",
+                headers=write_headers, pack_in=True,
+            )
+            order_id = await _create_order(
+                write_api, product_id, 10, customer, headers=write_headers,
+            )
+            shipped = await write_api.post(
+                "/api/v1/stock/out/create",
+                json={
+                    "product_id": product_id,
+                    "quantity": 10,
+                    "customer": customer,
+                    "stockout_date": date.today().isoformat(),
+                    "order_type": "regular",
+                },
+                headers=write_headers,
+            )
+            assert shipped.status_code == 200, shipped.text
+            assert (await _order_detail(write_api, order_id))["status"] == "已出货"
+            assert await _product_stock(write_api, product_id) == 10
+
+            from sqlalchemy import text
+            with _sync_engine().connect() as conn:
+                stockout_id = conn.execute(
+                    text(
+                        "SELECT id FROM stock_out WHERE product_id = :p "
+                        "ORDER BY id DESC LIMIT 1"
+                    ),
+                    {"p": product_id},
+                ).scalar_one()
+
+            returned = await write_api.post(
+                "/api/v1/stock-returns/create",
+                json={
+                    "stockout_id": stockout_id,
+                    "quantity": 4,
+                    "reason": "E2E 退货",
+                    "request_id": _unique("return-req")[:64],
+                },
+                headers=write_headers,
+            )
+            assert returned.status_code == 200, returned.text
+            assert await _product_stock(write_api, product_id) == 14
+            assert (await _order_detail(write_api, order_id))["status"] == "待出货"
+            with _sync_engine().connect() as conn:
+                return_row = conn.execute(
+                    text(
+                        "SELECT sr.id, so.returned_quantity FROM stock_return sr "
+                        "JOIN stock_out so ON so.id = sr.stockout_id "
+                        "WHERE so.id = :sid"
+                    ),
+                    {"sid": stockout_id},
+                ).one()
+                assert return_row.returned_quantity == 4
+                return_id = return_row.id
+
+            cancelled = await write_api.delete(
+                f"/api/v1/stock-returns/{return_id}", headers=write_headers,
+            )
+            assert cancelled.status_code == 200, cancelled.text
+            assert await _product_stock(write_api, product_id) == 10
+            assert (await _order_detail(write_api, order_id))["status"] == "已出货"
+            with _sync_engine().connect() as conn:
+                assert conn.execute(
+                    text("SELECT count(*) FROM stock_return WHERE id = :i"),
+                    {"i": return_id},
+                ).scalar_one() == 0
+                assert conn.execute(
+                    text("SELECT returned_quantity FROM stock_out WHERE id = :i"),
+                    {"i": stockout_id},
+                ).scalar_one() == 0
+        finally:
+            _cleanup([product_id], [order_id])
+
+
+# ============================================================
+# d) 采购订单一键生成 + X-Idempotency-Key
 # ============================================================
 class TestOneClickGenerate:
     """一键生成：真实建采购单、置订单为已备货，并锁定幂等键语义。"""
@@ -562,7 +733,12 @@ class TestOneClickGenerate:
     async def test_one_click_generate_creates_po_and_marks_order_stocked(
         self, write_api: httpx.AsyncClient, write_headers: dict[str, str]
     ) -> None:
-        """生成后：订单变「已备货」，且能按 source_order_ids 回查到该采购单。"""
+        """生成后：订单变「已备货」，且能按 source_order_ids 回查到该采购单。
+
+        下单（事务提交后）会就地自动生成采购单，因此本用例接受两种合法形态：
+        本次调用新建（created_count≥1）或幂等命中已存在的单（0 新增 + idempotent）。
+        两种形态都必须满足：恰好一张采购单、订单已备货。
+        """
         from sqlalchemy import text
 
         name = _unique("po")
@@ -581,9 +757,31 @@ class TestOneClickGenerate:
             assert resp.status_code == 200, f"一键生成失败：{resp.status_code} {resp.text[:300]}"
             body = resp.json()
             assert body.get("success") is True, body
-            assert int(body.get("created_count") or 0) >= 1, f"未创建采购单：{body}"
+            assert body.get("orders"), f"一键生成未返回任何采购单：{body}"
+            # 下单成功后由 post-commit 回调就地自动生成采购单
+            # （services/purchase/_auto_generate.py），所以手动「一键生成」经常是
+            # 「已存在」的幂等响应：created_count=0 且 idempotent=True。
+            # 真正的不变量是「恰好一张采购单 + 订单变已备货」，不是本次调用必须新建。
+            created = int(body.get("created_count") or 0)
+            if created == 0:
+                assert body.get("idempotent") is True, f"0 新增却不是幂等响应：{body}"
             po = body["orders"][0]
             assert po.get("id") and po.get("order_no"), po
+
+            # 反重复：同一来源只允许存在 1 张采购单。
+            # 自动生成、手动一键、同键重放三条路径叠加时也不得出现第二张。
+            import json as _json
+
+            with _sync_engine().connect() as conn:
+                dup = conn.execute(
+                    text(
+                        "SELECT count(*) FROM purchase_order "
+                        "WHERE source_order_ids IS NOT NULL "
+                        "AND CAST(source_order_ids AS jsonb) @> CAST(:needle AS jsonb)"
+                    ),
+                    {"needle": _json.dumps([order_id])},
+                ).scalar()
+            assert dup == 1, f"同一来源应只有 1 张采购单，实际 {dup}"
 
             # 订单被改写为「已备货」（一键生成的副作用，前端依赖它刷新列表）
             detail = await _order_detail(write_api, order_id)

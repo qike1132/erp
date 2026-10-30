@@ -253,10 +253,14 @@ class TestUpdateStockIn:
 
         result = await update_stockin_core(
             mock_async_db, stockin, quantity=100,
-            customer='客户', stockin_date=datetime.now(UTC), note='不变'
+            customer='新客户', stockin_date=datetime.now(UTC), note='只改文本'
         )
 
         assert result.quantity == 100
+        assert result.customer == '新客户'
+        assert result.note == '只改文本'
+        mock_get_product.assert_not_called()
+        mock_log.assert_not_called()
 
 
 class TestDeleteStockIn:

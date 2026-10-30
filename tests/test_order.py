@@ -14,6 +14,7 @@
 """
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -28,6 +29,49 @@ from fastapi_app.services.order_crud import (
     update_deduct_quantity,
     update_order,
 )
+from fastapi_app.shared_models import Order, OrderItem, Product
+
+
+async def _seed_order(
+    db,
+    *,
+    tag: str,
+    customer: str,
+    status: str = "待备货",
+    factory: str = "湖北",
+    order_date: datetime | None = None,
+    is_deleted: bool = False,
+) -> Order:
+    """为真实筛选测试创建完全独立的产品、订单和 SKU 快照。"""
+    product = Product(
+        name=f"筛选产品-{tag}",
+        barcode=f"FILTER-{tag}"[:50],
+        factory=factory,
+        current_stock=0,
+        initial_stock=0,
+    )
+    db.add(product)
+    await db.flush()
+    order = Order(
+        order_no=f"ORD-{tag}"[:20],
+        customer=customer,
+        product_id=product.id,
+        quantity=10,
+        status=status,
+        order_date=order_date or datetime(2024, 6, 15, 12, 0, tzinfo=UTC),
+        is_deleted=is_deleted,
+    )
+    db.add(order)
+    await db.flush()
+    db.add(OrderItem(
+        order_id=order.id,
+        product_id=product.id,
+        product_name=product.name,
+        product_barcode=product.barcode,
+        quantity=10,
+    ))
+    await db.flush()
+    return order
 
 
 def make_mock_order(id_val=1, order_no='ORD-001', customer='测试客户',
@@ -75,67 +119,125 @@ class TestGetOrders:
         assert result['total'] == 0
 
     @pytest.mark.asyncio
-    async def test_get_orders_with_customer_filter(self, mock_async_db):
-        """按客户筛选订单"""
-        count_result = MagicMock()
-        count_result.scalar.return_value = 3
+    async def test_get_orders_with_customer_filter(self, async_db_session):
+        """按客户筛选必须返回真实命中行，而不是 mock 的总数。"""
+        tag = uuid4().hex[:8]
+        customer = f"筛选客户-{tag}"
+        expected = await _seed_order(async_db_session, tag=f"A{tag}", customer=customer)
+        await _seed_order(async_db_session, tag=f"B{tag}", customer=f"其他客户-{tag}")
 
-        data_result = MagicMock()
-        data_result.scalars.return_value.unique.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.side_effect = [count_result, data_result]
+        result = await get_orders(async_db_session, page=1, customer=customer)
 
-        result = await get_orders(mock_async_db, page=1, customer='测试客户')
-
-        assert result['total'] == 3
+        assert result['total'] == 1
+        assert [row['id'] for row in result['items']] == [expected.id]
 
     @pytest.mark.asyncio
-    async def test_get_orders_with_status_filter(self, mock_async_db):
-        """按状态筛选"""
-        count_result = MagicMock()
-        count_result.scalar.return_value = 5
-
-        data_result = MagicMock()
-        data_result.scalars.return_value.unique.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.side_effect = [count_result, data_result]
-
-        result = await get_orders(mock_async_db, page=1, status='待备货')
-
-        assert result['total'] == 5
-
-    @pytest.mark.asyncio
-    async def test_get_orders_with_factory_filter(self, mock_async_db):
-        """按工厂筛选"""
-        count_result = MagicMock()
-        count_result.scalar.return_value = 2
-
-        data_result = MagicMock()
-        data_result.scalars.return_value.unique.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.side_effect = [count_result, data_result]
-
-        result = await get_orders(mock_async_db, page=1, factory='湖北')
-
-        assert result['total'] == 2
-
-    @pytest.mark.asyncio
-    async def test_get_orders_with_date_range(self, mock_async_db):
-        """按日期范围筛选"""
-        count_result = MagicMock()
-        count_result.scalar.return_value = 7
-
-        data_result = MagicMock()
-        data_result.scalars.return_value.unique.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock()
-        mock_async_db.execute.side_effect = [count_result, data_result]
-
-        result = await get_orders(
-            mock_async_db, page=1,
-            start_date='2024-01-01', end_date='2024-12-31'
+    async def test_get_orders_with_status_filter(self, async_db_session):
+        """状态筛选只返回同客户下目标状态的订单。"""
+        tag = uuid4().hex[:8]
+        customer = f"状态客户-{tag}"
+        expected = await _seed_order(
+            async_db_session, tag=f"A{tag}", customer=customer, status="待备货",
+        )
+        await _seed_order(
+            async_db_session, tag=f"B{tag}", customer=customer, status="已备货",
         )
 
-        assert result['total'] == 7
+        result = await get_orders(
+            async_db_session, page=1, customer=customer, status="待备货",
+        )
+
+        assert result['total'] == 1
+        assert [row['id'] for row in result['items']] == [expected.id]
+
+    @pytest.mark.asyncio
+    async def test_get_orders_with_factory_filter(self, async_db_session):
+        """混合 SKU 订单任一湖北 SKU 命中即返回；纯东莞订单排除。"""
+        tag = uuid4().hex[:8]
+        customer = f"工厂客户-{tag}"
+        mixed = await _seed_order(
+            async_db_session, tag=f"A{tag}", customer=customer, factory="湖北",
+        )
+        dongguan_product = Product(
+            name=f"东莞补充-{tag}", barcode=f"DG-{tag}"[:50], factory="东莞",
+        )
+        async_db_session.add(dongguan_product)
+        await async_db_session.flush()
+        async_db_session.add(OrderItem(
+            order_id=mixed.id,
+            product_id=dongguan_product.id,
+            product_name=dongguan_product.name,
+            product_barcode=dongguan_product.barcode,
+            quantity=1,
+        ))
+        await _seed_order(
+            async_db_session, tag=f"B{tag}", customer=customer, factory="东莞",
+        )
+        await async_db_session.flush()
+
+        result = await get_orders(
+            async_db_session, page=1, customer=customer, factory="湖北",
+        )
+
+        assert result['total'] == 1
+        assert [row['id'] for row in result['items']] == [mixed.id]
+
+    @pytest.mark.asyncio
+    async def test_get_orders_with_date_range(self, async_db_session):
+        """日期边界包含当天，范围外订单必须真实排除。"""
+        tag = uuid4().hex[:8]
+        customer = f"日期客户-{tag}"
+        expected = await _seed_order(
+            async_db_session,
+            tag=f"A{tag}",
+            customer=customer,
+            order_date=datetime(2024, 6, 15, 23, 59, 59, tzinfo=UTC),
+        )
+        await _seed_order(
+            async_db_session,
+            tag=f"B{tag}",
+            customer=customer,
+            order_date=datetime(2024, 6, 16, 0, 0, 0, tzinfo=UTC),
+        )
+
+        result = await get_orders(
+            async_db_session,
+            page=1,
+            customer=customer,
+            start_date="2024-06-15",
+            end_date="2024-06-15",
+        )
+
+        assert result['total'] == 1
+        assert [row['id'] for row in result['items']] == [expected.id]
+
+    @pytest.mark.asyncio
+    async def test_get_orders_rejects_invalid_date(self, async_db_session):
+        """非法日期不得被静默忽略成无筛选。"""
+        from fastapi_app.core.exceptions import BusinessError
+
+        with pytest.raises(BusinessError, match="日期格式错误"):
+            await get_orders(async_db_session, start_date="2024-99-99")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("field", ["order_no", "customer", "product", "barcode"])
+    async def test_get_orders_with_keyword_filter(self, async_db_session, field):
+        """关键字分别命中订单号、客户、SKU 名称和条码。"""
+        tag = uuid4().hex[:8]
+        customer = f"关键字客户-{tag}"
+        expected = await _seed_order(async_db_session, tag=f"K{tag}", customer=customer)
+        await _seed_order(async_db_session, tag=f"X{tag}", customer=f"无关客户-{tag}")
+        needles = {
+            "order_no": expected.order_no,
+            "customer": customer,
+            "product": f"筛选产品-K{tag}",
+            "barcode": f"FILTER-K{tag}",
+        }
+
+        result = await get_orders(async_db_session, page=1, keyword=needles[field])
+
+        assert result['total'] == 1
+        assert [row['id'] for row in result['items']] == [expected.id]
 
 
 class TestGetOrderById:
@@ -170,15 +272,20 @@ class TestGetOrderById:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_order_by_id_deleted_order(self, mock_async_db):
-        """已删除订单查不到"""
-        data_result = MagicMock()
-        data_result.scalars.return_value.unique.return_value.first.return_value = None
-        mock_async_db.execute = AsyncMock(return_value=data_result)
+    async def test_get_order_by_id_deleted_order(self, async_db_session):
+        """真实软删订单详情和列表都不可见，未删除对照组仍可查询。"""
+        tag = uuid4().hex[:8]
+        customer = f"软删客户-{tag}"
+        deleted = await _seed_order(
+            async_db_session, tag=f"D{tag}", customer=customer, is_deleted=True,
+        )
+        visible = await _seed_order(async_db_session, tag=f"V{tag}", customer=customer)
 
-        result = await get_order_by_id(mock_async_db, 999)
-
-        assert result is None
+        assert await get_order_by_id(async_db_session, deleted.id) is None
+        assert (await get_order_by_id(async_db_session, visible.id))["id"] == visible.id
+        listed = await get_orders(async_db_session, page=1, customer=customer)
+        assert listed['total'] == 1
+        assert [row['id'] for row in listed['items']] == [visible.id]
 
 
 class TestCreateOrder:

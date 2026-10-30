@@ -10,7 +10,9 @@
   "auth": true,
   "http_status": 200,
   "shape": [
+    "all_customers:array[0]",
     "all_customers[]:str",
+    "data:array[0]",
     "data[].available_stock:str",
     "data[].customer:str",
     "data[].order_quantity:int",
@@ -30,5 +32,5 @@
     "total_stockin_quantity:int"
   ],
   "value_checks": {},
-  "recorded_at": "2026-09-14T01:06:08Z"
+  "recorded_at": "2026-10-30T05:01:57Z"
 }

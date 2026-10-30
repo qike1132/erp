@@ -8,6 +8,9 @@
   "http_status": 200,
   "shape": [
     "app:str",
+    "backup.age_hours:float",
+    "backup.arq_ok:bool",
+    "backup.ok:bool",
     "checks.database.status:str",
     "checks.db_health_stats.check_interval:int",
     "checks.db_health_stats.failed_checks:int",
@@ -23,9 +26,16 @@
     "checks.db_pool.async_pool.overflow:int",
     "checks.db_pool.async_pool.size:int",
     "checks.redis.status:str",
+    "degraded:array[0]",
+    "runtime.boot_id:str",
+    "runtime.commit:str",
+    "runtime.pid:int",
+    "runtime.started_at:<volatile>",
+    "runtime.version:str",
+    "security_degraded:bool",
     "status:str",
     "version:str"
   ],
   "value_checks": {},
-  "recorded_at": "2026-09-14T01:06:08Z"
+  "recorded_at": "2026-10-30T05:01:56Z"
 }

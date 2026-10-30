@@ -10,6 +10,7 @@
   "auth": true,
   "http_status": 200,
   "shape": [
+    "customers:array[0]",
     "customers[].address:str",
     "customers[].contact:str",
     "customers[].create_time:<volatile>",
@@ -23,5 +24,5 @@
     "total:int"
   ],
   "value_checks": {},
-  "recorded_at": "2026-09-14T01:06:08Z"
+  "recorded_at": "2026-10-30T05:01:57Z"
 }

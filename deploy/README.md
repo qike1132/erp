@@ -180,8 +180,9 @@ fail-fast 中止安装，物料齐全才继续）：
 3. **还原服务注册**：导入 `preinstall-*\*.reg`（提权双击或
    `reg import <文件>`）——服务 ImageFile/ AppDirectory 指回旧版本目录。
 4. **数据库**：仅当装坏了库结构/数据时：先建空库再
-   `pg_restore -U erp_app -d erp_system --clean --if-exists backups\preinstall-*-db.sql`
-   （凭据同 .env；**不要**对正常库跑这句）。
+   `psql -U erp_app -d erp_system -v ON_ERROR_STOP=1 -f backups\preinstall-*-db.sql`
+   （`install_package.ps1` 生成的是**纯文本 SQL**，不是 `pg_dump -Fc` 自定义格式，
+   因此不能用 `pg_restore`；凭据同 .env；**不要**对正常库跑这句）。
 5. **拉起**：`nssm start erp-redis-broker erp-redis erp-web erp-arq erp-prod`
    （按启动序），然后核 `logs\prod_runner.json` 的 `ready:true` +
    `frontend_ok:true`（AGENTS §3 健康判据）。

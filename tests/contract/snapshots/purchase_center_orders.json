@@ -11,6 +11,7 @@
   "http_status": 200,
   "shape": [
     "current_page:int",
+    "orders:array[0]",
     "orders[].create_time:<volatile>",
     "orders[].customer:str",
     "orders[].customer_name:str",
@@ -44,5 +45,5 @@
     "total:int"
   ],
   "value_checks": {},
-  "recorded_at": "2026-09-14T01:06:08Z"
+  "recorded_at": "2026-10-30T05:01:57Z"
 }

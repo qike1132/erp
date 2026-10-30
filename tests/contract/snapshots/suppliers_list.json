@@ -11,6 +11,7 @@
   "http_status": 200,
   "shape": [
     "success:bool",
+    "suppliers:array[0]",
     "suppliers[].address:str",
     "suppliers[].contact_person:str",
     "suppliers[].created_at:<volatile>",
@@ -22,5 +23,5 @@
     "total:int"
   ],
   "value_checks": {},
-  "recorded_at": "2026-09-14T01:06:08Z"
+  "recorded_at": "2026-10-30T05:01:57Z"
 }

@@ -12,12 +12,13 @@
   "shape": [
     "customer_totals.total_inventory_qty:int",
     "customer_totals.total_plan_qty:int",
+    "customer_totals.total_produced_qty:int",
     "customer_totals.total_remaining_qty:int",
-    "customer_totals.total_shipped_qty:int",
     "customer_totals.warning_count:int",
     "customers:array[0]",
     "days_in_month:int",
     "fifo_degraded:bool",
+    "inventory_degraded:bool",
     "month:int",
     "rows:array[0]",
     "sku_date_index:object{}",
@@ -25,5 +26,5 @@
     "year:int"
   ],
   "value_checks": {},
-  "recorded_at": "2026-09-14T01:06:08Z"
+  "recorded_at": "2026-10-30T05:05:33Z"
 }

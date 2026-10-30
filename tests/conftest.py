@@ -34,6 +34,7 @@ import os
 import sys
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -104,6 +105,28 @@ from fastapi_app.main import app
 for _host in ("test", "testserver"):
     if _host not in settings.ALLOWED_HOSTS:
         settings.ALLOWED_HOSTS.append(_host)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_maintenance_sentinel(tmp_path_factory):
+    """把维护模式哨兵重定向到临时目录，禁止测试写仓库级 `logs/maintenance_mode.sentinel`。
+
+    根因：`enter_maintenance()` 即使 Redis 客户端被 mock，仍会写本地哨兵文件。
+    用例若在 enter 之后异常退出（未走到 `exit_maintenance()`），哨兵会残留，
+    并在 `_SENTINEL_MAX_AGE` 窗口内让**后续所有**写请求返回 503 MAINTENANCE ——
+    单点失败被放大成成片假红，掩盖真实结果。
+    """
+    from fastapi_app.core import maintenance as maintenance_module
+
+    sentinel_dir = tmp_path_factory.mktemp("maintenance_sentinel")
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        maintenance_module,
+        "_MAINTENANCE_SENTINEL",
+        sentinel_dir / "maintenance_mode.sentinel",
+    )
+    yield
+    monkeypatch.undo()
 
 
 # ============================================================
@@ -592,53 +615,33 @@ async def normal_user(async_db_session):
 
 @pytest_asyncio.fixture
 async def test_product(async_db_session):
-    """创建或查询测试产品（幂等，重复调用不抛唯一约束异常）
+    """每个用例创建独立产品，杜绝库存、订单和流水跨用例隐式传递。
 
-    用例级库存恢复（审计 Z09-R6）：夹具按 barcode 幂等查回**同一行**，而
-    ``async_db_session`` 在用例结束会把挂起变更提交进共享测试库——用例之间因此
-    通过 DB 隐式传递库存状态，依赖库存数值的断言在聚焦跑（``pytest -k``）与全量
-    跑下可能因初值不同而结论不同（聚焦绿 ≠ 全量绿）。这里进入用例时把库存归位
-    到基准值、退出用例时再写回，两个端口都断掉跨用例的状态传递。
+    根集成套件会提交真实测试库事务。旧实现按固定 barcode 复用同一产品，再在
+    teardown 仅恢复 current_stock，无法清理订单、出入库单和流水等关联状态。
+    现在改用唯一产品/SKU：同一用例内的订单与出入库夹具仍共享该产品，不同用例
+    不再共享任何可变业务行，也无需依赖 teardown 把数据库“修回”某个快照。
     """
+    from fastapi_app.shared_models import DailyProductionRecord
     from fastapi_app.shared_models.product import Product
 
-    result = await async_db_session.execute(
-        select(Product).where(Product.barcode == "TEST001")
+    suffix = uuid4().hex[:10]
+    product = Product(
+        name=f"测试产品-{suffix}",
+        barcode=f"TEST-{suffix}",
+        current_stock=TEST_PRODUCT_BASELINE_STOCK,
+        initial_stock=TEST_PRODUCT_BASELINE_STOCK,
     )
-    product = result.scalars().first()
-    if not product:
-        product = Product(
-            name="测试产品",
-            barcode="TEST001",
-            current_stock=TEST_PRODUCT_BASELINE_STOCK,
-            initial_stock=TEST_PRODUCT_BASELINE_STOCK,
-        )
-        async_db_session.add(product)
-        await async_db_session.flush()
-    elif product.current_stock != TEST_PRODUCT_BASELINE_STOCK:
-        # 上一用例（或历史脏数据）留下的库存漂移：归位到基准值
-        product.current_stock = TEST_PRODUCT_BASELINE_STOCK
-        await async_db_session.flush()
-    # 库存结余闸门（2026-10-07）要求「包装部入库 − 已出货」≥ 出货量；
-    # 测试产品无生产数据时闸门恒拒，故补一条包装部入库记录（幂等、足量）。
-    from fastapi_app.shared_models import DailyProductionRecord
-    has_packaging = (await async_db_session.execute(
-        select(DailyProductionRecord.id).where(
-            DailyProductionRecord.department == 'packaging',
-            DailyProductionRecord.product_id == product.id,
-        ).limit(1)
-    )).scalar()
-    if not has_packaging:
-        async_db_session.add(DailyProductionRecord(
-            department='packaging', product_id=product.id,
-            product_name=product.name, barcode=product.barcode or '',
-            quantity=100000, production_date=datetime.now(UTC).date(),
-        ))
-        await async_db_session.flush()
-    yield product
-    # 用例级恢复：库存写回基准值并提交，不把漂移留给下一个用例
-    product.current_stock = TEST_PRODUCT_BASELINE_STOCK
-    await async_db_session.commit()
+    async_db_session.add(product)
+    await async_db_session.flush()
+    # 库存结余闸门要求「包装部入库 − 已出货」≥ 出货量；每个新产品都独立补足量记录。
+    async_db_session.add(DailyProductionRecord(
+        department='packaging', product_id=product.id,
+        product_name=product.name, barcode=product.barcode or '',
+        quantity=100000, production_date=datetime.now(UTC).date(),
+    ))
+    await async_db_session.flush()
+    return product
 
 
 @pytest_asyncio.fixture
@@ -690,69 +693,53 @@ async def test_customer(async_db_session):
 
 @pytest_asyncio.fixture
 async def test_order(async_db_session, test_product, test_customer):
-    """创建或查询测试订单（幂等）"""
+    """每个用例创建独立订单，固定数量 50 但不复用状态或关联行。"""
     from fastapi_app.shared_models.order import Order
 
-    result = await async_db_session.execute(
-        select(Order).where(Order.order_no == "ORD-TEST-001")
+    order = Order(
+        order_no=f"ORD-T-{uuid4().hex[:12]}",
+        product_id=test_product.id,
+        customer=test_customer.name,
+        quantity=50,
+        order_date=datetime.now(UTC),
+        status="待备货",
     )
-    order = result.scalars().first()
-    if not order:
-        order = Order(
-            order_no="ORD-TEST-001",
-            product_id=test_product.id,
-            customer=test_customer.name,
-            # 50：出库集成测试按 FIFO 受订单量约束（test_stockout_exact_stock 需要出货 50）
-            quantity=50,
-            order_date=datetime.now(UTC),
-            status="待备货",
-        )
-        async_db_session.add(order)
-        await async_db_session.flush()
+    async_db_session.add(order)
+    await async_db_session.flush()
     return order
 
 
 @pytest_asyncio.fixture
 async def test_stockin(async_db_session, test_product, test_customer):
-    """创建或查询测试入库记录（幂等）"""
+    """每个用例创建独立备货记录，不复用数量、确认状态或关联出库。"""
     from fastapi_app.shared_models.stock_in import StockIn
 
-    result = await async_db_session.execute(
-        select(StockIn).where(StockIn.stockin_no == "SI-TEST-001")
+    stockin = StockIn(
+        stockin_no=f"SI-T-{uuid4().hex[:12]}",
+        product_id=test_product.id,
+        customer=test_customer.name,
+        quantity=50,
+        stockin_date=datetime.now(UTC),
     )
-    stockin = result.scalars().first()
-    if not stockin:
-        stockin = StockIn(
-            stockin_no="SI-TEST-001",
-            product_id=test_product.id,
-            customer=test_customer.name,
-            quantity=50,
-            stockin_date=datetime.now(UTC),
-        )
-        async_db_session.add(stockin)
-        await async_db_session.flush()
+    async_db_session.add(stockin)
+    await async_db_session.flush()
     return stockin
 
 
 @pytest_asyncio.fixture
 async def test_stockout(async_db_session, test_product, test_customer):
-    """创建或查询测试出库记录（幂等）"""
+    """每个用例创建独立出库记录，不复用数量、退货量或订单绑定。"""
     from fastapi_app.shared_models.stock_out import StockOut
 
-    result = await async_db_session.execute(
-        select(StockOut).where(StockOut.stockout_no == "SO-TEST-001")
+    stockout = StockOut(
+        stockout_no=f"SO-T-{uuid4().hex[:12]}",
+        product_id=test_product.id,
+        customer=test_customer.name,
+        quantity=20,
+        stockout_date=datetime.now(UTC),
     )
-    stockout = result.scalars().first()
-    if not stockout:
-        stockout = StockOut(
-            stockout_no="SO-TEST-001",
-            product_id=test_product.id,
-            customer=test_customer.name,
-            quantity=20,
-            stockout_date=datetime.now(UTC),
-        )
-        async_db_session.add(stockout)
-        await async_db_session.flush()
+    async_db_session.add(stockout)
+    await async_db_session.flush()
     return stockout
 
 

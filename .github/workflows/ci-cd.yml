@@ -58,6 +58,13 @@ jobs:
     steps:
     - uses: actions/checkout@v5
 
+    - name: Set up Node.js for full-stack browser E2E
+      uses: actions/setup-node@v5
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: frontend-vite/package-lock.json
+
     # pg_dump 必须与服务端同一个大版本：service 是 postgres:18-alpine（刻意对齐生产
     # 的 18.x），而 runner 自带的 pg_dump 是 16（pgdg24.04）。大版本不匹配时 pg_dump
     # 直接 abort，让 test_restore_real_roundtrip 这类真跑 dump/restore 的用例在 CI 上
@@ -129,6 +136,121 @@ jobs:
           --cov-report=html \
           --html=test-report.html \
           --junitxml=test-results.xml
+
+    - name: Run isolated API E2E and live contract checks
+      # 真实进程 + 真实 PostgreSQL/Redis：不得把默认环境中的 E2E skip 当成业务写路径已验证。
+      # 5502 是 CI 专用端口；e2e-identity 会证明目标确实为 APP_ENV=test 且连接 erp_test。
+      env:
+        APP_ENV: test
+        REDIS_CACHE_URL: redis://localhost:6379/15
+        REDIS_URL: redis://localhost:6379/15
+        REDIS_DB: "15"
+        E2E_API_BASE_URL: http://127.0.0.1:5502
+        ERP_E2E_REAL_DATABASE_URL: postgresql+psycopg://erp_test:erp_test_pass@localhost:5432/erp_test  # secret-scan:allow CI 测试库
+        CONTRACT_BASE_URL: http://127.0.0.1:5502
+      run: |
+        # 空库没有导航/权限行：/dashboard/nav-sections 只剩 core，前端左栏空白，
+        # 契约基线也无法复现（实测丢 35 个字段签名）。seed_nav.py 是「新库补齐导航」
+        # 的权威幂等来源；ERP_ALLOW_PROD_WRITE 仅用于放行本步骤指向的 CI *_test 库
+        # （写保护脚本按环境保守拒绝，不是指向生产）。
+        ERP_ALLOW_PROD_WRITE=1 PYTHONPATH=scripts python scripts/seed_nav.py
+        python -m uvicorn fastapi_app.main:app --host 127.0.0.1 --port 5502 &
+        E2E_PID=$!
+        trap 'kill $E2E_PID 2>/dev/null || true' EXIT
+        for attempt in $(seq 1 60); do
+          if curl -fsS http://127.0.0.1:5502/api/health >/dev/null; then
+            break
+          fi
+          if ! kill -0 $E2E_PID 2>/dev/null; then
+            echo "隔离后端提前退出"
+            exit 1
+          fi
+          sleep 1
+        done
+        curl -fsS http://127.0.0.1:5502/api/health/e2e-identity
+        # 禁止加载根 tests/conftest.py：它会清空并重建共享测试库，和运行中的隔离后端争用同一 DB。
+        #
+        # 2026-10-30：两条都恢复为**阻塞式门禁**。此前挂成报告项的三个原因已解决：
+        #   1) 出库可用量取「生产日报 department=packaging」，E2E 造数已按真实口径补包装部入库；
+        #   2) 下单后 post-commit 自动生成采购单，一键生成返回 created_count=0 属幂等语义，
+        #      用例改为断言「恰好一张采购单 + 订单已备货」；
+        #   3) 契约基线改为 `--record --merge`（只增不减），空库比对靠 array[0]/object{} 容差
+        #      通过；实测有数据与空库两种环境均 22/22 一致、0 漂移。
+        pytest --confcutdir=tests/e2e_api tests/e2e_api -v
+        pytest --confcutdir=tests/contract tests/contract -v
+
+    - name: Build frontend for real full-stack browser E2E
+      working-directory: frontend-vite
+      run: |
+        npm ci
+        npm run build
+
+    - name: Install Chromium for full-stack browser E2E
+      working-directory: frontend-vite
+      run: npx playwright install --with-deps chromium
+
+    - name: Run real full-stack browser smoke
+      # 2026-10-30 审计 B-M2：断言已从录入页 /customer-order 改到订单流水 /report，
+      # 该步骤恢复为阻塞门禁（失败必须红掉 test job）。
+      env:
+        APP_ENV: test
+        ALLOWED_HOSTS: '["127.0.0.1","localhost"]'
+        CORS_ORIGINS: http://127.0.0.1:5600
+        WS_ALLOWED_ORIGINS: http://127.0.0.1:5600
+        REDIS_CACHE_URL: redis://localhost:6379/15
+        REDIS_URL: redis://localhost:6379/15
+        REDIS_DB: "15"
+        E2E_FULLSTACK_BASE_URL: http://127.0.0.1:5502
+        E2E_FULLSTACK_USER: admin
+        E2E_FULLSTACK_PASSWORD: admin123  # secret-scan:allow CI 测试夹具口令
+        ERP_E2E_REAL_DATABASE_URL: postgresql+psycopg://erp_test:erp_test_pass@localhost:5432/erp_test  # secret-scan:allow CI 测试库
+      run: |
+        # 空库 + 迁移后没有任何用户，浏览器真实登录会 401。
+        # 这里用项目自身的 ORM 与 hash_password 造管理员，避免在 CI 里猜列名/哈希方案。
+        python - <<'PY'
+        import asyncio
+
+        from sqlalchemy import select
+
+        from fastapi_app.core.database import (
+            ensure_engine_for_current_loop,
+            require_async_session_local,
+        )
+        from fastapi_app.core.security import hash_password
+        from fastapi_app.shared_models.user import User
+
+        async def main() -> None:
+            await ensure_engine_for_current_loop()
+            async with require_async_session_local()() as session:
+                existing = (
+                    await session.execute(select(User).where(User.username == 'admin'))
+                ).scalars().first()
+                if existing is None:
+                    session.add(User(
+                        username='admin',
+                        password=hash_password('admin123'),
+                        is_super=True,
+                        status=True,
+                    ))
+                    await session.commit()
+                    print('seeded admin')
+
+        asyncio.run(main())
+        PY
+        python -m uvicorn fastapi_app.main:app --host 127.0.0.1 --port 5502 &
+        E2E_PID=$!
+        trap 'kill $E2E_PID 2>/dev/null || true' EXIT
+        for attempt in $(seq 1 60); do
+          if curl -fsS http://127.0.0.1:5502/api/health >/dev/null; then
+            break
+          fi
+          if ! kill -0 $E2E_PID 2>/dev/null; then
+            echo "全栈浏览器 E2E 后端提前退出"
+            exit 1
+          fi
+          sleep 1
+        done
+        node --test frontend-vite/tests/e2e/fullstack-business.e2e.mjs
 
     # P1-12 前端契约真校验：把 frontend-vite/src/api/*.ts 里真实调用的端点与后端
     # fastapi_app.main:app.openapi() 的路径逐条比对（字面量端点断言，模板端点只列出）。

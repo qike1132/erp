@@ -167,7 +167,7 @@ class TestStockInRoutes:
         """测试删除有关联出库的入库记录"""
         # 创建关联的出库记录
         stockout = StockOut(
-            stockout_no="SO-TEST-001",
+            stockout_no=f"SO-GUARD-{uuid4().hex[:8]}",
             product_id=test_product.id,
             customer=test_customer.name,
             quantity=10,
@@ -334,7 +334,7 @@ class TestStockOutRoutes:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_stockout_edit_success(self, async_client, auth_headers, async_db_session, test_stockout, test_product):
+    async def test_stockout_edit_success(self, async_client, auth_headers, async_db_session, test_stockout, test_product, test_order):
         """测试编辑出库记录成功"""
         test_product.current_stock = 100
         await async_db_session.flush()
@@ -356,7 +356,7 @@ class TestStockOutRoutes:
         assert test_stockout.quantity == new_quantity
 
     @pytest.mark.asyncio
-    async def test_stockout_edit_insufficient_stock(self, async_client, auth_headers, async_db_session, test_stockout, test_product):
+    async def test_stockout_edit_insufficient_stock(self, async_client, auth_headers, async_db_session, test_stockout, test_product, test_order):
         """测试编辑出库记录库存不足"""
         test_product.current_stock = 5
         await async_db_session.flush()

@@ -12,6 +12,7 @@
   "shape": [
     "current_page:int",
     "pages:int",
+    "products:array[0]",
     "products[].barcode:str",
     "products[].bom_info.accessory_count:int",
     "products[].bom_info.fabric_count:int",
@@ -25,5 +26,5 @@
     "total:int"
   ],
   "value_checks": {},
-  "recorded_at": "2026-09-14T01:06:08Z"
+  "recorded_at": "2026-10-30T05:01:57Z"
 }
