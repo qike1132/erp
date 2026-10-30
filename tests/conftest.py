@@ -446,6 +446,9 @@ def _isolate_memory_cache_fallback():
     # Redis 客户端可能绑定在上一个已关闭的事件循环上；丢弃引用让 ensure_client()
     # 在当前 loop 重建（health 用例 "Event loop is closed" 的根因）。
     redis_cache.redis_client = None
+    from fastapi_app.core.redis_client import reset_async_redis_client
+
+    reset_async_redis_client()
     yield
     redis_cache._fallback_cache.clear()
     redis_cache._fallback_timestamps.clear()
