@@ -26,7 +26,6 @@ from fastapi_app.services.purchase_order_sku import (
     resync_po_sku_spare,
     write_po_sku_rows,
 )
-from fastapi_app.services.purchase_utils import calc_spare_quantity
 from fastapi_app.shared_models import (
     Base,
     MaterialRegistration,
@@ -111,9 +110,9 @@ def test_build_po_sku_rows_splits_skus_and_merges_same_product():
     assert set(by_name) == {'A', 'B'}
     # 同一来源同产品名的多行合并（10 + 5），不拆分/不摊派
     assert by_name['A']['order_qty'] == 15
-    assert by_name['A']['spare_qty'] == calc_spare_quantity(15, 50)  # ceil(0.75) = 1
+    assert by_name['A']['spare_qty'] == 1  # ceil(15*50/1000)=ceil(0.75)=1（字面量期望，防镜像断言）
     assert by_name['B']['order_qty'] == 20
-    assert by_name['B']['spare_qty'] == calc_spare_quantity(20, 50)  # ceil(1.0) = 1
+    assert by_name['B']['spare_qty'] == 1  # ceil(20*50/1000)=1
     assert all(r['source_order_id'] == 11 and r['source_record_type'] == 'order' for r in rows)
     assert all(r['spare_rate'] == 50 for r in rows)
 
@@ -184,7 +183,7 @@ async def test_resync_po_sku_spare_recomputes_by_new_rate(db):
     assert updated == 1
     row = (await db.execute(select(PurchaseOrderSku))).scalars().one()
     assert row.spare_rate == 50
-    assert row.spare_qty == calc_spare_quantity(20, 50)  # ceil(20*50/1000)=1
+    assert row.spare_qty == 1  # ceil(20*50/1000)=1（字面量期望，防镜像断言）
 
 
 async def test_resync_po_sku_spare_noop_when_rate_none(db):

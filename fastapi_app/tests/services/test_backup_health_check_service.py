@@ -20,19 +20,18 @@ class TestBackupHealthCheckService:
 
     @pytest.fixture
     def health_check_service(self):
-        """创建健康检查服务实例"""
-        service = BackupHealthCheckService()
-        # 模拟环境变量
+        """创建健康检查服务实例（环境变量在整个用例期间生效）"""
         with patch.dict(os.environ, {
             'BACKUP_DISK_SPACE_THRESHOLD': '10.0',
             'BACKUP_AGE_THRESHOLD': '24',
             'BACKUP_INTEGRITY_SAMPLE_RATE': '10.0',
             'BACKUP_RECOVERY_TEST_FREQUENCY': '7',
-            'BACKUP_HEALTH_CHECK_INTERVAL': '60',
+            'BACKUP_HEALTH_CHECK_INTERVAL': '61',
             'BACKUP_REPORT_RETENTION_DAYS': '30',
         }):
+            service = BackupHealthCheckService()
             service.__init__()
-            return service
+            yield service
 
     @pytest.fixture
     def mock_backup_dir(self):
@@ -86,7 +85,7 @@ class TestBackupHealthCheckService:
         assert config['backup_age_threshold'] == 24
         assert config['integrity_sample_rate'] == 10.0
         assert config['recovery_test_frequency'] == 7
-        assert config['health_check_interval'] == 60
+        assert config['health_check_interval'] == 61
         assert config['report_retention_days'] == 30
 
     @pytest.mark.asyncio

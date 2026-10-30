@@ -17,7 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import invalidate_local_cache
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
-from fastapi_app.services.fifo_allocation import _invalidate_fifo_cache
+from fastapi_app.services.fifo_allocation import (
+    _invalidate_fifo_cache,
+    _invalidate_production_fifo_cache,
+)
 from fastapi_app.shared_models import ProductionPlanLog, PurchasePlan
 
 # 与原 purchase_plan_crud 模块共享同一 logger 实例，保持日志行为不变
@@ -46,8 +49,13 @@ async def _invalidate_plan_caches(plan_month: str = '') -> None:
     """
     if plan_month:
         await _invalidate_fifo_cache(plan_month)
+        # 生产进度分配缓存（plan_prod_fifo）必须同批清：计划明细改数量/改期/增删后，
+        # 日历与月度聚合读的就是这份摊派。此前只清 plan_fifo，导致生产进度最长
+        # FIFO_CACHE_TTL（30 分钟）显示旧值（2026-10-30 审计 A-H2）。
+        await _invalidate_production_fifo_cache(plan_month)
         # L1 本地缓存：FIFO 键为 `plan_fifo:YYYY-MM`，精确匹配避免误清
         invalidate_local_cache(f'plan_fifo:{plan_month}')
+        invalidate_local_cache(f'plan_prod_fifo:{plan_month}')
     await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:monthly:*')
     await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:summary:*')
     await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'pp:agg:*')

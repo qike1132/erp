@@ -501,7 +501,13 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
         await db.flush()
 
         stockout_nos = [stockout.stockout_no for stockout in created_stockouts] if created_stockouts else []
-        return {'success': True, 'stockout_no': stockout_nos[0] if stockout_nos else '', 'id': item_id}
+        return {
+            'success': True,
+            'stockout_no': stockout_nos[0] if stockout_nos else '',
+            'id': item_id,
+            # 私有字段仅供 batch_create_stockouts 重算订单状态，出口前移除，避免污染 API DTO。
+            '_created_stockouts': created_stockouts,
+        }
     except ValueError as e:
         return {'success': False, 'error': str(e), 'id': item_id}
     except (TypeError, OSError) as e:
@@ -515,8 +521,18 @@ async def batch_create_stockouts(db: AsyncSession, stockouts_data: list, operato
     results: list[dict[str, Any] | None] = [None] * len(stockouts_data)
     for idx, err in errors_map.items():
         results[idx] = {'success': False, 'error': err, 'id': stockouts_data[idx].get('id', '未知')}
+    created_for_status: list = []
     for orig_idx, item in validated:
-        results[orig_idx] = await _process_single_stockout(db, item, operator_id=operator_id)
+        result = await _process_single_stockout(db, item, operator_id=operator_id)
+        created_for_status.extend(result.pop('_created_stockouts', []))
+        results[orig_idx] = result
+    # 与单条出库路径一致：批量写库后统一重算受影响订单状态，避免订单停在「待备货」。
+    if created_for_status:
+        shipment_completed = await _recalc_shipment_order_statuses(db, created_for_status)
+        await db.flush()
+        # 重算后必须发布「出货完成」事件：单条路径 create_stockout 在 :253 发布，
+        # 批量路径此前丢弃返回值，订单已翻已出货但在线用户收不到通知（2026-10-30 审计 B-M1）。
+        await _publish_shipment_completed_events(shipment_completed)
     all_success = all(result is not None and result.get('success') for result in results)
     return {'success': all_success, 'results': results}
 

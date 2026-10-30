@@ -49,6 +49,8 @@ async def _run(mock_db, item, *, batch_available=0):
                new_callable=AsyncMock, return_value=batch_available), \
          patch('fastapi_app.services.stock_out_service.apply_stock_delta_locked',
                new_callable=AsyncMock, return_value=_make_product()), \
+         patch('fastapi_app.services.stock_out_service._recalc_shipment_order_statuses',
+               new_callable=AsyncMock, return_value=[]), \
          patch('fastapi_app.services.stock_service.log_inventory_change'):
         return await stock_service.batch_create_stockouts(mock_db, [item])
 

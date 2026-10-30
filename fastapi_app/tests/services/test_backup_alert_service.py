@@ -16,20 +16,19 @@ class TestBackupAlertService:
 
     @pytest.fixture
     def alert_service(self):
-        """创建告警服务实例"""
-        service = BackupAlertService()
-        # 模拟环境变量
+        """创建告警服务实例（环境变量在整个用例期间生效）"""
         with patch.dict(os.environ, {
             'BACKUP_ALERT_EMAIL_ENABLED': 'false',
             'BACKUP_ALERT_WEBHOOK_ENABLED': 'false',
             'BACKUP_ALERT_FAILURE_THRESHOLD': '3',
-            'BACKUP_ALERT_CRITICAL_THRESHOLD': '5',
-            'BACKUP_ALERT_COOLDOWN_MINUTES': '30',
+            'BACKUP_ALERT_CRITICAL_THRESHOLD': '9',
+            'BACKUP_ALERT_COOLDOWN_MINUTES': '45',
             'BACKUP_ALERT_MAX_RETRIES': '3',
             'BACKUP_ALERT_RETRY_DELAY_BASE': '2',
         }):
+            service = BackupAlertService()
             service.__init__()
-            return service
+            yield service
 
     def test_load_alert_config(self, alert_service):
         """测试加载告警配置"""
@@ -46,8 +45,8 @@ class TestBackupAlertService:
         assert config['email_enabled'] is False
         assert config['webhook_enabled'] is False
         assert config['failure_threshold'] == 3
-        assert config['critical_threshold'] == 5
-        assert config['alert_cooldown_minutes'] == 30
+        assert config['critical_threshold'] == 9
+        assert config['alert_cooldown_minutes'] == 45
         assert config['max_retries'] == 3
         assert config['retry_delay_base'] == 2
 

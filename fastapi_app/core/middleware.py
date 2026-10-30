@@ -144,6 +144,16 @@ _PATH_BODY_LIMITS: tuple[tuple[str, int], ...] = (
     # 精确到 packaging/upload：该前缀下其余 11 个端点是纯 JSON 小请求，整前缀
     # 放宽属扩大化（评审 finding 5）。middleware 是 startswith 匹配，写全路径即可。
     ('/api/v1/production-summary/packaging/upload', _EXCEL_UPLOAD_BODY_LIMIT),
+    # 暂存导入 / 计划上传 / OCR / 板房上传：端点内均声明 10MiB 文件上限，
+    # 但此前未进放宽名单，临界文件会在端点前被全局 10MB 拦成 413
+    # （2026-10-30 审计 A-M8）。
+    ('/api/v1/staging-orders/import', _EXCEL_UPLOAD_BODY_LIMIT),
+    ('/api/v1/staging-stockins/import', _EXCEL_UPLOAD_BODY_LIMIT),
+    ('/api/v1/staging-stockouts/import', _EXCEL_UPLOAD_BODY_LIMIT),
+    ('/api/v1/production-plans/upload', _EXCEL_UPLOAD_BODY_LIMIT),
+    ('/api/v1/plans/upload', _EXCEL_UPLOAD_BODY_LIMIT),
+    ('/api/v1/ocr-import/', _EXCEL_UPLOAD_BODY_LIMIT),
+    ('/api/v1/pattern-room/', _EXCEL_UPLOAD_BODY_LIMIT),
 )
 
 

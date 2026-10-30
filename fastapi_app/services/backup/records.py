@@ -87,6 +87,8 @@ def write_backup_meta_file(filepath, manifest: dict, *, record_type: str = 'full
             'total_rows': manifest.get('total_rows'),
             # S4：完整性自述随 sidecar 落盘。加密备份读不到 manifest，
             # 列表/补录/判状态只能靠这里，缺了它加密备份永远判 success。
+            # dump_format 必须一并落盘，否则 JSON 降级包在补录侧仍判 success。
+            'dump_format': manifest.get('dump_format'),
             'failed_tables': manifest.get('failed_tables') or [],
             'coverage': manifest.get('coverage'),
             'exported_by': manifest.get('exported_by'),
@@ -173,13 +175,27 @@ def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
       AUD-03（2026-10-24 审计）：JSON 降级包不含 schema、无法在空库/新机恢复，
       若仍判 success，灾难恢复能力会静默失效且 7 天保留期后可用的 pg_dump 包
       被清理光。旧产物无 dump_format 字段不回溯改判（保持其历史状态）。
-    - 其余情况 → ('success', '')
+    - 没有完整性自述（None/空 dict/非 dict/只有文件元数据）→ ('unknown', 说明)。
+      不能把「没人自述有问题」当成「已验证完整」；旧记录状态不回溯，但重新同步
+      或新产物缺 sidecar 时必须让运维看到 unknown。
+    - 有完整性自述且无问题 → ('success', '')
 
-    本函数只做「产物自述」判定：没有自述信息的旧产物仍判 success，无法凭空
-    推断内容完整性（那类情况见 sync_backup_records 的 unknown 分支）。
+    本函数只做「产物自述」判定；自述缺失统一返回 unknown，不凭文件存在推断完整。
+    历史 BackupsRecord 的既有 status 不会被回溯改写，但重新同步时会按本口径更新。
     """
+    completeness_keys = {
+        'coverage', 'failed_tables', 'missing_tables', 'error_tables',
+        'batch_errors', 'dump_format',
+    }
+    if not isinstance(info, dict) or not any(
+        key in info and info[key] is not None for key in completeness_keys
+    ):
+        return (
+            STATUS_UNKNOWN,
+            '完整性自述缺失：产物未提供覆盖度/失败表/降级格式，不能视为已验证完整',
+        )
     problems = _collect_problem_tables(info)
-    degraded_json = isinstance(info, dict) and info.get('dump_format') == 'json'
+    degraded_json = info.get('dump_format') == 'json'
     incomplete = bool(problems) or degraded_json
     coverage = info.get('coverage') if isinstance(info, dict) else None
     if isinstance(coverage, dict) and coverage.get('complete') is False:
@@ -281,6 +297,20 @@ async def write_backup_record(
                     _task.add_done_callback(_background_tasks.discard)
 
 
+def _apply_completeness_keys(entry: dict, source: dict) -> None:
+    """把完整性自述按「源数据真有键」透传，并清掉值为 None 的 dump_format。
+
+    无条件注入空值会把「旧产物无自述」洗成「自述为干净」，unknown 分支永远不可达
+    （2026-10-30 审计 B-M3）。
+    """
+    if 'failed_tables' in source:
+        entry['failed_tables'] = source['failed_tables']
+    if 'coverage' in source:
+        entry['coverage'] = source['coverage']
+    if entry.get('dump_format') is None:
+        entry.pop('dump_format', None)
+
+
 def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求上下文
     """列出服务器上的所有备份文件。
 
@@ -321,10 +351,12 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                                 'includes': manifest.get('includes', {}),
                                 'base_timestamp': manifest.get('base_timestamp', ''),
                                 'encrypted': manifest.get('encrypted', False),
-                                # S4：完整性自述透传，供 sync 补录时判定真实状态
-                                'failed_tables': manifest.get('failed_tables') or [],
-                                'coverage': manifest.get('coverage'),
+                                # S4：完整性自述透传，供 sync 补录时判定真实状态。
+                                # 只在源数据真有键时透传：无条件注入空值会把「旧产物无自述」
+                                # 洗成「自述为干净」，unknown 分支永远不可达（审计 B-M3）。
+                                'dump_format': manifest.get('dump_format'),
                             })
+                            _apply_completeness_keys(entry, manifest)
                 except (OSError, zipfile.BadZipFile, ValueError) as e:
                     logger.warning(f'读取 ZIP 备份 {f.name} 失败: {e}')
                     entry['error'] = str(e)
@@ -339,9 +371,9 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                         'remark': meta.get('remark', ''),
                         'table_count': meta.get('table_count', 0),
                         'total_rows': meta.get('total_rows', 0),
-                        'failed_tables': meta.get('failed_tables') or [],
-                        'coverage': meta.get('coverage'),
+                        'dump_format': meta.get('dump_format'),
                     })
+                    _apply_completeness_keys(entry, meta)
             elif f.name.endswith('.json'):
                 try:
                     data = json.loads(f.read_text(encoding='utf-8'))
@@ -352,9 +384,9 @@ def list_backup_files() -> list[dict]:  # log-context: internal helper 无请求
                         'remark': data.get('remark', ''),
                         'table_count': len(data.get('tables', {})),
                         'total_rows': sum(t.get('count', len(t.get('rows', []))) for t in data.get('tables', {}).values()),
-                        'failed_tables': data.get('failed_tables') or [],
-                        'coverage': data.get('coverage'),
+                        'dump_format': 'json',
                     })
+                    _apply_completeness_keys(entry, data)
                 except (OSError, json.JSONDecodeError, ValueError) as e:
                     logger.warning(f'读取 JSON 备份 {f.name} 失败: {e}')
                     entry['error'] = str(e)

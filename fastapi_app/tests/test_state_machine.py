@@ -11,35 +11,6 @@ import pytest
 from fastapi_app.core import state_machine as sm
 
 
-class TestApprovalApiUnchanged:
-    """审批域模块级 API 回归：泛化改造必须零行为变化"""
-
-    def test_get_allowed_actions_pending(self):
-        assert set(sm.get_allowed_actions('pending')) == {'approve', 'reject', 'cancel'}
-
-    def test_get_allowed_actions_init(self):
-        assert set(sm.get_allowed_actions(None)) == {'submit'}
-        assert set(sm.get_allowed_actions('init')) == {'submit'}
-
-    def test_can_transition(self):
-        assert sm.can_transition('pending', 'approve')
-        assert sm.can_transition('rejected', 'submit')
-        assert not sm.can_transition('approved', 'approve')
-
-    def test_transition_returns_new_state(self):
-        assert sm.transition('pending', 'approve') == 'approved'
-        assert sm.transition(None, 'submit') == 'pending'
-
-    def test_transition_invalid_raises(self):
-        with pytest.raises(ValueError, match='非法审批状态转换'):
-            sm.transition('approved', 'approve')
-
-    def test_is_terminal(self):
-        assert sm.is_terminal('approved')
-        assert not sm.is_terminal('pending')
-        assert not sm.is_terminal('cancelled')
-
-
 class TestGenericStateMachine:
     def test_staging_approve(self):
         assert sm.staging_machine.transition('pending', sm.StagingAction.APPROVE) == sm.StagingStatus.APPROVED

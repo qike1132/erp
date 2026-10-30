@@ -11,6 +11,8 @@ omit =
     */.trae/*
     */scripts/*
     */frontend/*
+    # 已实现但生产导入图不可达的待接线特性；接线后必须移除本排除项。
+    */services/purchase_order_spare.py
 
 [report]
 exclude_lines =

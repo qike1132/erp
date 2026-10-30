@@ -178,6 +178,69 @@ def iter_log_files(log_dir: Path) -> list[Path]:
     return sorted(files, key=safe_mtime)
 
 
+#: 单次盘点最多看多少个条目（防止 10GB 级目录把 UI 线程卡住）。
+LOG_TREE_SCAN_LIMIT = 50_000
+
+
+def measure_log_tree(
+    log_dir: Path,
+    *,
+    big_dir_bytes: int = 50 * 1024 * 1024,
+    top_n: int = 3,
+    entry_limit: int = LOG_TREE_SCAN_LIMIT,
+) -> dict:
+    """把 logs 目录拆成「策略统计的日志文件」与「策略根本看不到的其它内容」。
+
+    为什么需要它：体积上限只累加顶层 ``*.log*``（与 :func:`iter_log_files` 同一候选集）。
+    历史上一个 714MB 的校验用 venv 被建在 ``logs/`` 下，面板却只显示「上限 80MB」，
+    用户合理地以为策略失灵 —— 实际是「36MB 日志没超上限」与「目录 1.1GB」同时成立。
+    盘点的目的不是改判定，而是让这两件事在界面上一眼可分。
+
+    Returns:
+        dict: ``log_bytes`` 顶层 ``*.log*`` 合计；``other_bytes`` 其余内容合计；
+        ``big_dirs`` 超过 ``big_dir_bytes`` 的顶层子目录 ``[(name, bytes)]``（降序、最多 ``top_n``）；
+        ``truncated`` 是否因 ``entry_limit`` 提前结束（此时体积是下限）。
+    """
+    root = Path(log_dir)
+    result: dict = {'log_bytes': 0, 'other_bytes': 0, 'big_dirs': [], 'truncated': False}
+    if not root.is_dir():
+        return result
+
+    per_dir: dict[str, int] = {}
+    root_text = str(root)
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root_text):
+        if seen >= entry_limit:
+            result['truncated'] = True
+            dirnames[:] = []
+            break
+        for name in filenames:
+            seen += 1
+            if seen > entry_limit:
+                result['truncated'] = True
+                dirnames[:] = []
+                break
+            target = Path(dirpath) / name
+            try:
+                size = target.stat().st_size
+            except OSError:
+                continue
+            # 与 iter_log_files 同一候选口径：只有**顶层** *.log* 才算「策略可见的日志」
+            if dirpath == root_text and '.log' in name:
+                result['log_bytes'] += size
+                continue
+            result['other_bytes'] += size
+            rel = os.path.relpath(dirpath, root_text)
+            if rel != '.':
+                first = rel.split(os.sep, 1)[0]
+                per_dir[first] = per_dir.get(first, 0) + size
+
+    big = [(name, size) for name, size in per_dir.items() if size >= big_dir_bytes]
+    result['big_dirs'] = sorted(big, key=lambda item: item[1], reverse=True)[:top_n]
+    return result
+
+
+
 # ── 轮转 ─────────────────────────────────────────────────────────────────────
 
 # 兜底轮转的默认阈值必须**高于** NSSM 的 AppRotateBytes(10MB)，否则会去动 NSSM

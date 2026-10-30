@@ -7,7 +7,9 @@
 因此读取时需要 ast.literal_eval 反序列化，以便 enqueue_job 收到正确的参数类型。
 """
 import ast
+import contextlib
 import json
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -21,6 +23,8 @@ from fastapi_app.shared_models import User
 router = APIRouter()
 
 DLQ_KEY = 'arq:dead_letter'
+_RETRY_LOCK_PREFIX = 'arq:dead_letter:retry-lock:'
+_RETRY_LOCK_TTL_MS = 30_000
 
 
 class DeadLetterListResponse(BaseModel):
@@ -52,6 +56,27 @@ def _require_redis():
     if not client:
         raise HTTPException(503, 'Redis不可用')
     return client
+
+
+async def _acquire_retry_lock(client, task_id: str) -> tuple[str, str] | None:
+    """跨进程抢占同一死信任务的重试权；拿不到锁返回 None。"""
+    key = f'{_RETRY_LOCK_PREFIX}{task_id}'
+    token = uuid4().hex
+    acquired = await client.set(key, token, nx=True, px=_RETRY_LOCK_TTL_MS)
+    return (key, token) if acquired else None
+
+
+async def _release_retry_lock(client, lock: tuple[str, str]) -> None:
+    key, token = lock
+    # compare-and-delete：锁过期后可能已被另一个请求持有，绝不能删别人的锁。
+    with contextlib.suppress(Exception):
+        await client.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end",
+            1,
+            key,
+            token,
+        )
 
 
 def _parse_dead_letter_args(args_raw) -> list:
@@ -109,8 +134,13 @@ async def list_dead_letter(
 
 @router.post('/dead-letter/{task_id}/retry', response_model=DeadLetterRetryResponse, summary='重试死信队列中的失败任务')
 async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_superuser())):
+    client = None
+    lock = None
     try:
-        _require_redis()
+        client = _require_redis()
+        lock = await _acquire_retry_lock(client, task_id)
+        if lock is None:
+            raise HTTPException(409, f'任务 {task_id} 正在重试中，请勿重复操作')
         entries_raw = await safe_lrange(DLQ_KEY, 0, -1, context="死信队列")
         target_idx = None
         target_entry = None
@@ -129,6 +159,7 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_sup
         pool = await get_arq_pool()
         job = await pool.enqueue_job(task_name, *args, **kwargs)
         new_id = job.job_id if job else ''
+        # 仅入队成功后才移除原死信；入队抛错时 finally 只释放锁，原记录保持不变。
         await safe_lrem(DLQ_KEY, 1, entries_raw[target_idx], context="死信队列")
         logger.info('重试死信任务: %s -> new_id=%s', task_id, new_id)
         return {
@@ -142,6 +173,9 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_sup
     except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
         logger.error('重试死信任务失败: %s', e)
         raise HTTPException(500, detail=settings.sanitize_error(e)) from e
+    finally:
+        if client is not None and lock is not None:
+            await _release_retry_lock(client, lock)
 
 
 @router.delete('/dead-letter/{task_id}', response_model=DeadLetterRemoveResponse, summary='从死信队列中移除失败任务')

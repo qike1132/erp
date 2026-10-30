@@ -16,9 +16,7 @@ class TestBackupMetricsService:
 
     @pytest.fixture
     def metrics_service(self):
-        """创建性能监控服务实例"""
-        service = BackupMetricsService()
-        # 模拟环境变量
+        """创建性能监控服务实例（环境变量在整个用例期间生效）"""
         with patch.dict(os.environ, {
             'BACKUP_METRICS_INTERVAL': '60',
             'BACKUP_METRICS_RETENTION_DAYS': '90',
@@ -29,10 +27,11 @@ class TestBackupMetricsService:
             'BACKUP_DISK_IO_THRESHOLD': '100',
             'BACKUP_TREND_WINDOW': '24',
             'BACKUP_SUCCESS_RATE_THRESHOLD': '95.0',
-            'BACKUP_FAILURE_COUNT_THRESHOLD': '3',
+            'BACKUP_FAILURE_COUNT_THRESHOLD': '4',
         }):
+            service = BackupMetricsService()
             service.__init__()
-            return service
+            yield service
 
     @pytest.fixture
     def mock_backup_record(self):
@@ -74,7 +73,7 @@ class TestBackupMetricsService:
         assert config['disk_io_threshold'] == 100
         assert config['trend_window_hours'] == 24
         assert config['success_rate_threshold'] == 95.0
-        assert config['failure_count_threshold'] == 3
+        assert config['failure_count_threshold'] == 4
 
     @pytest.mark.asyncio
     async def test_collect_backup_metrics_success(self, metrics_service):

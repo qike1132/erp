@@ -17,6 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.cache_invalidation import (
+    InvalidationStrategy,
+    cache_mgr,
+    schedule_post_commit_invalidation,
+)
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models import Case, CaseMovement, CraftWork, PackagingRecord, Product
 from fastapi_app.utils import parse_date_with_fallback
@@ -33,6 +38,11 @@ _MAX_EXPORT_ROWS = 10000
 
 def _last_day_of_month(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
+
+
+async def _invalidate_craft_cache() -> None:
+    """手工部列表缓存失效（写入后立即清，提交后再兜底清一次）。"""
+    await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'production:craft_works:*')
 
 @cache_result(key_prefix="production:craft_works", ttl=60, local_ttl=30,
               key_builder=lambda *args, **kwargs: f"y{kwargs.get('year', args[1] if len(args) > 1 else '')}:m{kwargs.get('month', args[2] if len(args) > 2 else '')}:d{kwargs.get('work_date', args[3] if len(args) > 3 else '')}")
@@ -68,6 +78,8 @@ async def create_craft_work(db: AsyncSession, *, worker_name: str, quantity: int
     db.add(record)
     await db.flush()
     await db.refresh(record)
+    await _invalidate_craft_cache()
+    schedule_post_commit_invalidation(db, _invalidate_craft_cache)
     logger.info(f'手工部记录创建: {worker_name} - {quantity} - {work_date_str}')
     return record
 
@@ -84,6 +96,8 @@ async def update_craft_work(db: AsyncSession, record_id: int, *, created_by: str
         record.work_date = parse_date_with_fallback(kwargs['work_date'])
     await db.flush()
     await db.refresh(record)
+    await _invalidate_craft_cache()
+    schedule_post_commit_invalidation(db, _invalidate_craft_cache)
     return record
 
 async def delete_craft_work(db: AsyncSession, record_id: int) -> None:
@@ -94,6 +108,8 @@ async def delete_craft_work(db: AsyncSession, record_id: int) -> None:
         raise ValueError('记录不存在')
     await db.delete(record)
     await db.flush()
+    await _invalidate_craft_cache()
+    schedule_post_commit_invalidation(db, _invalidate_craft_cache)
 
 async def export_craft_works(db: AsyncSession, start_date: str='', end_date: str='') -> bytes:
     """导出手工部生产数据为Excel"""

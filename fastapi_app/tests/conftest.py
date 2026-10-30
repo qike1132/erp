@@ -59,6 +59,28 @@ if "test" not in settings.ALLOWED_HOSTS:
     settings.ALLOWED_HOSTS.append("test")
 
 
+@pytest.fixture(scope='session', autouse=True)
+def _isolate_maintenance_sentinel(tmp_path_factory):
+    """把维护模式哨兵重定向到临时目录，禁止测试写仓库级 `logs/maintenance_mode.sentinel`。
+
+    根因：`enter_maintenance()` 即使 Redis 客户端被 mock，仍会写本地哨兵文件。
+    用例若在 enter 之后异常退出（未走到 `exit_maintenance()`），哨兵会残留，
+    并在 `_SENTINEL_MAX_AGE` 窗口内让**后续所有**写请求返回 503 MAINTENANCE ——
+    单点失败被放大成成片假红，掩盖真实结果。
+    """
+    from fastapi_app.core import maintenance as maintenance_module
+
+    sentinel_dir = tmp_path_factory.mktemp('maintenance_sentinel')
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        maintenance_module,
+        '_MAINTENANCE_SENTINEL',
+        sentinel_dir / 'maintenance_mode.sentinel',
+    )
+    yield
+    monkeypatch.undo()
+
+
 @pytest.fixture(autouse=True)
 def _clear_l1_cache():
     """每个测试前清空 L1 进程内缓存，避免缓存键命中上一轮测试结果导致假阳性"""

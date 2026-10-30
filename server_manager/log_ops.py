@@ -71,6 +71,9 @@ from utils.log_rotation import (
     safe_mtime,
     save_log_policy,
 )
+from utils.log_rotation import (
+    measure_log_tree as measure_log_tree,
+)
 
 # 本模块对 UI 层（log_view）与测试的公开面：既含自有的回灌/巡检，也含从
 # utils.log_rotation **重新导出**的机制名。列进 __all__ 是为了让「这里只是中转、

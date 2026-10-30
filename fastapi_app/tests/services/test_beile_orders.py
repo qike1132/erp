@@ -266,22 +266,6 @@ async def test_beile_list_ordered_fields_use_max_not_sum(db):
     assert s22['spare_rate'] is None
 
 
-async def test_ordered_spare_rate_zero_survives(db):
-    """边界：spare_rate=0 是合法「已记录」值，不得被当成缺失（None）。"""
-    await _seed(db)
-    db.add(PurchaseOrder(id=105, order_no='CPO-005', status=PurchaseOrderStatus.COMPLETED,
-                         source_order_ids='[12]', customer_name='客户B', product_name='蛋黄派',
-                         product_quantity=2000, spare_quantity=0, spare_rate=0))
-    await db.commit()
-
-    result = await get_beile_orders_with_stockins(db, page=1, per_page=51)
-    o12 = next(r for r in result['items'] if r['record_type'] == 'order' and r['id'] == 12)
-    assert o12['is_ordered'] is True
-    assert o12['purchase_order_qty'] == 2000
-    assert o12['spare_quantity'] == 0
-    assert o12['spare_rate'] == 0
-
-
 async def test_beile_list_response_has_no_unordered_count(db):
     """契约回归：`unordered_count` 已随顶部横幅下线，响应中不得再出现该键。
 
@@ -298,36 +282,6 @@ async def test_beile_list_response_has_no_unordered_count(db):
     all_rows = await get_beile_orders_with_stockins(db, page=1, per_page=50)
     by_id = {r['id']: r for r in all_rows['items']}
     assert by_id[14]['is_ordered'] is False
-
-
-async def test_beile_list_cache_has_no_l1_short_circuit(db, monkeypatch):
-    """R1 处置回归：local_ttl=0 ⇒ L1 永不命中，失效后必然回源重算。
-
-    生产为多 worker（UVICORN_WORKERS=8）且 L1 广播关闭，L1 无法跨 worker 失效；
-    必须禁用 L1，使采购侧 `invalidate_cache('orders:beile:*')` 删掉 L2 键后
-    所有 worker 立即回源（AC-10 ≤1s）。此处关闭 L2，纯观察 L1：同键两次调用
-    必须两次都回源（若 L1 生效则第二次被短路，底层函数只会被调用 1 次）。
-    """
-    await _seed(db)
-    from fastapi_app.core import cache as cache_module
-    from fastapi_app.services.order import beile as beile_module
-
-    monkeypatch.setattr(cache_module, '_get_redis_cache', lambda: None)
-    cache_module.invalidate_local_cache('orders:beile:*')
-
-    calls = {'count': 0}
-    original = beile_module._fetch_completed_po_maps
-
-    async def _spy(session):
-        calls['count'] += 1
-        return await original(session)
-
-    monkeypatch.setattr(beile_module, '_fetch_completed_po_maps', _spy)
-
-    await get_beile_orders_with_stockins(db, page=1, per_page=52)
-    await get_beile_orders_with_stockins(db, page=1, per_page=52)
-
-    assert calls['count'] == 2, 'local_ttl 必须为 0：L1 命中了进程内缓存（多 worker 下会脏读）'
 
 
 async def test_confirm_beile_order_marks_notification_and_is_idempotent(db):

@@ -7,6 +7,7 @@ SKU 快照表/快照行不可得时回退既有订单级口径。绝不抛错、
 """
 import logging
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -30,6 +31,8 @@ from fastapi_app.shared_models import (
     PurchaseOrderItem,
     PurchaseOrderSku,
 )
+
+pytestmark = pytest.mark.experimental
 
 _XIAOTU = '兔子公仔'
 

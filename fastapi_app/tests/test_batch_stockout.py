@@ -22,6 +22,16 @@ from fastapi_app.shared_models import StockOut
 
 
 @pytest.fixture(autouse=True)
+def _stub_order_status_recalc():
+    """本文件聚焦批量写库；订单状态重算由真实 PG 集成测试覆盖。"""
+    with patch.object(
+        stock_out_service, '_recalc_shipment_order_statuses',
+        new_callable=AsyncMock, return_value=[],
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _default_inventory_balance():
     """默认库存结余充足，使既有用例无需显式 mock 新闸门。
 

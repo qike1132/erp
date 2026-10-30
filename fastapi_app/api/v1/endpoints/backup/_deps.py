@@ -56,13 +56,17 @@ def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal 
         'backup_status': 'backup_read',
         'get_backup_records': 'backup_read',
         'get_backup_schedule': 'backup_read',
-        'get_backup_info': 'backup_read',
+        # /export-info 会现场生成整库备份（分片 bundle），属创建而非读取；
+        # 挂 backup_read 会让只读用户反复触发全量导出（2026-10-30 审计 A-M3）。
+        'get_backup_info': 'backup_create',
 
         # 创建权限
         'export_backup': 'backup_create',
         'export_backup_enhanced': 'backup_create',
         'save_backup_to_server': 'backup_create',
-        'download_server_backup': 'backup_create',
+        # /download 只回放既有文件，属读取；旧映射挂 backup_create，
+        # 导致只读用户反而不能下载（2026-10-30 审计 A-M3）。
+        'download_server_backup': 'backup_read',
 
         # M1 任务化触发
         'trigger_full_backup': 'backup_create',
@@ -77,6 +81,10 @@ def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal 
         'restore_server_backup': 'backup_restore',
         'async_import_backup': 'backup_restore',
         'async_restore_server_backup': 'backup_restore',
+        # 还原差异预览是只读探测（restore.py 的 docstring 也声明 backup_read）；
+        # 不登记会回退到 backup_manage，导致仅有 backup_read/backup_restore 的
+        # 用户能发起还原却拿不到预览，前端向导被 403 卡死（2026-10-30 审计 A-H1）。
+        'restore_plan': 'backup_read',
 
         # 删除权限
         'delete_server_backup': 'backup_delete',

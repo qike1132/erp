@@ -25,6 +25,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -175,3 +176,24 @@ async def test_different_exception_class_is_not_suppressed(monkeypatch: pytest.M
     await maintenance.is_maintenance_mode()
 
     assert len(logged) == 2, f'不同异常类型被错误节流，只记录了 {len(logged)} 条'
+
+
+def test_sentinel_is_isolated_from_repo_logs() -> None:
+    """回归（2026-10-30）：测试会话必须把哨兵重定向到临时目录。
+
+    事故形态：`test_backup_m3::test_enter_sets_flag` 只 mock 了 Redis 客户端，
+    `enter_maintenance()` 仍写真实 `logs/maintenance_mode.sentinel`；该用例若异常
+    退出（未执行 `exit_maintenance()`），哨兵残留并在 2×TTL 内让后续**所有**写请求
+    返回 503 MAINTENANCE —— 实测把一个 setup 异常放大成 609 条错误。
+    """
+    repo_sentinel = (
+        Path(maintenance.__file__).resolve().parents[2]
+        / 'logs'
+        / 'maintenance_mode.sentinel'
+    )
+    assert repo_sentinel != maintenance._MAINTENANCE_SENTINEL, (
+        '测试会话未隔离维护模式哨兵：崩溃用例会留下哨兵，导致后续写请求集体 503'
+    )
+    assert 'maintenance_sentinel' in str(maintenance._MAINTENANCE_SENTINEL), (
+        f'哨兵未指向 pytest 临时目录：{maintenance._MAINTENANCE_SENTINEL}'
+    )

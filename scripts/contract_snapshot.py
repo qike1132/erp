@@ -283,18 +283,42 @@ def _shape_map(shape: list[str]) -> dict[str, str]:
 # ============================================================
 # 容差规则 —— 避免数据波动造成误报
 #
-# 契约门禁最容易死于"误报太多、没人看"。以下两种形态本质是"录制时数据恰好如此"，
-# 不代表结构约定，因此不参与比对（但键本身仍会被记录）：
-#   1. 类型为 null   ：首元素该字段恰好为 null，不代表它一定是 null
-#   2. 空数组 array[0]：录制时数组为空，无法得知元素结构
-# 对应的"反向"情况（实际为空、基线有结构）同样容忍。
+# 契约门禁最容易死于"误报太多、没人看"。以下三种形态本质是"录制/比对时数据恰好
+# 如此"，不代表结构约定，因此不参与比对（但键本身仍会被记录）：
+#   1. null        ：该字段恰好为 null，不代表它一定是 null
+#   2. array[0]    ：数组为空，无法得知元素结构
+#   3. object{}    ：对象为空，无法得知子键结构（如端点在空库上返回 {}）
+# 对应的"反向"情况（实际为空、基线有结构）同样容忍 —— 结构无从观测时，
+# 任何一方都不该断言另一方"少字段"。
 # ============================================================
+_EMPTY_SHAPE_TYPES = ("null", "array[0]", "object{}")
+
+
 def _tolerant_paths(shape_map: dict[str, str]) -> list[str]:
-    return [p for p, t in shape_map.items() if t in ("null", "array[0]")]
+    return [p for p, t in shape_map.items() if t in _EMPTY_SHAPE_TYPES]
 
 
 def _is_tolerated(path: str, tolerant: list[str]) -> bool:
-    return any(path == p or path.startswith(f"{p}[]") or path.startswith(f"{p}.") for p in tolerant)
+    for p in tolerant:
+        if path == p or path.startswith(f"{p}[]") or path.startswith(f"{p}."):
+            return True
+        # 根级空数组的 label 是 "<root>"，其元素路径形如 "[].field"（2026-10-30 修复：
+        # 此前只按 "<root>[]" 前缀匹配，根级空数组的嵌套字段全部误报「字段消失」）。
+        if p == "<root>" and path.startswith("[]"):
+            return True
+    return False
+
+
+def _has_descendant(shape: set[str], base: str) -> bool:
+    """shape 里是否存在 base 路径的后代（用于合并时丢弃冗余的空容器哨兵）。"""
+    for item in shape:
+        path = item.rsplit(":", 1)[0]
+        if base == "<root>":
+            if path.startswith("[]"):
+                return True
+        elif path.startswith(f"{base}[]") or path.startswith(f"{base}."):
+            return True
+    return False
 
 
 def diff_snapshot(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
@@ -305,17 +329,30 @@ def diff_snapshot(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]
 
     exp = _shape_map(expected.get("shape") or [])
     act = _shape_map(actual.get("shape") or [])
-    tolerant = _tolerant_paths(exp) + _tolerant_paths(act)
+    # 容差只对「本次观测侧为空」生效：基线里的 array[0]/object{} 是某次录制时的
+    # 快照，不能永久赦免其下所有后代字段（2026-10-30 审计 B-H1：149/324 条签名
+    # 因基线持久化哨兵而免检）。字段消失 → 仅当实际侧为空时容忍；新增字段 →
+    # 仅当基线侧为空时容忍。
+    exp_tolerant = _tolerant_paths(exp)
+    act_tolerant = _tolerant_paths(act)
 
     diffs = list(status_diff)
     for path in sorted(set(exp) - set(act)):
-        if not _is_tolerated(path, tolerant):
+        if exp[path] in _EMPTY_SHAPE_TYPES:
+            continue
+        if not _is_tolerated(path, act_tolerant):
             diffs.append(f"字段消失: {path}:{exp[path]}")
     for path in sorted(set(act) - set(exp)):
-        if not _is_tolerated(path, tolerant):
+        if act[path] in _EMPTY_SHAPE_TYPES:
+            continue
+        if not _is_tolerated(path, exp_tolerant):
             diffs.append(f"新增字段: {path}:{act[path]}")
     for path in sorted(set(exp) & set(act)):
-        if exp[path] != act[path] and exp[path] != "null" and act[path] != "null":
+        if exp[path] != act[path] and exp[path] not in _EMPTY_SHAPE_TYPES and act[path] not in _EMPTY_SHAPE_TYPES:
+            # object / object{} 只是「有没有子键」的差别，不是类型契约差异：
+            # 有数据时记为 object、空对象记为 object{}，二者必须互认。
+            if {exp[path], act[path]} == {"object", "object{}"}:
+                continue
             diffs.append(f"类型变化: {path} {exp[path]} → {act[path]}")
 
     for key, exp_val in (expected.get("value_checks") or {}).items():
@@ -328,6 +365,45 @@ def diff_snapshot(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]
 # ============================================================
 # 命令
 # ============================================================
+def _merge_snapshot(new: dict[str, Any], path: Path) -> tuple[dict[str, Any], int]:
+    """把新录制的 shape 与已有基线取并集（只增不减），返回 (快照, 新增条数)。
+
+    为什么必须合并：录制常在空库或数据不全的环境执行，数组元素结构拍不出来
+    （``array[0]``）。若直接覆盖，会把历史基线里靠真实数据录到的整片嵌套字段
+    删掉 —— 门禁表面「通过」，实际已被削弱（2026-10-30 实测空库重录丢失
+    208 个字段签名）。并集让基线单调增长：
+
+    * 空库比对：``array[0]`` 路径本就在容差范围内，仍然通过；
+    * 有数据比对：新字段被并集吸收，**字段消失/类型变化仍然会红**。
+    """
+    if not path.exists():
+        return new, len(new.get("shape") or [])
+    try:
+        old = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return new, len(new.get("shape") or [])
+    if not isinstance(old, dict) or old.get("http_status") != new.get("http_status"):
+        return new, len(new.get("shape") or [])
+
+    old_shape = set(old.get("shape") or [])
+    new_shape = set(new.get("shape") or [])
+    merged = dict(new)
+    merged_shape = set(old_shape)
+    for item in new_shape:
+        path, _, typ = item.rpartition(":")
+        # 已有后代字段时，不再把本次空录制的 array[0]/object{} 哨兵写进基线：
+        # 否则基线会越滚越脏，且会掩盖「后代字段消失」（2026-10-30 审计 B-H1）。
+        if typ in _EMPTY_SHAPE_TYPES and _has_descendant(old_shape, path):
+            continue
+        merged_shape.add(item)
+    merged["shape"] = sorted(merged_shape)
+    checks = dict(old.get("value_checks") or {})
+    checks.update(new.get("value_checks") or {})
+    if checks:
+        merged["value_checks"] = checks
+    return merged, len(new_shape - old_shape)
+
+
 def run_record(args, cfg: Config, endpoints: list[Endpoint]) -> int:
     headers = _auth_headers(args, cfg)
     written = 0
@@ -339,11 +415,15 @@ def run_record(args, cfg: Config, endpoints: list[Endpoint]) -> int:
                 print(f"  [ERROR] {ep.name:<34} {status or '-'} {err}")
                 continue
             snap = make_snapshot(ep, status, body, cfg)
+            added = 0
+            if getattr(args, "merge", False):
+                snap, added = _merge_snapshot(snap, args.snapshot_dir / f"{ep.name}.json")
             (args.snapshot_dir / f"{ep.name}.json").write_text(
                 json.dumps(snap, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
             written += 1
-            print(f"  [OK]    {ep.name:<34} {status}  shape={len(snap['shape'])} 键")
+            extra = f"  合并新增 {added}" if getattr(args, "merge", False) else ""
+            print(f"  [OK]    {ep.name:<34} {status}  shape={len(snap['shape'])} 键{extra}")
     print(f"\n已录制 {written}/{len(endpoints)} 个快照 → {args.snapshot_dir}")
     return 0 if written == len(endpoints) else 2
 
@@ -431,6 +511,11 @@ def main() -> int:
     mode.add_argument("--record", action="store_true", help="录制基线快照")
     mode.add_argument("--check", action="store_true", help="与基线比对")
     mode.add_argument("--list", action="store_true", help="列出配置的端点")
+    parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="录制时与已有快照取 shape 并集（只增不减）：空库录制不会删掉历史嵌套字段",
+    )
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--snapshot-dir", type=Path, default=DEFAULT_SNAPSHOT_DIR)
@@ -444,6 +529,10 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--json", action="store_true", help="输出机器可读结果")
     args = parser.parse_args()
+
+    if args.merge and not args.record:
+        print("[ERROR] --merge 只能与 --record 一起使用", file=sys.stderr)
+        return 2
 
     try:
         cfg = load_config(args.config)

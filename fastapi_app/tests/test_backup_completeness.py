@@ -10,6 +10,7 @@ import pytest
 from fastapi_app.services.backup.records import (
     STATUS_PARTIAL,
     STATUS_SUCCESS,
+    STATUS_UNKNOWN,
     _collect_problem_tables,
     compose_remark,
     evaluate_backup_completeness,
@@ -17,11 +18,22 @@ from fastapi_app.services.backup.records import (
 
 
 class TestEvaluateBackupCompleteness:
-    def test_no_info_is_success(self):
-        assert evaluate_backup_completeness(None) == (STATUS_SUCCESS, '')
+    def test_no_info_is_unknown_not_success(self):
+        status, detail = evaluate_backup_completeness(None)
+        assert status == STATUS_UNKNOWN
+        assert '自述缺失' in detail
 
-    def test_empty_dict_is_success(self):
-        assert evaluate_backup_completeness({}) == (STATUS_SUCCESS, '')
+    def test_empty_dict_is_unknown_not_success(self):
+        assert evaluate_backup_completeness({})[0] == STATUS_UNKNOWN
+
+    def test_file_metadata_without_completeness_is_unknown(self):
+        """只有文件名/大小等文件元数据，不等于备份内容已验证。"""
+        status, _ = evaluate_backup_completeness({
+            'filename': 'erp_backup_20260101_000000.zip',
+            'size': 1024,
+            'created_at': '2026-01-01 00:00:00',
+        })
+        assert status == STATUS_UNKNOWN
 
     def test_clean_manifest_is_success(self):
         manifest = {
@@ -82,8 +94,8 @@ class TestEvaluateBackupCompleteness:
         # 最多列出 _MAX_REPORTED_TABLES 张，避免 remark 被刷爆
         assert 'table_20' not in detail
 
-    def test_non_dict_info_is_success(self):
-        assert evaluate_backup_completeness('nonsense') == (STATUS_SUCCESS, '')
+    def test_non_dict_info_is_unknown(self):
+        assert evaluate_backup_completeness('nonsense')[0] == STATUS_UNKNOWN
 
 
 class TestCollectProblemTables:
@@ -118,3 +130,27 @@ class TestComposeRemark:
 def test_status_constants_are_short_enough_for_column(bad_status):
     """backup_record.status 是 String(20)，新取值必须放得下。"""
     assert len(bad_status) <= 20
+
+
+def test_list_backup_files_does_not_inject_fake_completeness(tmp_path, monkeypatch):
+    """旧 manifest 没有自述键时，fs_entry 不得凭空注入 failed_tables/coverage。
+
+    否则 sync 补录会把「无自述」洗成「自述为干净」，unknown 永远不可达
+    （2026-10-30 审计 B-M3）。
+    """
+    import json
+    import zipfile
+
+    from fastapi_app.services.backup import records
+
+    zip_path = tmp_path / 'erp_backup_20260101_000000.zip'
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        zf.writestr('manifest.json', json.dumps({'type': 'full', 'exported_at': '2026-01-01 00:00:00'}))
+    monkeypatch.setattr(records, 'BACKUP_DIR', tmp_path)
+
+    entry = records.list_backup_files()[0]
+
+    assert 'failed_tables' not in entry
+    assert 'coverage' not in entry
+    assert entry.get('dump_format') is None
+    assert records.evaluate_backup_completeness(entry)[0] == STATUS_UNKNOWN

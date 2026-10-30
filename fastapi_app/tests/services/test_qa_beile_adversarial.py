@@ -272,6 +272,40 @@ async def test_qa_stockin_gating_same_source(db):
     assert exc.value.message == BEILE_NOT_ORDERED_DETAIL
 
 
+async def test_qa_mixed_status_and_independent_max_use_completed_only(db):
+    """同一来源混合状态 + 不同数值：仅 completed 参与，qty/spare 独立取 MAX。"""
+    p = Product(id=1, name='变形金刚', barcode='690001', factory='湖北')
+    order = _order(106, 'PO-106', '混合状态客户', datetime(2026, 9, 6), p, 100)
+    pos = [
+        # 数量最大值来自 PC-A，备品最大值来自 PC-B；若整行选择或取 MIN/首末单都会失败。
+        PurchaseOrder(id=206, order_no='PC-206', status=PurchaseOrderStatus.COMPLETED,
+                      supplier_name='供应商A', source_order_ids='[106]', customer_name='混合状态客户',
+                      product_name='变形金刚', product_quantity=10000,
+                      spare_quantity=100, spare_rate=10),
+        PurchaseOrder(id=207, order_no='PC-207', status=PurchaseOrderStatus.COMPLETED,
+                      supplier_name='供应商B', source_order_ids='[106]', customer_name='混合状态客户',
+                      product_name='变形金刚', product_quantity=8000,
+                      spare_quantity=500, spare_rate=50),
+        # pending 的更大数值绝不得污染 completed 集合。
+        PurchaseOrder(id=208, order_no='PP-208', status=PurchaseOrderStatus.PENDING,
+                      supplier_name='供应商C', source_order_ids='[106]', customer_name='混合状态客户',
+                      product_name='变形金刚', product_quantity=99999,
+                      spare_quantity=9999, spare_rate=999),
+    ]
+    db.add_all([_user(), p, order, *pos])
+    await db.commit()
+
+    result = await get_beile_orders_with_stockins(db, page=1, per_page=50)
+    row = next(r for r in result['items'] if r['record_type'] == 'order' and r['id'] == 106)
+
+    assert row['is_ordered'] is True
+    assert row['purchase_order_qty'] == 10000
+    assert row['spare_quantity'] == 500
+    assert row['purchase_order_qty'] != 99999
+    assert row['spare_quantity'] != 9999
+    assert (await confirm_beile_order(db, 106, QA_USER))['success'] is True
+
+
 # =========================================================================
 # D. NULL / 空值边界
 # =========================================================================

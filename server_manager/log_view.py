@@ -28,8 +28,10 @@ from tkinter import ttk
 
 from server_manager.log_ops import (
     ProdLogTailer,
+    human_bytes,
     inspect_log_health,
     load_log_policy,
+    measure_log_tree,
     policy_from_fields,
     prune_log_files,
     rotate_oversized_logs,
@@ -103,7 +105,31 @@ class LogViewMixin:
         return load_log_policy(self._log_policy_path())
 
     def _log_policy_text(self) -> str:
-        return f'自动轮转+清理：{self._log_policy().summary()}'
+        """面板上的策略提示：把「策略管得到的日志」与「策略看不到的其它内容」分开说清。
+
+        为什么必须分开：体积上限只累加顶层 ``*.log*``。2026-10-30 现场 ``logs/`` 1.1GB，
+        面板却只写「上限 80MB」—— 用户合理地以为策略失灵，实际是 36MB 日志没超上限，
+        另有 1GB 一次性产物（含一个 714MB 的校验用 venv）躺在同目录里。
+        """
+        policy = self._log_policy()
+        text = f'自动轮转+清理：{policy.summary()}'
+        try:
+            tree = measure_log_tree(self._PROJECT_DIR / 'logs')
+        except OSError:
+            return text
+        log_bytes = int(tree.get('log_bytes') or 0)
+        other_bytes = int(tree.get('other_bytes') or 0)
+        text += f'（日志 {human_bytes(log_bytes)}'
+        if other_bytes:
+            text += f' / 非日志 {human_bytes(other_bytes)}，不在上限统计内'
+        text += '）'
+        big_dirs = tree.get('big_dirs') or []
+        if big_dirs:
+            detail = '、'.join(f'{name} {human_bytes(size)}' for name, size in big_dirs)
+            text += f'；大目录：{detail}'
+        if tree.get('truncated'):
+            text += '（盘点未完成，体积为下限）'
+        return text
 
     def _refresh_log_policy_label(self):
         """设置保存后刷新面板上的策略提示（控件可能尚未构建，故容错）。"""

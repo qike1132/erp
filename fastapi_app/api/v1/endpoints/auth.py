@@ -172,6 +172,18 @@ async def _check_login_rate_limit(key: str) -> None:
         from fastapi_app.core.redis_wrapper import get_client, note_command_failure, note_command_success
 
         _redis = get_client()
+        if not _redis:
+            # Redis 不可用（get_client 返回 None）时也必须走内存兜底：
+            # 旧实现只在 except 分支降级，`if _redis:` 为假会整段跳过，
+            # 30/min 突发限制静默失效，只剩 slowapi 100/min（2026-10-30 审计 A-M4）。
+            if not memory_limiter.hit(f"login_burst:{key}", LOGIN_BURST_WINDOW, LOGIN_BURST_LIMIT):
+                logger.warning("[Login] 登录尝试过快（内存限流），1分钟内超过%d次: IP=%s", LOGIN_BURST_LIMIT, key)
+                raise HTTPException(status_code=429, detail="登录尝试过于频繁，请1分钟后重试", headers={"Retry-After": str(LOGIN_BURST_WINDOW)})
+            if not memory_limiter.hit(f"login_attempt:{key}", LOGIN_ATTEMPT_WINDOW, LOGIN_ATTEMPT_LIMIT):
+                logger.warning("[Login] 登录尝试过多（内存限流），暂时锁定: IP=%s", key)
+                raise HTTPException(status_code=429, detail="登录尝试过多，请5分钟后重试", headers={"Retry-After": str(LOGIN_ATTEMPT_WINDOW)})
+            logger.warning("[Login] Redis 限流不可用，已降级为进程内存限流: IP=%s", key)
+            return
         if _redis:
             # 第十四轮：incr 与 expire 必须同一 pipeline —— 原实现 `_attempts == 1`
             # 后单独 await expire，若此时连接断开/worker 崩溃，计数 key 永不过期

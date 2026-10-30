@@ -70,6 +70,7 @@ class InvalidDateRangeError(ValueError):
 
 async def _apply_production_stock(
     db: AsyncSession, record: DailyProductionRecord, *, delta: int, product_id: int | None = None,
+    skip_balance_gate: bool = False,
 ) -> None:
     """生产数量变更同步库存（2026-10-06 用户裁决：生产即入库）。
 
@@ -96,7 +97,7 @@ async def _apply_production_stock(
         # 时，净减量会把「包装部入库 − 已出货」打穿成负数，后续一切出货被闸门
         # 拦死。语义与 cancel_stockreturn_core（stock_return_service.py:197-201）
         # 对齐：quantity > balance 即拒。改小/换产品回退/删除三个路径都经过这里。
-        if (record.department or '') == 'packaging':
+        if (record.department or '') == 'packaging' and not skip_balance_gate:
             from fastapi_app.services.stock_inventory_service import get_inventory_balance
 
             balance = await get_inventory_balance(db, pid)
@@ -495,6 +496,43 @@ async def create_record(
     return record
 
 
+async def _sync_stock_after_update(
+    db: AsyncSession,
+    record: DailyProductionRecord,
+    *,
+    old_product_id: int | None,
+    old_department: str | None,
+    old_quantity: int,
+) -> None:
+    """生产记录编辑后的库存联动（同产品差额 / 换产品双边）。
+
+    结余闸门必须在 flush **之前**用变更前结余判定：flush 后旧行贡献已扣除，
+    再按 -delta 比较会把本次减量算两次，导致「减量 > 结余/2」的合法修数被误拒
+    （2026-10-30 审计 A-M14）。调用方已预检的路径传 skip_balance_gate，避免二次判定。
+    """
+    if old_product_id == record.product_id:
+        delta = record.quantity - old_quantity
+        if delta < 0 and (old_department or '') == 'packaging' and record.product_id is not None:
+            from fastapi_app.services.stock_inventory_service import get_inventory_balance
+
+            balance = await get_inventory_balance(db, record.product_id)
+            if -delta > balance:
+                raise ValueError(
+                    f'生产记录变动将导致库存（结余）为负数：'
+                    f'结余 {balance}，本次减少 {-delta}。'
+                    f'该记录是包装部口径（计入结余），其数量可能已被出货消耗，'
+                    f'请先核对出货记录或改为冲销方式处理。'
+                )
+        await db.flush()
+        await _apply_production_stock(db, record, delta=delta, skip_balance_gate=True)
+    else:
+        await db.flush()
+        await _apply_production_stock(
+            db, record, delta=-old_quantity, product_id=old_product_id, skip_balance_gate=True,
+        )
+        await _apply_production_stock(db, record, delta=record.quantity)
+
+
 async def update_record(
     db: AsyncSession,
     record_id: int,
@@ -570,14 +608,13 @@ async def update_record(
     if not record.is_custom:
         record.custom_country = None
 
-    await db.flush()
-
     # 库存联动：同产品按差额调整；换产品则旧产品回退、新产品全额入账
-    if old_product_id == record.product_id:
-        await _apply_production_stock(db, record, delta=record.quantity - old_quantity)
-    else:
-        await _apply_production_stock(db, record, delta=-old_quantity, product_id=old_product_id)
-        await _apply_production_stock(db, record, delta=record.quantity)
+    await _sync_stock_after_update(
+        db, record,
+        old_product_id=old_product_id,
+        old_department=old_department,
+        old_quantity=old_quantity,
+    )
 
     await db.refresh(record)
     logger.info(f'生产记录更新: {record_id} by {created_by}')

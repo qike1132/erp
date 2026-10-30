@@ -350,12 +350,19 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
         )
     created_plans = []
     created_details = 0
+    # 客户/月份解析失败必须 fail-fast：旧实现静默 continue，但该行仍在 confirmed_ids
+    # 里，随后被物理删除 → 静默丢计划行（2026-10-30 审计 A-M21）。
+    unresolved = sorted({
+        f'{customer_name or "(空客户)"}（{"缺少计划月份" if not plan_month else "客户不存在"}）'
+        for (customer_name, plan_month) in groups
+        if not plan_month or not customer_id_map.get(customer_name)
+    })
+    if unresolved:
+        raise ValueError(
+            '以下分组无法建单，请重新校验后再确认：' + '、'.join(unresolved)
+        )
     for (customer_name, plan_month), group_records in groups.items():
-        if not plan_month:
-            continue
-        customer_id = customer_id_map.get(customer_name)
-        if not customer_id:
-            continue
+        customer_id = customer_id_map[customer_name]
         plan = await _get_or_create_plan_for_group(db, customer_id, customer_name, plan_month, batch_id, created_by)
         created_details += _create_details_for_group(db, plan, group_records, name_to_product)
         created_plans.append({'plan_id': plan.id, 'plan_no': plan.plan_no})

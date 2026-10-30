@@ -67,6 +67,8 @@ async def approval_list(
     result = await approval_service.get_approval_list(db, status, search, page, per_page)
     return ApprovalListResponse(
         data=result['approvals'],
+        total=result['total'],
+        pages=result['pages'],
         pending_count=result['pending_count'],
         approved_count=result['approved_count'],
         rejected_count=result['rejected_count'],

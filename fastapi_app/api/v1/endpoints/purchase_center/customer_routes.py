@@ -17,7 +17,7 @@ from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
 )
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.database import get_async_read_db as get_read_db
-from fastapi_app.core.deps import require_permission
+from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import CustomerStatisticsResponse
 from fastapi_app.services import purchase_center_service as svc
@@ -36,7 +36,7 @@ async def api_get_customers(
     sort_by: str = Query('name', description='排序字段'),
     sort_order: str = Query('asc', description='排序方向: asc/desc'),
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission("product_manage")),
+    _current_user=Depends(require_any_permission("product_manage", "purchase_center_manage")),
 ) -> dict[str, Any]:
     """获取采购中心客户列表（分页 + 搜索 + 排序）。
 
@@ -71,7 +71,7 @@ async def api_get_customers(
 async def api_sync_customers(
     data: CustomerSyncRequest,
     db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_permission("product_manage")),
+    _current_user=Depends(require_any_permission("product_manage", "purchase_center_manage")),
 ) -> dict[str, Any]:
     """同步客户数据。
 
@@ -134,7 +134,7 @@ async def api_sync_customers(
 async def api_batch_get_customers(
     data: CustomerBatchRequest,
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission("product_manage")),
+    _current_user=Depends(require_any_permission("product_manage", "purchase_center_manage")),
 ) -> dict[str, Any]:
     """批量获取客户信息。
 
@@ -160,7 +160,7 @@ async def api_batch_get_customers(
 @router.get("/customers/statistics", response_model=CustomerStatisticsResponse)
 async def api_get_customers_statistics(
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission("product_manage")),
+    _current_user=Depends(require_any_permission("product_manage", "purchase_center_manage")),
 ) -> dict[str, Any]:
     """获取客户统计数据。
 
@@ -186,7 +186,7 @@ async def api_get_customers_statistics(
 async def api_get_customer_detail(
     customer_id: int,
     db: AsyncSession = Depends(get_read_db),
-    _current_user=Depends(require_permission("product_manage")),
+    _current_user=Depends(require_any_permission("product_manage", "purchase_center_manage")),
 ) -> dict[str, Any]:
     """获取客户详情。
 

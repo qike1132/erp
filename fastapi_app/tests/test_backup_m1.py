@@ -395,8 +395,12 @@ class TestSettingsEndpoints:
 #    否则前端轮询 GET /progress/{task_id} 取不到进度。
 # ===========================================================================
 
-@pytest.mark.asyncio
-async def test_manual_full_task_uses_passed_task_id(monkeypatch, tmp_path):
+def _patch_manual_full_task(monkeypatch, tmp_path, manifest):
+    """为 manual_full_backup_task 打桩，返回 captured（记录 task_id 与落库参数）。
+
+    manifest 由调用方给定：完整性自述的有无决定任务结果，必须显式构造，
+    不能让桩数据在「无人自述完整」时被当成 ok。
+    """
     from contextlib import asynccontextmanager
 
     import fastapi_app.core.database as database_mod
@@ -418,7 +422,7 @@ async def test_manual_full_task_uses_passed_task_id(monkeypatch, tmp_path):
 
     async def fake_create_full_backup(db, user, remark, encrypt_password=None, encrypt=True, **kwargs):
         # M6 起任务还会透传 tables/exclude_tables/progress_cb（表级范围与 8 阶段进度）
-        return (b'zip-bytes', {'table_count': 1, 'total_rows': 5, 'encrypted': False})
+        return (b'zip-bytes', dict(manifest))
 
     async def fake_write_backup_record(db, **kwargs):
         captured['record'] = kwargs
@@ -436,6 +440,17 @@ async def test_manual_full_task_uses_passed_task_id(monkeypatch, tmp_path):
     monkeypatch.setattr(backup_mod, 'create_full_backup', fake_create_full_backup)
     monkeypatch.setattr(backup_mod, 'write_backup_record', fake_write_backup_record)
     monkeypatch.setattr(backup_mod, 'BACKUP_DIR', tmp_path)
+    return bt, captured
+
+
+@pytest.mark.asyncio
+async def test_manual_full_task_uses_passed_task_id(monkeypatch, tmp_path):
+    bt, captured = _patch_manual_full_task(
+        monkeypatch, tmp_path,
+        # 有完整性自述且无问题 → success/ok
+        {'table_count': 1, 'total_rows': 5, 'encrypted': False,
+         'coverage': {'complete': True}},
+    )
 
     result = await bt.manual_full_backup_task(
         {'job_try': 1}, task_id='EXPECTED-ID', remark='r', encrypt=False,
@@ -446,7 +461,30 @@ async def test_manual_full_task_uses_passed_task_id(monkeypatch, tmp_path):
     # 落库记录:trigger=manual,文件名写入真实目录
     assert captured['record']['trigger_type'] == 'manual'
     assert captured['record']['record_type'] == 'full'
+    assert captured['record']['status'] == 'success'
     assert result['status'] == 'ok'
+    assert result['backup_status'] == 'success'
+
+
+@pytest.mark.asyncio
+async def test_manual_full_task_reports_unknown_without_completeness(monkeypatch, tmp_path):
+    """产物没有完整性自述时不得记账为 ok。
+
+    2026-10-30 修复 P2-04：自述缺失从 success 改判 unknown 后，任务结果必须
+    跟着变成 partial —— 否则「没人报错」会再次等价于「已验证完整」。
+    """
+    bt, captured = _patch_manual_full_task(
+        monkeypatch, tmp_path,
+        {'table_count': 1, 'total_rows': 5, 'encrypted': False},
+    )
+
+    result = await bt.manual_full_backup_task(
+        {'job_try': 1}, task_id='NO-SELFREPORT', remark='r', encrypt=False,
+    )
+
+    assert captured['record']['status'] == 'unknown'
+    assert result['backup_status'] == 'unknown'
+    assert result['status'] == 'partial'
 
 
 # ===========================================================================

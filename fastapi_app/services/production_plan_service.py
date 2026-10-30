@@ -346,7 +346,11 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
     conditions = [StagingPurchasePlan.session_id == session_id]
     if batch_id:
         conditions.append(StagingPurchasePlan.upload_batch_id == batch_id)
-    result = await db.execute(select(StagingPurchasePlan).where(*conditions))
+    # 并发确认（双击/重试）必须互斥：锁住暂存行，第二个请求等锁后重查会发现行已被删，
+    # 走「暂存区无数据」分支而不是再插一套正式计划（2026-10-30 审计 A-M16）。
+    result = await db.execute(
+        select(StagingPurchasePlan).where(*conditions).with_for_update()
+    )
     records = result.scalars().all()
     if not records:
         raise ValueError('暂存区无数据')

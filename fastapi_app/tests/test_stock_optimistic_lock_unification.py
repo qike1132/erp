@@ -378,6 +378,9 @@ async def test_batch_stockout_writes_via_locked_entry_without_nested_transaction
         "fastapi_app.services.stock_service.generate_stockout_number",
         new_callable=AsyncMock,
         return_value="SO-2026-0001",
+    ), patch.object(
+        stock_out_service, "_recalc_shipment_order_statuses",
+        new_callable=AsyncMock, return_value=[],
     ):
         result = await stock_out_service.batch_create_stockouts(
             mock_db,
