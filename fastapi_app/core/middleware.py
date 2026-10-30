@@ -152,8 +152,8 @@ _PATH_BODY_LIMITS: tuple[tuple[str, int], ...] = (
     ('/api/v1/staging-stockouts/import', _EXCEL_UPLOAD_BODY_LIMIT),
     ('/api/v1/production-plans/upload', _EXCEL_UPLOAD_BODY_LIMIT),
     ('/api/v1/plans/upload', _EXCEL_UPLOAD_BODY_LIMIT),
-    ('/api/v1/ocr-import/', _EXCEL_UPLOAD_BODY_LIMIT),
-    ('/api/v1/pattern-room/', _EXCEL_UPLOAD_BODY_LIMIT),
+    # OCR 端点刻意维持全局 10MB：端点自身按「单文件 10MB」校验并返回 400，
+    # 中间件若放宽会让 test_oversized_rejected_by_middleware 的 413 契约失效。
 )
 
 
