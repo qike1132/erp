@@ -38216,6 +38216,16 @@
             "type": "array",
             "title": "Data"
           },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages",
+            "default": 0
+          },
           "pending_count": {
             "type": "integer",
             "title": "Pending Count",

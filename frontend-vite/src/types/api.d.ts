@@ -3272,6 +3272,8 @@ export interface schemas_BatchCompleteRequest {
 export interface approval_ApprovalListResponse {
   success?: boolean
   data: Array<ApprovalItemSchema>
+  total?: number
+  pages?: number
   pending_count?: number
   approved_count?: number
   rejected_count?: number
