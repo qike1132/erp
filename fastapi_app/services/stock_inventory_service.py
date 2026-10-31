@@ -692,7 +692,8 @@ filtered AS (
         GROUP BY product_id
     ) ship ON ship.product_id = ic.product_id
     WHERE (ic.has_stockin OR ic.has_order OR (ic.has_packaging_production AND :sc_is_empty))
-      AND (ic.total_qty > 0 OR (ic.has_packaging_production AND :sc_is_empty))
+      AND (ic.total_qty > 0
+           OR (ic.has_packaging_production AND NOT ic.has_stockin AND NOT ic.has_order AND :sc_is_empty))
 )
 SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
     f.stockin_qty, f.direct_stockout_qty, f.order_stockout_qty,

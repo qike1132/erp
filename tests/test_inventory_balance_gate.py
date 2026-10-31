@@ -16,7 +16,13 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.services import stock_inventory_service as svc
-from fastapi_app.shared_models import DailyProductionRecord, InventoryLog, Order, Product
+from fastapi_app.shared_models import (
+    DailyProductionRecord,
+    InventoryLog,
+    Order,
+    Product,
+    StockOut,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -106,6 +112,45 @@ async def test_packaging_production_only_product_visible_on_stock_page(db, monke
     assert rows, '仅包装部生产入库的商品也应在 /stock 页出现'
     assert rows[0]['customer'] == ''
     assert rows[0]['inventory_balance'] == 1000
+
+
+async def test_zero_total_row_hidden_when_all_customers(db, monkeypatch):
+    """回归 2026-10-31：客户=全部 时不得显示订单/备货/总订单全为 0 的行。
+
+    成因：9395f21f 为「仅有包装部生产」的商品放行时，把
+    `has_packaging_production AND :sc_is_empty` 挂到了行级 `total_qty > 0`
+    的旁路上。于是任何产品只要有过包装部生产，其零余量行（订单已全部出货、
+    无备货）都会在「全部」下出现，而选中该客户时又消失（生产页图1 vs 图2：
+    网易下《蛋仔派对》…陈列样等 3 行）。纯包装生产行（无备货、无订单）
+    仍须可见，见上一条用例。
+    """
+    product = Product(
+        name='零余量行可见性产品', barcode='INV-BAL-006', current_stock=0, initial_stock=0,
+    )
+    db.add(product)
+    await db.flush()
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=product.id,
+        product_name=product.name, barcode='INV-BAL-006',
+        quantity=50, production_date=datetime.now(UTC).date(),
+    ))
+    db.add(Order(
+        order_no='INV-BAL-ORD-6', customer='零余量行客户', product_id=product.id,
+        quantity=50, order_date=datetime.now(UTC), status='待备货',
+    ))
+    # 订单 50 全部独立出货 → 余量 0；无备货 → total_qty = 0
+    db.add(StockOut(
+        stockout_no='INV-BAL-SO-6', product_id=product.id, quantity=50,
+        customer='零余量行客户', order_id=None, stockin_id=None,
+    ))
+    await db.flush()
+
+    monkeypatch.setattr(svc, '_get_all_customers', svc._get_all_customers.__wrapped__)
+    result = await svc.get_inventory_paginated.__wrapped__(
+        db, search_customer='', search_product=product.name, page=1, per_page=50,
+    )
+    rows = [r for r in result['inventory_data'] if r['product_name'] == product.name]
+    assert rows == [], '客户=全部 不得显示订单/备货/总订单全为 0 的行'
 
 
 async def test_inventory_balance_excludes_deduction_types(db, monkeypatch):
