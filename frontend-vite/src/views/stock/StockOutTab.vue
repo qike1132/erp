@@ -8,6 +8,7 @@
           <StockOutInputForm
             :form="form"
             :customer-options="customerOptions"
+            :customer-options-error="customerOptionsError"
             :shipment-info="shipmentInfo"
             :batch-options="batchOptions"
             :can-add="canAdd"
@@ -16,6 +17,7 @@
             :list-fn="fetchSkuList"
             :empty-text="productEmptyText"
             @add-staged="addStaged"
+            @retry-customers="retryCustomers"
             @product-select="onProductSelect"
             @clear-shipment="clearShipmentSelection"
             @ocr-staged="addOcrStaged"
@@ -93,9 +95,16 @@ const confirmDialog = useConfirmDialog()
 
 // === 客户列表（目录 store 统一缓存，TTL 内跨视图复用） ===
 const catalogStore = useCatalogStore()
-catalogStore.ensureActiveCustomerNames().catch(() => {
-  // 加载失败保持空列表，下次进入视图时重试
-})
+/**
+ * 客户下拉加载失败状态（A-M34）：原先 `.catch(() => {})` 静默吞掉，客户是必填项，
+ * 加载失败时下拉为空却与「系统里没有客户」同形，用户零提示。
+ */
+const customerOptionsError = computed(() => catalogStore.activeCustomerNamesError)
+void catalogStore.ensureActiveCustomerNames().catch(() => {})
+/** 失败后的手动重试（强制绕过 TTL） */
+function retryCustomers() {
+  void catalogStore.ensureActiveCustomerNames(true).catch(() => {})
+}
 const customerNames = computed(() => catalogStore.activeCustomerNames.map((c) => c.name))
 const customerOptions = computed(() => customerNames.value.map((name) => ({ value: name, label: name })))
 

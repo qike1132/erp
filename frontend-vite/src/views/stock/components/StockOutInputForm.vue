@@ -13,6 +13,10 @@
         <div class="form-field">
           <label class="form-label">客户名称</label>
           <UiSelect v-model="form.customer" placeholder="请选择客户" :options="customerOptions" />
+          <p v-if="customerOptionsError" class="field-error-text" role="alert">
+            客户列表加载失败，下拉可能为空。
+            <button type="button" class="so-inline-link" @click="emit('retry-customers')">重试</button>
+          </p>
         </div>
       </div>
 
@@ -111,6 +115,8 @@ interface StockOutForm {
 
 const props = defineProps<{
   customerOptions: { value: string; label: string }[]
+  /** 客户下拉是否加载失败（A-M34）：失败时下拉为空，必须给出提示与重试入口 */
+  customerOptionsError: boolean
   shipmentInfo: ShipmentInfo | null
   /** 成品库存批次可用量列表（选定 SKU 后由父级带出） */
   batchOptions: BatchAvailable[]
@@ -145,6 +151,8 @@ const emit = defineEmits<{
   /** OCR 粘贴识别确认后的暂存出货条目，转发给上层并入暂存列表 */
   'ocr-staged': [items: StagedStockout[]]
   'go-manual': []
+  /** 客户下拉加载失败后的重试（由父级强制刷新目录 store） */
+  'retry-customers': []
 }>()
 
 /** 产品输入框引用：指引态「去录入」时把焦点交回这里（按暴露的接口结构声明） */
@@ -167,6 +175,21 @@ function onSearchInput() {
 <style scoped>
 :deep(input.bg-slate-50) {
   background-color: #ffffff !important;
+}
+
+/* 行内重试入口：贴在字段错误提示里，键盘可达（A-M34） */
+.so-inline-link {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  color: var(--color-ocean-deep, #1d4ed8);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.so-inline-link:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
 }
 
 .so-col-title {

@@ -27,6 +27,14 @@ export interface CustomerNameOption {
 function createCatalogEntry<T>(fetcher: () => Promise<T[]>) {
   const list = ref([]) as Ref<T[]>
   const loading = ref(false)
+  /**
+   * 最近一次加载是否失败（2026-10-30 审计 A-M34）。
+   *
+   * 没有这个标记时，加载失败与「目录里确实一条都没有」在界面上完全同形：
+   * 客户下拉是空的、必填项选不出来，也没有任何提示。调用方据此显示「加载失败 +
+   * 重试」，而不是把 5xx/超时渲染成「没有客户」。
+   */
+  const error = ref(false)
   /** 最近一次成功加载的时间戳（0 表示尚未加载过） */
   const loadedAt = ref(0)
   /** 进行中的请求 Promise，并发调用共享 */
@@ -51,8 +59,15 @@ function createCatalogEntry<T>(fetcher: () => Promise<T[]>) {
         if (currentGeneration === generation) {
           list.value = data
           loadedAt.value = Date.now()
+          error.value = false
         }
         return data
+      })
+      .catch((e: unknown) => {
+        // 只在「仍是当前代」时记错误：clear() 之后的旧失败不该污染新会话的界面
+        if (currentGeneration === generation) error.value = true
+        // 继续上抛，调用方原有的 .catch 语义不变
+        throw e
       })
       .finally(() => {
         // reset() 会把 inflight 置空并递增代际；旧请求结束时不能再清掉
@@ -70,10 +85,11 @@ function createCatalogEntry<T>(fetcher: () => Promise<T[]>) {
     list.value = []
     loading.value = false
     loadedAt.value = 0
+    error.value = false
     inflight = null
   }
 
-  return { list, loading, ensure, reset }
+  return { list, loading, error, ensure, reset }
 }
 
 export const useCatalogStore = defineStore('catalog', () => {
@@ -94,6 +110,8 @@ export const useCatalogStore = defineStore('catalog', () => {
     activeCustomerNames: activeCustomerNamesEntry.list,
     // 加载态
     activeCustomerNamesLoading: activeCustomerNamesEntry.loading,
+    // 最近一次加载是否失败（下拉为空时用它区分「加载失败」与「确实没有客户」）
+    activeCustomerNamesError: activeCustomerNamesEntry.error,
     // 确保数据可用（TTL 缓存 + 请求去重）
     ensureActiveCustomerNames: activeCustomerNamesEntry.ensure,
     // 清理

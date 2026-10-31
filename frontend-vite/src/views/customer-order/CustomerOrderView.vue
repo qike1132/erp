@@ -18,6 +18,7 @@
             v-model:form="form"
             :is-order="isOrder"
             :customer-options="customerOptions"
+            :customer-options-error="customerOptionsError"
             :missing-fields="missingFields"
             :available-stock="availableStock"
             :stock-error="stockError"
@@ -37,6 +38,7 @@
             :handle-import="handleImport"
             :add-staged-items="addStagedItems"
             @add-staged="addStaged"
+            @retry-customers="retryCustomers"
           />
 
           <!-- 右栏：暂存列表 + 提交按钮 -->
@@ -95,6 +97,8 @@ const {
   quantityOutOfRange,
   planSplitsInvalid,
   customerOptions,
+  customerOptionsError,
+  retryCustomers,
   searchProducts,
   productSearchFailed,
   fetchSkuList,

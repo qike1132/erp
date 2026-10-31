@@ -20,9 +20,25 @@ export function useOrderForm() {
   // ===== Data queries =====
   // 客户下拉选项：目录 store 统一缓存（TTL 内跨视图复用，组件卸载不清空）
   const catalogStore = useCatalogStore()
-  catalogStore.ensureActiveCustomerNames().catch(() => {
-    // 加载失败保持空列表，下次进入视图时重试
-  })
+  /**
+   * 客户下拉是否加载失败（A-M34）。
+   *
+   * 原先是 `.catch(() => {})` 静默吞掉：客户是必填项，加载失败时下拉是空的、
+   * 选不出任何值，界面却与「系统里没有客户」完全同形，用户零提示。
+   */
+  const customerOptionsError = computed(() => catalogStore.activeCustomerNamesError)
+  /** 拉取客户下拉（失败只记状态，不抛出——首屏不该因为下拉失败整页报错） */
+  function loadCustomers(force = false): Promise<void> {
+    return catalogStore.ensureActiveCustomerNames(force).then(
+      () => {},
+      () => {},
+    )
+  }
+  void loadCustomers()
+  /** 客户下拉失败后的手动重试 */
+  function retryCustomers(): Promise<void> {
+    return loadCustomers(true)
+  }
   const customerList = computed(() => catalogStore.activeCustomerNames.map((c) => ({ name: c.name })))
   const customerOptions = computed(() => customerList.value.map((c: { name: string }) => ({ value: c.name, label: c.name })))
 
@@ -233,6 +249,8 @@ export function useOrderForm() {
     quantityOutOfRange,
     planSplitsInvalid,
     customerOptions,
+    customerOptionsError,
+    retryCustomers,
     searchProducts,
     productSearchFailed,
     fetchSkuList,

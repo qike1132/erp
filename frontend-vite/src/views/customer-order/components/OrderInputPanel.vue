@@ -27,6 +27,10 @@
               style="width: 100%"
               :options="customerOptions"
             />
+            <p v-if="customerOptionsError" class="field-error-text" role="alert">
+              客户列表加载失败，下拉可能为空。
+              <button type="button" class="co-inline-link" @click="emit('retry-customers')">重试</button>
+            </p>
           </div>
         </div>
 
@@ -200,6 +204,8 @@ const quantityInvalid = computed(() => quantityTouched.value && isQuantityOutOfR
 const props = defineProps<{
   isOrder: boolean
   customerOptions: { label: string; value: string }[]
+  /** 客户下拉是否加载失败（A-M34）：失败时下拉为空，必须给出提示与重试入口 */
+  customerOptionsError: boolean
   /** 当前还缺的必填项（面向用户的字段名），用于主动提示 */
   missingFields: string[]
   availableStock: number
@@ -229,6 +235,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'add-staged': []
   'update:isDragOver': [value: boolean]
+  /** 客户下拉加载失败后的重试（由父级调用目录 store 的强制刷新） */
+  'retry-customers': []
 }>()
 
 /** OCR 确认后的条目映射：识别与闸门在共享 OcrPasteImport 里，这里只决定落点。
@@ -309,6 +317,20 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
 }
 .co-required {
   color: var(--color-danger-500);
+}
+/* 行内重试入口：贴在字段错误提示里，键盘可达（A-M34） */
+.co-inline-link {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font: inherit;
+  color: var(--color-ocean-deep, #1d4ed8);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.co-inline-link:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
 }
 .co-form-hint {
   margin: 8px 0 0;
