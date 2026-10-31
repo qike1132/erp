@@ -17,16 +17,18 @@ class TestBackupMetricsService:
     @pytest.fixture
     def metrics_service(self):
         """创建性能监控服务实例（环境变量在整个用例期间生效）"""
+        # 取值刻意与代码默认值不同（默认 60/90/1800/1GiB/80/80/100/24/95/3，A-M42）：
+        # 全部沿用默认值时，某个键的解析坏掉也照样全绿——测不到任何东西。
         with patch.dict(os.environ, {
-            'BACKUP_METRICS_INTERVAL': '60',
-            'BACKUP_METRICS_RETENTION_DAYS': '90',
-            'BACKUP_DURATION_THRESHOLD': '1800',
-            'BACKUP_SIZE_THRESHOLD': '1073741824',
-            'BACKUP_CPU_THRESHOLD': '80.0',
-            'BACKUP_MEMORY_THRESHOLD': '80.0',
-            'BACKUP_DISK_IO_THRESHOLD': '100',
-            'BACKUP_TREND_WINDOW': '24',
-            'BACKUP_SUCCESS_RATE_THRESHOLD': '95.0',
+            'BACKUP_METRICS_INTERVAL': '45',
+            'BACKUP_METRICS_RETENTION_DAYS': '120',
+            'BACKUP_DURATION_THRESHOLD': '900',
+            'BACKUP_SIZE_THRESHOLD': '536870912',
+            'BACKUP_CPU_THRESHOLD': '70.5',
+            'BACKUP_MEMORY_THRESHOLD': '65.5',
+            'BACKUP_DISK_IO_THRESHOLD': '55',
+            'BACKUP_TREND_WINDOW': '12',
+            'BACKUP_SUCCESS_RATE_THRESHOLD': '88.5',
             'BACKUP_FAILURE_COUNT_THRESHOLD': '4',
         }):
             service = BackupMetricsService()
@@ -64,15 +66,15 @@ class TestBackupMetricsService:
         assert 'success_rate_threshold' in config
         assert 'failure_count_threshold' in config
 
-        assert config['collection_interval'] == 60
-        assert config['retention_days'] == 90
-        assert config['backup_duration_threshold'] == 1800
-        assert config['backup_size_threshold'] == 1073741824
-        assert config['cpu_usage_threshold'] == 80.0
-        assert config['memory_usage_threshold'] == 80.0
-        assert config['disk_io_threshold'] == 100
-        assert config['trend_window_hours'] == 24
-        assert config['success_rate_threshold'] == 95.0
+        assert config['collection_interval'] == 45
+        assert config['retention_days'] == 120
+        assert config['backup_duration_threshold'] == 900
+        assert config['backup_size_threshold'] == 536870912
+        assert config['cpu_usage_threshold'] == 70.5
+        assert config['memory_usage_threshold'] == 65.5
+        assert config['disk_io_threshold'] == 55
+        assert config['trend_window_hours'] == 12
+        assert config['success_rate_threshold'] == 88.5
         assert config['failure_count_threshold'] == 4
 
     @pytest.mark.asyncio
@@ -536,10 +538,10 @@ class TestBackupMetricsService:
         with patch.object(metrics_service, 'get_performance_summary') as mock_summary:
             # 模拟有问题的性能摘要
             mock_summary.return_value = {
-                'success_rate': 90.0,  # 低于95%阈值
-                'failed_count': 5,      # 高于3次阈值
-                'average_duration_seconds': 2000.0,  # 高于1800秒阈值
-                'total_size_mb': 1500.0  # 高于1024MB阈值
+                'success_rate': 85.0,  # 低于 88.5% 阈值（见 fixture）
+                'failed_count': 5,      # 高于 4 次阈值
+                'average_duration_seconds': 2000.0,  # 高于 900 秒阈值
+                'total_size_mb': 1500.0  # 高于 512MiB 阈值
             }
 
             alerts = await metrics_service.get_performance_alerts()

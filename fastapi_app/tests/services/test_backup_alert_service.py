@@ -17,14 +17,16 @@ class TestBackupAlertService:
     @pytest.fixture
     def alert_service(self):
         """创建告警服务实例（环境变量在整个用例期间生效）"""
+        # 取值刻意与代码默认值不同（默认 3/5/30/3/2，A-M42）：
+        # 若某个键的解析坏掉，回退到默认值就会让断言变红，而不是"恰好相等"蒙过去。
         with patch.dict(os.environ, {
             'BACKUP_ALERT_EMAIL_ENABLED': 'false',
             'BACKUP_ALERT_WEBHOOK_ENABLED': 'false',
-            'BACKUP_ALERT_FAILURE_THRESHOLD': '3',
-            'BACKUP_ALERT_CRITICAL_THRESHOLD': '9',
+            'BACKUP_ALERT_FAILURE_THRESHOLD': '7',
+            'BACKUP_ALERT_CRITICAL_THRESHOLD': '11',
             'BACKUP_ALERT_COOLDOWN_MINUTES': '45',
-            'BACKUP_ALERT_MAX_RETRIES': '3',
-            'BACKUP_ALERT_RETRY_DELAY_BASE': '2',
+            'BACKUP_ALERT_MAX_RETRIES': '2',
+            'BACKUP_ALERT_RETRY_DELAY_BASE': '1',
         }):
             service = BackupAlertService()
             service.__init__()
@@ -44,11 +46,11 @@ class TestBackupAlertService:
 
         assert config['email_enabled'] is False
         assert config['webhook_enabled'] is False
-        assert config['failure_threshold'] == 3
-        assert config['critical_threshold'] == 9
+        assert config['failure_threshold'] == 7
+        assert config['critical_threshold'] == 11
         assert config['alert_cooldown_minutes'] == 45
-        assert config['max_retries'] == 3
-        assert config['retry_delay_base'] == 2
+        assert config['max_retries'] == 2
+        assert config['retry_delay_base'] == 1
 
     def test_update_failure_count(self, alert_service):
         """测试更新失败计数"""
@@ -79,9 +81,9 @@ class TestBackupAlertService:
         # 无失败记录时首次告警应发送（无冷却时间、无阈值限制）
         assert alert_service._should_send_alert(task_name, 'error') is True
 
-        # 设置失败计数达到阈值
+        # 设置失败计数达到阈值（阈值取自环境变量，见 fixture）
         alert_service.failure_counts[task_name] = {
-            'error': 3,
+            'error': alert_service.alert_config['failure_threshold'],
             'critical': 0,
             'last_failure_time': datetime.now()
         }
@@ -259,30 +261,35 @@ class TestBackupAlertService:
         """测试指数退避重试（成功）"""
         mock_func = AsyncMock(return_value="success")
 
-        success, result = await alert_service.retry_with_backoff(
-            mock_func,
-            task_name='test_task'
-        )
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            success, result = await alert_service.retry_with_backoff(
+                mock_func,
+                task_name='test_task'
+            )
 
         assert success is True
         assert result == "success"
         assert mock_func.call_count == 1
+        mock_sleep.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_retry_with_backoff_failure(self, alert_service):
         """测试指数退避重试（失败）"""
         mock_func = AsyncMock(side_effect=Exception("test error"))
 
-        success, result = await alert_service.retry_with_backoff(
-            mock_func,
-            task_name='test_task'
-        )
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            success, result = await alert_service.retry_with_backoff(
+                mock_func,
+                task_name='test_task'
+            )
 
+        # 退避真的发生：2 次重试各等一次（base_delay=1 → 1**1、1**2）
+        assert mock_sleep.await_count == 2
         assert success is False
         assert isinstance(result, Exception)
         assert str(result) == "test error"
-        # 应该重试3次（max_retries=3）
-        assert mock_func.call_count == 4  # 初始尝试 + 3次重试
+        # max_retries=2（见 fixture）→ 初始尝试 + 2 次重试
+        assert mock_func.call_count == 3
 
     @pytest.mark.asyncio
     async def test_retry_with_backoff_success_on_retry(self, alert_service):
@@ -296,10 +303,11 @@ class TestBackupAlertService:
                 raise Exception(f"attempt {call_count} failed")
             return "success"
 
-        success, result = await alert_service.retry_with_backoff(
-            mock_func,
-            task_name='test_task'
-        )
+        with patch('asyncio.sleep', new_callable=AsyncMock):
+            success, result = await alert_service.retry_with_backoff(
+                mock_func,
+                task_name='test_task'
+            )
 
         assert success is True
         assert result == "success"

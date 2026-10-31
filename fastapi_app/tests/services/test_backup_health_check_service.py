@@ -21,13 +21,15 @@ class TestBackupHealthCheckService:
     @pytest.fixture
     def health_check_service(self):
         """创建健康检查服务实例（环境变量在整个用例期间生效）"""
+        # 取值刻意与代码默认值不同（默认 10.0/24/10.0/7/60/30，A-M42）；
+        # age 阈值仍取 24：下面多个用例用字面量 24 小时描述"新/旧备份"的语义。
         with patch.dict(os.environ, {
-            'BACKUP_DISK_SPACE_THRESHOLD': '10.0',
+            'BACKUP_DISK_SPACE_THRESHOLD': '12.5',
             'BACKUP_AGE_THRESHOLD': '24',
-            'BACKUP_INTEGRITY_SAMPLE_RATE': '10.0',
-            'BACKUP_RECOVERY_TEST_FREQUENCY': '7',
+            'BACKUP_INTEGRITY_SAMPLE_RATE': '15.0',
+            'BACKUP_RECOVERY_TEST_FREQUENCY': '9',
             'BACKUP_HEALTH_CHECK_INTERVAL': '61',
-            'BACKUP_REPORT_RETENTION_DAYS': '30',
+            'BACKUP_REPORT_RETENTION_DAYS': '45',
         }):
             service = BackupHealthCheckService()
             service.__init__()
@@ -81,12 +83,12 @@ class TestBackupHealthCheckService:
         assert 'health_check_interval' in config
         assert 'report_retention_days' in config
 
-        assert config['disk_space_threshold'] == 10.0
+        assert config['disk_space_threshold'] == 12.5
         assert config['backup_age_threshold'] == 24
-        assert config['integrity_sample_rate'] == 10.0
-        assert config['recovery_test_frequency'] == 7
+        assert config['integrity_sample_rate'] == 15.0
+        assert config['recovery_test_frequency'] == 9
         assert config['health_check_interval'] == 61
-        assert config['report_retention_days'] == 30
+        assert config['report_retention_days'] == 45
 
     @pytest.mark.asyncio
     async def test_check_disk_space(self, health_check_service):
@@ -113,7 +115,7 @@ class TestBackupHealthCheckService:
 
             assert result['healthy'] is True
             assert result['free_percent'] == 20.0
-            assert result['threshold_percent'] == 10.0
+            assert result['threshold_percent'] == 12.5
 
         with patch('psutil.disk_usage') as mock_disk_usage:
             # 模拟磁盘使用情况（空间不足）
