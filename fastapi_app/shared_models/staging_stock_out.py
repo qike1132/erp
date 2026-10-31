@@ -23,7 +23,11 @@ class StagingStockOut(Base):
     __tablename__ = 'staging_stock_out'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    session_id: Mapped[str] = mapped_column(String(64), index=True, comment='会话ID，用于标识同一批导入')
+    # 2026-10-31 索引对齐：session_id 去掉列级 index=True——__table_args__ 已有
+    # 显式命名的 idx_staging_stockout_session（库内存在），列级声明会生成第二个
+    # 同列幽灵索引 ix_staging_stock_out_session_id（与 purchase_order.source_order_id
+    # 同型的双声明缺陷）。
+    session_id: Mapped[str] = mapped_column(String(64), comment='会话ID，用于标识同一批导入')
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True, comment='客户名称')
     stockout_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='出货时间')
     product_name: Mapped[str] = mapped_column(String(200), nullable=False, comment='产品名称（冗余存储）')

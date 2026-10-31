@@ -61,7 +61,10 @@ class PurchaseOrder(Base):
     order_date: Mapped[date | None] = mapped_column(Date, comment='下单日期')
     status: Mapped[str | None] = mapped_column(String(20), default='pending', comment='状态')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
-    source_order_id: Mapped[int | None] = mapped_column(Integer, index=True, comment='关联的原始订单ID(单)')
+    # 2026-10-31 索引对齐：去掉列级 index=True——它与 __table_args__ 的
+    # idx_purchase_order_source_order_id 生成两个同列索引（迁移 pg_standalone_054
+    # 引入的重复，库内曾同时存在 ix_/idx_ 两份），仅保留显式命名版本。
+    source_order_id: Mapped[int | None] = mapped_column(Integer, comment='关联的原始订单ID(单)')
     source_order_ids: Mapped[str | None] = mapped_column(Text, comment='关联的原始订单IDs(JSON数组)')
     product_name: Mapped[str | None] = mapped_column(String(200), comment='产品名称')
     product_quantity: Mapped[float | None] = mapped_column(Numeric(12, 2), comment='订单数量')
@@ -195,7 +198,9 @@ class PurchaseOrderItem(Base):
 
 
     __table_args__ = (
-        Index('idx_purchase_order_item_order', 'order_id'),
+        # 2026-10-31 索引对齐：删除 idx_purchase_order_item_order (order_id)——
+        # 被 idx_perf_poi_order_include (order_id) INCLUDE (...) 前缀覆盖（迁移
+        # pg_standalone_106 已删库内索引，此处同步删模型声明）。
         Index('idx_purchase_order_item_material', 'material_name'),
         Index('idx_perf_poi_order_include', 'order_id',
               postgresql_include=['material_name', 'quantity', 'unit_price']),

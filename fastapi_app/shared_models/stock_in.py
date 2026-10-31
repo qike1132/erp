@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -55,7 +55,10 @@ class StockIn(Base):
         Index('idx_stockin_product_date', 'product_id', 'stockin_date'),
         Index('idx_stockin_customer_date', 'customer', 'stockin_date'),
         Index('idx_stockin_customer_product_date', 'customer', 'product_id', 'stockin_date'),
-        Index('idx_perf_stockin_product_date', 'product_id', desc('stockin_date')),
+        # 2026-10-31 索引对齐：删除 idx_perf_stockin_product_date 声明——
+        # 它与 idx_stockin_product_date (product_id, stockin_date) 仅排序方向
+        # 不同，B-tree 可反向扫描，同列组合两个方向索引是纯冗余（库内只有
+        # ASC 版，此声明是永不落库的幽灵索引）。
     )
 
     def __repr__(self):

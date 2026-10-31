@@ -466,6 +466,9 @@ def test_prod_write_guard_ratchet_covers_all_db_scripts():
         'scripts/check_order_indexes.py',
         'scripts/contract_snapshot.py',
         'scripts/db_baseline_probe.py',
+        # 2026-10-31 登记索引结构对账（asyncpg 只读 SELECT + 会话级
+        # default_transaction_read_only=on，见 scripts/diag/check_schema_drift.py）
+        'scripts/diag/check_schema_drift.py',
         'scripts/diag/migration_drift_probe.py',
         'scripts/perf_benchmark.py',
         'scripts/perf_optimization/db_query_analyzer.py',

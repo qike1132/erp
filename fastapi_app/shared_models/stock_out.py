@@ -45,7 +45,9 @@ class StockOut(Base):
         Index('idx_stockout_customer_date', 'customer', 'stockout_date'),
         Index('idx_stockout_product_customer_type', 'product_id', 'customer', 'stockin_id'),
         Index('idx_stockout_order_type', 'order_id', 'stockin_id'),
-        Index('idx_perf_stockout_product_date', 'product_id', desc('stockout_date')),
+        # 2026-10-31 索引对齐：删除 idx_perf_stockout_product_date 声明——
+        # 与 idx_stockout_product_date (product_id, stockout_date) 仅排序方向
+        # 不同，B-tree 可反向扫描，同列双向索引是纯冗余（库内只有 ASC 版）。
         Index('idx_stockout_order_stockin_qty', 'order_id', 'stockin_id',
               postgresql_include=['quantity', 'returned_quantity']),
         Index('idx_stockout_deduction', 'product_id', desc('stockout_date'),

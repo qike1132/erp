@@ -116,10 +116,14 @@ class Order(Base):
         Index('idx_order_locked_by', 'locked_by_id'),
         Index('idx_order_customer_trgm', 'customer', postgresql_using='gin',
               postgresql_ops={'customer': 'gin_trgm_ops'}),
+        # 2026-10-31 索引对齐（pg_standalone_106）：谓词从 `= false` 改为
+        # `IS NOT TRUE`——订单列表主路径查询（services/order/queries.py）
+        # 用 `is_deleted IS NOT TRUE`，PG 不做谓词蕴含推断，`= false` 版
+        # 索引无法服务该查询（此前模型声明与查询谓词不一致的潜伏缺陷）。
         Index('idx_perf_order_status_date_covering', 'status', desc('order_date'), 'id',
-              postgresql_where=text("is_deleted = false")),
+              postgresql_where=text("is_deleted IS NOT TRUE")),
         Index('idx_perf_order_customer_date', 'customer', desc('order_date'),
-              postgresql_where=text("is_deleted = false")),
+              postgresql_where=text("is_deleted IS NOT TRUE")),
         Index('idx_order_batch_completed', desc('batch_completed_at'),
               postgresql_where=text("batch_completed_at IS NOT NULL")),
         # 订单列表游标分页主路径：ORDER BY order_date DESC, id DESC
