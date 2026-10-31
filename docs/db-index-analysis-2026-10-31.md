@@ -19,10 +19,10 @@
 | **P4 模型对齐** | ✅ 已完成 | audit_log 索引声明全删（纯写不读）；stock_in/stock_out idx_perf 冗余声明删（库内 ASC 版等价，B-tree 可反向扫）；staging_stock_out 列级双声明删（同 purchase_order 同型缺陷）；material_registration.idx_material_reg_supplier 列漂移修正（supplier_name→supplier_id） |
 | **P4 对账脚本** | ✅ 已交付 | `scripts/diag/check_schema_drift.py`（只读，已登记写守卫白名单）；**复跑结果：MODEL_ONLY 53→0，COLUMN_MISMATCH→0**（DB_ONLY 剩 16 个良性：物化视图索引/显式命名唯一约束，不在 ORM table.indexes 中） |
 | **P1-R2 audit_log 保留期** | ⏳ 待决策 | 涉及审计合规保留年限，需 owner 决定（当前 26.1 万行 / +200 行/天） |
-| **P2 其余前缀冗余** | ⏳ 按计划等待 | 等 pg_stat_statements 积累一个完整业务月（约 2026-11 月底）再执行 |
-| **P3 编号表达式索引** | ⏳ 规模触发 | 业务表 >1000 行或巡检单实体 >100ms 再建（当前 order 71 行）；近期可先做巡检降频评估 |
+| **P2 其余前缀冗余** | ✅ 2026-11-01 执行 | owner 授权提前执行：迁移 107 DROP CONCURRENTLY 30 个零扫描前缀冗余索引（在用的 approval_request.status=134 次、order.product_id=12 次按证据保留；inventory_log 删零扫描复合版保留在用单列版；Down 按原定义逐字重建）。索引总数 369→348 |
+| **P3 编号表达式索引** | ✅ 2026-11-01 执行 | owner 授权提前执行：迁移 107 建 9 个 `idx_*_no_date_seq` 部分表达式索引；**read_daily_max 过滤器静态化**（动态日期正则无法命中静态谓词索引——PG 不做正则蕴含推断）；shared_models 加 PG-only 索引守卫（SQLite 测试后端建表时临时摘除，曾致 132 个测试失败）。**强制索引 EXPLAIN 证明**：Index Cond 走日期段等值前导列、MAX 反向扫取末行（0.045ms）；当前 71 行 planner 选顺扫是成本模型正确决策，规模回升自动切换。锁链路（对账持锁全表聚合→取号排队 4.43s）随对账查询走索引而消解 |
 
-**验证**：全量提权 pytest 5274 passed / 57 skipped（唯一失败为写守卫白名单登记，补登后聚焦复绿 131 passed）；迁移链单一 head；生产 alembic 105→106 应用成功；迁移后服务健康 ready=true / frontend_ok=true。
+**验证**：全量提权 pytest 5275 passed / 57 skipped；生产 alembic 105→106→107 应用成功；迁移后服务健康 ready=true / frontend_ok=true。
 
 **事故与恢复记录**（运维教训，2026-10-31 23:20–23:40）：`net stop` PostgreSQL 时 Windows 服务依赖链连带停止 erp-prod/erp-arq/erp-web（redis 不受影响）；且 NSSM 停止未杀干净 uvicorn master（孤儿进程与新 master 双绑 5002），nginx 存在新旧交替期 502。已全部恢复：三服务启动、孤儿进程树清理（PID 38808 树）、健康快照 ready=true，后端运行 commit 0593dbb8（owner 逐项授权）。**下次重启 PG 用 `pg_ctl restart -m fast -D <PGDATA>` 直连进程控制，不走 SCM 服务接口，避免依赖链连停。**
 
