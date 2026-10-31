@@ -359,11 +359,12 @@ SERVICE_AND_SHARED_ROOTS = (REPO / "fastapi_app/services", REPO / "fastapi_app/s
 UNIFIED_ENTRY = STOCK_CONCURRENCY
 
 # 具名豁免：低库存计数用的只读阈值查询（无任何写入路径，不是负库存判定）。
-# fastapi_app/services/dashboard/stats.py:209 的 .where(Product.current_stock <= 10)
+# fastapi_app/services/dashboard/stats.py:226 的 .where(Product.current_stock <= 10)
 # 属统计阈值语义，与 t31 的 ALLOWED_RESIDUAL_ORDERING 逐字一致；在本任务写域之外，未改。
-# 2026-10-17 审计 AUD-23 改动 stats.py 后行号 208→209，同步更新。
+# 2026-10-17 审计 AUD-23 改动 stats.py 后行号 208→209；
+# 2026-10-30 审计 A-M22 把该子查询抽成 low_stock_stmt（按工厂收窄）后 209→226。
 DASHBOARD_STATS = REPO / "fastapi_app/services/dashboard/stats.py"
-DASHBOARD_STATS_HITS = ["stats.py:209: Product.current_stock <= 10"]
+DASHBOARD_STATS_HITS = ["stats.py:226: Product.current_stock <= 10"]
 # 2026-10-06 出货校准：可出货量 = min(订单余量, 产品净存量)，此比较为只读阈值（不写库存）
 INVENTORY_SERVICE = REPO / "fastapi_app/services/inventory_service.py"
 

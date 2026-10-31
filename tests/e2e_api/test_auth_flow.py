@@ -127,9 +127,10 @@ class TestAuthEndpointsAlive:
         前端 ``setUserInfo(null)`` 会构造出 id=0 的空壳身份。
         这里用现造临时用户来验证，避免依赖真实库里的口令。
         """
-        created = await _create_temp_user(api)
-        if created is None:
-            pytest.skip("无法创建临时用户（可能缺少用户创建权限或写库受限）")
+        try:
+            created = await _create_temp_user(api)
+        except TempUserUnavailableError as exc:
+            pytest.skip(f'环境不具备造临时用户的前置条件：{exc}')
         username, password = created
         try:
             resp = await api.post(
@@ -194,11 +195,23 @@ class TestAuthEndpointsAlive:
 _TEMP_PREFIX = "__e2e_api_tmp__"
 
 
-async def _create_temp_user(api: httpx.AsyncClient) -> tuple[str, str] | None:
-    """造一个临时用户。返回 (username, password)；失败返回 None。
+class TempUserUnavailableError(Exception):
+    """环境不具备造临时用户的前置条件（缺管理员 token / 端点在本环境不可用）。
+
+    只有这种「环境性缺失」才允许 skip；端点返回 5xx 或业务错误必须让用例变红——
+    否则「登录返回 user=null」这条唯一守卫可以被静默跳过（2026-10-30 审计 A-M46）。
+    """
+
+
+async def _create_temp_user(api: httpx.AsyncClient) -> tuple[str, str]:
+    """造一个临时用户。返回 (username, password)。
 
     走 ``/api/v1/users/create`` 需要管理员 token，所以这里先用
     admin token 覆盖 header，再还原 —— 保持 ``api`` fixture 的"无鉴权"语义。
+
+    Raises:
+        TempUserUnavailableError: 缺 admin token，或端点在当前环境不可用（401/403/404/405）。
+        AssertionError(pytest.fail): 端点可达但创建失败（4xx 业务错 / 5xx），属于真回归。
     """
     import time
 
@@ -206,10 +219,12 @@ async def _create_temp_user(api: httpx.AsyncClient) -> tuple[str, str] | None:
 
     token = _mint_token("admin").token
     if not token:
-        return None
+        raise TempUserUnavailableError('无法铸造 admin token')
 
     username = f"{_TEMP_PREFIX}{int(time.time())}"
-    password = "E2eApiTmp!2026"
+    # 脱敏夹具：每次运行现造的临时用户口令，用完即弃（不存在于任何环境），
+    # 仅用于验证「登录返回 user=null」这条守卫。属定义而非凭据，逐行豁免扫描。
+    password = "E2eApiTmp!2026"  # secret-scan:allow
 
     try:
         resp = await api.post(
@@ -217,10 +232,16 @@ async def _create_temp_user(api: httpx.AsyncClient) -> tuple[str, str] | None:
             json={"username": username, "password": password, "is_super": False},
             headers={"Authorization": f"Bearer {token}"},
         )
-    except httpx.HTTPError:
-        return None
+    except httpx.HTTPError as exc:
+        raise TempUserUnavailableError(f'创建用户请求失败: {exc}') from exc
+
+    if resp.status_code in (401, 403, 404, 405):
+        # 环境/权限边界：端点不可达或该环境不允许造用户
+        raise TempUserUnavailableError(f'/users/create 不可用: HTTP {resp.status_code}')
     if resp.status_code not in (200, 201):
-        return None
+        pytest.fail(
+            f'创建临时用户失败（端点可达但返回 {resp.status_code}）: {resp.text[:300]}'
+        )
     return username, password
 
 
