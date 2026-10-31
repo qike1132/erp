@@ -21,6 +21,7 @@ from fastapi_app.services.bom_service import (  # noqa: F401
 from fastapi_app.services.bom_service import (
     has_bom,
 )
+from fastapi_app.services.purchase_order_purge import purge_purchase_order_children
 from fastapi_app.shared_models import (
     MaterialRegistration,
     Product,
@@ -69,6 +70,9 @@ async def batch_delete_purchase_orders(db: AsyncSession, order_ids: list, userna
         item_counts: dict[int, int] = {
             int(order_id): int(count) for order_id, count in count_rows
         }
+        # 子表必须先显式清理：items 的 FK 是 NO ACTION，skus 虽是 CASCADE 但
+        # 关系为 lazy='raise'，靠 ORM 级联会在 flush 抛 InvalidRequestError（A-M19）。
+        await purge_purchase_order_children(db, [o.id for o in orders_to_delete])
         for order in orders_to_delete:
             item_count = item_counts.get(order.id, 0)
             deleted_info.append({

@@ -64,14 +64,16 @@ def _dashboard_factory_scope(user: User) -> str:
 
 @router.get("/stats", response_model=DashboardResponse)
 async def get_dashboard_stats(
+    user: User = Depends(get_current_user_with_permissions),
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """仪表盘统计数据（10秒 L1+L2 缓存，兼顾实时性与并发性能）"""
-    # 短 TTL 缓存（10s）：用户要求"今日备货/今日出货/待审批/待备料"等模块近实时显示。
-    # 10s 窗口足够小，用户无感知；同时避免高并发下 10+ 聚合查询打满 DB。
+    """仪表盘统计数据（30s L1+L2 缓存，按工厂隔离，兼顾实时性与并发性能）"""
+    # 短 TTL 缓存（30s）：用户要求"今日备货/今日出货/待审批/待备料"等模块近实时显示。
+    # 30s 窗口足够小，用户无感知；同时避免高并发下 10+ 聚合查询打满 DB。
+    # 工厂隔离（A-M22）：厂绑定用户只能看到本厂口径，缓存键随工厂分桶。
     try:
-        dashboard_stats = await fetch_dashboard_stats(db)
+        dashboard_stats = await fetch_dashboard_stats(db, _dashboard_factory_scope(user))
     except (OperationalError, DisconnectionError):
         # 数据库不可用时不得吞成空统计返回 200（会掩盖故障、前端展示全 0 无告警），
         # 应显式 503 触发监控告警与前端降级提示。
@@ -101,11 +103,12 @@ async def get_nav_sections(user_id: int = Depends(get_current_user_id)):
 
 @router.get("/todos", response_model=TodoListResponse)
 async def get_dashboard_todos(
+    user: User = Depends(get_current_user_with_permissions),
     user_id: int = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """仪表盘待办事项"""
-    return await fetch_dashboard_todos(db)
+    """仪表盘待办事项（按工厂隔离：厂绑定用户只看到本厂订单待办）"""
+    return await fetch_dashboard_todos(db, _dashboard_factory_scope(user))
 
 
 @router.get("/system-status", response_model=SystemStatusResponse)

@@ -5,9 +5,11 @@
 事件通过Redis Pub/Sub实现异步传播，支持进程内同步和跨进程异步两种模式。
 """
 import asyncio
+import contextlib
 import json
 import logging
 import os
+import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -15,6 +17,15 @@ from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---- 跨进程广播的超时与退避（2026-10-30 审计 A-M1）----
+# 单次 publish 的硬超时：发布在 post-commit 回调里执行，此时 DB 连接仍被持有，
+# 不能让它无限等 Redis 的套接字超时（5–10s）。
+_BROADCAST_TIMEOUT_S = 0.5
+# 失败后的短路窗口：窗口内不再尝试发布，避免每个写请求都付一次超时代价。
+_BROADCAST_BACKOFF_S = 5.0
+# 单调时钟的「可尝试发布」时间点；0 表示健康。
+_broadcast_unhealthy_until = 0.0
 
 
 class DomainEventType(StrEnum):
@@ -107,25 +118,43 @@ async def _dispatch_in_process(event: DomainEvent) -> None:
             _append_deadletter_handler(event, handler, e)
 
 
-async def _broadcast(event: DomainEvent) -> bool:
+async def _broadcast(event: DomainEvent, force: bool = False) -> bool:
     """广播到 Redis Pub/Sub（跨 worker），返回**是否真的发出**。
 
     不能用 `safe_publish` 的返回值判断成败：它在 Redis 不可用或发布异常时返回 0 且不抛，
     而 0 同时也可能是"当前无订阅者"，两者无法区分。故这里直接问 `get_client()` ——
     拿不到客户端即视为未发出，这正是调用方需要重试/落死信的情形。
+
+    超时与退避（2026-10-30 审计 A-M1）：发布发生在写请求的 post-commit 回调里，此时
+    数据库连接仍被持有。Redis 出现 TCP 半死（连得上、不响应）时，`publish()` 会一直挂到
+    套接字超时（5–10s），写请求随之排队超时。因此：
+    - 单次发布包 `wait_for` 硬超时，最坏只多付 `_BROADCAST_TIMEOUT_S`；
+    - 失败后置退避窗口，窗口内的发布直接返回 False（不再逐个付超时代价）；
+    - 同时调用 `note_command_failure` 让缓存层一起进入退避，避免「事件总线好了、缓存还在打」。
     """
+    global _broadcast_unhealthy_until
+    if not force and time.monotonic() < _broadcast_unhealthy_until:
+        return False
     try:
         from fastapi_app.core.redis_wrapper import get_client
         client = get_client()
         if client is None:
             return False
-        await client.publish(
-            'domain_events',
-            json.dumps(event.to_dict(), ensure_ascii=False, default=str),
+        await asyncio.wait_for(
+            client.publish(
+                'domain_events',
+                json.dumps(event.to_dict(), ensure_ascii=False, default=str),
+            ),
+            timeout=_BROADCAST_TIMEOUT_S,
         )
+        _broadcast_unhealthy_until = 0.0  # 恢复：下一次立即尝试
         return True
     except Exception as e:  # defensive: 广播失败不影响进程内事件处理
+        _broadcast_unhealthy_until = time.monotonic() + _BROADCAST_BACKOFF_S
         logger.debug('领域事件Redis广播失败（可忽略）: %s', e)
+        with contextlib.suppress(Exception):
+            from fastapi_app.core.redis_wrapper import note_command_failure
+            note_command_failure(e)
         return False
 
 
@@ -215,7 +244,8 @@ async def publish_with_retry(event: DomainEvent, max_retries: int = 1, delay: fl
 
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
-        if await _broadcast(event):
+        # force=True：显式要求投递的调用方不受短路窗口限制（默认重试 1 次，代价可控）
+        if await _broadcast(event, force=True):
             return
         last_error = RuntimeError('Redis 广播未发出（客户端不可用或发布失败）')
         if attempt < max_retries:

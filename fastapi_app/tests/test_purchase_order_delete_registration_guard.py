@@ -114,12 +114,16 @@ async def test_batch_delete_without_registration_succeeds() -> None:
         _Scalars([_order(1, 'PO-1'), _order(2, 'PO-2')]),
         _Rows([]),
         _Rows([(1, 2), (2, 3)]),
+        # A-M19：子表清理的两条批量 DELETE（明细 + SKU 快照）
+        _Rows([]),
+        _Rows([]),
     ]
 
     result = await batch_delete_purchase_orders(db, [1, 2])
 
     assert result['deleted_count'] == 2
-    assert db.execute.await_count == 3, '明细计数必须一次 GROUP BY，不得逐单查询'
+    # 3 次业务查询（订单/登记/明细计数）+ 2 次子表 DELETE；明细计数只允许一次 GROUP BY
+    assert db.execute.await_count == 5, '明细计数必须一次 GROUP BY，不得逐单查询'
     assert db.delete.await_count == 2
     assert db.flush.await_count == 1
 
@@ -130,6 +134,8 @@ async def test_batch_delete_translates_integrity_error_to_conflict() -> None:
         _Scalars([_order(1, 'PO-1')]),
         _Rows([]),
         _Rows([(1, 0)]),
+        _Rows([]),  # A-M19：明细 DELETE
+        _Rows([]),  # A-M19：SKU 快照 DELETE
     ]
     db.flush.side_effect = IntegrityError('DELETE', {}, Exception('fk'))
 

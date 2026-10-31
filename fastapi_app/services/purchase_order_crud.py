@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
+from fastapi_app.services.purchase_order_purge import purge_purchase_order_children
 from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
 from fastapi_app.services.purchase_utils import (
     calc_spare_quantity,
@@ -358,17 +359,10 @@ async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
         raise ConflictError(f'采购单{order.order_no}存在来料登记，无法删除')
 
     try:
-        # 批量删除明细（单条 DELETE ... WHERE 语句），替代逐条 db.delete 的 N+1；
-        # order.items 关系为 lazy='raise'，不做集合赋空，后续 delete(order)+flush 不再访问该集合
-        await db.execute(
-            delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
-        )
-        # 逐 SKU 数量快照（方案 C）同样以单条 DELETE 显式清理：
-        # order.skus 关系为 lazy='raise'，显式删除可避免依赖 ORM 级联时对集合的惰性加载，
-        # 且在未开启外键约束的 SQLite（测试）下也能保证无残留孤儿行。
-        await db.execute(
-            delete(PurchaseOrderSku).where(PurchaseOrderSku.po_id == order_id)
-        )
+        # 子表（明细 + 逐 SKU 快照）统一由 purge 显式批量删除：
+        # 两者都是 lazy='raise' + delete-orphan，靠 ORM 级联会在 flush 时抛
+        # InvalidRequestError；purchase_order_item 的 FK 又是 NO ACTION（A-M19）。
+        await purge_purchase_order_children(db, [order_id])
 
         await db.delete(order)
         await db.flush()
@@ -751,12 +745,16 @@ async def cleanup_orphan_pending_purchase_orders(
     if typed_match is not None:
         conditions.append(typed_match)
     result = await db.execute(select(PurchaseOrder).where(or_(*conditions[1:]), conditions[0]))
+    targets = [po for po in result.scalars().all() if po.id not in _exclude]
     deleted = 0
-    for po in result.scalars().all():
-        if po.id in _exclude:
-            continue
-        await db.delete(po)
-        deleted += 1
+    if targets:
+        # 兜底清理走的也是「先显式删子表、再删主表」：items 是 NO ACTION 外键，
+        # 只删主表在真库上会 FK 409；依赖 ORM 级联又会因 lazy='raise' 抛
+        # InvalidRequestError（A-M19）。
+        await purge_purchase_order_children(db, [po.id for po in targets])
+        for po in targets:
+            await db.delete(po)
+            deleted += 1
     if deleted:
         logger.info(
             'cleanup_orphan_pending_purchase_orders: 清理 %d 个 pending 采购单 (source_ids=%s)',

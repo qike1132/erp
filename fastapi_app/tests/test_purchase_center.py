@@ -821,8 +821,12 @@ class TestPurchaseCenterEndpoints:
         result = MagicMock()
         result.scalars.return_value.all.return_value = [mock_po]
 
+        # 子表清理：purge 会先发 2 条 DELETE（明细 + SKU 快照），再删主表
+        child_delete = MagicMock()
+        child_delete.rowcount = 1
+
         db = MagicMock()
-        db.execute = AsyncMock(side_effect=[result2, result])
+        db.execute = AsyncMock(side_effect=[result2, result, child_delete, child_delete])
         db.delete = AsyncMock()
 
         deleted = await cleanup_orphan_pending_purchase_orders(
@@ -831,6 +835,8 @@ class TestPurchaseCenterEndpoints:
         assert deleted == 1
         # db.delete 必须被调用一次（删除该 pending 采购单）
         db.delete.assert_awaited_once_with(mock_po)
+        # A-M19：子表必须先显式删，不能依赖 ORM 级联（lazy='raise' + NO ACTION 外键）
+        assert db.execute.await_count == 4
 
     @pytest.mark.asyncio
     async def test_cleanup_orphan_with_order_ids_still_works(self):
@@ -847,8 +853,11 @@ class TestPurchaseCenterEndpoints:
         result = MagicMock()
         result.scalars.return_value.all.return_value = [mock_po]
 
+        child_delete = MagicMock()
+        child_delete.rowcount = 1
+
         db = MagicMock()
-        db.execute = AsyncMock(side_effect=[result2, result])
+        db.execute = AsyncMock(side_effect=[result2, result, child_delete, child_delete])
         db.delete = AsyncMock()
 
         deleted = await cleanup_orphan_pending_purchase_orders(
@@ -856,6 +865,8 @@ class TestPurchaseCenterEndpoints:
         )
         assert deleted == 1
         db.delete.assert_awaited_once_with(mock_po)
+        # A-M19：子表显式清理先于主表删除
+        assert db.execute.await_count == 4
 
     @pytest.mark.asyncio
     async def test_complete_order_missing_id(self, client):

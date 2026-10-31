@@ -11729,7 +11729,7 @@
           "来料登记"
         ],
         "summary": "Export Registrations",
-        "description": "导出来料登记数据（真 xlsx 文件下载）。\n\nArgs:\n    data: 导出筛选参数（POST body）。\n    user: 当前登录用户（仅需通过权限校验）。\n    db: 异步数据库会话（只读副本）。\n\nReturns:\n    StreamingResponse: xlsx 文件流（含 Content-Disposition 头）。\n\nRaises:\n    HTTPException: 导出失败时抛出 500。",
+        "description": "导出来料登记数据（真 xlsx 文件下载）。\n\nArgs:\n    data: 导出筛选参数（POST body）。\n    user: 当前登录用户（仅需通过权限校验）。\n    db: 异步数据库会话（只读副本）。\n\nReturns:\n    StreamingResponse: xlsx 文件流（含 Content-Disposition 头）。\n\nRaises:\n    HTTPException: 超过单次导出上限（可解释的业务拒绝）→ 400；I/O 失败 → 500。",
         "operationId": "export_registrations_api_v1_material_registrations_export_post",
         "requestBody": {
           "content": {
@@ -16244,7 +16244,7 @@
           "仪表盘"
         ],
         "summary": "Get Dashboard Stats",
-        "description": "仪表盘统计数据（10秒 L1+L2 缓存，兼顾实时性与并发性能）",
+        "description": "仪表盘统计数据（30s L1+L2 缓存，按工厂隔离，兼顾实时性与并发性能）",
         "operationId": "get_dashboard_stats_api_v1_dashboard_stats_get",
         "responses": {
           "200": {
@@ -16318,7 +16318,7 @@
           "仪表盘"
         ],
         "summary": "Get Dashboard Todos",
-        "description": "仪表盘待办事项",
+        "description": "仪表盘待办事项（按工厂隔离：厂绑定用户只看到本厂订单待办）",
         "operationId": "get_dashboard_todos_api_v1_dashboard_todos_get",
         "responses": {
           "200": {
