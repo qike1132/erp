@@ -113,8 +113,17 @@ def _register_order_event_subscriptions():
                     # 撤销引用它的 pending 采购单，并把同张单里其余来源订单的状态重算回真实值
                     # （否则同客户其余订单会永久卡在「已备货」）
                     await revoke_pending_purchase_orders_for_order(db, order_id)
-                    # 兜底：没有 SKU 快照的存量单仍按旧的 JSON 口径清理
-                    await cleanup_orphan_pending_purchase_orders(db, [order_id])
+                # 兜底清理独立事务：与主清理同事务时，兜底抛错会把主清理一起回滚，
+                # 只剩日志、采购单仍在（2026-10-30 审计 A-M18）。
+                try:
+                    async with get_async_db_context() as db:
+                        # 没有 SKU 快照的存量单仍按旧的 JSON 口径清理
+                        await cleanup_orphan_pending_purchase_orders(db, [order_id])
+                except Exception:  # defensive: 兜底清理失败只记日志，不能回滚已提交的主清理
+                    logger.warning(
+                        'ORDER_DELETED 兜底清理失败（主清理已提交）: order_id=%s',
+                        order_id, exc_info=True,
+                    )
                 # 撤销发生在删除端点的采购缓存失效**之后**（独立事务、提交后）；这里必须再失效
                 # 一次，否则两动作之间被回填的旧列表会把已删的采购单继续展示到 TTL 到期。
                 await invalidate_purchase_caches()

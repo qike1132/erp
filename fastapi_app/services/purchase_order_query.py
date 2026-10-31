@@ -224,8 +224,11 @@ async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
     ``orders`` 必须已预加载 ``items``（见 get_purchase_orders_with_items）。
 
     Returns:
-        list[dict]: 每个供应商一项，含 supplier_name / items /
-            contact_person / phone / address。
+        list[dict]: 每个供应商一项，含 supplier_name / items / orders /
+            order_count / contact_person / phone / address；每个 item 含
+            material_name / specification / unit / quantity / order_count。
+            （形状必须与 ``schemas.purchase_center.SupplierSummary`` 一致，
+            否则响应模型校验会 500 —— 2026-10-30 审计 A-M2。）
     """
     groups: dict[str, dict] = {}
     redundant: dict[str, dict] = {}
@@ -249,9 +252,11 @@ async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
                     'specification': item.specification or '',
                     'unit': item.unit or '',
                     'quantity': float(item.quantity or 0),
+                    'orders': {order.order_no},
                 }
             else:
                 entry['quantity'] += float(item.quantity or 0)
+                entry['orders'].add(order.order_no)
             group['orders'].add(order.order_no)
 
     supplier_names = [name for name in groups if name != '未指定供应商']
@@ -275,7 +280,15 @@ async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
             address = fallback.get('address') or ''
         export_groups.append({
             'supplier_name': supplier_name,
-            'items': list(group['items'].values()),
+            # 汇总打印/供应商汇总端点需要 items+orders+order_count；
+            # 此前只返回 items，导致 print 路径 KeyError、响应模型校验 500（A-M2）。
+            'items': [
+                {**{k: v for k, v in item.items() if k != 'orders'},
+                 'order_count': len(item['orders'])}
+                for item in group['items'].values()
+            ],
+            'orders': sorted(group['orders']),
+            'order_count': len(group['orders']),
             'contact_person': contact_person,
             'phone': phone,
             'address': address,

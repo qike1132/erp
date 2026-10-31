@@ -118,7 +118,9 @@ export const backupApi = {
     if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
     // H3：multipart 上传场景密码经 X-Backup-Password 请求头传递，不进 URL
     const headers = opts?.password ? { 'X-Backup-Password': opts.password } : undefined
-    return upload<{ success: boolean; task_id?: string }>(`/backup/async-import?${q.toString()}`, formData, headers)
+    return upload<{ success: boolean; task_id?: string }>(
+      `/backup/async-import?${q.toString()}`, formData, headers, 10 * 60 * 1000,
+    )
   },
   asyncRestoreByName: (filename: string, opts?: RestoreOptions) => {
     const q = new URLSearchParams({ confirm: 'true' })

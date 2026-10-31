@@ -3,7 +3,6 @@
 从 material_registration_service.py 按职责拆出,行为与原实现完全一致。
 """
 import io
-import logging
 
 import xlsxwriter
 from sqlalchemy import func, select
@@ -14,7 +13,6 @@ from fastapi_app.services.material_registration._queries import _parse_filter_da
 from fastapi_app.shared_models import MaterialRegistration, MaterialRegistrationItem, PurchaseOrder
 from utils.report_exporter import _sanitize_excel_value
 
-logger = logging.getLogger(__name__)
 
 def _apply_export_scope(query, scope: str):
     """P1-25：按页面 tab 口径过滤导出数据（history=已完成 / progress=未完成）。"""
@@ -60,16 +58,15 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
 
     query = query.order_by(MaterialRegistration.create_time.desc()).limit(5000)
 
-    # 独立 COUNT 查询总数，检测 limit(5000) 截断并向日志留痕（本函数返回 BytesIO 文件流，
-    # 响应头需由 endpoint 层设置，故此处以 WARNING 日志标注截断事实与筛选条件）
+    # 独立 COUNT 查询总数，超过上限直接拒绝（见下）；limit(5000) 只作为兜底护栏，
+    # 正常情况下不会命中——静默截断会让用户拿到缺行 Excel 而无从察觉（A-M24）。
     count_query = select(func.count()).select_from(query.order_by(None).limit(None).subquery())
     total_count = (await db.execute(count_query)).scalar() or 0
     if total_count > 5000:
-        logger.warning(
-            '来料登记导出被截断：符合条件的记录共 %d 条，仅导出前 5000 条 '
-            '（order_no=%r, supplier=%r, customer_name=%r, category=%r, %s~%s, scope=%s）',
-            total_count, order_no, supplier, customer_name, material_category,
-            start_date, end_date, scope,
+        # 明确拒绝而不是静默截断：用户拿到缺行 Excel 无从察觉（A-M24）。
+        raise ValueError(
+            f'符合条件的数据共 {total_count} 条，超过单次导出上限 5000 条，'
+            '请缩小日期/供应商/客户等筛选范围后重试'
         )
 
     result = await db.execute(query)

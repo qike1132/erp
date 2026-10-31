@@ -32,6 +32,7 @@ from fastapi_app.shared_models import (
     StockIn,
     Supplier,
 )
+from fastapi_app.utils import parse_date_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +109,20 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
         # 失效 dashboard 统计缓存（stockout_today 受影响）
         await cache_mgr.invalidate_dashboard()
 
-        successful_pairs: set[tuple[int, str]] = set()
+        successful_pairs: dict[tuple[int, str], str] = {}
+        now_month = business_month_str()
         for idx, item in enumerate(stockouts_data):
             r = result['results'][idx]
             if r.get('success'):
-                successful_pairs.add((item['product_id'], item['customer']))
+                # 补录历史出货时 plan_month 必须取该行出货日期月份，不能一律用当前月，
+                # 否则采购计划缓存失效打错月份（2026-10-30 审计 A-M25）。
+                date_str = item.get('stockout_date')
+                if date_str:
+                    parsed = parse_date_with_fallback(date_str)
+                    month = fmt_business(datetime.combine(parsed, datetime.min.time()), '%Y-%m')
+                else:
+                    month = now_month
+                successful_pairs[(item['product_id'], item['customer'])] = month
 
         if successful_pairs:
             unique_product_ids = {pid for pid, _ in successful_pairs}
@@ -120,7 +130,6 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                 select(Product).where(Product.id.in_(unique_product_ids))
             )
             product_map = {p.id: p for p in product_result.scalars().all()}
-            now_month = business_month_str()
             for product_id, customer in successful_pairs:
                 product = product_map.get(product_id)
                 product_name = product.name if product is not None else ''
@@ -136,7 +145,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                                 'product_id': product_id,
                                 'product_name': product_name,
                                 'factory': getattr(product, 'factory', None),
-                                'plan_month': now_month,
+                                'plan_month': successful_pairs[(product_id, customer)],
                             },
                         ))
                     except Exception:  # defensive: 领域事件发布失败不应影响出库主流程

@@ -46,7 +46,7 @@ function createCatalogEntry<T>(fetcher: () => Promise<T[]>) {
 
     const currentGeneration = generation
     loading.value = true
-    inflight = fetcher()
+    const request = fetcher()
       .then((data) => {
         if (currentGeneration === generation) {
           list.value = data
@@ -55,11 +55,12 @@ function createCatalogEntry<T>(fetcher: () => Promise<T[]>) {
         return data
       })
       .finally(() => {
-        if (currentGeneration === generation) {
-          loading.value = false
-          inflight = null
-        }
+        // reset() 会把 inflight 置空并递增代际；旧请求结束时不能再清掉
+        // 新请求的 inflight，也不能让旧请求把 inflight 永久占住（A-M28）。
+        if (inflight === request) inflight = null
+        if (currentGeneration === generation) loading.value = false
       })
+    inflight = request
     return inflight
   }
 

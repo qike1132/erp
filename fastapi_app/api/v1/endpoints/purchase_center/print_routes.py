@@ -60,7 +60,9 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
             html = generate_factory_summary_print(orders, order_items_map, source_orders)
             return success_response(html=html, order_count=len(orders))
         elif format_type == 'supplier':
-            sorted_suppliers = await svc.query_supplier_groups(db)
+            # 与导出同一份明细级归并；query_supplier_groups 只有金额聚合，
+            # generate_supplier_summary_print 取 items/orders 会 KeyError（A-M2）。
+            sorted_suppliers = await svc.build_supplier_export_groups(db, orders)
             html = generate_supplier_summary_print(sorted_suppliers, orders)
             return success_response(html=html, supplier_count=len(sorted_suppliers), order_count=len(orders))
         else:

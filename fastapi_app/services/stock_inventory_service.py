@@ -239,7 +239,8 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
 async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
                            page: int = 1, per_page: int = 50,
                            customer: str | None = None,
-                           start_date: str | None = None, end_date: str | None = None) -> dict:
+                           start_date: str | None = None, end_date: str | None = None,
+                           factory: str | None = None) -> dict:
     """获取退货列表（**仅 active**；支持按出货ID/客户/日期区间筛选，支持分页）
 
     只展示 active 行 —— 与退货流水报表口径一致（report_data_service 同样只查 active）。
@@ -249,6 +250,9 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
     # 构建共享过滤条件：stockout_id 为空时不加条件
     # （此前 `== stockout_id if stockout_id else True` 在无筛选时退化为 `== True` 恒假，导致 total 恒为 0）
     conditions = [StockReturn.status == 'active']
+    if factory:
+        # 厂绑定用户只能看本厂产品的退货；用 EXISTS 子查询保持 count/分页同口径。
+        conditions.append(StockReturn.product.has(Product.factory == factory))
     if stockout_id:
         conditions.append(StockReturn.stockout_id == stockout_id)
     if customer:

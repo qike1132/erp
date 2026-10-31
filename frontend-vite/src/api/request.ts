@@ -132,40 +132,10 @@ service.interceptors.response.use(
   },
 )
 
-const RETRY_STATUS_CODES = [502, 503, 504]
-const MAX_RETRIES = 2
-const RETRY_DELAY_MS = 1000
+// 下载/导出不再走通用重试：大文件 15s 超时会被当成可重试错误重放（A-M29）。
+// 业务 GET 的重试由各 API 层按需处理，这里不再保留未使用的通用重试器。
 
-function shouldRetry(error: AxiosError, retryCount: number): boolean {
-  if (retryCount >= MAX_RETRIES) return false
-  if (error.response && RETRY_STATUS_CODES.includes(error.response.status)) return true
-  if (error.code === 'ECONNABORTED' || !error.response) return true
-  return false
-}
-
-async function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-async function executeWithRetry<T>(
-  fn: () => Promise<T>,
-  retryCount = 0,
-): Promise<T> {
-  try {
-    return await fn()
-  } catch (error: unknown) {
-    if (axios.isAxiosError(error) && shouldRetry(error, retryCount)) {
-      const backoff = RETRY_DELAY_MS * Math.pow(2, retryCount)
-      await delay(backoff)
-      return executeWithRetry(fn, retryCount + 1)
-    }
-    throw error
-  }
-}
-
-// GET 请求去重：同一 url+params 的并发 GET 共享同一个 Promise，避免重复网络请求
-// 注意：去重的 Promise 包含重试逻辑（executeWithRetry），所有去重调用者会共享重试延迟。
-// 如需独立重试或快速失败，请直接使用 service.get()。
+// GET 请求去重：同一 url+params 的并发 GET 共享同一个 Promise，避免重复网络请求。
 const _inflightGet = new Map<string, Promise<unknown>>()
 
 // 路由切换时取消上一路由的未完成 GET，避免旧响应回填新页面
@@ -243,6 +213,9 @@ export function get<T>(
 /** 写重试**仅在被调用方显式声明幂等时**生效；命中的网关错误码 */
 const WRITE_RETRY_CODES = [502, 503, 504]
 
+/** 幂等写重试一次的退避（毫秒）。非幂等写不重试，因此不需要读响应头的 Retry-After */
+const WRITE_RETRY_DELAY_MS = 800
+
 /**
  * 写操作重试。
  *
@@ -270,7 +243,7 @@ async function executeWriteWithRetry<T>(
       && axios.isAxiosError(error) && error.response
       && WRITE_RETRY_CODES.includes(error.response.status)
     ) {
-      await delay(RETRY_DELAY_MS)
+      await new Promise((resolve) => setTimeout(resolve, WRITE_RETRY_DELAY_MS))
       return fn() // 仅重试一次
     }
     throw error
@@ -307,7 +280,7 @@ export function upload<T>(url: string, formData: FormData, headers?: Record<stri
 /** POST 请求下载文件（用于需要 POST body 的文件下载场景） */
 export async function postDownload(url: string, data: unknown, filename: string): Promise<void> {
   // 响应拦截器返回 response.data，因此 res 已是 Blob（responseType: 'blob'）
-  const blob = await service.post(url, data, { responseType: 'blob' }) as unknown as Blob
+  const blob = await service.post(url, data, { responseType: 'blob', timeout: 10 * 60 * 1000 }) as unknown as Blob
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
   link.download = filename
@@ -317,21 +290,21 @@ export async function postDownload(url: string, data: unknown, filename: string)
 }
 
 export function download(url: string, filename: string, params?: Record<string, unknown>): Promise<void> {
-  return executeWithRetry(() =>
-    service.get(url, { responseType: 'blob', params }).then((blob: unknown) => {
-      try {
-        const link = document.createElement('a')
-        link.href = URL.createObjectURL(blob as Blob)
-        link.download = filename
-        link.click()
-        link.remove()
-        setTimeout(() => URL.revokeObjectURL(link.href), 10000)
-      } catch (e) {
-        console.error('Download failed:', e)
-        throw e
-      }
-    }),
-  )
+  // 导出/下载独立长超时且不重试：15s 全局超时会把大文件下载判成 ECONNABORTED，
+  // 再重放 2 次（A-M29）。
+  return service.get(url, { responseType: 'blob', params, timeout: 10 * 60 * 1000 }).then((blob: unknown) => {
+    try {
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob as Blob)
+      link.download = filename
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(link.href), 10000)
+    } catch (e) {
+      console.error('Download failed:', e)
+      throw e
+    }
+  })
 }
 
 /**

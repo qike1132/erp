@@ -26,7 +26,7 @@ from fastapi_app.services.stock_return_service import (
     edit_stockreturn,
     search_returnable_stockouts,
 )
-from fastapi_app.shared.factory_scope import assert_product_factory_scoped
+from fastapi_app.shared.factory_scope import assert_product_factory_scoped, factory_scope_of
 from fastapi_app.shared_models import StockOut, StockReturn, User
 
 logger = logging.getLogger(__name__)
@@ -113,6 +113,7 @@ async def list_stock_returns(
     result = await get_stockreturns(
         db, page=page, per_page=per_page, customer=customer,
         start_date=start_date, end_date=end_date,
+        factory=factory_scope_of(_user) or None,
     )
     return StockListResponse(
         data=result['items'], total=result['total'],

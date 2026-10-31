@@ -198,6 +198,11 @@ async def import_staging_stockouts_from_file(db: AsyncSession, file_content: byt
             await _prog(message='正在保存到数据库...', percent=98)
             await asyncio.sleep(0.05)
             await db.flush()
+            # 与 Excel 导入同口径：预检按「结余」（包装部入库 − 已出货）重算。
+            # 只用 current_stock 会让确认弹窗绿灯、确认时被结余闸门拒绝并批删（A-M12）。
+            from fastapi_app.services.staging.stockout import _recalc_stock_check_by_balance
+
+            await _recalc_stock_check_by_balance(db, session_id)
             result_msg = f'成功从{file_type}识别并导入 {imported} 个出货到暂存区'
             if errors:
                 result_msg += f"。错误: {'; '.join(errors[:5])}"

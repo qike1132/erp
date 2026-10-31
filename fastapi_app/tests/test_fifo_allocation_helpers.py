@@ -28,18 +28,43 @@ def _make_detail(plan_id, product_name, product_id=0, detail_id=0):
 # ============================================================================
 class TestBuildFifoPlanIdToCustomer:
     @pytest.mark.asyncio
-    async def test_reuses_customer_name_map_when_complete(self):
-        """customer_name_map 已覆盖所有 plan_id 时应直接复用，不查询 DB"""
-        d1 = _make_detail(plan_id=1, product_name="P1", detail_id=10)
-        d2 = _make_detail(plan_id=2, product_name="P2", detail_id=11)
-        customer_name_map = {1: "客户A", 2: "客户B"}
+    async def test_always_scopes_to_all_customer_plans(self):
+        """即使 customer_name_map 已覆盖全部明细，也必须查「客户全部计划」（A-M17）。
 
+        旧实现命中 map 就跳过查询、把作用域收窄到当前明细的 plan_id：
+        同一明细经写/列表/详情三个入口会拿到不同的 shipped_qty（跨月计划的历史
+        出货被漏算），并已出货量失真。
+        """
+        d1 = _make_detail(plan_id=1, product_name="P1", detail_id=10)
+        customer_name_map = {1: "客户A"}
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            MagicMock(id=1, customer_name="客户A"),
+            MagicMock(id=9, customer_name="客户A"),  # 同客户的历史月计划
+        ]
         db = AsyncMock()
+        db.execute = AsyncMock(return_value=mock_result)
+
         result = await fifo_allocation._build_fifo_plan_id_to_customer(
-            db, customer_name_map, [d1, d2], ["客户A", "客户B"], date(2026, 1, 1),
+            db, customer_name_map, [d1], ["客户A"], date(2026, 1, 1),
         )
-        assert result == {1: "客户A", 2: "客户B"}
-        assert db.execute.await_count == 0
+        assert db.execute.await_count == 1
+        assert result == {1: "客户A", 9: "客户A"}
+
+    @pytest.mark.asyncio
+    async def test_map_name_overrides_db_value(self):
+        """map 里的名字优先（调用方可能带已规范化的展示名）。"""
+        d1 = _make_detail(plan_id=1, product_name="P1", detail_id=10)
+        mock_result = MagicMock()
+        mock_result.all.return_value = [MagicMock(id=1, customer_name="客户A（旧名）")]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=mock_result)
+
+        result = await fifo_allocation._build_fifo_plan_id_to_customer(
+            db, {1: "客户A"}, [d1], ["客户A"], date(2026, 1, 1),
+        )
+        assert result == {1: "客户A"}
 
     @pytest.mark.asyncio
     async def test_queries_db_when_map_incomplete(self):
@@ -78,12 +103,16 @@ class TestBuildFifoPlanIdToCustomer:
 
     @pytest.mark.asyncio
     async def test_filters_out_falsy_customer_names_from_map(self):
-        """customer_name_map 中值为空字符串的 plan_id 应被过滤"""
+        """customer_name_map 中值为空字符串的 plan_id 不得覆盖 DB 的真空名。"""
         d1 = _make_detail(plan_id=1, product_name="P1", detail_id=10)
         d2 = _make_detail(plan_id=2, product_name="P2", detail_id=11)
         customer_name_map = {1: "客户A", 2: ""}
 
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
         db = AsyncMock()
+        db.execute = AsyncMock(return_value=mock_result)
+
         result = await fifo_allocation._build_fifo_plan_id_to_customer(
             db, customer_name_map, [d1, d2], ["客户A"], date(2026, 1, 1),
         )

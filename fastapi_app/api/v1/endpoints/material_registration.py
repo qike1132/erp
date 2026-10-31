@@ -410,14 +410,18 @@ async def export_registrations(
         StreamingResponse: xlsx 文件流（含 Content-Disposition 头）。
 
     Raises:
-        HTTPException: 导出失败时抛出 500。
+        HTTPException: 超过单次导出上限（可解释的业务拒绝）→ 400；I/O 失败 → 500。
     """
     try:
         buffer = await mr_service.export_registrations(
             db, data.order_no, data.supplier, data.customer_name,
             data.material_category, data.start_date, data.end_date, data.scope,
         )
-    except (ValueError, OSError) as e:
+    except ValueError as e:
+        # 超过导出上限等可解释的业务拒绝 → 400；其余 I/O 失败仍 500。
+        logger.warning('导出来料登记被拒绝: %s', e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except OSError as e:
         logger.warning('导出来料登记失败: %s', e)
         raise HTTPException(status_code=500, detail='导出来料登记失败') from e
     return StreamingResponse(

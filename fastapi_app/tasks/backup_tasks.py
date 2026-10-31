@@ -15,6 +15,7 @@ ARQ 任务为原生 async，原先在 Celery 同步 worker 中用 _run_async 包
 只会立即标记失败）；``_MAX_TRIES`` 是总尝试次数上限。
 """
 import asyncio
+import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -266,6 +267,11 @@ async def scheduler_poller(ctx):
                             [s.id for s in due], batcher.commits)
     except Exception as e:  # defensive: 调度轮询不得中断 worker
         logger.error('调度轮询失败: %s', e)
+        # 调度轮询是备份唯一入口：静默失败会让备份停摆且无人知晓（A-M23）。
+        with contextlib.suppress(Exception):
+            await _send_backup_alert(
+                'backup_schedule_poll', str(e), task_type='backup', severity='critical',
+            )
 
 
 async def auto_daily_backup_task(ctx):

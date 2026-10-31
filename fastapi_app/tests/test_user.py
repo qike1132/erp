@@ -371,6 +371,37 @@ class TestUserService:
             await delete_user(mock_db, 1)
 
     @pytest.mark.asyncio
+    async def test_delete_user_with_approval_history_raises(self, mock_db, mock_user):
+        """存在审批历史（任意状态、审批人或申请人）时拒绝删除（A-M26）。
+
+        旧实现只统计 status=pending 的申请：已审批的历史在 flush 阶段撞
+        NO ACTION 外键，直接把 500 抛给前端；而且完全没统计 approver_id。
+        """
+        from fastapi_app.services.user_service import delete_user
+        mock_db.get = AsyncMock(return_value=mock_user)
+        mock_db.scalar = AsyncMock(return_value=3)
+
+        with pytest.raises(ValueError, match="审批历史"):
+            await delete_user(mock_db, 1)
+        mock_db.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_user_maps_integrity_error_to_value_error(self, mock_db, mock_user):
+        """仍有其它 NO ACTION 外键时给可解释的 4xx，而不是 500（A-M26）。"""
+        from sqlalchemy.exc import IntegrityError
+
+        from fastapi_app.services.user_service import delete_user
+        mock_db.get = AsyncMock(return_value=mock_user)
+        mock_db.scalar = AsyncMock(return_value=0)
+        mock_db.flush = AsyncMock(
+            side_effect=IntegrityError('DELETE FROM "user"', {}, Exception('FK violation'))
+        )
+
+        with pytest.raises(ValueError, match="无法删除"):
+            await delete_user(mock_db, 1)
+        mock_db.rollback.assert_awaited()
+
+    @pytest.mark.asyncio
     async def test_update_user_permissions_skips_sensitive(self, mock_db, mock_user, mock_permission):
         from fastapi_app.services.user_service import update_user_permissions
 

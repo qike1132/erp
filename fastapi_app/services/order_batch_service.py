@@ -565,8 +565,11 @@ async def complete_batch(
     completed = []
     failed_orders = []
 
-    from fastapi_app.services.order_utils import compute_order_status_from_db
+    from fastapi_app.services.order_utils import compute_order_statuses_batch
 
+    # 一次聚合算完所有待完成订单状态：旧实现逐单 2 条 SQL，N 单持锁 2N 次往返（A-M13）。
+    shipped_orders = [o for o in orders if o.status == ORDER_STATUS_SHIPPED]
+    status_map = await compute_order_statuses_batch(db, shipped_orders)
     for o in orders:
         # 批次完成仅适用于已出货的订单
         if o.status != ORDER_STATUS_SHIPPED:
@@ -574,7 +577,7 @@ async def complete_batch(
             continue
         o.batch_completed_at = now
         o.batch_completed_by_id = user.id
-        o.status = await compute_order_status_from_db(db, o)
+        o.status = status_map.get(o.id, o.status)
         completed.append(o)
 
     # 备货无出货状态：批次完成时无条件标记（查询已限定未完成）

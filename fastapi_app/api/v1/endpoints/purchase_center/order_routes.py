@@ -676,7 +676,10 @@ async def api_get_supplier_summary_by_vendor(
         HTTPException 500: 操作失败。
     """
     try:
-        sorted_suppliers = await svc.query_supplier_groups(db)
+        # 用明细级归并（items/orders/order_count）而不是 query_supplier_groups 的
+        # 纯金额聚合；后者字段与 SupplierSummary 不匹配，响应模型校验必 500（A-M2）。
+        orders = await svc.get_purchase_orders_with_items(db, data.ids)
+        sorted_suppliers = await svc.build_supplier_export_groups(db, orders)
         return success_response(
             suppliers=sorted_suppliers,
             supplier_count=len(sorted_suppliers),

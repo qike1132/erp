@@ -132,6 +132,8 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
   let groupedCache: Record<string, GroupedCacheEntry> = {}
   /** 版师列表缓存（内存） */
   let patternMakersCache: MakersCacheEntry | null = null
+  /** 代际：clear() 后旧请求的回写被丢弃，避免切号后上一位用户数据回填（A-M30） */
+  let generation = 0
   /** 同 key 并发请求去重（跨组件实例、跨挂载共享） */
   const _inflightGrouped = new Map<string, Promise<GroupedListResponse>>()
   let _inflightMakers: Promise<PatternMaker[]> | null = null
@@ -184,6 +186,7 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
     const key = makeGroupedKey(keyword, status, page)
     const existing = _inflightGrouped.get(key)
     if (existing) return existing
+    const requestGeneration = generation
 
     const params: GroupedListParams = { per_page: PATTERN_ROOM_PAGE_SIZE }
     const kw = (keyword ?? '').trim()
@@ -198,8 +201,10 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
     // 条目 → 之后进 /pattern-room 复用同一死 Promise，页面永久停在「加载中」。
     const p = patternRoomApi.getGroupedList(params, { routeCancel: false })
       .then((res) => {
-        groupedCache = { ...groupedCache, [key]: { data: res, loadedAt: Date.now() } }
-        persist()
+        if (requestGeneration === generation) {
+          groupedCache = { ...groupedCache, [key]: { data: res, loadedAt: Date.now() } }
+          persist()
+        }
         return res
       })
       .catch((e: unknown) => {
@@ -234,11 +239,14 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
   /** 请求版师列表并写入缓存（并发去重） */
   async function fetchMakers(): Promise<PatternMaker[] | null> {
     if (_inflightMakers) return _inflightMakers
+    const requestGeneration = generation
     const p = patternMakerApi.list()
       .then((res) => {
         const data = res.items ?? []
-        patternMakersCache = { data, loadedAt: Date.now() }
-        persist()
+        if (requestGeneration === generation) {
+          patternMakersCache = { data, loadedAt: Date.now() }
+          persist()
+        }
         return data
       })
       .catch((e: unknown) => {
@@ -247,7 +255,7 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
       })
     _inflightMakers = p
     p.finally(() => {
-      _inflightMakers = null
+      if (_inflightMakers === p) _inflightMakers = null
     }).catch(() => { /* 错误已由调用方处理 */ })
     return p
   }
@@ -289,6 +297,7 @@ export const usePatternRoomStore = defineStore('patternRoom', () => {
 
   /** 清空缓存（退出登录时调用，避免跨账号数据残留） */
   function clear(): void {
+    generation++
     groupedCache = {}
     patternMakersCache = null
     _inflightGrouped.clear()

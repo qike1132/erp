@@ -197,22 +197,21 @@ async def _get_shipped_fifo_map(db: AsyncSession, plan_details: list, customer_n
 
 
 async def _build_fifo_plan_id_to_customer(db: AsyncSession, customer_name_map: dict | None, plan_details: list, customers: list, earliest_plan_date) -> dict:
-    plan_ids_in_details = {d.plan_id for d in plan_details}
-    if customer_name_map and plan_ids_in_details.issubset(customer_name_map.keys()):
-        plan_id_to_customer = {pid: customer_name_map[pid] for pid in plan_ids_in_details if customer_name_map.get(pid)}
-    else:
-        # 查询相关主单 — 只取 id + customer_name，限制时间范围避免全表扫描
-        plan_result = await db.execute(
-            select(PurchasePlan.id, PurchasePlan.customer_name)
-            .where(
-                PurchasePlan.customer_name.in_(customers),
-                # 字符串比较 "YYYY-MM" >= "YYYY-MM" 依赖字典序，
-                # 在固定位数（年4位+月2位）格式下等价于日期比较，安全可用
-                PurchasePlan.plan_month >= f"{earliest_plan_date.year - 1}-{earliest_plan_date.month:02d}",
-            )
+    # 作用域必须是「客户的全部计划」，不能因调用方已带 map 就只保留当前明细的 plan_id：
+    # 否则同一明细在写/列表/详情三种入口拿到不同 shipped_qty（A-M17）。
+    plan_result = await db.execute(
+        select(PurchasePlan.id, PurchasePlan.customer_name)
+        .where(
+            PurchasePlan.customer_name.in_(customers),
+            # 字符串比较 "YYYY-MM" >= "YYYY-MM" 依赖字典序，
+            # 在固定位数（年4位+月2位）格式下等价于日期比较，安全可用
+            PurchasePlan.plan_month >= f"{earliest_plan_date.year - 1}-{earliest_plan_date.month:02d}",
         )
-        all_plan_rows = plan_result.all()
-        plan_id_to_customer = {r.id: r.customer_name for r in all_plan_rows}
+    )
+    all_plan_rows = plan_result.all()
+    plan_id_to_customer = {r.id: r.customer_name for r in all_plan_rows}
+    if customer_name_map:
+        plan_id_to_customer.update({pid: name for pid, name in customer_name_map.items() if name})
     return plan_id_to_customer
 
 

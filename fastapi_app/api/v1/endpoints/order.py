@@ -58,13 +58,16 @@ async def _assert_order_factory_scoped(db: AsyncSession, order_id: int, user: Us
     scoped_factory = user.factory if (user.factory and not user.is_super) else None
     if not scoped_factory:
         return
-    order_factory = (await db.execute(
+    factories = (await db.execute(
         select(Product.factory)
         .join(OrderItem, OrderItem.product_id == Product.id)
         .where(OrderItem.order_id == order_id, Product.factory.isnot(None))
-        .limit(1)
-    )).scalar_one_or_none()
-    if order_factory is not None and order_factory != scoped_factory:
+    )).scalars().all()
+    # 必须「全部 SKU 均属本厂」：旧实现 limit(1) 只取任意一行，
+    # 混合工厂订单可被跨厂编辑/删除（2026-10-30 审计 A-M7）。
+    # 未设工厂的历史 SKU 沿用旧口径（忽略），否则存量单会对所有厂绑定用户 404；
+    # SQL 侧已用 isnot(None) 过滤，这里再判一次是为了不依赖查询细节。
+    if any(factory is not None and factory != scoped_factory for factory in factories):
         raise HTTPException(status_code=404, detail="订单不存在")
 
 

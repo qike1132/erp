@@ -1,8 +1,12 @@
-"""订单写端点工厂隔离回归（2026-10-17 审计 F-BE-API-01）。
+"""订单写端点工厂隔离回归（2026-10-17 审计 F-BE-API-01 / 2026-10-30 A-M7）。
 
 读端点早有「绑定工厂的非超管只能碰本厂」隔离，写端点只认权限码按 id 直取，
 厂绑定用户可对可枚举的自增 order_id 跨厂 PUT/DELETE。修复后六个写端点统一
 走 _assert_order_factory_scoped：非本厂订单一律 404。
+
+2026-10-30 审计 A-M7：旧实现 `.limit(1)` 只取订单任意一行 SKU 的工厂，
+多 SKU 混合工厂订单会因「先读到本厂那一行」而放行跨厂写。现口径是
+**全部 SKU 都必须属于本厂**（factory 为 NULL 的历史 SKU 仍忽略，见下方用例）。
 """
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,10 +23,12 @@ def _user(factory='东莞', is_super=False):
     return u
 
 
-def _db(scalar):
-    """db.execute(...) await 后 scalar_one_or_none() 返回 scalar。"""
+def _db(factories):
+    """db.execute(...) await 后 scalars().all() 返回订单全部 SKU 的工厂列表。"""
+    if isinstance(factories, str) or factories is None:
+        factories = [factories]
     result = MagicMock()
-    result.scalar_one_or_none.return_value = scalar
+    result.scalars.return_value.all.return_value = list(factories)
     db = MagicMock()
     db.execute = AsyncMock(return_value=result)
     return db
@@ -31,21 +37,48 @@ def _db(scalar):
 @pytest.mark.asyncio
 async def test_cross_factory_order_returns_404():
     """厂绑定用户访问他厂订单 → 404（不暴露存在性）。"""
-    db = _db('湖北')  # 订单的工厂归属
+    db = _db(['湖北'])  # 订单的工厂归属
     with pytest.raises(HTTPException) as ei:
         await _assert_order_factory_scoped(db, 123, _user('东莞'))
     assert ei.value.status_code == 404
 
 
 @pytest.mark.asyncio
+async def test_mixed_factory_order_returns_404():
+    """多 SKU 混合工厂：任意一个 SKU 不属本厂即 404（A-M7 的核心回归）。
+
+    旧实现 limit(1) 命中本厂那一行就放行，跨厂写得以绕过。
+    """
+    db = _db(['东莞', '湖北', '东莞'])
+    with pytest.raises(HTTPException) as ei:
+        await _assert_order_factory_scoped(db, 123, _user('东莞'))
+    assert ei.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mixed_factory_order_blocks_the_other_side_too():
+    """反向同样不成立：湖北用户也不能写「东莞 + 湖北」的混合单。"""
+    db = _db(['东莞', '湖北'])
+    with pytest.raises(HTTPException) as ei:
+        await _assert_order_factory_scoped(db, 123, _user('湖北'))
+    assert ei.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_same_factory_passes():
-    db = _db('东莞')
+    db = _db(['东莞'])
     await _assert_order_factory_scoped(db, 123, _user('东莞'))  # 不抛即过
 
 
 @pytest.mark.asyncio
+async def test_multi_sku_all_same_factory_passes():
+    db = _db(['东莞', '东莞'])
+    await _assert_order_factory_scoped(db, 123, _user('东莞'))
+
+
+@pytest.mark.asyncio
 async def test_super_user_bypasses():
-    db = _db('湖北')
+    db = _db(['湖北'])
     await _assert_order_factory_scoped(db, 123, _user('东莞', is_super=True))
 
 
@@ -62,5 +95,12 @@ async def test_order_without_factory_product_passes():
     """订单的物料都没挂工厂（factory 全 NULL）→ 无法判定归属，放行（与读端点
     WHERE 过滤的行为一致：过滤条件 isnot(None) 下该订单本就不可见——但写侧
     service 层仍有自己的权限校验兜底）。"""
-    db = _db(None)
+    db = _db([None])
+    await _assert_order_factory_scoped(db, 123, _user('东莞'))
+
+
+@pytest.mark.asyncio
+async def test_order_with_no_items_passes():
+    """订单没有任何 SKU（空单）→ 无归属可判，放行，交由 service 报错。"""
+    db = _db([])
     await _assert_order_factory_scoped(db, 123, _user('东莞'))
