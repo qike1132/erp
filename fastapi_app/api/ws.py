@@ -112,6 +112,16 @@ async def _consume_ws_ticket(ticket: str) -> tuple[int, dict] | None:
 
 
 def _origin_allowed(origin: str | None) -> bool:
+    """Origin 白名单判定。
+
+    L4（2026-10-31 评审）——本函数的两个「宽松回退」依赖 core/config.py 的生产
+    启动闸门兜底，重构闸门时必须连带核对本处：
+    1. `origin 为 None → "*" in ALLOWED_HOSTS`：生产闸门（config.py Settings.__init__
+       「ALLOWED_HOSTS 必须显式配置、禁 *」）保证生产恒为 False，仅开发环境可放行；
+    2. `异常 Origin → bool(FASTAPI_DEBUG)`：生产闸门（config.py「生产禁止
+       FASTAPI_DEBUG=true」）保证生产恒为 False。
+    两个闸门任一被移除，本函数就会在生产漏放无 Origin/异常 Origin 的握手。
+    """
     if not origin:
         return "*" in settings.ALLOWED_HOSTS
     try:

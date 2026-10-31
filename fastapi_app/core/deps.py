@@ -107,6 +107,29 @@ async def invalidate_user_permission_cache(user_id: int | None=None) -> None:
         await _PERMISSION_CACHE.clear()
         with contextlib.suppress(AttributeError):
             await _USER_ACTIVE_CACHE.clear()
+
+
+def register_permission_event_subscriber() -> None:
+    """订阅 USER_PERMISSION_CHANGED：跨 worker 失效本进程权限/活跃缓存。
+
+    L1（2026-10-31 评审）：invalidate_user_permission_cache 只清当前 worker，
+    其余 worker 的 L1 权限缓存要等 TTL（5s）自然过期——管理员撤销/授予权限后
+    数秒内其他 worker 仍按旧权限放行/拒绝。user.py 的权限相关端点在 post-commit
+    发布本事件：publish() 的进程内派发覆盖发布 worker，Redis 广播经各 worker 的
+    domain_events 监听器（main.py lifespan 启动）覆盖其余 worker，本订阅把事件
+    落到本地缓存失效。发布/消费失败不重试：最坏退化为旧行为（TTL 5s 有界窗口）。
+    由 main.py lifespan 显式注册（与 notification_service 的订阅注册同批，无模块
+    导入期副作用）。
+    """
+    from fastapi_app.core.domain_events import DomainEventType, subscribe
+
+    async def _on_user_permission_changed(event) -> None:
+        payload = getattr(event, 'payload', None)
+        user_id = payload.get('user_id') if isinstance(payload, dict) else None
+        if isinstance(user_id, int):
+            await invalidate_user_permission_cache(user_id)
+
+    subscribe(DomainEventType.USER_PERMISSION_CHANGED, _on_user_permission_changed)
 __all__ = ['create_access_token', 'create_refresh_token', 'get_async_db', 'get_current_user_id', 'get_current_user_id_strict', 'get_current_user_id_write_strict', 'get_current_user_strict', 'get_user_identity', 'is_token_revoked', 'require_permission', 'require_superuser', 'revoke_token']
 
 

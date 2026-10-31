@@ -259,6 +259,14 @@ async def lifespan(application: FastAPI):
     # 领域事件订阅注册（原为 notification_service 模块导入期副作用，批次1 迁移至此显式执行）
     _register_domain_event_subscriptions()
 
+    # L1（2026-10-31 评审）：权限缓存跨 worker 失效。USER_PERMISSION_CHANGED 事件
+    # 此前已定义但全链路无生产者/消费者——invalidate_user_permission_cache 只清当前
+    # worker，其余 worker 的 L1 最长 TTL 5s 不一致。现 user.py 权限相关端点在
+    # post-commit 发布事件，本订阅让每个 worker 消费后失效本进程缓存（发布 worker
+    # 已在 publish() 的进程内派发中失效）。事件链路失败时退化为旧行为（TTL 兜底）。
+    from fastapi_app.core.deps import register_permission_event_subscriber
+    register_permission_event_subscriber()
+
     # 跨 worker 领域事件监听器（评审 2026-10-10 P0-2）：此前全仓无人调用
     # start_event_listener，多 worker 下非发起 worker 收不到 domain_events
     # 频道事件 → 进程内订阅者（缓存失效/WebSocket 转发）失效。后台任务，

@@ -66,10 +66,21 @@ def _schedule_permission_cache_invalidation(db: AsyncSession, user_id: int) -> N
     权限缓存必须在 commit 之后失效：若在提交前失效，并发请求可能在提交前读到旧权限
     并回填缓存，而提交后不再失效，该用户将在缓存 TTL 内持续被判为权限不足（403）。
     约定见 core/exceptions.py::db_transaction 的 post_commit_callbacks。
+
+    L1（2026-10-31 评审）：本地失效之外再发布 USER_PERMISSION_CHANGED，让其余
+    worker 经 domain_events 监听器同步失效各自的 L1 权限缓存（原先只清本
+    worker，其他 worker 最长 TTL 5s 内仍按旧权限放行）。publish 不抛异常，
+    广播失败时退化为旧行为（TTL 5s 有界窗口）。
     """
 
     async def _invalidate() -> None:
         await invalidate_user_permission_cache(user_id)
+        from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish
+        await publish(DomainEvent(
+            event_type=DomainEventType.USER_PERMISSION_CHANGED,
+            domain='user',
+            payload={'user_id': user_id},
+        ))
 
     db.info.setdefault('post_commit_callbacks', []).append(_invalidate)
 
