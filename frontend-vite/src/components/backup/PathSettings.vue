@@ -21,7 +21,7 @@
         <span>自定义路径</span>
       </label>
       <div v-if="mode === 'custom'" class="ps-custom">
-        <input v-model="customPath" class="ps-input mono" placeholder="D:\erp_data\backups\custom" @input="onPathInput" />
+        <input v-model="customPath" class="ps-input mono" placeholder="D:\erp_data\backups\custom" aria-label="自定义备份路径" @input="onPathInput" />
         <div class="ps-feedback" :class="feedback.tone">{{ feedback.text }}</div>
       </div>
     </div>

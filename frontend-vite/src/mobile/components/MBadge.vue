@@ -1,20 +1,40 @@
 <template>
-  <span :class="['m-badge', variant, { dot, interactive }]" @click="interactive && $emit('click')">
+  <span
+    :class="['m-badge', variant, { dot, interactive }]"
+    :role="interactive ? 'button' : undefined"
+    :tabindex="interactive ? 0 : undefined"
+    @click="interactive && $emit('click')"
+    @keydown="onKeydown"
+  >
     <span v-if="dot" class="m-badge-dot" />
     <span class="m-badge-text"><slot /></span>
   </span>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   variant?: 'success' | 'warning' | 'error' | 'info' | 'neutral'
   dot?: boolean
   interactive?: boolean
 }>()
 defineEmits<{ (e: 'click'): void }>()
+
+/** Enter / Space 等价于点击（A-M39） */
+function onKeydown(e: KeyboardEvent) {
+  if (!props.interactive) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    ;(e.currentTarget as HTMLElement).click()
+  }
+}
 </script>
 
 <style scoped>
+.m-badge.interactive:focus-visible {
+  outline: 2px solid var(--m-accent, #2563eb);
+  outline-offset: 2px;
+}
+
 .m-badge {
   display: inline-flex;
   align-items: center;

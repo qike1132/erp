@@ -144,3 +144,32 @@ async def test_watchdog_fire_still_reports_timeout(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match='pg_dump 执行失败'):
         await run_pg_dump(tmp_path / 'dump.sql.gz')
+
+
+@pytest.mark.asyncio
+async def test_watchdog_true_trigger_marks_timeout(tmp_path, monkeypatch):
+    """看门狗**真的触发**时必须判超时（A-M45）。
+
+    原用例用 fire=False 走的是「wait() 等不到进程退出」的另一条路径，看门狗回调
+    本身从未被执行——2026-10-18 的竞态修复（置位只在真触发时发生、判读前先
+    cancel+join）因此没有回归锁。这里让 Timer.start() 立刻执行回调。
+    """
+    from fastapi_app.services.backup.dump import run_pg_dump
+
+    # 被 terminate 的进程：returncode 非 0，真实场景是 -15
+    proc = _FakeProc(returncode=-15)
+    events = _make_timer_spy(monkeypatch, fire=True)
+    monkeypatch.setattr(subprocess, 'Popen', lambda *a, **kw: proc)
+    monkeypatch.setattr(
+        'fastapi_app.services.backup.dump.get_pg_version',
+        _async_return('16.0'),
+    )
+
+    with pytest.raises(RuntimeError, match='pg_dump 执行失败') as exc:
+        await run_pg_dump(tmp_path / 'dump.sql.gz')
+
+    # 看门狗确实跑过：置位 + terminate；错误文案落到「超时」而不是笼统的 rc 失败
+    assert 'set' in events
+    assert proc.terminated is True
+    assert '超时' in str(exc.value)
+

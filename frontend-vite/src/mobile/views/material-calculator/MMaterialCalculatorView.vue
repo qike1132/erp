@@ -43,7 +43,14 @@
             <span class="m-scope-qty">合计 {{ summary.totalQuantity }} 件</span>
           </div>
           <div v-for="cat in categoryList" :key="cat.key" class="m-result-group">
-            <div class="m-result-cat" @click="toggle(`summary::${cat.key}`)">
+            <div
+              class="m-result-cat"
+              role="button"
+              tabindex="0"
+              :aria-expanded="!isCollapsed(`summary::${cat.key}`)"
+              @click="toggle(`summary::${cat.key}`)"
+              @keydown="onCatKeydown($event, `summary::${cat.key}`)"
+            >
               <span>{{ cat.label }} ({{ summaryCat(cat.key).length }})</span>
               <svg :style="{ transform: isCollapsed(`summary::${cat.key}`) ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
             </div>
@@ -72,7 +79,14 @@
             <span class="m-scope-qty">×{{ group.quantity }}</span>
           </div>
           <div v-for="cat in categoryList" :key="cat.key" class="m-result-group">
-            <div class="m-result-cat" @click="toggle(`${scopeKeyOf(group)}::${cat.key}`)">
+            <div
+              class="m-result-cat"
+              role="button"
+              tabindex="0"
+              :aria-expanded="!isCollapsed(`${scopeKeyOf(group)}::${cat.key}`)"
+              @click="toggle(`${scopeKeyOf(group)}::${cat.key}`)"
+              @keydown="onCatKeydown($event, `${scopeKeyOf(group)}::${cat.key}`)"
+            >
               <span>{{ cat.label }} ({{ groupCat(group, cat.key).length }})</span>
               <svg :style="{ transform: isCollapsed(`${scopeKeyOf(group)}::${cat.key}`) ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
             </div>
@@ -95,7 +109,14 @@
       <div v-else-if="hasFlat" class="m-results">
         <h3 class="m-results-title">计算结果</h3>
         <div v-for="cat in categoryList" :key="cat.key" class="m-result-group">
-          <div class="m-result-cat" @click="toggle(`flat::${cat.key}`)">
+          <div
+            class="m-result-cat"
+            role="button"
+            tabindex="0"
+            :aria-expanded="!isCollapsed(`flat::${cat.key}`)"
+            @click="toggle(`flat::${cat.key}`)"
+            @keydown="onCatKeydown($event, `flat::${cat.key}`)"
+          >
             <span>{{ cat.label }} ({{ (calcResults[cat.key] || []).length }})</span>
             <svg :style="{ transform: isCollapsed(`flat::${cat.key}`) ? '' : 'rotate(90deg)' }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6" /></svg>
           </div>
@@ -217,6 +238,18 @@ function decQty(item: { quantity: number }) {
 }
 
 function toggle(key: string) { collapsed[key] = !collapsed[key] }
+
+/**
+ * 分类折叠头的键盘操作（2026-10-30 审计 A-M39）。
+ * 这些标题是 div + @click，键盘与读屏都点不到；补 role=button/tabindex 后，
+ * Enter/Space 必须与点击等价（Space 默认会滚动页面，需 preventDefault）。
+ */
+function onCatKeydown(e: KeyboardEvent, key: string) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    toggle(key)
+  }
+}
 function isCollapsed(key: string): boolean { return !!collapsed[key] }
 
 /** 读取分块里某分类的行（安全索引）。 */
@@ -261,6 +294,11 @@ function rowKeyOf(prefix: string, category: string, row: MaterialCalcRow): strin
 .m-scope-qty { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--m-accent); }
 
 .m-result-group { background: var(--m-bg-card); border-radius: var(--m-radius-md); margin-bottom: 8px; overflow: hidden; }
+.m-result-cat:focus-visible {
+  outline: 2px solid var(--m-accent, #2563eb);
+  outline-offset: 2px;
+}
+
 .m-result-cat { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-size: 14px; font-weight: 600; color: var(--m-text-primary); cursor: pointer; }
 .m-result-row { padding: 8px 16px; border-top: 0.5px solid rgba(0,0,0,0.04); }
 .m-result-name { font-size: 14px; font-weight: 500; color: var(--m-text-primary); }

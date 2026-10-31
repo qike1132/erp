@@ -1,5 +1,12 @@
 <template>
-  <div :class="['m-card', { interactive: clickable, padded }]" @click="clickable && $emit('click')">
+  <!-- 可点击卡片补键盘可达（A-M39） -->
+  <div
+    :class="['m-card', { interactive: clickable, padded }]"
+    :role="clickable ? 'button' : undefined"
+    :tabindex="clickable ? 0 : undefined"
+    @click="clickable && $emit('click')"
+    @keydown="onKeydown"
+  >
     <div v-if="$slots.header" class="m-card-header">
       <slot name="header" />
     </div>
@@ -11,11 +18,20 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   clickable?: boolean
   padded?: boolean
 }>()
 defineEmits<{ (e: 'click'): void }>()
+
+/** Enter / Space 等价于点击（A-M39）：否则卡片在键盘与读屏下完全不可操作 */
+function onKeydown(e: KeyboardEvent) {
+  if (!props.clickable) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    ;(e.currentTarget as HTMLElement).click()
+  }
+}
 </script>
 
 <style scoped>
@@ -24,6 +40,11 @@ defineEmits<{ (e: 'click'): void }>()
   border-radius: var(--m-radius-md);
   box-shadow: var(--m-shadow-card);
   overflow: hidden;
+}
+
+.m-card.interactive:focus-visible {
+  outline: 2px solid var(--m-accent, #2563eb);
+  outline-offset: 2px;
 }
 
 .m-card.interactive {

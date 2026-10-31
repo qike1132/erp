@@ -2,11 +2,19 @@
   <div class="sc-card">
     <div class="sc-row">
       <div class="sc-label">启用定时备份</div>
-      <button class="sc-switch" :class="{ on: form.enabled }" role="switch" :aria-checked="form.enabled" @click="form.enabled = !form.enabled" />
+      <button
+        class="sc-switch"
+        :class="{ on: form.enabled }"
+        type="button"
+        role="switch"
+        aria-label="启用定时备份"
+        :aria-checked="form.enabled"
+        @click="form.enabled = !form.enabled"
+      />
     </div>
     <div class="sc-row">
       <div class="sc-label">任务类型</div>
-      <select v-model="taskType" class="sc-select">
+      <select v-model="taskType" class="sc-select" aria-label="任务类型">
         <option value="full">全量备份</option>
         <option value="integrity_check">完整性巡检</option>
         <option value="cleanup">智能清理</option>
@@ -15,7 +23,7 @@
     </div>
     <div class="sc-row">
       <div class="sc-label">备份周期</div>
-      <select v-model="period" class="sc-select">
+      <select v-model="period" class="sc-select" aria-label="备份周期">
         <option value="daily">每日</option>
         <option value="weekly">每周</option>
         <option value="monthly">每月</option>
@@ -24,11 +32,11 @@
     </div>
     <div v-if="period === 'custom'" class="sc-row">
       <div class="sc-label">cron 表达式</div>
-      <input v-model="form.cron_expr" class="sc-input mono" placeholder="0 2 * * *" />
+      <input v-model="form.cron_expr" class="sc-input mono" placeholder="0 2 * * *" aria-label="cron 表达式" />
     </div>
     <div v-if="period === 'daily'" class="sc-row">
       <div class="sc-label">执行时间</div>
-      <input v-model="timeInput" type="time" class="sc-input" />
+      <input v-model="timeInput" type="time" class="sc-input" aria-label="执行时间" />
     </div>
     <div class="sc-actions">
       <button class="sc-btn sc-btn-primary" :disabled="saving" @click="handleSave">{{ saving ? '保存中...' : '保存配置' }}</button>

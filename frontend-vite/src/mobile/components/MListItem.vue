@@ -1,5 +1,12 @@
 <template>
-  <div :class="['m-list-item', { clickable: clickable ?? !!to, active }]" @click="handleClick">
+  <!-- 可点击项必须是键盘可达的（A-M39）：移动端组件同样要能被外接键盘/辅助技术操作 -->
+  <div
+    :class="['m-list-item', { clickable: interactive, active }]"
+    :role="interactive ? 'button' : undefined"
+    :tabindex="interactive ? 0 : undefined"
+    @click="handleClick"
+    @keydown="onKeydown"
+  >
     <div v-if="$slots.icon" class="m-list-item-icon">
       <slot name="icon" />
     </div>
@@ -20,6 +27,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps<{
@@ -33,9 +41,25 @@ const props = defineProps<{
 
 const router = useRouter()
 
+/** 可交互 = 有跳转目标，或调用方显式声明 clickable（如「退出登录」） */
+const interactive = computed(() => props.clickable === true || !!props.to)
+
 function handleClick() {
   if (props.to) {
     router.push(props.to)
+  }
+}
+
+/**
+ * Enter / Space 触发一次真实 click。
+ * 用 `.click()` 而不是直接 router.push：clickable 项的真正动作来自调用方的原生
+ * @click（外部监听），只有派发原生事件才能让它和鼠标路径走同一条代码。
+ */
+function onKeydown(e: KeyboardEvent) {
+  if (!interactive.value) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault() // Space 默认会滚动页面
+    ;(e.currentTarget as HTMLElement).click()
   }
 }
 </script>
@@ -57,6 +81,12 @@ function handleClick() {
 .m-list-item.clickable {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* 键盘焦点必须可见（A-M39）：移动端组件在桌面/外接键盘下同样要能定位当前项 */
+.m-list-item.clickable:focus-visible {
+  outline: 2px solid var(--m-accent, #2563eb);
+  outline-offset: -2px;
 }
 
 .m-list-item.clickable:active {

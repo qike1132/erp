@@ -1,13 +1,13 @@
 <template>
   <div class="brt-card">
     <div class="brt-toolbar">
-      <select v-model="typeFilter" class="brt-select">
+      <select v-model="typeFilter" class="brt-select" aria-label="按备份类型筛选">
         <option value="">全部类型</option><option value="full">全量</option>
       </select>
-      <select v-model="statusFilter" class="brt-select">
+      <select v-model="statusFilter" class="brt-select" aria-label="按备份状态筛选">
         <option value="">全部状态</option><option value="success">成功</option><option value="failed">失败</option><option value="running">进行中</option>
       </select>
-      <input v-model="keyword" class="brt-search" placeholder="搜索备份名称" />
+      <input v-model="keyword" class="brt-search" placeholder="搜索备份名称" aria-label="搜索备份名称" />
     </div>
     <div class="brt-table-wrap">
       <table class="brt-table">
