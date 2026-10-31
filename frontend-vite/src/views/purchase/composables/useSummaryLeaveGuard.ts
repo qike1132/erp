@@ -52,11 +52,12 @@ export function useSummaryLeaveGuard(summary: SummaryGuardTarget, confirm: Confi
     return confirmLeaveSummary()
   })
 
-  /** 「返回订单列表」按钮（及页签底部的返回）：编辑态先确认，非编辑态直接返回 */
+  /** 「返回订单列表」按钮：编辑态先确认（确认后 confirmLeaveSummary 内已 close），
+   *  非编辑态直接 close。不要在此再调一次 close —— 会重复执行清理。 */
   async function handleSummaryClose() {
     if (isSummaryDirty(summary)) {
-      const allowed = await confirmLeaveSummary()
-      if (!allowed) return
+      await confirmLeaveSummary()
+      return
     }
     summary.close()
   }
