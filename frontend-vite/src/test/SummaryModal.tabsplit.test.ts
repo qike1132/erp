@@ -1,7 +1,7 @@
 /**
- * SummaryModal 页签拆分回归（2026-09-19）。
+ * SummaryPanel 页签拆分回归（2026-09-19）。
  *
- * 背景：`SummaryModal.vue` 为压回质量门禁「单 SFC ≤400 行」阈值，把两个页签拆为
+ * 背景：`SummaryPanel.vue`（前名 SummaryModal）为压回质量门禁「单 SFC ≤400 行」阈值，把两个页签拆为
  * 子组件（`SummaryFactoryTab.vue` / `SummarySupplierTab.vue`）。本文件锁定拆分**不得**
  * 改变的两条契约 —— 都是拆分极易静默破坏、且既有 478 个用例**没有**覆盖的点：
  *
@@ -30,13 +30,13 @@ vi.mock('@/api', () => ({
   },
 }))
 
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 // 源码级断言（样式归属）：用 Vite 的 ?raw 读原文，避免依赖 node:fs 类型
 import factoryTabSrc from '@/views/purchase/components/SummaryFactoryTab.vue?raw'
 import supplierTabSrc from '@/views/purchase/components/SummarySupplierTab.vue?raw'
-import modalSrc from '@/views/purchase/components/SummaryModal.vue?raw'
+import panelSrc from '@/views/purchase/components/SummaryPanel.vue?raw'
 import tablesPartialSrc from '@/styles/summary-tables.scss?raw'
 
 const factoryData: FactorySummaryData = {
@@ -58,9 +58,8 @@ const factoryData: FactorySummaryData = {
 }
 
 function mountModal() {
-  return mount(SummaryModal, {
+  return mount(SummaryPanel, {
     props: {
-      open: true,
       factoryData,
       supplierData: null,
       editMode: false,
@@ -68,7 +67,6 @@ function mountModal() {
       orderCount: 1,
       supplierGroups: [],
     },
-    global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
   })
 }
 
@@ -133,6 +131,6 @@ describe('G2. 页签拆分后表格边框样式随子组件作用域存在', () 
   })
 
   it('父组件不再自带 table 规则（已随页签下沉到子组件）', () => {
-    expect(modalSrc).not.toMatch(/table th,\s*table td\s*\{/)
+    expect(panelSrc).not.toMatch(/table th,\s*table td\s*\{/)
   })
 })

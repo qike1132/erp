@@ -44,7 +44,7 @@ vi.mock('@/composables/useExport', async () => {
 
 import { buildFactoryHtml, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import SummaryFactoryTab from '@/views/purchase/components/SummaryFactoryTab.vue'
 import { showToast } from '@/composables/useToast'
 import { purchaseApi } from '@/api'
@@ -181,9 +181,8 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     m.applyLossRate(8)
 
     // 展示加放 = 100 × 1.008 = 100.8 → 向上取整显示 101（旧实现 = 100.5 × 1.008 = 101.3，即复利）
-    const wrapper = mount(SummaryModal, {
+    const wrapper = mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: m.factoryData,
         supplierData: m.supplierData,
         editMode: false,
@@ -191,7 +190,6 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
         orderCount: 1,
         supplierGroups: m.supplierGroups,
       },
-      global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
     const firstDataRow = wrapper.findAll('tbody tr')[0]!
     expect(firstDataRow.findAll('td')[8]!.text()).toBe('101')
@@ -246,9 +244,8 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
 
     // 每次按 m 的**当前**状态重新挂载，等价于真实页面中 prop 随响应式状态重渲染。
     const mountModal = () =>
-      mount(SummaryModal, {
+      mount(SummaryPanel, {
         props: {
-          open: true,
           factoryData: m.factoryData,
           supplierData: m.supplierData,
           editMode: m.editMode,
@@ -257,7 +254,6 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
           orderCount: 1,
           supplierGroups: m.supplierGroups,
         },
-        global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
       })
     const supplierRowQty = (w: ReturnType<typeof mountModal>) => {
       const rows = w.findAll('tbody tr').filter((r) => r.findAll('td').length >= 4)
@@ -530,9 +526,8 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
     const known = ['保存中…', '保存失败', '各订单损耗率不一致']
 
     for (const c of cases) {
-      const wrapper = mount(SummaryModal, {
+      const wrapper = mount(SummaryPanel, {
         props: {
-          open: true,
           factoryData: factoryOf(10),
           supplierData: null,
           editMode: false,
@@ -542,7 +537,6 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
           lossRateSaveState: c.state,
           lossRateMixed: c.mixed ?? false,
         },
-        global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
       })
       // 提示位必须始终存在且承载文案；且必须是绝对定位（不参与布局）：
       // 内联在输入框后会推挤行宽（输入抖动），在列内占一行高度会让列比按钮高、
@@ -618,12 +612,11 @@ describe('C. 在途落库与关闭/取消编辑', () => {
 
   it('C8 取消编辑会作废挂起的 300ms 防抖；保存修改不会', async () => {
     vi.useFakeTimers()
-    const mountModal = () => mount(SummaryModal, {
+    const mountModal = () => mount(SummaryPanel, {
       props: {
-        open: true, factoryData: factoryOf(10), supplierData: SUPPLIER_RESPONSE, editMode: false,
+        factoryData: factoryOf(10), supplierData: SUPPLIER_RESPONSE, editMode: false,
         lossRate: 0, orderCount: 1, supplierGroups: [],
       },
-      global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
     try {
       // 对照：不取消 → 防抖到点后照常发出

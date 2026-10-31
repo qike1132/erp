@@ -1,40 +1,47 @@
 <template>
   <!--
-    汇总下单弹窗内会录入损耗率、逐行改数量，属于「有未保存内容」的编辑型弹窗，
-    误触遮罩/空白处关闭会直接丢失输入，故显式关闭遮罩点击关闭行为。
-    （UiDialog 默认允许遮罩点击关闭；此处仅对本弹窗覆盖，不影响其它弹窗。）
+    汇总下单整页视图（2026-10-31 由弹窗改为铺满内容区，需求：用户嫌弹窗局促）。
+    结构：头部（标题+页签+返回）→ 表体（唯一滚动区，flex 撑满）→ 底部操作条。
+    侧边栏保留；「编辑态离开需确认」由 PurchaseView 的 useSummaryLeaveGuard 把守。
   -->
-  <UiDialog
-    :open="open"
-    max-width-class="max-w-[1400px]"
-    :close-on-overlay-click="false"
-    @update:open="$emit('close')"
-  >
-    <template #title>
-      <div class="flex items-center gap-2"><FontAwesomeIcon icon="clipboard-list" class="text-primary-500" aria-hidden="true" /> 汇总下单</div>
-    </template>
-
-    <!-- Tab headers -->
-    <div class="sm-tab-group" role="tablist">
-      <div
-        role="tab"
-        :aria-selected="activeTab === 'factory'"
-        :class="['sm-tab-btn', { active: activeTab === 'factory' }]"
-        @click="activeTab = 'factory'"
-      >
-        <FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂内部订单
+  <div class="sm-panel">
+    <!-- 头部：标题 + 页签（左） / 返回订单列表（右） -->
+    <div class="sm-header">
+      <div class="sm-title-block">
+        <div class="sm-title">
+          <FontAwesomeIcon icon="clipboard-list" class="text-primary-500" aria-hidden="true" /> 汇总下单
+        </div>
+        <div class="sm-tab-group" role="tablist">
+          <div
+            role="tab"
+            :aria-selected="activeTab === 'factory'"
+            :class="['sm-tab-btn', { active: activeTab === 'factory' }]"
+            @click="activeTab = 'factory'"
+          >
+            <FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂内部订单
+          </div>
+          <div
+            role="tab"
+            :aria-selected="activeTab === 'supplier'"
+            :class="['sm-tab-btn', { active: activeTab === 'supplier', 'out-mode': activeTab === 'supplier' }]"
+            @click="activeTab = 'supplier'"
+          >
+            <FontAwesomeIcon icon="truck" aria-hidden="true" /> 供应商采购订单
+          </div>
+        </div>
       </div>
-      <div
-        role="tab"
-        :aria-selected="activeTab === 'supplier'"
-        :class="['sm-tab-btn', { active: activeTab === 'supplier', 'out-mode': activeTab === 'supplier' }]"
-        @click="activeTab = 'supplier'"
+      <button
+        class="sm-back-btn"
+        :title="editMode ? '编辑态返回需确认' : '返回订单列表'"
+        @click="$emit('close')"
       >
-        <FontAwesomeIcon icon="truck" aria-hidden="true" /> 供应商采购订单
-      </div>
+        <FontAwesomeIcon icon="arrow-left" aria-hidden="true" /> 返回订单列表
+      </button>
     </div>
 
-    <div class="py-4">
+    <!-- 表体：唯一滚动区。页签切换用 v-if（不换页签不卸载子组件的表格 DOM 无益，
+         但换页签卸载可减轻长表格的常驻 DOM——与拆分前的弹窗行为一致） -->
+    <div class="sm-body">
       <!-- Factory Tab -->
       <SummaryFactoryTab
         v-if="activeTab === 'factory' && factoryData"
@@ -68,33 +75,28 @@
         @print-supplier="$emit('printSupplier')"
       />
     </div>
-  </UiDialog>
+  </div>
 </template>
 
 <script setup lang="ts">
 /**
- * SummaryModal.vue — 汇总下单弹窗外壳（页签切换 + 事件转发）。
+ * SummaryPanel.vue — 汇总下单整页视图外壳（页签切换 + 事件转发）。
  *
- * 两个页签各自独立成组件（与 SummarySupplierTab.vue 对称）：
- * - `SummaryFactoryTab.vue` — 工厂内部订单（含损耗率输入、逐 SKU 分行、编辑态数量输入）
- * - `SummarySupplierTab.vue` — 供应商采购订单
- *
- * 拆分为的是把本文件压回质量门禁的「单 SFC ≤400 行」阈值。**对外契约零改动**：
- * props / emits 与拆分前逐字一致，PurchaseView.vue 无需任何改动；子组件事件在此
- * 原样转发，行为与视觉不变（表格外观由子组件各自的 `summary-tables.scss` 提供）。
+ * 2026-10-31 由 SummaryModal.vue（UiDialog 弹窗）整页化而来：保留侧边栏、
+ * 占满内容区；props/emits 契约除删去 open 外与弹窗版逐字一致，
+ * 两个页签子组件（SummaryFactoryTab / SummarySupplierTab）零改动可复用。
  *
  * ⚠️ 损耗率防抖（300ms）**留在本组件**，不下放到 SummaryFactoryTab：工厂页签位于
  * `v-if` 之下，用户在防抖窗口内切页签会让该子组件卸载，若定时器在子组件内则
- * `emit` 无监听者、刚输入的损耗率被静默丢弃。本组件不随页签切换卸载，行为与拆分前一致。
+ * `emit` 无监听者、刚输入的损耗率被静默丢弃。本组件不随页签切换卸载，行为与
+ * 弹窗版一致。
  */
-import { ref, watch, onUnmounted } from 'vue'
-import UiDialog from '@/components/ui/UiDialog.vue'
+import { ref, onUnmounted } from 'vue'
 import SummaryFactoryTab from './SummaryFactoryTab.vue'
 import SummarySupplierTab from './SummarySupplierTab.vue'
 import type { FactorySummaryData, SupplierSummaryData, MaterialItem } from '../composables/useSummaryModal'
 
-const props = defineProps<{
-  open: boolean
+defineProps<{
   factoryData: FactorySummaryData | null
   supplierData: SupplierSummaryData | null
   editMode: boolean
@@ -130,7 +132,7 @@ const activeTab = ref<'factory' | 'supplier'>('factory')
 
 /**
  * P1-4: 损耗率输入防抖 300ms，避免每次按键触发全量 groups×suppliers×fabrics×materials 重算。
- * 定时器归属本组件（弹窗外壳）而非页签子组件，确保防抖窗口内切换页签不丢输入。
+ * 定时器归属本组件（整页外壳）而非页签子组件，确保防抖窗口内切换页签不丢输入。
  * 不用 useDebounceFn：当前 @vueuse 版本的返回值没有 cancel，取消编辑时无法作废挂起值。
  */
 let lossRateTimer: ReturnType<typeof setTimeout> | null = null
@@ -169,11 +171,70 @@ function onToggleEditMode(enable: boolean) {
   if (!enable) cancelPendingRateEdits()
   emit('toggleEditMode', enable)
 }
-watch(() => props.open, (open) => { if (!open) cancelPendingRateEdits() })
 onUnmounted(cancelPendingRateEdits)
 </script>
 
 <style scoped>
+/* 整页外壳：占满父容器（PurchaseView 的 .pc-container → page-card-body 链路），
+   唯一滚动区是表体。与 /stock 的 .sk-card-main 同一套 flex 约束。 */
+.sm-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.sm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
+}
+.sm-title-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.sm-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+.sm-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--color-border-light);
+  border-radius: 9px;
+  background: white;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color 0.3s ease, background 0.3s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.sm-back-btn:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  border-color: var(--color-primary-500);
+}
+.sm-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .sm-tab-group {
   display: inline-flex;
   gap: 4px;
@@ -182,7 +243,6 @@ onUnmounted(cancelPendingRateEdits)
   background: white;
   border: 1px solid var(--color-border-light);
   box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  margin-bottom: 12px;
 }
 .sm-tab-btn {
   padding: 8px 14px;

@@ -26,7 +26,7 @@ vi.mock('@/api', () => ({
   },
 }))
 
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import {
   buildFactoryHtml,
   buildSkuDisplayLines,
@@ -34,10 +34,6 @@ import {
 } from '@/views/purchase/composables/useSummaryModal'
 import type { FactorySummaryData, FactoryGroup } from '@/views/purchase/composables/useSummaryModal'
 import { fmtQty } from '@/utils/formatQty'
-
-const stubs = {
-  UiDialog: { template: '<div class="ui-dialog-stub"><slot name="title" /><slot /></div>' },
-}
 
 /** 4 SKU 订单（对齐真实单 CG-20260918-0008：奥飞，4 × 999,111） */
 function multiSkuGroup(): FactoryGroup {
@@ -77,9 +73,8 @@ function dataWith(group: FactoryGroup): FactorySummaryData {
 }
 
 function mountModal(group: FactoryGroup, lossRate = 10) {
-  return mount(SummaryModal, {
+  return mount(SummaryPanel, {
     props: {
-      open: true,
       factoryData: dataWith(group),
       supplierData: { success: true, order_count: 1, materials: [] },
       editMode: false,
@@ -87,7 +82,6 @@ function mountModal(group: FactoryGroup, lossRate = 10) {
       orderCount: 1,
       supplierGroups: [],
     },
-    global: { stubs },
     attachTo: document.body,
   })
 }
@@ -165,7 +159,7 @@ describe('buildFactoryHtml（打印预览 / Excel 导出与屏幕同源）', () 
   })
 })
 
-describe('SummaryModal 渲染（逐 SKU 分行）', () => {
+describe('SummaryPanel 渲染（逐 SKU 分行）', () => {
   it('C1 多 SKU：产品名称 / 订单数量各 5 行，末行为「合计」', async () => {
     const wrapper = mountModal(multiSkuGroup())
     const cells = firstRowCells(wrapper)

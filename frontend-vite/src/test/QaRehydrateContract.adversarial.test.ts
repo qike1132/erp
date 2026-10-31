@@ -6,7 +6,7 @@
  *      并对照「含字段」时不会误触自动落库（避免把回显当成用户交互）。
  *  C2. 【回显不夹带提交】openSummary(spare_rate=5) → handleCompleteOrder(999) 实参 (999, undefined)；
  *      反向对照 lossRateTouched=true → 确实夹带 5（证明接线有效、断言非恒真）。
- *  C3. 【组件层】lossRateMixed=true 渲染提示文案；false 不渲染（真实挂载 SummaryModal）。
+ *  C3. 【组件层】lossRateMixed=true 渲染提示文案；false 不渲染（真实挂载 SummaryPanel）。
  *  C4. 【基线恢复】落库成功 → persistedLossRate 更新；编辑→取消编辑恢复该值（非 0）。
  *  C5. 【close 复位】四项全复位（lossRate/persistedLossRate/saveState/lossRateMixed）。
  *
@@ -40,11 +40,9 @@ vi.mock('@/composables/useExport', async () => {
 
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
-
-const stubs = { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } }
 
 const FACTORY: FactorySummaryData = {
   success: true,
@@ -152,11 +150,10 @@ describe('C2. 回显不夹带提交', () => {
   })
 })
 
-describe('C3. SummaryModal 组件层 mixed 提示', () => {
+describe('C3. SummaryPanel 组件层 mixed 提示', () => {
   function mountModal(lossRateMixed: boolean, lossRate = 0) {
-    return mount(SummaryModal, {
+    return mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: FACTORY,
         supplierData: null,
         editMode: false,
@@ -165,7 +162,6 @@ describe('C3. SummaryModal 组件层 mixed 提示', () => {
         supplierGroups: [],
         lossRateMixed,
       },
-      global: { stubs },
     })
   }
 
@@ -182,9 +178,8 @@ describe('C3. SummaryModal 组件层 mixed 提示', () => {
   })
 
   it('缺省（未传 lossRateMixed）→ 不渲染（向后兼容）', () => {
-    const w = mount(SummaryModal, {
-      props: { open: true, factoryData: FACTORY, supplierData: null, editMode: false, lossRate: 0, orderCount: 1, supplierGroups: [] },
-      global: { stubs },
+    const w = mount(SummaryPanel, {
+      props: { factoryData: FACTORY, supplierData: null, editMode: false, lossRate: 0, orderCount: 1, supplierGroups: [] },
     })
     expect(w.text()).not.toContain('各订单损耗率不一致')
     w.unmount()

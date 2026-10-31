@@ -25,7 +25,7 @@ vi.mock('@/api', () => ({
   },
 }))
 
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import {
   FACTORY_TABLE_HEAD,
   buildFactoryHtml,
@@ -33,10 +33,6 @@ import {
   calcSpareQuantity,
 } from '@/views/purchase/composables/useSummaryModal'
 import type { FactoryGroup, FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
-
-const stubs = {
-  UiDialog: { template: '<div class="ui-dialog-stub"><slot name="title" /><slot /></div>' },
-}
 
 /** 单 SKU：订单数量 10000（对齐真实单 CG-20260930-0002 的数量级） */
 function singleSkuGroup(): FactoryGroup {
@@ -79,9 +75,8 @@ function mountModal(group: FactoryGroup, opts: {
   groupSpareRates?: number[]
   fabricLossRates?: number[][][]
 } = {}) {
-  return mount(SummaryModal, {
+  return mount(SummaryPanel, {
     props: {
-      open: true,
       factoryData: dataWith(group, opts.lossRate ?? 15),
       supplierData: { success: true, order_count: 1, materials: [] },
       editMode: false,
@@ -91,7 +86,6 @@ function mountModal(group: FactoryGroup, opts: {
       groupSpareRates: opts.groupSpareRates,
       fabricLossRates: opts.fabricLossRates,
     },
-    global: { stubs },
     attachTo: document.body,
   })
 }
@@ -194,13 +188,13 @@ describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
     const g1 = singleSkuGroup()
     const g2: FactoryGroup = { ...singleSkuGroup(), customer_name: '客户B', product_quantity: 1000, skus: undefined }
     const data: FactorySummaryData = { success: true, order_count: 2, spare_rate: 15, groups: [g1, g2] }
-    const wrapper = mount(SummaryModal, {
+    const wrapper = mount(SummaryPanel, {
       props: {
-        open: true, factoryData: data, supplierData: { success: true, order_count: 2, materials: [] },
+        factoryData: data, supplierData: { success: true, order_count: 2, materials: [] },
         editMode: false, lossRate: 15, orderCount: 2, supplierGroups: [],
         groupSpareRates: [15, 30],
       },
-      global: { stubs }, attachTo: document.body,
+      attachTo: document.body,
     })
 
     const rows = wrapper.findAll('tbody tr')

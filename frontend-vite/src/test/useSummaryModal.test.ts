@@ -4,7 +4,7 @@
  * 覆盖：
  * 1. getGroupOrderQty 订单数量取数（product_quantity 优先 / order_quantity 回退 / 非法兜底 0）
  * 2. buildFactoryHtml 打印/导出共用 HTML：10 列表头 + 数据行第 4 列备品、第 8 列损耗率、第 9 列数量
- * 3. SummaryModal 挂载后的数量口径：数据行「数量」列按损耗率派生取整，且工厂页签
+ * 3. SummaryPanel 挂载后的数量口径：数据行「数量」列按损耗率派生取整，且工厂页签
  *    表格内的「合计」行已删除（tbody 只剩数据行）；含字符串 qty 的防御性 parseFloat 场景
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -37,18 +37,13 @@ vi.mock('@/composables/useExport', async () => {
 
 import { getGroupOrderQty, magnifyByLossRate, buildFactoryHtml, FACTORY_TABLE_HEAD, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import { fmtQty } from '@/utils/formatQty'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
-// reka-ui 的 Dialog 依赖 teleport/portal，jsdom 下直接 stub 成普通容器渲染插槽内容更稳。
 // FontAwesomeIcon 已由 src/test/setup.ts 全局 stub。
-const stubs = {
-  UiDialog: {
-    template: '<div class="ui-dialog-stub"><slot name="title" /><slot /></div>',
-  },
-}
+// 2026-10-31 整页化：SummaryPanel 无 UiDialog 外壳，不再需要 Dialog stub。
 
 /**
  * magnifyByLossRate —— 「损耗加放」的**唯一来源**（纯函数）。
@@ -97,7 +92,7 @@ describe('magnifyByLossRate 纯函数（损耗加放的唯一来源）', () => {
   })
 })
 
-describe('SummaryModal 数量口径（数据行）', () => {
+describe('SummaryPanel 数量口径（数据行）', () => {
   const factoryData: FactorySummaryData = {
     success: true,
     order_count: 2,
@@ -131,9 +126,8 @@ describe('SummaryModal 数量口径（数据行）', () => {
   }
 
   function mountModal(lossRate: number, data: FactorySummaryData = factoryData, editMode = false) {
-    return mount(SummaryModal, {
+    return mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: data,
         supplierData: null,
         editMode,
@@ -141,7 +135,7 @@ describe('SummaryModal 数量口径（数据行）', () => {
         orderCount: 2,
         supplierGroups: [],
       },
-      global: { stubs },
+
     })
   }
 
@@ -177,9 +171,9 @@ describe('SummaryModal 数量口径（数据行）', () => {
     await m.openSummary([7, 8])
 
     const mountWithSummary = () =>
-      mount(SummaryModal, {
+      mount(SummaryPanel, {
         props: {
-          open: true,
+
           factoryData: m.factoryData,
           supplierData: m.supplierData,
           editMode: m.editMode,
@@ -187,7 +181,6 @@ describe('SummaryModal 数量口径（数据行）', () => {
           orderCount: 2,
           supplierGroups: m.supplierGroups,
         },
-        global: { stubs },
       })
 
     // 数量列逐行读数：第 2 行被 rowspan 合并（仅 5 个 td），数量仍在其第 4 位

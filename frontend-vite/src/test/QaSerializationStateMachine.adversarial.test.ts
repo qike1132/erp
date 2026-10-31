@@ -37,7 +37,7 @@ vi.mock('@/composables/useExport', async () => {
 
 import { purchaseApi } from '@/api'
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 interface Deferred<T> {
@@ -235,9 +235,8 @@ describe('C. 状态机（独立复核）', () => {
     ]
     const known = ['保存中…', '保存失败']
     for (const c of cases) {
-      const w = mount(SummaryModal, {
+      const w = mount(SummaryPanel, {
         props: {
-          open: true,
           factoryData: FACTORY,
           supplierData: null,
           editMode: false,
@@ -246,7 +245,6 @@ describe('C. 状态机（独立复核）', () => {
           supplierGroups: [],
           lossRateSaveState: c.state,
         },
-        global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
       })
       const hint = w.findAll('span').find((s) => known.includes(s.text()))
       // 提示位恒定存在且绝对定位：文案只在位内切换，不改变行宽/行高，避免表头行抖动或错位。

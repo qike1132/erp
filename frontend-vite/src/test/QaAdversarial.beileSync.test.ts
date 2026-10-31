@@ -1,6 +1,6 @@
 /**
  * QA 对抗性验证（前端）：
- * - F. SummaryModal.vue「为过 gate 压缩订单级 <td>」后的渲染等价性：
+ * - F. SummaryPanel.vue（前名 SummaryModal）「为过 gate 压缩订单级 <td>」后的渲染等价性：
  *    * 表头 9 列、第 7 列为「损耗率」
  *    * 第 1 个 fabric 行的 3 个订单级单元格带 rowspan=N；后续行不再出现订单级单元格
  *    * 合计行 = colspan3 合计 + colspan3 + 损耗率空列 + 第8列数量合计 + 单位空列
@@ -80,7 +80,7 @@ import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
 import { provideBeileOrders, NOT_ORDERED_TIP, NOT_ORDERED_TOAST } from '@/views/beile-order/composables/useBeileOrders'
 import type { BeileOrderRow as BeileOrderRowType } from '@/views/beile-order/composables/useBeileOrders'
 import { toast } from '@/composables/useToast'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 import type { OrderListApiResponse } from '@/api/order'
@@ -130,9 +130,9 @@ function logicalWidths(rows: Element[], nCols: number): number[] {
 }
 
 // =========================================================================
-// F. SummaryModal 渲染等价性
+// F. SummaryPanel 渲染等价性
 // =========================================================================
-describe('F. SummaryModal 订单级 <td> 压缩后的渲染等价性', () => {
+describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
   const factoryData: FactorySummaryData = {
     success: true,
     order_count: 2,
@@ -167,9 +167,9 @@ describe('F. SummaryModal 订单级 <td> 压缩后的渲染等价性', () => {
   }
 
   function mountModal() {
-    return mount(SummaryModal, {
-      props: { open: true, factoryData, supplierData: null, editMode: false, lossRate: 5, orderCount: 2, supplierGroups: [] },
-      global: { stubs: { UiDialog: { template: '<div class="ui-dialog-stub"><slot name="title" /><slot /></div>' } } },
+    // 2026-10-31 整页化：SummaryPanel 不再包 UiDialog、无 open prop
+    return mount(SummaryPanel, {
+      props: { factoryData, supplierData: null, editMode: false, lossRate: 5, orderCount: 2, supplierGroups: [] },
     })
   }
 

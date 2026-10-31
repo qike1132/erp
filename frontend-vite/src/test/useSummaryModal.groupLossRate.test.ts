@@ -29,7 +29,7 @@ import {
   unmagnifyByLossRate,
 } from '@/views/purchase/composables/useSummaryModal'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 
 function factorySummary(): FactorySummaryData {
   return {
@@ -167,9 +167,8 @@ describe('逐布料行差异化损耗率', () => {
   })
 
   it('组件逐布料行输入经防抖后向上层发出 applyFabricLossRate(gi,si,fi,rate)', async () => {
-    const wrapper = mount(SummaryModal, {
+    const wrapper = mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: factorySummary(),
         supplierData: null,
         editMode: false,
@@ -179,7 +178,6 @@ describe('逐布料行差异化损耗率', () => {
         orderCount: 2,
         supplierGroups: [],
       },
-      global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
 
     // 第 1 个 input 是统一损耗率；第 2 个是布料行 0 的独立输入。
@@ -195,9 +193,8 @@ describe('逐布料行差异化损耗率', () => {
   })
 
   it('自定义编辑输入框按该布料行损耗率加载最新订单用量（100‰ → 110）', async () => {
-    const wrapper = mount(SummaryModal, {
+    const wrapper = mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: factorySummary(),
         supplierData: null,
         editMode: true,
@@ -207,7 +204,6 @@ describe('逐布料行差异化损耗率', () => {
         orderCount: 2,
         supplierGroups: [],
       },
-      global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
 
     const inputs = wrapper.findAll('input[type="number"]')

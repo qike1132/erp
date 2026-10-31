@@ -1,6 +1,34 @@
 <template>
   <div class="pc-container">
-    <div class="page-card page-card-main">
+    <!-- 汇总下单整页视图（2026-10-31 由弹窗改为铺满内容区）：open 时替换整个订单列表卡片，
+         侧边栏保留。数据层 useSummaryModal 不变，仅承载方式从 UiDialog 换成页面视图。 -->
+    <div v-if="summary.open" class="page-card page-card-main">
+      <SummaryPanel
+        :factory-data="summary.factoryData"
+        :supplier-data="summary.supplierData"
+        :edit-mode="summary.editMode"
+        :loss-rate="summary.lossRate"
+        :loss-rate-save-state="summary.lossRateSaveState"
+        :loss-rate-mixed="summary.lossRateMixed"
+        :fabric-loss-rates="summary.fabricLossRates"
+        :fabric-loss-rate-mixed="summary.fabricLossRateMixed"
+        :group-spare-rates="summary.groupSpareRates"
+        :order-count="purchaseOrders.selectedIds.length"
+        :supplier-groups="summary.supplierGroups"
+        @close="handleSummaryClose"
+        @toggle-edit-mode="summary.toggleEditMode"
+        @save-edits="handleSaveFactoryEdits"
+        @update-qty="handleUpdateFactoryQty"
+        @apply-loss-rate="handleApplyLossRate"
+        @apply-fabric-loss-rate="handleApplyFabricLossRate"
+        @export-factory="summary.exportFactory"
+        @export-supplier="handleExportSupplier"
+        @print-factory="summary.printFactory"
+        @print-supplier="summary.printSupplier"
+      />
+    </div>
+
+    <div v-else class="page-card page-card-main">
       <div class="page-card-header">
         <div class="pc-tab-group" role="tablist">
           <button
@@ -144,32 +172,6 @@
       @saved="handleDetailSaved"
     />
 
-    <!-- Summary Modal -->
-    <SummaryModal
-      :open="summary.open"
-      :factory-data="summary.factoryData"
-      :supplier-data="summary.supplierData"
-      :edit-mode="summary.editMode"
-      :loss-rate="summary.lossRate"
-      :loss-rate-save-state="summary.lossRateSaveState"
-      :loss-rate-mixed="summary.lossRateMixed"
-      :fabric-loss-rates="summary.fabricLossRates"
-      :fabric-loss-rate-mixed="summary.fabricLossRateMixed"
-      :group-spare-rates="summary.groupSpareRates"
-      :order-count="purchaseOrders.selectedIds.length"
-      :supplier-groups="summary.supplierGroups"
-      @close="summary.close"
-      @toggle-edit-mode="summary.toggleEditMode"
-      @save-edits="handleSaveFactoryEdits"
-      @update-qty="handleUpdateFactoryQty"
-      @apply-loss-rate="handleApplyLossRate"
-      @apply-fabric-loss-rate="handleApplyFabricLossRate"
-      @export-factory="summary.exportFactory"
-      @export-supplier="handleExportSupplier"
-      @print-factory="summary.printFactory"
-      @print-supplier="summary.printSupplier"
-    />
-
     <!-- 同页 BOM 配置：不再跳 /product；保存/关闭直接回到本页续提状态机 -->
     <component
       :is="bomEditorComponent"
@@ -190,9 +192,10 @@ import CompletedOrdersPanel from './components/CompletedOrdersPanel.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import CompletedOrdersFilterInputs from './components/CompletedOrdersFilterInputs.vue'
 import { usePurchaseBomModal } from './composables/usePurchaseBomModal'
+import { useSummaryLeaveGuard } from './composables/useSummaryLeaveGuard'
 // P1-5: 模态框懒加载，减小 purchase 主 chunk（用户不点开则不加载）
 const OrderDetailModal = defineAsyncComponent(() => import('./components/OrderDetailModal.vue'))
-const SummaryModal = defineAsyncComponent(() => import('./components/SummaryModal.vue'))
+const SummaryPanel = defineAsyncComponent(() => import('./components/SummaryPanel.vue'))
 import { usePurchaseHandlers } from './composables/usePurchaseHandlers'
 
 const { bomEditorRef, bomEditorComponent, openBomEditor } = usePurchaseBomModal()
@@ -229,6 +232,10 @@ const {
  * 二者同表并列渲染，只取 purchaseOrders.total 会漏掉待生成行，徽标小于可见行数。
  */
 const activeOrderCount = computed(() => unprocessed.total + purchaseOrders.total)
+
+/* 汇总下单整页视图的离开守卫（编辑态确认）：判定与确认细节在 useSummaryLeaveGuard
+ * （View 在 400 行门禁边缘，接线一行化；弹窗时代靠遮罩拦导航，整页化后侧边栏可点）。 */
+const { handleSummaryClose } = useSummaryLeaveGuard(summary, confirm.confirm)
 
 /** 待生产/待生成任一列表加载失败时，重试两者 */
 function handleOrdersRetry() {

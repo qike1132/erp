@@ -36,7 +36,7 @@ vi.mock('@/composables/useExport', async () => {
 
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
 
@@ -261,9 +261,8 @@ describe('persistedLossRate / 取消编辑恢复真值', () => {
 
 describe('SummaryModal 组件：mixed 提示', () => {
   function mountModal(lossRateMixed: boolean) {
-    return mount(SummaryModal, {
+    return mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: factoryRes(),
         supplierData: null,
         editMode: false,
@@ -272,7 +271,6 @@ describe('SummaryModal 组件：mixed 提示', () => {
         supplierGroups: [],
         lossRateMixed,
       },
-      global: { stubs: { UiDialog: { template: '<div><slot name="title" /><slot /></div>' } } },
     })
   }
 

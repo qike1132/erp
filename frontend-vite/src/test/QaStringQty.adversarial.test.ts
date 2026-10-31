@@ -39,14 +39,10 @@ vi.mock('@/composables/useExport', async () => {
 })
 
 import { magnifyByLossRate, buildFactoryHtml, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
-import SummaryModal from '@/views/purchase/components/SummaryModal.vue'
+import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import { fmtQty } from '@/utils/formatQty'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
-
-const stubs = {
-  UiDialog: { template: '<div class="ui-dialog-stub"><slot name="title" /><slot /></div>' },
-}
 
 /** 后端 Decimal → 字符串 的模拟响应（quantity / total_quantity / product_quantity 全为字符串） */
 const STRING_FACTORY: FactorySummaryData = {
@@ -131,9 +127,8 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     await m.openSummary([7, 8])
     m.applyLossRate(5)
 
-    const wrapper = mount(SummaryModal, {
+    const wrapper = mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: m.factoryData,
         supplierData: m.supplierData,
         editMode: false,
@@ -141,7 +136,6 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
         orderCount: 1,
         supplierGroups: m.supplierGroups,
       },
-      global: { stubs },
     })
 
     const dataRows = wrapper.findAll('tbody tr').slice(0, 2)
@@ -168,9 +162,8 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     await m.openSummary([7, 8])
     m.applyLossRate(5)
 
-    const wrapper = mount(SummaryModal, {
+    const wrapper = mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: m.factoryData,
         supplierData: m.supplierData,
         editMode: false,
@@ -178,7 +171,6 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
         orderCount: 1,
         supplierGroups: m.supplierGroups,
       },
-      global: { stubs },
     })
     // 切到供应商 Tab
     await wrapper.findAll('.sm-tab-btn')[1]!.trigger('click')
@@ -201,9 +193,8 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     await m.openSummary([7, 8])
     m.applyLossRate(5)
 
-    const wrapper = mount(SummaryModal, {
+    const wrapper = mount(SummaryPanel, {
       props: {
-        open: true,
         factoryData: m.factoryData,
         supplierData: m.supplierData,
         editMode: true,
@@ -211,7 +202,6 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
         orderCount: 1,
         supplierGroups: m.supplierGroups,
       },
-      global: { stubs },
     })
     const inputs = wrapper.findAll('input[type="number"]')
     expect((inputs[0]!.element as HTMLInputElement).value).toBe('10.05')

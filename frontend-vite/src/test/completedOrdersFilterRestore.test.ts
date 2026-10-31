@@ -66,6 +66,7 @@ vi.mock('@tanstack/vue-query', async () => {
 })
 
 vi.mock('vue-router', () => ({
+  onBeforeRouteLeave: () => {},
   useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }))
@@ -98,7 +99,7 @@ const stubs = {
   ActiveOrdersPanel: { template: '<div />' },
   CompletedOrdersPanel: { template: '<div />' },
   OrderDetailModal: { template: '<div />' },
-  SummaryModal: { template: '<div />' },
+  SummaryPanel: { template: '<div />' },
   UiConfirmDialog: { template: '<div />' },
 }
 

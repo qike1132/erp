@@ -85,6 +85,7 @@ vi.mock('@tanstack/vue-query', async () => {
 })
 
 vi.mock('vue-router', () => ({
+  onBeforeRouteLeave: () => {},
   useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }))
@@ -143,7 +144,7 @@ async function mountView() {
         FontAwesomeIcon: { template: '<i />' },
         UiLoadingIcon: { template: '<i />' },
         OrderDetailModal: { template: '<div />' },
-        SummaryModal: { template: '<div />' },
+        SummaryPanel: { template: '<div />' },
         UiConfirmDialog: { template: '<div />' },
       },
     },
