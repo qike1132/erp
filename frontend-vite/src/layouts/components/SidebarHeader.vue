@@ -1,7 +1,10 @@
 <template>
   <div class="sb-header">
     <router-link to="/dashboard" class="sb-logo">
-      <img loading="lazy" src="/logo_plush.png" alt="东莞玩具" width="70" height="70" />
+      <picture>
+        <source srcset="/logo_plush-256.webp 256w, /logo_plush.webp 512w" sizes="70px" type="image/webp" />
+        <img src="/logo_plush.png" alt="东莞玩具" width="70" height="70" />
+      </picture>
       <div v-if="!collapsed" class="sb-logo-text">
         <div class="sb-logo-title">{{ APP_NAME_FULL }}</div>
         <div class="sb-logo-subtitle">供应链管理平台 v2.0</div>

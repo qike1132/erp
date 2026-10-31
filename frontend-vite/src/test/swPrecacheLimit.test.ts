@@ -24,9 +24,25 @@ function workboxBlock(): string {
 }
 
 describe('service worker precache', () => {
+  it('defers service worker registration so it cannot block HTML parsing', () => {
+    expect(src).toMatch(/injectRegister\s*:\s*'script-defer'/)
+  })
+
+  it('does not let manifest icons bypass the startup precache whitelist', () => {
+    expect(src).toMatch(/includeManifestIcons\s*:\s*false/)
+  })
+
   it('caps the precached file size', () => {
     expect(src).toMatch(/maximumFileSizeToCacheInBytes\s*:/)
     expect(workboxBlock()).toMatch(/maximumFileSizeToCacheInBytes\s*:\s*2\s*\*\s*1024\s*\*\s*1024/)
+  })
+
+  it('precaches startup assets instead of every route, chart, telemetry and icon chunk', () => {
+    const block = workboxBlock()
+    expect(block).toMatch(/globPatterns\s*:\s*\[[\s\S]*'assets\/app-entry-\*\.js'/)
+    expect(block).toMatch(/globPatterns\s*:\s*\[[\s\S]*'logo_plush\.webp'/)
+    expect(block).not.toMatch(/globPatterns\s*:\s*\[\s*['"]\*\*\/\*\./)
+    expect(block).not.toMatch(/'assets\/vendor-(?:echarts|fa-icons|primevue|reka-ui)-/)
   })
 
   it('keeps navigateFallback disabled', () => {

@@ -3,7 +3,10 @@
     <div class="brand-content">
       <div class="logo-wrapper">
         <div class="logo-frame">
-          <img loading="lazy" src="/logo_plush.png" alt="东莞玩具" />
+          <picture>
+            <source srcset="/logo_plush-256.webp 256w, /logo_plush.webp 512w" sizes="130px" type="image/webp" />
+            <img src="/logo_plush.png" alt="东莞玩具" width="512" height="512" fetchpriority="high" />
+          </picture>
         </div>
       </div>
 

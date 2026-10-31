@@ -1,7 +1,10 @@
 <template>
   <div class="m-login-page">
     <div class="m-login-logo-area">
-      <img loading="lazy" class="m-login-logo" src="/logo_plush.png" :alt="APP_NAME_FULL" />
+      <picture>
+        <source srcset="/logo_plush-256.webp 256w, /logo_plush.webp 512w" sizes="96px" type="image/webp" />
+        <img class="m-login-logo" src="/logo_plush.png" :alt="APP_NAME_FULL" width="512" height="512" fetchpriority="high" />
+      </picture>
       <div class="m-login-title">{{ APP_NAME_FULL }}</div>
       <div class="m-login-sub">Binfa Collaboration System</div>
     </div>

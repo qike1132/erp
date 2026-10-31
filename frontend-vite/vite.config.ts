@@ -71,6 +71,12 @@ export default defineConfig(({ mode }) => {
       }),
       VitePWA({
         registerType: 'autoUpdate',
+        // 经典 script 默认会阻塞 HTML 解析；defer 让首屏加载指示器先绘制，
+        // 同时保持自动注册与更新行为不变（CSP 仍无需 unsafe-inline）。
+        injectRegister: 'script-defer',
+        // manifest.icons 默认会被插件额外加入预缓存，绕过上面的启动白名单。
+        // 512px PNG 只作安装图标/旧浏览器回退，不应让首次访问额外下载 150KB。
+        includeManifestIcons: false,
         workbox: {
           // 2026-10-14：SW 不再接管 HTML —— 发布后用户一直看到旧界面的根因。
           // 原状：generateSW 默认 navigateFallback='index.html' + 预缓存收 index.html，
@@ -81,10 +87,27 @@ export default defineConfig(({ mode }) => {
           //     会让它绑到不存在的 URL → createHandlerBoundToURL 抛 non-precached-url。
           //   · globIgnores 把 index.html 移出预缓存；只关 navigateFallback 的话，
           //     workbox 预缓存的 directoryIndex 默认 'index.html'，从根路径进站仍中招。
-          // hashed 资源（js/css）照旧预缓存 CacheFirst，性能不受影响；导航一律回源。
+          // hashed 启动资源照旧预缓存 CacheFirst；导航一律回源。
           navigateFallback: null,
           globIgnores: ['**/index.html'],
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          // 只预缓存入口及其静态依赖。原先 **/* 会把所有路由、ECharts、
+          // Sentry（未配置 DSN 时根本不会加载）和整套图标在首次访问时拉一遍，
+          // 与首屏关键请求争抢带宽。按需路由/图标仍由下方 runtimeCaching 缓存。
+          // app-entry 名称由下方 entryFileNames 固定，避免把其他 index-*.js 误纳入。
+          globPatterns: [
+            'assets/app-entry-*.js',
+            'assets/polyfills-*.js',
+            'assets/vendor-vue-*.js',
+            'assets/vendor-query-*.js',
+            'assets/vendor-fontawesome-*.js',
+            'assets/vendor-axios-*.js',
+            'assets/index-*.css',
+            'app-loading-fallback.js',
+            'logo_plush.webp',
+            'logo_plush-256.webp',
+            'favicon.png',
+            'manifest.webmanifest',
+          ],
           // 首装带宽尖峰：单个超过 2MB 的 chunk 不预缓存，改由下方运行时缓存按需填充
           maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
           runtimeCaching: [
@@ -106,7 +129,7 @@ export default defineConfig(({ mode }) => {
                 cacheableResponse: { statuses: [0, 200] },
               },
             },
-            // 超过预缓存上限的 chunk 走运行时缓存（不阻塞首装）。
+            // 非启动路由、组件与图标 chunk 在首次实际使用时进入运行时缓存。
             // 用 CacheFirst 而非 StaleWhileRevalidate：assets 是内容哈希，天然不可变；
             // 且仓库守卫禁止 SWR/NetworkFirst（会缓存陈旧业务数据）。
             {
@@ -114,8 +137,8 @@ export default defineConfig(({ mode }) => {
               handler: 'CacheFirst',
               options: {
                 cacheName: 'large-chunks',
-                // 内容哈希每次部署换新，不设上限会永久累积
-                expiration: { maxEntries: 30 },
+                // 内容哈希每次部署换新；提高上限，减少多页面导航后的频繁逐出。
+                expiration: { maxEntries: 100 },
               },
             },
             // ERP 为数据一致性敏感系统：全部 API 请求一律 NetworkOnly（不缓存）。
@@ -156,6 +179,11 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           exports: 'auto',
+          // 给主入口稳定、可识别的文件名前缀，供 Workbox 精确白名单使用；
+          // 其他入口（如 polyfills）仍保持 Rollup 默认命名。
+          entryFileNames(chunk) {
+            return chunk.name === 'index' ? 'assets/app-entry-[hash].js' : 'assets/[name]-[hash].js'
+          },
           manualChunks(id: string) {
             // Capacitor 构建：分离 Capacitor 依赖
             if (isCapacitor) {
@@ -175,12 +203,10 @@ export default defineConfig(({ mode }) => {
               'vendor-query': ['@tanstack/vue-query'],
               'vendor-vueuse': ['@vueuse/core'],
               'vendor-fontawesome': ['@fortawesome/fontawesome-svg-core', '@fortawesome/vue-fontawesome'],
-              // 图标定义单独成 chunk：仅由 fontAwesomeLoader 动态 import 触发加载，
-              // 若与上面的 core 合并会被 entry 静态引入，导致整套图标重回首屏。
-              'vendor-fa-icons': ['@fortawesome/free-solid-svg-icons'],
-              'vendor-reka-ui': ['reka-ui'],
+              // 不再把 free-solid-svg-icons / reka-ui / primevue 各自合并成全量 vendor 包：
+              // 那会让首个图标、首个复选框或 primevue/config 拉起所有页面用到的组件。
+              // 交给 Rollup 按动态路由与 import 拆分，首屏只下载实际使用部分。
               'vendor-axios': ['axios'],
-              'vendor-primevue': ['primevue'],
             }
             for (const [name, deps] of Object.entries(chunks)) {
               for (const dep of deps) {

@@ -6,7 +6,10 @@
     <!-- 品牌区 -->
     <header class="m-login-brand">
       <div class="m-login-logo">
-        <img loading="lazy" src="/logo_plush.png" :alt="APP_NAME" width="96" height="96" />
+        <picture>
+          <source srcset="/logo_plush-256.webp 256w, /logo_plush.webp 512w" sizes="96px" type="image/webp" />
+          <img src="/logo_plush.png" :alt="APP_NAME" width="96" height="96" fetchpriority="high" />
+        </picture>
       </div>
       <h1 class="m-login-title">{{ APP_NAME }}</h1>
       <p class="m-login-sub">Binfa Collaboration System</p>

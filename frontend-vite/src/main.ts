@@ -114,8 +114,11 @@ async function bootstrap() {
     }
   } else {
     try {
-      const PrimeVueMod = await import('primevue/config')
-      const ptMod = await import('./styles/primevue-pt')
+      // 配置与 passthrough 样式无相互依赖，并行下载，避免挂载前多一个串行 RTT。
+      const [PrimeVueMod, ptMod] = await Promise.all([
+        import('primevue/config'),
+        import('./styles/primevue-pt'),
+      ])
       app.use(PrimeVueMod.default, {
         unstyled: true,
         pt: ptMod.plushCutePT,
