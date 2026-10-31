@@ -79,6 +79,41 @@ async def _invalidate_order_domains() -> None:
     )
 
 
+async def _purge_synced_plan_details(db: AsyncSession, order_no: str, product_id: int | None) -> None:
+    """明细删除/改量后清掉该 SKU 同步出的出货计划明细（2026-10-30 审计 A-M10）。
+
+    明细数量变了或整行被删，而按 remark 溯源同步出来的计划明细仍是旧数量/仍存在：
+    月历与采购计划会继续按旧量备料（超采购）。整单删除早有联动，明细级没有。
+    与订单同事务执行，失败一起回滚，不产生「订单改了、计划没改」的中间态。
+    """
+    from fastapi_app.services.shipment_plan_sync import purge_shipment_plan_details_for_sku
+
+    await purge_shipment_plan_details_for_sku(db, order_no, product_id)
+
+
+async def _assert_no_outsource_ledger(db: AsyncSession, order_id: int, product_id: int | None) -> None:
+    """明细删除前拦外发流水（2026-10-30 审计 A-M9）。
+
+    `order_item` 删除会 CASCADE 掉 `order_outsource_process`，后者再 CASCADE 掉
+    `order_outsource_process_flow` —— 外发发货/收货台账被一起抹掉，事后无法重建。
+    整单删除走备份路径，明细删除没有，因此这里直接拒绝：要删就删整单（有备份）。
+    """
+    if product_id is None:
+        return
+    from fastapi_app.shared_models.outsource import OrderOutsourceProcess, OrderOutsourceProcessFlow
+
+    flow_count = (await db.execute(
+        select(func.count(OrderOutsourceProcessFlow.id))
+        .join(OrderOutsourceProcess, OrderOutsourceProcess.id == OrderOutsourceProcessFlow.process_id)
+        .where(
+            OrderOutsourceProcess.order_id == order_id,
+            OrderOutsourceProcess.product_id == product_id,
+        )
+    )).scalar_one()
+    if int(flow_count or 0) > 0:
+        raise ValueError('该产品存在外发发货/收货流水，删除明细会抹掉台账；请改为删除整单（有备份）')
+
+
 
 from fastapi_app.services.order.approval_flow import (
     _check_order_lock,
@@ -255,6 +290,9 @@ async def update_order_item(db: AsyncSession, item_id: int, quantity: int | None
     order.quantity = int(total)
 
     if quantity is not None and quantity != old_qty:
+        # A-M10：数量已变，按 remark 溯源同步出来的计划明细仍是旧数量，
+        # 继续按旧量备料会超采购 —— 同事务内清掉本 SKU 的同步明细。
+        await _purge_synced_plan_details(db, order.order_no, item.product_id)
         db.add(InventoryLog(
             product_id=item.product_id, change_type='订单修改',
             change_quantity=quantity - old_qty,
@@ -339,10 +377,15 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     )).scalar_one_or_none()
     if item is None:
         raise ValueError('订单明细不存在')
+    # A-M9：非末项删除前拦外发流水（末项走整单删除，那条路径有备份）
+    await _assert_no_outsource_ledger(db, order.id, head.product_id)
     # 先取值再删：delete+flush 后不再读对象属性
     pid, qty = item.product_id, item.quantity
     await db.delete(item)
     await db.flush()
+    # A-M10：这一行被删了，按 remark 溯源同步出的计划明细必须一起清，
+    # 否则月历/采购计划会继续按已删 SKU 备料。
+    await _purge_synced_plan_details(db, order.order_no, pid)
     # 删掉的正是「订单兼容产品」所指明细时，把兼容值指向剩余的任一明细，避免悬空
     if pid is not None and pid == order.product_id:
         order.product_id = (await db.execute(
@@ -411,6 +454,8 @@ async def _update_order_directly(
             note=f'订单修改：{order.order_no}'
         )
         db.add(log)
+        # A-M10：整单改量同样要清掉该 SKU 同步出的计划明细（旧数量已失效）
+        await _purge_synced_plan_details(db, order.order_no, product_id)
 
     await db.flush()
 

@@ -69,6 +69,9 @@ async def test_edit_quantity_syncs_single_item():
         new_callable=AsyncMock, return_value=MagicMock(id=1, current_stock=100),
     ), patch(
         "fastapi_app.services.order._common._safe_publish_event", new_callable=AsyncMock,
+    ), patch(
+        # 出货计划联动由 test_shipment_plan_sku_purge 覆盖；这里只验证明细数量同步
+        "fastapi_app.services.order.commands._purge_synced_plan_details", new_callable=AsyncMock,
     ):
         await order_service.update_order(
             db, order_id=1, quantity=8888, customer="客户", note="", current_user=user,
@@ -98,6 +101,9 @@ async def test_multi_item_order_items_left_untouched():
         new_callable=AsyncMock, return_value=MagicMock(id=1, current_stock=100),
     ), patch(
         "fastapi_app.services.order._common._safe_publish_event", new_callable=AsyncMock,
+    ), patch(
+        # 出货计划联动由 test_shipment_plan_sku_purge 覆盖；这里只验证明细数量同步
+        "fastapi_app.services.order.commands._purge_synced_plan_details", new_callable=AsyncMock,
     ):
         await order_service.update_order(
             db, order_id=2, quantity=999, customer="客户", note="", current_user=user,

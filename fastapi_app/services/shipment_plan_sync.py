@@ -133,6 +133,33 @@ async def purge_shipment_plan_details_for_order(db: AsyncSession, order_no: str)
     Returns:
         {'detail_deleted': 明细条数, 'plan_deleted': 被删空移除的主单个数}
     """
+    return await _purge_synced_details(db, order_no)
+
+
+async def purge_shipment_plan_details_for_sku(
+    db: AsyncSession, order_no: str, product_id: int | None,
+) -> dict:
+    """清理某张订单**某个 SKU** 同步出的采购计划明细（2026-10-30 审计 A-M10）。
+
+    订单明细被删除或数量被改后，按 remark 溯源同步出来的计划明细仍是旧数量：
+    月历/采购计划会继续按已删 SKU 或旧数量备料（超采购）。整单删除早有
+    :func:`purge_shipment_plan_details_for_order`，明细级此前完全没有联动。
+
+    只删「本订单 + 本 SKU」的明细，同客户的其它订单/其它 SKU 不受影响；
+    被删空的计划主单一并移除，并在提交后失效受影响月份的缓存。
+
+    Returns:
+        {'detail_deleted': 明细条数, 'plan_deleted': 被删空移除的主单个数}
+    """
+    if product_id is None:
+        return {'detail_deleted': 0, 'plan_deleted': 0}
+    return await _purge_synced_details(db, order_no, product_id)
+
+
+async def _purge_synced_details(
+    db: AsyncSession, order_no: str, product_id: int | None = None,
+) -> dict:
+    """按 remark 溯源删除同步明细（order 级 / sku 级共用实现）。"""
     from sqlalchemy import delete, or_
 
     from fastapi_app.services import escape_like
@@ -142,12 +169,17 @@ async def purge_shipment_plan_details_for_order(db: AsyncSession, order_no: str)
     )
 
     prefix = f'来源订单:{escape_like(order_no)}'
-    hit_rows = (await db.execute(
-        select(PurchasePlanDetail.id, PurchasePlanDetail.plan_id)
-        .where(or_(
+    conditions = [
+        or_(
             PurchasePlanDetail.remark == prefix,
             PurchasePlanDetail.remark.like(prefix + '；%'),
-        ))
+        )
+    ]
+    if product_id is not None:
+        conditions.append(PurchasePlanDetail.product_id == product_id)
+
+    hit_rows = (await db.execute(
+        select(PurchasePlanDetail.id, PurchasePlanDetail.plan_id).where(*conditions)
     )).all()
     if not hit_rows:
         return {'detail_deleted': 0, 'plan_deleted': 0}
