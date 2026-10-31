@@ -11,12 +11,22 @@
     />
 
     <div class="page-card-body flex flex-col gap-3">
+      <!-- 汇总加载失败（A-M33）：四个 query 任一失败都从这里说明并给重试，
+           否则 KPI 条会停在骨架屏、部门卡片显示 0，用户无法判断是真没产量还是没取到 -->
+      <div v-if="summaryLoadError" class="pr-load-error" role="alert">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        <span>生产汇总数据加载失败，当前显示的数据可能不完整</span>
+        <UiButton size="sm" variant="outline" @click="retrySummaries">重试</UiButton>
+      </div>
+
       <CockpitKpiRow
         data-test="cockpit-kpi"
         :today="todaySummary"
         :yesterday="yesterdaySummary"
         :monthly="monthlySummary"
         :previous-month="previousMonthSummary"
+        :load-failed="summaryLoadError"
+        @retry="retrySummaries"
       />
 
       <div class="grid min-h-0 grid-cols-1 gap-3 xl:grid-cols-[2fr_1fr]">
@@ -65,6 +75,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 
 import { dailyProductionApi } from '@/api/production'
+import UiButton from '@/components/ui/UiButton.vue'
 import { showToast } from '@/composables/useToast'
 import type { DailyProductionRecord, DailySummary, MonthlySummary } from '@/types'
 import ProductionToolbar from './components/ProductionToolbar.vue'
@@ -105,7 +116,7 @@ function goToday() {
 }
 
 // ===== 三个数据源 =====
-const { data: dailyData, isFetching: dailyLoading } = useQuery({
+const { data: dailyData, isFetching: dailyLoading, isError: dailyError, refetch: refetchDaily } = useQuery({
   queryKey: computed(() => ['daily-production-daily-summary', selectedDate.value]),
   queryFn: () => dailyProductionApi.dailySummary(selectedDate.value),
   staleTime: 30_000,
@@ -117,14 +128,14 @@ const yesterdayDate = computed(() => {
   d.setDate(d.getDate() - 1)
   return toLocalDate(d)
 })
-const { data: yesterdayData } = useQuery({
+const { data: yesterdayData, isError: yesterdayError, refetch: refetchYesterday } = useQuery({
   queryKey: computed(() => ['daily-production-daily-summary', yesterdayDate.value]),
   queryFn: () => dailyProductionApi.dailySummary(yesterdayDate.value),
   staleTime: 30_000,
 })
 const yesterdaySummary = computed<DailySummary | null>(() => yesterdayData.value ?? null)
 
-const { data: monthlyData, isFetching: monthlyLoading } = useQuery({
+const { data: monthlyData, isFetching: monthlyLoading, isError: monthlyError, refetch: refetchMonthly } = useQuery({
   queryKey: computed(() => [
     'daily-production-monthly-summary',
     new Date(`${selectedDate.value}T00:00:00`).getFullYear(),
@@ -146,12 +157,27 @@ const previousMonthParts = computed(() => {
   const month = d.getMonth() === 0 ? 12 : d.getMonth()
   return { year, month }
 })
-const { data: previousMonthData } = useQuery({
+const { data: previousMonthData, isError: previousMonthError, refetch: refetchPreviousMonth } = useQuery({
   queryKey: computed(() => ['daily-production-monthly-summary', previousMonthParts.value.year, previousMonthParts.value.month]),
   queryFn: () => dailyProductionApi.monthlySummary(previousMonthParts.value),
   staleTime: 60_000,
 })
 const previousMonthSummary = computed<MonthlySummary | null>(() => previousMonthData.value ?? null)
+
+/**
+ * 汇总数据是否加载失败（2026-10-30 审计 A-M33）。
+ *
+ * 四个 query（今日/昨日/本月/上月）任一失败，KPI 条与部门卡片都会停在骨架屏或
+ * 显示 0 —— 同屏出现「骨架屏 + 暂无产量 + 0」三种互相矛盾的信号，且永不恢复。
+ * 这里聚合成一个失败态：横幅说明 + 重试，同时把 loadFailed 传给 KPI 行，
+ * 让它在没有数据时显示失败而不是永远转圈。
+ */
+const summaryLoadError = computed(
+  () => dailyError.value || yesterdayError.value || monthlyError.value || previousMonthError.value,
+)
+async function retrySummaries() {
+  await Promise.all([refetchDaily(), refetchYesterday(), refetchMonthly(), refetchPreviousMonth()])
+}
 
 const { trendQuery } = useProductionTrend(TREND_DAYS)
 const trendData = computed(() => trendQuery.data.value ?? null)
@@ -292,6 +318,18 @@ defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
 </script>
 
 <style scoped>
+/* 汇总加载失败横幅（A-M33）：与内容同宽，不遮挡工具栏 */
+.pr-load-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-danger-500, #ef4444);
+  border-radius: 10px;
+  background: var(--color-danger-50, #fef2f2);
+  color: var(--color-danger-700, #b91c1c);
+  font-size: 13px;
+}
 .pr-export-toast {
   position: fixed;
   top: 20px;

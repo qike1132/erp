@@ -38,6 +38,18 @@
       </UiStatCard>
     </template>
 
+    <!-- 加载失败（A-M33）：原先没有数据就恒显骨架屏，请求失败时会永远转圈；
+         失败必须显示成失败，并给一个重试入口 -->
+    <div
+      v-else-if="loadFailed"
+      class="col-span-2 flex flex-col items-center gap-2 rounded-xl border border-danger-200 bg-danger-50 px-4 py-6 text-sm text-danger-700 lg:col-span-4"
+      role="alert"
+      data-test="kpi-error"
+    >
+      <span>汇总数据加载失败，暂时无法显示 KPI</span>
+      <UiButton size="sm" variant="outline" @click="emit('retry')">重试</UiButton>
+    </div>
+
     <UiSkeleton v-else data-test="kpi-skeleton" variant="stat" class="col-span-2 lg:col-span-4" />
   </div>
 </template>
@@ -46,6 +58,7 @@
 import { computed, h } from 'vue'
 
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import UiStatCard from '@/components/ui/UiStatCard.vue'
 import { formatCurrency, formatNumber } from '@/utils/format'
 import type { DailySummary, MonthlySummary } from '@/types'
@@ -57,7 +70,14 @@ const props = defineProps<{
   monthly: MonthlySummary | null
   /** 上月汇总，只用于算"日均较上月"；为 null 时该处显示破折号 */
   previousMonth: MonthlySummary | null
+  /**
+   * 汇总请求是否失败（A-M33）。没有数据时用它区分「还在加载」与「加载失败」：
+   * 前者该转圈，后者该报错 + 重试；否则失败会表现为永远转圈的骨架屏。
+   */
+  loadFailed?: boolean
 }>()
+
+const emit = defineEmits<{ retry: [] }>()
 
 const quantityDelta = computed(() =>
   formatDelta(props.today?.overall_quantity ?? 0, props.yesterday?.overall_quantity ?? 0),

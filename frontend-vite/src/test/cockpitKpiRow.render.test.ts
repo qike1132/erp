@@ -87,4 +87,27 @@ describe('CockpitKpiRow', () => {
 
     expect(wrapper.text()).toContain('较上月 —')
   })
+
+  // 2026-10-30 审计 A-M33：没有数据时不能一律当成「还在加载」
+  it('请求失败且无数据 → 显示失败态与重试，而不是永远转圈的骨架屏', async () => {
+    const wrapper = mount(CockpitKpiRow, {
+      props: { today: null, yesterday: null, monthly: null, previousMonth: null, loadFailed: true },
+    })
+
+    expect(wrapper.find('[data-test="kpi-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="kpi-skeleton"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('汇总数据加载失败')
+
+    await wrapper.find('[data-test="kpi-error"] button').trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
+
+  it('没失败时仍走骨架（loadFailed 缺省不改变原有行为）', () => {
+    const wrapper = mount(CockpitKpiRow, {
+      props: { today: null, yesterday: null, monthly: null, previousMonth: null },
+    })
+
+    expect(wrapper.find('[data-test="kpi-skeleton"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="kpi-error"]').exists()).toBe(false)
+  })
 })
