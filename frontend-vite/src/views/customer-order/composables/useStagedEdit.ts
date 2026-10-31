@@ -15,6 +15,20 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
   const editStagedIdx = ref(-1)
   const editStagedData = ref<StagedItem | null>(null)
   const editAvailableStock = ref(0)
+  /**
+   * 可用备货查询状态（2026-10-30 审计 A-M36）。
+   *
+   * `editAvailableStock` 同时承担「数量输入框上限」与「保存前校验基准」两个职责，
+   * 因此必须能区分「查询中 / 查询成功且为 0 / 查询失败」：
+   * 失败时把 0 当成真值，会让用户以为「这个产品没有可用备货」，也让保存校验
+   * 无从判断；查询中也一样，0 只是个占位值。
+   */
+  const editStockState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  /**
+   * 查询序号：连续打开不同暂存条目时，先发的请求可能后到，把 A 产品的可用量
+   * 写到 B 产品上（用户按 A 的数字填抵扣量，后端按 B 的备货扣 → 少扣且无提示）。
+   */
+  let stockSeq = 0
 
   function openEditStaged(uid: string) {
     const idx = stagedItems.value.findIndex((i) => i.uid === uid)
@@ -26,17 +40,31 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
     const data: StagedItem = { ...source, shipmentPlans: source.shipmentPlans.map((s) => ({ ...s })) }
     editStagedData.value = data
     editStagedVisible.value = true
+    // 新的一次编辑：清空上一条目的可用量，别让「上一条的 N 件」在新弹窗里
+    // 停留到响应回来为止
+    editAvailableStock.value = 0
+    editStockState.value = 'idle'
+    const seq = ++stockSeq
     if (data.type === 'order' && data.productId && data.customer) {
-      auxApi.availableStockins({ product_id: data.productId, customer: data.customer })
+      const productId = data.productId
+      const customer = data.customer
+      editStockState.value = 'loading'
+      auxApi.availableStockins({ product_id: productId, customer: customer })
         .then((res) => {
+          // 已被更新的编辑请求取代（或弹窗已切到别的条目）：丢弃，不写回
+          if (seq !== stockSeq) return
+          if (editStagedData.value?.productId !== productId || editStagedData.value?.customer !== customer) return
           const items: AvailableStockinItem[] = Array.isArray(res) ? res : []
           editAvailableStock.value = items.reduce(
             (s: number, i: AvailableStockinItem) => s + (i.available ?? i.quantity - (i.deducted || 0)),
             0,
           )
+          editStockState.value = 'ready'
         })
         .catch(() => {
+          if (seq !== stockSeq) return
           editAvailableStock.value = 0
+          editStockState.value = 'error'
         })
     }
   }
@@ -46,6 +74,20 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
     if (editStagedData.value && isQuantityOutOfRange(editStagedData.value.quantity)) {
       showToast(QUANTITY_RANGE_MESSAGE, 'warning')
       return
+    }
+    // 抵扣数量不得超过（已确认的）可用备货（A-M36）。后端 `min(请求, 可用)`
+    // 是静默截断：填 10 实际只扣 6 也不报错，用户只能事后发现少扣。
+    // 查询失败时无法确认上限 —— 宁可拦住并要求重试，也不放行一个无法校验的数。
+    if (editStagedData.value?.type === 'order' && (editStagedData.value.deductStock || editStagedData.value.deductQuantity > 0)) {
+      const requested = editStagedData.value.deductQuantity || 0
+      if (requested > 0 && editStockState.value === 'error') {
+        showToast('可用备货查询失败，无法确认抵扣数量，请重试后再保存', 'warning')
+        return
+      }
+      if (requested > 0 && editStockState.value === 'ready' && requested > editAvailableStock.value) {
+        showToast(`抵扣数量 ${requested} 超过当前可用备货 ${editAvailableStock.value}，请调整后再保存`, 'warning')
+        return
+      }
     }
     // 分批出货计划校验（2026-10-06 v2）：行完整性 + 排满口径，
     // 与录入表单同规则同文案，否则提交时会被后端整组拒绝
@@ -76,6 +118,7 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
     editStagedIdx,
     editStagedData,
     editAvailableStock,
+    editStockState,
     openEditStaged,
     saveEditStaged,
   }

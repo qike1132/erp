@@ -148,6 +148,8 @@ export function useOrderForm() {
   // ===== Deduct stock =====
   const availableStock = ref(0)
   const deductInfoVisible = ref(false)
+  /** 可用备货请求序号（A-M36）：只接受最后一次请求的结果，防跨产品串数 */
+  let stockFetchSeq = 0
   /** 可用备货查询的失败/前置条件原因。非空时界面展示该原因，
    * 而不是把「查询失败」或「还没选客户」呈现成「暂无可用备货」这一业务结论。 */
   const stockError = ref('')
@@ -158,12 +160,22 @@ export function useOrderForm() {
       stockError.value = '请先选择产品与客户，才能查询可用备货'
       return
     }
+    // 请求序号（A-M36）：连续换产品/客户时先发的请求可能后到，把 A 产品的
+    // 可用量写到 B 产品上——用户照着这个数字填抵扣量，后端按 B 的备货扣，
+    // 结果就是「少扣且无提示」。只接受最后一次请求、且产品/客户未变的结果。
+    const seq = ++stockFetchSeq
+    const productId = form.productId
+    const customer = form.customer
     try {
-      const res = await auxApi.availableStockins({ product_id: form.productId, customer: form.customer })
+      const res = await auxApi.availableStockins({ product_id: productId, customer: customer })
+      if (seq !== stockFetchSeq) return
+      if (form.productId !== productId || form.customer !== customer) return
       const items: AvailableStockinItem[] = Array.isArray(res) ? res : []
       availableStock.value = items.reduce((s: number, i: AvailableStockinItem) => s + (i.available ?? i.quantity - (i.deducted || 0)), 0)
       stockError.value = ''
     } catch {
+      if (seq !== stockFetchSeq) return
+      if (form.productId !== productId || form.customer !== customer) return
       availableStock.value = 0
       stockError.value = '可用备货查询失败，请重试'
     }
@@ -229,6 +241,7 @@ export function useOrderForm() {
     availableStock,
     deductInfoVisible,
     stockError,
+    fetchAvailableStock,
     handleDeductPreview,
     openDeductEdit,
     resetFormAfterAdd,

@@ -340,3 +340,116 @@ describe('useOutsourceProcess 一键发货/收货数量草稿三分支（P1-21 �
     expect(outsourceApi.receiveProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 3 }])
   })
 })
+
+describe('useOutsourceProcess 快速换单的请求序号（A-M35）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    grantedPermissions = new Set(['outsource_manage', 'outsource_ship', 'outsource_receive'])
+    currentUsername = 'admin'
+  })
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    const promise = new Promise<T>((res) => {
+      resolve = res
+    })
+    return { promise, resolve }
+  }
+
+  it('A 单的响应后到，不得覆盖 B 单的工序列表', async () => {
+    const slowA = deferred<unknown>()
+    const fastB = deferred<unknown>()
+    vi.mocked(outsourceApi.orderProcesses)
+      .mockReturnValueOnce(slowA.promise as never)
+      .mockReturnValueOnce(fastB.promise as never)
+
+    const detailRef = ref<OutsourceOrderRow>(detail)
+    const hook = useOutsourceProcess(detailRef, () => {})
+
+    const loadA = hook.loadProcesses(1)
+    const loadB = hook.loadProcesses(2) // 用户此时已切到 B 单
+
+    fastB.resolve({ success: true, total: 1, data: [makeProcess({ id: 22, order_id: 2, process_type: '转印' })] })
+    await loadB
+    slowA.resolve({ success: true, total: 1, data: [makeProcess({ id: 11, order_id: 1 })] })
+    await loadA
+
+    // 无序号守卫时这里会变成 [11]：弹窗标题是 B 单、工序行却是 A 单的
+    expect(hook.processes.value.map((p) => p.id)).toEqual([22])
+    expect(hook.loadingProcesses.value).toBe(false)
+  })
+
+  it('旧请求的 finally 不得提前关掉新请求的加载态', async () => {
+    const slowA = deferred<unknown>()
+    const slowB = deferred<unknown>()
+    vi.mocked(outsourceApi.orderProcesses)
+      .mockReturnValueOnce(slowA.promise as never)
+      .mockReturnValueOnce(slowB.promise as never)
+
+    const hook = useOutsourceProcess(ref<OutsourceOrderRow>(detail), () => {})
+    const loadA = hook.loadProcesses(1)
+    const loadB = hook.loadProcesses(2)
+
+    slowA.resolve({ success: true, total: 0, data: [] })
+    await loadA
+    // B 单请求仍在途：此时若被旧请求关掉 loading，界面会露出「A 单的空列表」
+    expect(hook.loadingProcesses.value).toBe(true)
+
+    slowB.resolve({ success: true, total: 0, data: [] })
+    await loadB
+    expect(hook.loadingProcesses.value).toBe(false)
+  })
+
+  it('已切到 B 单但工序仍是 A 单时，一键发货被拦下（不按 B 的 orderId 提交 A 的 process_id）', async () => {
+    vi.mocked(outsourceApi.orderProcesses).mockResolvedValue({
+      success: true,
+      total: 1,
+      data: [makeProcess({ id: 1, order_id: 1, process_type: '电绣', shipped_quantity: 0 })],
+    } as never)
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+
+    const detailRef = ref<OutsourceOrderRow>(detail)
+    const hook = useOutsourceProcess(detailRef, () => {})
+    await hook.loadProcesses(1)
+
+    // 换单：新单的工序还没回来，processes 里仍是 A 单那一帧
+    detailRef.value = { ...detail, id: 2 } as OutsourceOrderRow
+
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('工序数据与当前订单不一致'))
+  })
+
+  it('一键收货同样受归属校验保护', async () => {
+    vi.mocked(outsourceApi.orderProcesses).mockResolvedValue({
+      success: true,
+      total: 1,
+      data: [makeProcess({ id: 1, order_id: 1, process_type: '电绣', shipped_quantity: 4 })],
+    } as never)
+
+    const detailRef = ref<OutsourceOrderRow>(detail)
+    const hook = useOutsourceProcess(detailRef, () => {})
+    await hook.loadProcesses(1)
+    detailRef.value = { ...detail, id: 2 } as OutsourceOrderRow
+
+    await hook.handleBulkReceive()
+
+    expect(outsourceApi.receiveProcessesBatch).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('工序数据与当前订单不一致'))
+  })
+
+  it('同单内正常发货不受归属校验影响', async () => {
+    vi.mocked(outsourceApi.orderProcesses).mockResolvedValue({
+      success: true,
+      total: 1,
+      data: [makeProcess({ id: 1, order_id: 1, process_type: '电绣', shipped_quantity: 4 })],
+    } as never)
+    vi.mocked(outsourceApi.shipProcessesBatch).mockResolvedValue({ success: true, total: 1, data: [] } as never)
+
+    const hook = await setup([makeProcess({ id: 1, order_id: 1, shipped_quantity: 4 })])
+    await hook.handleBulkShip()
+
+    expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 6 }])
+  })
+})

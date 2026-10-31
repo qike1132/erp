@@ -26,6 +26,22 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
   /** 外发工序流水（发货/收货记录，台账用） */
   const flows = ref<OutsourceProcessFlow[]>([])
 
+  /**
+   * 请求序号（2026-10-30 审计 A-M35）。
+   *
+   * 弹窗按 `detailData.id` 触发加载，但用户可以在前一次请求在途时切到另一张单：
+   * 后发的请求不保证后到。没有序号时，A 单的响应会覆盖 B 单的 `processes`，
+   * 于是弹窗标题是 B 单、工序行是 A 单，一键发货按 B 单的 orderId 提交 A 单的
+   * process_id —— 轻则 400，重则把 A 单的工序记到 B 单名下。
+   *
+   * 工序与流水各用一个计数器：两者是并行的两个请求，共用一个计数器会让
+   * 「先发的工序请求」被「后发的流水请求」判为过期而整块丢弃。
+   */
+  let processSeq = 0
+  let flowSeq = 0
+  /** `processes` 当前承载的是哪张订单的数据（null = 尚无有效数据） */
+  const loadedProcessOrderId = ref<number | null>(null)
+
   /** 每道工序可编辑的本批发货数量草稿（缺省=剩余待发） */
   const shipQtyDrafts = reactive<Record<number, string>>({})
   /** 每道工序可编辑的本批收货数量草稿（缺省=剩余待收） */
@@ -146,26 +162,37 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
   }
 
   async function loadProcesses(orderId: number) {
+    const seq = ++processSeq
     loadingProcesses.value = true
     processes.value = []
+    loadedProcessOrderId.value = null
     // 清空数量草稿，避免跨订单/重载后残留旧值
     for (const k of Object.keys(shipQtyDrafts)) delete shipQtyDrafts[Number(k)]
     for (const k of Object.keys(receiveQtyDrafts)) delete receiveQtyDrafts[Number(k)]
     try {
       const res = await outsourceApi.orderProcesses(orderId)
+      // 已被更新的请求取代：丢弃这份（可能属于上一张单）的数据，也不要动 loading
+      if (seq !== processSeq) return
       processes.value = res.data ?? []
+      loadedProcessOrderId.value = orderId
     } catch {
+      if (seq !== processSeq) return
       toast.error('加载外发工序失败')
     } finally {
-      loadingProcesses.value = false
+      // 只有最新一次请求才有资格结束加载态，否则旧请求的 finally 会提前把
+      // 骨架屏关掉、露出上一张单的空列表
+      if (seq === processSeq) loadingProcesses.value = false
     }
   }
 
   async function loadFlows(orderId: number) {
+    const seq = ++flowSeq
     try {
       const res = await outsourceApi.orderFlows(orderId)
+      if (seq !== flowSeq) return
       flows.value = res.data ?? []
     } catch {
+      if (seq !== flowSeq) return
       flows.value = []
     }
   }
@@ -232,15 +259,30 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     return items
   }
 
+  /**
+   * 工序数据是否属于当前订单（A-M35 的第二道闸）。
+   *
+   * 序号守卫只在**响应到达时**生效：切单瞬间 `processes` 里仍是上一张单的最后
+   * 一帧（新单的请求刚发出、还没被清空/替换），此时点一键发货就会把上一张单的
+   * process_id 提交到当前 orderId 下。这里在动手前显式比对归属，宁可让用户重开
+   * 一次弹窗，也不要把工序记到别的订单名下。
+   */
+  function processesBelongTo(orderId: number): boolean {
+    if (loadedProcessOrderId.value === orderId) return true
+    toast.error('工序数据与当前订单不一致，请重新打开该订单后再操作')
+    return false
+  }
+
   /** 一键发货：所有有待发剩余的工序，单请求单事务批量发货（数量取各行输入，缺省剩余） */
   async function handleBulkShip() {
+    const orderId = detailData.value?.id
+    if (!orderId) return
+    if (!processesBelongTo(orderId)) return
     const targets = processes.value.filter((p) => remainingShipQty(p) > 0)
     if (targets.length === 0) {
       toast.info('没有待发货的工序')
       return
     }
-    const orderId = detailData.value?.id
-    if (!orderId) return
     const items = buildBatchItems(targets, shipQtyDrafts, remainingShipQty)
     if (!items) return
     bulkShipping.value = true
@@ -258,13 +300,14 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
 
   /** 一键收货：所有有待收剩余的工序，单请求单事务批量收货（数量取各行输入，缺省剩余） */
   async function handleBulkReceive() {
+    const orderId = detailData.value?.id
+    if (!orderId) return
+    if (!processesBelongTo(orderId)) return
     const targets = processes.value.filter((p) => remainingReceiveQty(p) > 0)
     if (targets.length === 0) {
       toast.info('没有待收货的工序')
       return
     }
-    const orderId = detailData.value?.id
-    if (!orderId) return
     const items = buildBatchItems(targets, receiveQtyDrafts, remainingReceiveQty)
     if (!items) return
     bulkReceiving.value = true

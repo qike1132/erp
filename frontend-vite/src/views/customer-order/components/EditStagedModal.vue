@@ -40,9 +40,30 @@
       </div>
       <div v-if="editStagedData.type === 'order'" class="co-form-group">
         <label class="co-label">抵扣备货数量</label>
-        <input v-model.number="editStagedData.deductQuantity" type="number" class="form-number-input" min="0" :max="Math.min(editStagedData.quantity, editAvailableStock)" step="1" style="width: 100%" name="deduct-quantity" autocomplete="off" aria-label="抵扣备货数量" />
-        <small v-if="editAvailableStock > 0" style="color: var(--color-success-700); margin-top: 4px; display: block">
+        <input
+          v-model.number="editStagedData.deductQuantity"
+          type="number"
+          class="form-number-input"
+          min="0"
+          :max="deductMax"
+          step="1"
+          style="width: 100%"
+          name="deduct-quantity"
+          autocomplete="off"
+          aria-label="抵扣备货数量"
+          aria-describedby="es-deduct-hint"
+        />
+        <small v-if="editStockState === 'loading'" id="es-deduct-hint" style="color: var(--color-text-muted); margin-top: 4px; display: block">
+          正在查询可用备货…
+        </small>
+        <small v-else-if="editStockState === 'error'" id="es-deduct-hint" style="color: var(--color-danger-600); margin-top: 4px; display: block" role="status">
+          <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" /> 可用备货查询失败：抵扣数量无法校验，保存前请重试
+        </small>
+        <small v-else-if="editAvailableStock > 0" id="es-deduct-hint" style="color: var(--color-success-700); margin-top: 4px; display: block">
           <FontAwesomeIcon icon="check-circle" aria-hidden="true" /> 可用备货: <strong>{{ editAvailableStock }}</strong> 件
+        </small>
+        <small v-else-if="editStockState === 'ready'" id="es-deduct-hint" style="color: var(--color-text-muted); margin-top: 4px; display: block">
+          该客户当前无可用备货，抵扣数量应为 0
         </small>
       </div>
       <!-- 分批出货计划（2026-10-06 v2）：仅订单类型，供导入/OCR 条目补设或修改手工条目 -->
@@ -132,11 +153,24 @@ import {
 const props = defineProps<{
   open: boolean
   editAvailableStock: number
+  /** 可用备货查询状态：只有 'ready' 时的 editAvailableStock 才是可信上限 */
+  editStockState: 'idle' | 'loading' | 'ready' | 'error'
   customerOptions: { label: string; value: string }[]
   saveEditStaged: () => void
 }>()
 
 const editStagedData = defineModel<StagedItem | null>('editStagedData')
+
+/**
+ * 抵扣数量输入框上限（A-M36）：查询未成功前不设上限，避免把「查询中/查询失败」
+ * 的占位 0 当成业务事实，让用户根本填不进任何值；真正的拦截在 saveEditStaged。
+ */
+const deductMax = computed(() => {
+  if (!editStagedData.value) return undefined
+  return props.editStockState === 'ready'
+    ? Math.min(editStagedData.value.quantity, props.editAvailableStock)
+    : editStagedData.value.quantity
+})
 
 /**
  * 分批出货计划（2026-10-06 v2）：

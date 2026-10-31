@@ -57,6 +57,7 @@
       v-model:open="editStagedVisible"
       v-model:edit-staged-data="editStagedData"
       :edit-available-stock="editAvailableStock"
+      :edit-stock-state="editStockState"
       :customer-options="customerOptions"
       :save-edit-staged="saveEditStaged"
     />
@@ -102,6 +103,7 @@ const {
   availableStock,
   deductInfoVisible,
   stockError,
+  fetchAvailableStock,
   handleDeductPreview,
   openDeductEdit,
   resetFormAfterAdd,
@@ -118,6 +120,7 @@ const {
   editStagedVisible,
   editStagedData,
   editAvailableStock,
+  editStockState,
   openEditStaged,
   saveEditStaged,
   excelFile,
@@ -141,7 +144,7 @@ function addStagedItems(items: StagedItem[]) {
   stagedItems.value.push(...items)
 }
 
-function addStaged() {
+async function addStaged() {
   // 主操作始终可点：缺项时把「缺什么」说出来，而不是把按钮变灰后沉默。
   // （原先按钮被 :disabled 拦掉，这段提示在鼠标与键盘两条路径上都不可能出现）
   if (missingFields.value.length) {
@@ -157,6 +160,20 @@ function addStaged() {
   if (planSplitsInvalid.value) {
     showToast(planSplitsInvalid.value, 'warning')
     return
+  }
+  // 抵扣量提交前复核（A-M36）：界面上的「可用备货」是上次查询的快照，期间可能有
+  // 别的单据扣过同一批备货；后端对超量抵扣做 min() 静默截断（不报错），用户只会
+  // 在事后发现「说好扣 10 实际只扣了 6」。这里重新查一次，超量就拦住并给出具体数字。
+  if (isOrder.value && form.deductStock && form.deductQuantity > 0) {
+    await fetchAvailableStock()
+    if (stockError.value) {
+      showToast(`可用备货未能确认：${stockError.value}`, 'warning')
+      return
+    }
+    if (form.deductQuantity > availableStock.value) {
+      showToast(`抵扣数量 ${form.deductQuantity} 超过当前可用备货 ${availableStock.value}，请调整后再添加`, 'warning')
+      return
+    }
   }
   stagedItems.value.push({
     uid: genUid(),
