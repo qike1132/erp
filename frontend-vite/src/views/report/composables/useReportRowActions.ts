@@ -27,6 +27,7 @@ import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
 import { useStockinEdit } from './useStockinEdit'
+import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 import type { OrderRecord } from './orderRecordTypes'
 
 export type ReportActionTab = 'order' | 'stockin' | 'stockout' | 'deduction' | 'return'
@@ -91,8 +92,11 @@ export function useReportRowActions() {
   const queryClient = useQueryClient()
   const authStore = useAuthStore()
 
-  /** 写入成功后的刷新：前缀失效当前报表查询（queryKey 以 'report-data' 开头） */
-  const refreshAfterWrite = () => queryClient.invalidateQueries({ queryKey: ['report-data'] })
+  /** 写入成功后的刷新：统一失效订单/备货/出货的全部派生查询（集中列表见 queryKeys.ts）。
+   * 2026-10-31：此前只失效 report-data —— inventory 等派生查询被 persistQueryClient
+   *  持久化到 sessionStorage，改完在别处打开 /stock 会命中恢复的旧快照且 age < staleTime，
+   *  根本不发请求（表现为「/stock 订单数量约 20~30s 后才更新」）。必须整体失效。 */
+  const refreshAfterWrite = async () => { invalidateOrderDerivedQueries(queryClient) }
 
   const confirmDialog = useConfirmDialog()
   const stockinEdit = useStockinEdit(refreshAfterWrite, confirmDialog)

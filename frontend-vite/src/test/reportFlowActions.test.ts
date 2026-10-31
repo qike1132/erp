@@ -132,6 +132,22 @@ describe('订单流水：单 SKU 直连', () => {
     expect(api.orderItemEditVisible.value).toBe(false)
   })
 
+  it('写入成功后失效订单派生查询（含 inventory）——2026-10-31 /stock 延迟修复', async () => {
+    // 回归：refreshAfterWrite 曾只失效 ['report-data']；inventory 被持久化到
+    // sessionStorage 且 staleTime 30s，改完在别处打开 /stock 会命中旧快照
+    // 不发请求，约 20~30s 后才更新。必须走 invalidateOrderDerivedQueries 整体失效。
+    const api = makeActions()
+    await api.onRowAction('order', 'edit', ORDER_ROW)
+    api.orderItemEditForm.value = { ...api.orderItemEditForm.value!, quantity: 200, note: '改' }
+    await api.saveOrderItemEdit()
+
+    expect(mocks.updateItem).toHaveBeenCalled()
+    const keys = mocks.invalidateQueries.mock.calls.map((c: unknown[]) => (c[0] as { queryKey: string[] }).queryKey)
+    const prefixes = keys.map((k) => k[0])
+    expect(prefixes).toContain('inventory')
+    expect(prefixes).toContain('report-data')
+  })
+
   it('无 item_id（历史订单）时拒绝，不调接口', async () => {
     const api = makeActions()
     await api.onRowAction('order', 'delete', { ...ORDER_ROW, item_id: 0 })
