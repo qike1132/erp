@@ -29,6 +29,11 @@ from fastapi_app.shared_models import User
 
 router = APIRouter()
 
+# M2（2026-10-31 评审）：本模块三处 per_page le=500 是承重契约，勿收紧——前端
+# views/batch/composables/useBatchQuery.ts 的 BATCH_PAGE_SIZE=500 逐页拉取
+# （批次查询主查询 + 完成批次，最多 20 页 × 500 行），收紧会直接 422 打挂批次查询页。
+# 其余列表端点已统一收紧到 le=200（UI 每页选择器最大 200，见 UiDataTable/useEnhancedList）。
+
 
 @router.get('/batch-query', response_model=BatchQueryListResponse)
 async def batch_query_list(

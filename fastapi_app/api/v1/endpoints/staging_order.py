@@ -25,6 +25,10 @@ from fastapi_app.shared_models import User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# M2（2026-10-31 评审）：per_page le=500 是承重契约，勿收紧——前端
+# views/customer-order/composables/useOrderImport.ts 的 STAGING_PAGE_SIZE=500
+# 逐页拉取暂存订单，收紧会直接 422 打挂导入暂存区。
+
 @router.get('', response_model=StagingListResponse, summary='获取暂存订单列表')
 async def get_staging_orders(session_id: str=Query('default', max_length=50, description='会话ID'), page: int=Query(1, ge=1, description='页码'), per_page: int=Query(100, ge=1, le=500, description='每页数量'), db: AsyncSession=Depends(get_async_read_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """获取指定会话的暂存订单列表"""

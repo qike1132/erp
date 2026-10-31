@@ -74,7 +74,7 @@ async def _assert_order_factory_scoped(db: AsyncSession, order_id: int, user: Us
 @router.get("/list", response_model=OrderListResponse)
 async def list_orders(
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=200, description="每页数量"),
     customer: str | None = Query(None, max_length=100, description="客户名筛选"),
     product_id: int | None = Query(None, description="产品ID筛选"),
     status: str | None = Query(None, max_length=20, description="状态筛选"),
@@ -131,7 +131,7 @@ async def list_orders(
 @router.get("/beile-list", response_model=OrderListResponse)
 async def list_beile_orders(
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=200, description="每页数量"),
     customer: str | None = Query(None, max_length=100, description="客户名筛选"),  # B3-07
     confirm_status: str | None = Query(None, max_length=20, description="湖北订单确认状态筛选：unconfirmed=未确认 / confirmed=已确认"),  # B3-07
     product: str | None = Query(None, max_length=100, description="产品关键字筛选（匹配产品名称或条码）"),  # B3-07
@@ -216,7 +216,7 @@ async def my_approvals(
 @router.get("/records", response_model=OrderListResponse)
 async def list_unified_records(
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=200, description="每页数量"),
     record_type: Literal['all', 'order', 'stockin'] = Query(
         'all', description="记录类型：all=全部 / order=订单 / stockin=备货"),
     product: str | None = Query(None, max_length=100, description="产品关键字（匹配名称或条码）"),  # B3-07

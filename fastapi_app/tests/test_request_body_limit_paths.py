@@ -259,3 +259,50 @@ async def test_chunked_body_path_limit_still_applies(client):
     )
     assert resp.status_code != 413, f'路径级放宽对流式请求失效: {resp.text[:200]}'
 
+
+async def test_chunked_body_over_streaming_budget_is_413(client):
+    """M1（2026-10-31 评审）：无 CL 请求的缓冲预算独立收紧为 2MB。
+
+    修复前 chunked 预算沿用路径级上限（默认路径 10MB）：3MB 流可全部缓冲进内存。
+    修复后 min(路径上限, _CHUNKED_BODY_LIMIT=2MB)——3MB 流在 2MB 处提前 413，
+    单请求峰值内存从 ~2×路径上限 降到 ~2×2MB，杜绝导入路径 64MB 级内存放大。
+    """
+    resp = await client.post(
+        '/api/v1/orders',
+        content=_chunked_body(3),
+        headers={'content-type': 'application/octet-stream'},
+    )
+    assert resp.status_code == 413, f'3MB 流式请求未被独立预算拦下: {resp.status_code} {resp.text[:200]}'
+
+
+async def test_chunked_body_content_reaches_endpoint():
+    """M1 语义锁：chunked 分支缓冲的请求体必须完整送达端点（不能只拦不传）。
+
+    探针端点 /auth/login（公开 + CSRF 豁免）。判定：422 = body 丢失/未解析，
+    413 = 中间件误拦——出现任一即失败。其余状态码都证明 body 已送达并解析
+    （401 = 凭据校验走完；本测试环境的 DB 会话是 AsyncMock，端点拿到已解析的
+    username/password 后才撞上 mock → 500，同样证明 body 完整抵达端点函数）。
+
+    不复用 conftest 的 client 夹具：其一该夹具带 Bearer/CSRF 头（login 用不上），
+    其二 httpx ASGITransport 默认 raise_app_exceptions=True，会把 AsyncMock 引发的
+    AttributeError（Starlette ServerErrorMiddleware 发完 500 响应后重抛）透传进
+    测试，掩盖真正的断言目标。这里自建 raise_app_exceptions=False 的客户端。
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from fastapi_app.main import app
+
+    async def _body():
+        yield b'{"username": "probe_chunked_user", "password": "probe_pass"}'
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url='http://test') as ac:
+        resp = await ac.post(
+            '/api/v1/auth/login',
+            content=_body(),
+            headers={'content-type': 'application/json'},
+        )
+    assert resp.status_code not in (413, 422), (
+        f'chunked 请求体未完整送达端点: {resp.status_code} {resp.text[:200]}'
+    )
+

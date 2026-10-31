@@ -133,6 +133,15 @@ _MULTIPART_OVERHEAD_BYTES = 2 * 1024 * 1024
 _EXCEL_UPLOAD_BODY_LIMIT = int(os.environ.get(
     'MAX_EXCEL_UPLOAD_BODY_BYTES', str(10 * 1024 * 1024 + _MULTIPART_OVERHEAD_BYTES)))
 
+# M1（2026-10-31 评审）：无 Content-Length（chunked/流式）请求的**独立缓冲预算**。
+# 生产链路 nginx 以 HTTP/1.0 反代且默认缓冲请求体（proxy_request_buffering on），
+# 到达 uvicorn 的请求必然携带 Content-Length——chunked 只可能来自直连 :5002 的
+# 手工/异常客户端。此前该分支沿用路径级上限（导入路径可达 64MB），每个并发请求
+# 在中间件内缓冲 ~2×预算（chunk 列表 + join），构成内存放大面。现独立收紧为
+# 2MB（MAX_CHUNKED_BODY_BYTES 可覆盖）：正常大上传请走 nginx（带 CL，不受影响）；
+# 直连客户端超预算得到明确 413。备份路径维持 411 前置（见下方分支）。
+_CHUNKED_BODY_LIMIT = int(os.environ.get('MAX_CHUNKED_BODY_BYTES', str(2 * 1024 * 1024)))
+
 _PATH_BODY_LIMITS: tuple[tuple[str, int], ...] = (
     # 匿名 Web Vitals：小 JSON 即可，禁止借通用 10MB 预算放大内存与日志。
     ('/api/v1/monitoring/vitals', 64 * 1024),
@@ -366,6 +375,9 @@ def _setup_csrf(app: FastAPI) -> None:
         _csrf_samesite = "lax"
         _has_bearer_resp = request.headers.get("authorization", "").startswith("Bearer ")
         _csrf_sec = _csrf_secure() if (_is_https and not _has_bearer_resp) else False
+        # L5（2026-10-31 评审）：httponly=False 是 double-submit CSRF 防御的固有设计，
+        # 不是缺陷——前端必须能读 fastapi_csrf_token 才能回填 X-CSRF-Token 头完成
+        # 双重提交校验；会话凭据本身（access_token/refresh_token）始终是 httpOnly。
         response.set_cookie(
             key="fastapi_csrf_token",
             value=csrf_token,
@@ -535,14 +547,16 @@ def _setup_body_size_limit(app: FastAPI) -> None:
                     )
             else:
                 # 无 Content-Length（chunked/流式上传）：备份路径要求带长度（nginx 正常
-                # 代理会带），否则 411；其余路径不允许借 chunked 绕过 64MB 导入上限。
+                # 代理会带），否则 411；其余路径按 M1 独立预算 min(路径上限, 2MB) 计数，
+                # 边读边判、超限即拒——不允许借 chunked 绕过任何路径级上限，也不给
+                # 直连客户端 64MB 级的内存放大面（见 _CHUNKED_BODY_LIMIT 注释）。
                 if request.url.path.startswith('/api/v1/backup'):
                     return Response(
                         content='{"detail":"备份上传必须携带 Content-Length"}',
                         status_code=411,
                         media_type="application/json",
                     )
-                no_length_limit = min(limit, _IMPORT_UPLOAD_BODY_LIMIT)
+                no_length_limit = min(limit, _CHUNKED_BODY_LIMIT)
                 received = 0
                 chunks: list[bytes] = []
                 async for chunk in request.stream():

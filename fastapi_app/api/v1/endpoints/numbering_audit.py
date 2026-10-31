@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.get('')
 async def latest_audit(
-    limit: int = Query(200, ge=1, le=1000, description='返回最近多少条巡检记录'),
+    limit: int = Query(200, ge=1, le=300, description='返回最近多少条巡检记录'),
     db: AsyncSession = Depends(get_async_read_db),
 ) -> dict:
     """返回最近一轮（按时间倒序前 limit 条）编号巡检记录。"""

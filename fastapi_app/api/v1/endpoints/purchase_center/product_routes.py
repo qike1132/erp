@@ -41,7 +41,7 @@ router = APIRouter()
 @router.get('/products', response_model=ProductListResponse)
 async def api_get_products(
     page: int = Query(1, ge=1, description='页码'),
-    per_page: int = Query(50, ge=1, le=500, description='每页数量'),
+    per_page: int = Query(50, ge=1, le=200, description='每页数量'),
     search: str = Query('', max_length=100, description='搜索关键词'),
     has_bom: str = Query('all', description='BOM 筛选: all/yes/no'),
     category: str = Query('', max_length=100, description='分类筛选'),

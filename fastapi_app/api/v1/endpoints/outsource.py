@@ -65,7 +65,7 @@ router = APIRouter()
 @router.get("/orders", response_model=OrderListResponse)
 async def list_outsource_orders(
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=200, description="每页数量"),
     customer: str | None = Query(None, description="客户名筛选"),
     product: str | None = Query(None, max_length=100, description="产品名称/条码关键字筛选"),
     process_status: str | None = Query(
@@ -92,6 +92,9 @@ async def list_process_types(
     keyword: str | None = Query(None, max_length=100, description="工序类型关键字"),
     is_active: bool | None = Query(None, description="是否启用筛选"),
     page: int = Query(1, ge=1, description="页码"),
+    # M2（2026-10-31 评审）：le=500 是承重契约，勿收紧——前端
+    # views/outsource/composables/useOutsourcePresetTypes.ts 的 PRESET_PAGE_SIZE=500
+    # 逐页拉取工序类型（PRESET_MAX_PAGES × 500 封顶），收紧会直接 422 打挂预设页。
     per_page: int = Query(200, ge=1, le=500, description="每页数量"),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("outsource_view")),
@@ -465,7 +468,7 @@ async def create_merged_shipment(
 async def list_shipments(
     status: str | None = Query(None, description="状态筛选：shipped=待收货 / received=已完成"),
     page: int = Query(1, ge=1, description="页码"),
-    per_page: int = Query(50, ge=1, le=500, description="每页数量"),
+    per_page: int = Query(50, ge=1, le=200, description="每页数量"),
     db: AsyncSession = Depends(get_async_read_db),
     _user: User = Depends(require_permission("outsource_view")),
 ) -> ShipmentListResponse:

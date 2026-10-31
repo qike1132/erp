@@ -241,7 +241,7 @@ async def get_inventory_logs(
 async def available_stockins(
     product_id: int | None = Query(None),
     customer: str = Query('', max_length=100),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=200),
     # order_edit/stockin_edit：报表流水编辑弹窗的「可用备货量」提示（迁移 075/091）；失败不致命但别让它必然 403
     user: User = Depends(require_any_permission("stock_view", "order_edit", "stockin_edit")),
     db: AsyncSession = Depends(get_async_read_db),

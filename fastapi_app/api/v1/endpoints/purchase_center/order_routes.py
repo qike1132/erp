@@ -172,7 +172,7 @@ async def api_one_click_generate_order(
 @router.get('/orders', response_model=PurchaseOrderListResponse)
 async def api_get_purchase_orders(
     page: int = Query(1, ge=1, description='页码'),
-    per_page: int = Query(20, ge=1, le=500, description='每页数量'),
+    per_page: int = Query(20, ge=1, le=200, description='每页数量'),
     status: str = Query('', max_length=50, description='状态筛选'),
     keyword: str = Query('', max_length=100, description='搜索关键词'),
     date_from: str = Query('', max_length=20, description='起始日期'),
@@ -212,7 +212,7 @@ async def api_get_purchase_orders(
 @router.get('/orders/completed', response_model=PurchaseOrderListResponse)
 async def api_get_completed_purchase_orders(
     page: int = Query(1, ge=1, description='页码'),
-    per_page: int = Query(20, ge=1, le=500, description='每页数量'),
+    per_page: int = Query(20, ge=1, le=200, description='每页数量'),
     keyword: str = Query('', max_length=100, description='搜索关键词（兼容字段，模糊匹配订单号/客户/供应商）'),
     date_from: str = Query('', max_length=20, description='起始日期（兼容字段，建议用 start_date）'),
     date_to: str = Query('', max_length=20, description='结束日期（兼容字段，建议用 end_date）'),
@@ -532,7 +532,7 @@ async def api_get_orders_batch_print_data(
 @router.get('/unprocessed-orders', response_model=UnprocessedOrdersResponse)
 async def api_get_unprocessed_orders(
     page: int = Query(1, ge=1, description='页码'),
-    per_page: int = Query(15, ge=1, le=500, description='每页数量'),
+    per_page: int = Query(15, ge=1, le=200, description='每页数量'),
     db: AsyncSession = Depends(get_read_db),
     _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
 ) -> dict[str, Any]:

@@ -171,7 +171,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -1038,7 +1038,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 20,
@@ -1254,7 +1254,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 20,
@@ -1945,7 +1945,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 15,
@@ -4258,7 +4258,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -4451,7 +4451,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -4677,7 +4677,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -5336,7 +5336,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -6432,7 +6432,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -7225,7 +7225,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -7481,7 +7481,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -8039,7 +8039,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "description": "每页数量",
               "default": 50,
@@ -12293,7 +12293,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 500,
+              "maximum": 200,
               "minimum": 1,
               "default": 100,
               "title": "Limit"
@@ -20189,7 +20189,7 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 1000,
+              "maximum": 300,
               "minimum": 1,
               "description": "返回最近多少条巡检记录",
               "default": 200,
