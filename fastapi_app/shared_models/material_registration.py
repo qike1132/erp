@@ -40,7 +40,6 @@ class MaterialRegistration(Base):
     __table_args__ = (
         Index('idx_material_reg_purchase_order', 'purchase_order_id'),
         Index('idx_material_reg_supplier', 'supplier_id'),
-        Index('idx_material_reg_status', 'status'),
         Index('idx_material_reg_date', 'registration_date'),
         Index('idx_material_reg_status_date', 'status', 'registration_date'),
         Index('idx_material_registration_created_by', 'created_by'),

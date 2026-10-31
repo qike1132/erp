@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, cast, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -26,8 +26,8 @@ class StockIn(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     stockin_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='备货编号')
     stockin_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='备货时间')
-    customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
-    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, index=True, comment='产品ID')
+    customer: Mapped[str] = mapped_column(String(100), nullable=False, comment='客户名称')
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id', ondelete='RESTRICT'), nullable=False, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='备货数量')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     batch_no: Mapped[str | None] = mapped_column(String(100), comment='批次号')
@@ -50,7 +50,17 @@ class StockIn(Base):
     )
 
     __table_args__ = (
-        Index('idx_stockin_customer_product', 'customer', 'product_id'),
+    # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
+    # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+    # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
+    # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
+    # 编号格式变更时必须同步重建本索引。
+    Index(
+        'idx_stockin_no_date_seq',
+        func.split_part(stockin_no, '-', 2),
+        cast(func.split_part(stockin_no, '-', 3), BigInteger),
+        postgresql_where=text("stockin_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+    ),
         Index('idx_stockin_batch_no', 'batch_no'),
         Index('idx_stockin_product_date', 'product_id', 'stockin_date'),
         Index('idx_stockin_customer_date', 'customer', 'stockin_date'),

@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, cast, desc, func, text
 from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -39,12 +39,21 @@ class StockOut(Base):
     order: Mapped[Order | None] = relationship('Order', backref=backref('order_stockouts', passive_deletes=True))
 
     __table_args__ = (
+    # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
+    # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+    # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
+    # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
+    # 编号格式变更时必须同步重建本索引。
+    Index(
+        'idx_stockout_no_date_seq',
+        func.split_part(stockout_no, '-', 2),
+        cast(func.split_part(stockout_no, '-', 3), BigInteger),
+        postgresql_where=text("stockout_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+    ),
         Index('idx_stockout_stockin', 'stockin_id'),
-        Index('idx_stockout_order', 'order_id'),
         Index('idx_stockout_product_date', 'product_id', 'stockout_date'),
         Index('idx_stockout_customer_date', 'customer', 'stockout_date'),
         Index('idx_stockout_product_customer_type', 'product_id', 'customer', 'stockin_id'),
-        Index('idx_stockout_order_type', 'order_id', 'stockin_id'),
         # 2026-10-31 索引对齐：删除 idx_perf_stockout_product_date 声明——
         # 与 idx_stockout_product_date (product_id, stockout_date) 仅排序方向
         # 不同，B-tree 可反向扫描，同列双向索引是纯冗余（库内只有 ASC 版）。

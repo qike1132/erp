@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, desc, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -54,7 +54,6 @@ class InventoryLog(Base):
     # 避免引入默认 lazy 加载带来的 N+1（本仓其它模型对非必需关系用 lazy="raise" 收紧）。
 
     __table_args__ = (
-        Index('idx_inventory_log_product_date', 'product_id', desc('change_date')),
         Index(
             'uq_inventory_log_idem',
             'idem_key',

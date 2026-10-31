@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -27,7 +28,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    cast,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,7 +48,7 @@ class OutsourceProcessType(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     product_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey('product.id'), nullable=False, index=True, comment='产品(SKU)ID'
+        Integer, ForeignKey('product.id'), nullable=False, comment='产品(SKU)ID'
     )
     process_type: Mapped[str] = mapped_column(String(50), nullable=False, comment='工序类型：电绣/转印/配件等')
     sort_order: Mapped[int] = mapped_column(Integer, default=0, comment='工序顺序，数值越小越靠前')
@@ -77,7 +80,7 @@ class OrderOutsourceProcess(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey('order.id', ondelete='CASCADE'), nullable=False, index=True, comment='主订单ID'
+        Integer, ForeignKey('order.id', ondelete='CASCADE'), nullable=False, comment='主订单ID'
     )
     order_item_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey('order_item.id', ondelete='CASCADE'), nullable=True, index=True,
@@ -90,7 +93,7 @@ class OrderOutsourceProcess(Base):
     process_type: Mapped[str] = mapped_column(String(50), nullable=False, comment='工序类型：电绣/转印/配件等')
     sort_order: Mapped[int] = mapped_column(Integer, default=0, comment='工序顺序，数值越小越靠前')
     status: Mapped[str] = mapped_column(
-        String(20), default='pending', nullable=False, index=True, comment='状态：pending/shipped/received'
+        String(20), default='pending', nullable=False, comment='状态：pending/shipped/received'
     )
     shipped_quantity: Mapped[int | None] = mapped_column(
         Integer, nullable=True, comment='发货数量（发货时录入，每道工序独立）'
@@ -149,7 +152,7 @@ class OrderOutsourceProcessFlow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     process_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey('order_outsource_process.id', ondelete='CASCADE'), nullable=False, index=True,
+        Integer, ForeignKey('order_outsource_process.id', ondelete='CASCADE'), nullable=False,
         comment='工序ID'
     )
     action: Mapped[str] = mapped_column(String(10), nullable=False, comment='动作：ship=发货 / receive=收货')
@@ -196,7 +199,7 @@ class OutsourceShipment(Base):
     )
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True, comment='冗余客户名称')
     status: Mapped[str] = mapped_column(
-        String(20), default=SHIPMENT_STATUS_SHIPPED, nullable=False, index=True,
+        String(20), default=SHIPMENT_STATUS_SHIPPED, nullable=False,
         comment='状态：shipped=已发货(待收货)/received=已收货(已完成)',
     )
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment='发货时间')
@@ -219,6 +222,17 @@ class OutsourceShipment(Base):
     )
 
     __table_args__ = (
+    # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
+    # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+    # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
+    # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
+    # 编号格式变更时必须同步重建本索引。
+    Index(
+        'idx_outsource_shipment_no_date_seq',
+        func.split_part(shipment_no, '-', 2),
+        cast(func.split_part(shipment_no, '-', 3), BigInteger),
+        postgresql_where=text("shipment_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+    ),
         Index('ix_outsource_shipment_status_create', 'status', 'create_time'),
     )
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, desc, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, cast, desc, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -71,11 +71,11 @@ class Order(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, comment='订单编号')
-    customer: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='客户名称')
+    customer: Mapped[str] = mapped_column(String(100), nullable=False, comment='客户名称')
     order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True, comment='下单时间')
     product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product.id', ondelete='SET NULL'), nullable=True, index=True, comment='产品ID')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, comment='订单数量')
-    status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, index=True, comment='订单状态')
+    status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     batch_no: Mapped[str | None] = mapped_column(String(100), comment='批次号')
     is_locked: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='是否被审批锁定')
@@ -109,6 +109,17 @@ class Order(Base):
     )
 
     __table_args__ = (
+    # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
+    # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+    # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
+    # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
+    # 编号格式变更时必须同步重建本索引。
+    Index(
+        'idx_order_no_date_seq',
+        func.split_part(order_no, '-', 2),
+        cast(func.split_part(order_no, '-', 3), BigInteger),
+        postgresql_where=text("order_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+    ),
         Index('idx_order_customer_status', 'customer', 'status'),
         Index('idx_order_product_status', 'product_id', 'status'),
         Index('idx_order_status_date', 'status', 'order_date'),

@@ -6,7 +6,7 @@
 """
 from datetime import UTC, date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, String, Text, cast, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.core.business_time import fmt_business
@@ -35,7 +35,17 @@ class PurchasePlan(Base):
     )
 
     __table_args__ = (
-        Index('idx_ppl_plan_month', 'plan_month'),
+    # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
+    # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+    # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
+    # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
+    # 编号格式变更时必须同步重建本索引。
+    Index(
+        'idx_ppl_no_date_seq',
+        func.split_part(plan_no, '-', 2),
+        cast(func.split_part(plan_no, '-', 3), BigInteger),
+        postgresql_where=text("plan_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+    ),
         Index('idx_ppl_customer_id', 'customer_id'),
         Index('idx_ppl_status', 'status'),
         Index('idx_ppl_upload_batch', 'upload_batch'),

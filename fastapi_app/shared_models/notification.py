@@ -38,7 +38,7 @@ class Notification(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey('user.id'), nullable=False, index=True, comment='接收人ID')
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey('user.id'), nullable=False, comment='接收人ID')
     type: Mapped[str] = mapped_column(String(30), nullable=False, comment='通知类型：new_order/order_updated')
     title: Mapped[str] = mapped_column(String(200), nullable=False, comment='通知标题')
     content: Mapped[str | None] = mapped_column(Text, nullable=True, comment='通知内容')

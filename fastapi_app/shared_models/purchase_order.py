@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
@@ -18,8 +19,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    cast,
     desc,
     func,
+    text,
 )
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -94,13 +97,21 @@ class PurchaseOrder(Base):
     )
 
     __table_args__ = (
-        Index('idx_purchase_order_supplier', 'supplier_id'),
+    # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
+    # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+    # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
+    # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
+    # 编号格式变更时必须同步重建本索引。
+    Index(
+        'idx_purchase_order_no_date_seq',
+        func.split_part(order_no, '-', 2),
+        cast(func.split_part(order_no, '-', 3), BigInteger),
+        postgresql_where=text("order_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+    ),
         Index('idx_purchase_order_customer', 'customer_id'),
-        Index('idx_purchase_order_status', 'status'),
         Index('idx_purchase_order_date', 'order_date'),
         Index('idx_purchase_order_created_by', 'created_by'),
         Index('idx_purchase_order_source_order_id', 'source_order_id'),
-        Index('idx_purchase_order_status_created', 'status', 'create_time'),
         Index('idx_purchase_order_supplier_status', 'supplier_id', 'status'),
         Index('idx_po_status_date_covering', 'status', desc('create_time'), 'id',
               postgresql_include=['order_no', 'supplier_name', 'customer_name']),

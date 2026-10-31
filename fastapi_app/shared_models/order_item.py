@@ -50,7 +50,6 @@ class OrderItem(Base):
     product: Mapped[Product] = relationship('Product')
 
     __table_args__ = (
-        Index('ix_order_item_order_id', 'order_id'),
         Index('ix_order_item_product_id', 'product_id'),
         Index('ix_order_item_order_product', 'order_id', 'product_id'),
     )

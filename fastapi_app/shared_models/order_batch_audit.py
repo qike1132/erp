@@ -13,7 +13,7 @@ class OrderBatchAuditLog(Base):
     __tablename__ = 'order_batch_audit_log'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    batch_no: Mapped[str] = mapped_column(String(100), nullable=False, index=True, comment='批次号')
+    batch_no: Mapped[str] = mapped_column(String(100), nullable=False, comment='批次号')
     action: Mapped[str] = mapped_column(String(50), nullable=False, index=True, comment='操作类型')
     order_ids: Mapped[str] = mapped_column(Text, nullable=False, comment='关联订单ID列表(JSON)')
     operator_id: Mapped[int] = mapped_column(Integer, ForeignKey('user.id'), nullable=False, comment='操作人ID')

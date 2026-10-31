@@ -33,7 +33,6 @@ class ProductionPlan(Base):
     __table_args__ = (
         Index('idx_pp_barcode', 'barcode'),
         Index('idx_pp_customer_name', 'customer_name'),
-        Index('idx_pp_plan_date', 'plan_date'),
         Index('idx_pp_plan_month', 'plan_date', 'customer_name'),
     )
 

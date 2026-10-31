@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, cast, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.shared_models import Base
@@ -24,20 +24,15 @@ DIRECTIONS = (DIRECTION_IN, DIRECTION_OUT)
 class CaseMovement(Base):
     """皮套出入库流水（单一真值来源）"""
     __tablename__ = 'case_movement'
-    __table_args__ = (
-        Index('idx_case_movement_case_date', 'case_id', 'movement_date'),
-        Index('idx_case_movement_dir_date', 'direction', 'movement_date'),
-        Index('idx_case_movement_customer_date', 'customer', 'movement_date'),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     case_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey('case.id', ondelete='CASCADE'), nullable=False, index=True
+        Integer, ForeignKey('case.id', ondelete='CASCADE'), nullable=False
     )
-    direction: Mapped[str] = mapped_column(String(3), nullable=False, index=True, comment='方向：in=入库 / out=出库')
+    direction: Mapped[str] = mapped_column(String(3), nullable=False, comment='方向：in=入库 / out=出库')
     movement_no: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, comment='单号（CSI-/CSO-）')
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    customer: Mapped[str | None] = mapped_column(String(100), index=True)
+    customer: Mapped[str | None] = mapped_column(String(100))
     movement_date: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
     )
@@ -48,3 +43,20 @@ class CaseMovement(Base):
     )
 
     case: Mapped[Case] = relationship('Case', back_populates='movements')
+
+    __table_args__ = (
+        # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
+        # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+        # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
+        # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
+        # 编号格式变更时必须同步重建本索引。
+        Index(
+            'idx_case_movement_no_date_seq',
+            func.split_part(movement_no, '-', 2),
+            cast(func.split_part(movement_no, '-', 3), BigInteger),
+            postgresql_where=text("movement_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+        ),
+        Index('idx_case_movement_case_date', 'case_id', 'movement_date'),
+        Index('idx_case_movement_dir_date', 'direction', 'movement_date'),
+        Index('idx_case_movement_customer_date', 'customer', 'movement_date'),
+    )

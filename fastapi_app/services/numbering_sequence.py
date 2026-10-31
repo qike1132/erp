@@ -129,11 +129,19 @@ async def read_daily_max(db: AsyncSession, model, number_field: str, date_str: s
     以编号自身的日期段过滤（split_part 第 2 段），与日期列的时区口径无关；
     正则守卫保证进入 cast 的序号段必为数字（脏行不抛 invalid input syntax）。
 
+    2026-11-01（P3）：过滤器从「动态日期正则」改为「静态格式正则 +
+    split_part 日期段等值」——语义等价，但静态谓词与各编号表的
+    ``idx_*_no_date_seq`` 部分表达式索引（迁移 pg_standalone_107）逐字匹配：
+    PG 不做正则蕴含推断，动态日期正则永远用不上该索引（体检报告 §4-P3）。
+
     使用调用方会话：同一业务事务内连续生成编号时能看到未提交行，批内连续。
     """
     col = getattr(model, number_field)
     seq = func.cast(func.split_part(col, '-', 3), BigInteger)
     result = await db.execute(
-        select(func.max(seq)).where(col.op('~')(f'^[A-Z]+-{date_str}-[0-9]+$'))
+        select(func.max(seq)).where(
+            col.op('~')('^[A-Z]+-[0-9]{8}-[0-9]+$'),
+            func.split_part(col, '-', 2) == date_str,
+        )
     )
     return int(result.scalar() or 0)

@@ -14,7 +14,7 @@ class OrderStatusLog(Base):
     __tablename__ = 'order_status_log'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    target_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True, comment='目标类型: unprocessed_order/purchase_order')
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False, comment='目标类型: unprocessed_order/purchase_order')
     target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, comment='目标ID')
     order_no: Mapped[str | None] = mapped_column(String(20), comment='订单编号')
     from_status: Mapped[str | None] = mapped_column(String(50), comment='变更前状态')

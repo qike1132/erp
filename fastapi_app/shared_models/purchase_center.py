@@ -15,7 +15,7 @@ class ModificationLog(Base):
     __tablename__ = 'modification_log'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    target_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True, comment='目标类型: purchase_order/purchase_order_item/material')
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False, comment='目标类型: purchase_order/purchase_order_item/material')
     target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, comment='目标ID')
     field_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='字段名称')
     old_value: Mapped[str | None] = mapped_column(Text, comment='修改前值')

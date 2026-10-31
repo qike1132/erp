@@ -177,3 +177,59 @@ __all__ = [
     'WebVital',
     'user_permission',
 ]
+
+
+# ---- PG-only 表达式索引守卫（2026-11-01，迁移 pg_standalone_107 / P3）----
+# 编号查询族表达式索引（idx_*_no_date_seq）的列表达式与谓词使用 PostgreSQL
+# 专用的 split_part / 正则操作符。SQLite 测试后端没有这些函数，
+# ``Base.metadata.create_all`` / ``Table.create()`` 时会报
+# "no such function: split_part"（曾致 132 个测试失败，2026-11-01）。
+# 模型声明保留（PG 建表 / drift 对账正常），仅在 create 面对非 PG 连接时
+# 临时摘除、建表后恢复。同时挂 MetaData 级与 Table 级事件：create_all 走
+# MetaData 级、单表 Table.create()（部分测试 fixture）走 Table 级；两条路径
+# 都触发时摘除/恢复幂等，不会重复。
+from sqlalchemy import Table as _SaTable
+from sqlalchemy import event as _sa_event
+
+_PG_ONLY_INDEX_SUFFIX = '_no_date_seq'
+_pg_only_index_stash: list = []
+
+
+def _stash_pg_only_indexes_for(connection, tables):
+    """非 PG 连接：从给定表摘除 PG-only 表达式索引（幂等）。"""
+    if connection.dialect.name == 'postgresql':
+        return
+    for table in tables:
+        for idx in list(table.indexes):
+            if idx.name and idx.name.endswith(_PG_ONLY_INDEX_SUFFIX):
+                table.indexes.remove(idx)
+                _pg_only_index_stash.append((table, idx))
+
+
+def _restore_pg_only_indexes_for(connection):
+    """非 PG 连接：恢复此前摘除的 PG-only 索引（幂等）。"""
+    if connection.dialect.name == 'postgresql':
+        return
+    while _pg_only_index_stash:
+        table, idx = _pg_only_index_stash.pop()
+        table.indexes.add(idx)
+
+
+@_sa_event.listens_for(Base.metadata, 'before_create')
+def _stash_pg_only_indexes_metadata(metadata, connection, **kw):
+    _stash_pg_only_indexes_for(connection, list(metadata.tables.values()))
+
+
+@_sa_event.listens_for(Base.metadata, 'after_create')
+def _restore_pg_only_indexes_metadata(metadata, connection, **kw):
+    _restore_pg_only_indexes_for(connection)
+
+
+@_sa_event.listens_for(_SaTable, 'before_create')
+def _stash_pg_only_indexes_table(target, connection, **kw):
+    _stash_pg_only_indexes_for(connection, [target])
+
+
+@_sa_event.listens_for(_SaTable, 'after_create')
+def _restore_pg_only_indexes_table(target, connection, **kw):
+    _restore_pg_only_indexes_for(connection)
