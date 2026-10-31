@@ -10,7 +10,7 @@ import { downloadXls } from '@/utils/xls'
 /** Vue Query 缓存 key */
 export const COMPLETED_ORDERS_QUERY_KEY = 'completed-orders-list'
 
-/** 每页条数（后端 per_page 上限 500） */
+/** 每页条数（后端 per_page 上限 200，2026-10-31 评审 M-2 已从 500 收紧） */
 const PER_PAGE = 20
 
 export interface CompletedOrderFilters {

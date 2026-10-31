@@ -129,7 +129,7 @@
 | 项 | 修复方式 | 状态 |
 |---|---|---|
 | M-1 | `middleware.py` 新增 `_CHUNKED_BODY_LIMIT`（默认 2MB，`MAX_CHUNKED_BODY_BYTES` 可覆盖，已登记 .env.example）：无 CL 请求预算从 min(路径上限, 64MB) 收紧为 min(路径上限, 2MB)，边读边判/411 前置语义不变。测试：预算上限 Red→Green（含变异检查）+ chunked body 送达端点语义锁（traceback 证实请求携已解析 body 抵达端点函数） | ✅ 已修复 |
-| M-2 | 核实前端真实用量后**分级收紧**：order/stock/stock_return/auxiliary/purchase_center 共 10 处 `le=500→le=200`（前端 UI 每页选择器最大 200，无 >200 调用方）；三处承重 500（order_batch×3、outsource process-types、staging_order）保留并加契约注释（前端 BATCH_PAGE_SIZE/PRESET_PAGE_SIZE/STAGING_PAGE_SIZE=500 依赖）；服务层内部调用（如 list_outsource_orders 直调 500）不受端点校验影响 | ✅ 已修复（按实际用量分级） |
+| M-2 | 核实前端真实用量后**分级收紧**：order×3/stock×2/stock_return/outsource×2/auxiliary/purchase_center×4 共 13 处 Query `le=500→le=200`（前端 UI 每页选择器最大 200，无 >200 调用方）；三处承重 500（order_batch×3、outsource process-types、staging_order）保留并加契约注释（前端 BATCH_PAGE_SIZE/PRESET_PAGE_SIZE/STAGING_PAGE_SIZE=500 依赖）；服务层内部调用（如 list_outsource_orders 直调 500）不受端点校验影响 | ✅ 已修复（按实际用量分级） |
 | L-1 | `USER_PERMISSION_CHANGED` 事件全链接通：`user.py` 权限相关端点的 post-commit 回调发布事件（`publish()` 进程内派发 + Redis 广播），`deps.py::register_permission_event_subscriber` 订阅、各 worker 经 domain_events 监听器失效本进程 L1（main.py lifespan 注册）。失败退化为旧行为（TTL 5s 有界）。测试 3 条（含坏载荷防御） | ✅ 已修复 |
 | L-2 | `numbering_audit.py` limit `le=1000→le=300`（前端无调用方，无风险） | ✅ 已修复 |
 | L-3 | **评审更正：误报**。`notification_service._send_to_targets` 已是 `asyncio.gather` 并发发送 + 单连接超时 + 断开清理（docstring 明示"并发发送"），当初依据的 `for ws in list(connections)` 只是构造目标列表的同步推导式 | ✅ 无需修复（更正） |

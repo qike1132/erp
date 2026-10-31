@@ -70,10 +70,11 @@ class _TTLCache:
 
 # 进程内 L1 权限缓存。
 # ⚠️ 是**进程级**的：生产为多 uvicorn worker + 独立 ARQ 进程，invalidate_user_permission_cache
-# 只清当前 worker。管理员在 worker A 改权限后，B/C/D 的旧缓存最长存活到 TTL（5s）——
-# 撤销权限后数秒内仍生效、授予权限后数秒内仍 403，均为**有界窗口**。
-# 如需强一致，可改为 Redis 共享失效（domain_events 已定义 USER_PERMISSION_CHANGED 事件，
-# 但目前**无消费方**）；维持现状则请在运维文档中写明"权限变更最坏 5s 生效"。
+# 只清当前 worker。跨 worker 失效已由 USER_PERMISSION_CHANGED 事件链接通（2026-10-31 评审 L-1）：
+# user.py 权限变更端点 post-commit 发布事件，本文件 register_permission_event_subscriber 在每个
+# worker 消费并失效本地缓存（main.py lifespan 注册）。事件链路失败时退化为旧行为——其余 worker
+# 的旧缓存最长存活到 TTL（5s）：撤销权限后数秒内仍生效、授予权限后数秒内仍 403，均为**有界
+# 窗口**；运维口径仍按"权限变更最坏 5s 生效"。
 _PERMISSION_CACHE = _TTLCache(ttl=5, maxsize=500)
 
 async def _get_cached_user(user_id: int) -> User | None:
