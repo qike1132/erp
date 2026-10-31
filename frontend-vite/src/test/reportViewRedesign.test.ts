@@ -147,13 +147,13 @@ async function mountViewWithData() {
 
 /** 订单流水的表格列（与 useReportConfig 的订单分支一致：八列、末列 9% 操作） */
 const TABLE_COLUMNS = [
-  { field: 'date', header: '下单时间', align: 'left' as const, width: '14%' },
-  { field: 'no', header: '订单号', align: 'left' as const, width: '16%' },
-  { field: 'customer', header: '客户', align: 'left' as const, width: '11%' },
-  { field: 'product_name', header: '产品名称', align: 'left' as const, width: '20%' },
-  { field: 'product_barcode', header: '条码', align: 'left' as const, width: '11%' },
-  { field: 'quantity', header: '数量', align: 'center' as const, width: '9%', sortable: true },
-  { field: 'note', header: '备注', align: 'left' as const, width: '10%' },
+  { field: 'date', header: '下单时间', align: 'left' as const, width: '11%' },
+  { field: 'no', header: '订单号', align: 'left' as const, width: '12%' },
+  { field: 'customer', header: '客户', align: 'left' as const, width: '10%' },
+  { field: 'product_name', header: '产品名称', align: 'left' as const, width: '33%' },
+  { field: 'product_barcode', header: '条码', align: 'left' as const, width: '10%' },
+  { field: 'quantity', header: '数量', align: 'center' as const, width: '8%', sortable: true },
+  { field: 'note', header: '备注', align: 'left' as const, width: '7%' },
   { field: 'actions', header: '操作', align: 'center' as const, width: '9%' },
 ]
 
@@ -322,13 +322,13 @@ describe('ReportView —— 表格与数字格式', () => {
     const headers = mountView().findAll('th')
     const styles = headers.map((th) => th.attributes('style') ?? '')
 
-    expect(styles[0]).toContain('14%')  // 下单时间
-    expect(styles[1]).toContain('16%')  // 订单号
-    expect(styles[2]).toContain('11%')  // 客户
-    expect(styles[3]).toContain('20%')  // 产品名称
-    expect(styles[4]).toContain('11%')  // 条码
-    expect(styles[5]).toContain('9%')   // 数量
-    expect(styles[6]).toContain('10%')  // 备注
+    expect(styles[0]).toContain('11%')  // 下单时间
+    expect(styles[1]).toContain('12%')  // 订单号
+    expect(styles[2]).toContain('10%')  // 客户
+    expect(styles[3]).toContain('33%')  // 产品名称（2026-10-31 加宽，避免显示不全）
+    expect(styles[4]).toContain('10%')  // 条码
+    expect(styles[5]).toContain('8%')   // 数量
+    expect(styles[6]).toContain('7%')   // 备注
     expect(styles[7]).toContain('9%')   // 操作
   })
 

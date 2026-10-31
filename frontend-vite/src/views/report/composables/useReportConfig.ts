@@ -112,14 +112,17 @@ export function useReportConfig(activeTab: Ref<TabType>, canManageRowActions?: R
     const withActions = canManageRowActions?.value ?? false
     const cfg = currentCfg.value
 
+    // 2026-10-31 用户反馈：下单时间/订单号列过宽，导致「产品名称」显示不全。
+    // 重分配：前三列各收 1~2pp、条码/数量/备注同步收紧，产品名称 20%→29%（无操作列时 22%→32%）。
+    // 2026-10-31 二轮：时间/订单号再各收 2pp（11%/12%），腾出的宽度继续给产品名称。
     const columns: TableColumn[] = [
-      { field: 'date', header: cfg.dateLabel, align: 'left', width: withActions ? '14%' : '15%' },
-      { field: 'no', header: cfg.noLabel, align: 'left', width: withActions ? '16%' : '17%' },
-      { field: 'customer', header: '客户', align: 'left', width: withActions ? '11%' : '12%' },
-      { field: 'product_name', header: '产品名称', align: 'left', width: withActions ? '20%' : '22%' },
-      { field: 'product_barcode', header: '条码', align: 'left', width: withActions ? '11%' : '12%' },
-      { field: 'quantity', header: cfg.countLabel, align: 'center', width: withActions ? '9%' : '10%', sortable: true },
-      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: withActions ? '10%' : '12%' },
+      { field: 'date', header: cfg.dateLabel, align: 'left', width: withActions ? '11%' : '12%' },
+      { field: 'no', header: cfg.noLabel, align: 'left', width: withActions ? '12%' : '13%' },
+      { field: 'customer', header: '客户', align: 'left', width: withActions ? '10%' : '11%' },
+      { field: 'product_name', header: '产品名称', align: 'left', width: withActions ? '33%' : '36%' },
+      { field: 'product_barcode', header: '条码', align: 'left', width: withActions ? '10%' : '11%' },
+      { field: 'quantity', header: cfg.countLabel, align: 'center', width: withActions ? '8%' : '9%', sortable: true },
+      { field: 'note', header: activeTab.value === 'deduction' ? '订单备注' : '备注', align: 'left', width: withActions ? '7%' : '8%' },
     ]
     if (withActions) columns.push({ field: 'actions', header: '操作', align: 'center', width: '9%' })
     return columns

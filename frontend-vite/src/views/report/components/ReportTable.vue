@@ -34,7 +34,11 @@
         {{ cellText((row as Record<string, unknown>).customer) }}
       </template>
       <template #column-body-product_name="{ row }">
-        {{ cellText((row as Record<string, unknown>).product_name) }}
+        <!-- 列宽已加宽，但超长名称仍会省略：加 title，悬停可看全名 -->
+        <span
+          class="rp-product"
+          :title="cellText((row as Record<string, unknown>).product_name)"
+        >{{ cellText((row as Record<string, unknown>).product_name) }}</span>
       </template>
       <template #column-body-product_barcode="{ row }">
         <span class="rp-barcode">{{ cellText((row as Record<string, unknown>).product_barcode) }}</span>
