@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.database import require_async_session_local
 from fastapi_app.services.numbering_reconcile import NUMBERED_ENTITIES
 from fastapi_app.services.numbering_sequence import business_date_str
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import NumberingAudit, NumberingCounter
 
 logger = logging.getLogger(__name__)
@@ -29,14 +30,14 @@ logger = logging.getLogger(__name__)
 _ENTITY_MAX_SQL = (
     'SELECT COALESCE(MAX(CAST(split_part("{column}", \'-\', 3) AS BIGINT)), 0) '
     'FROM "{table}" '
-    'WHERE "{column}" ~ \'^[A-Z]+-[0-9]{{8}}-[0-9]+$\' '
+    'WHERE "{column}" ~ \'' + NUMBERING_FORMAT_REGEX + '\' '
     'AND split_part("{column}", \'-\', 2) = :today'
 )
 
 # 单实体格式违规计数：不符合 `^[A-Z]+-YYYYMMDD-N$` 的编号行数。
 _ENTITY_VIOLATION_SQL = (
     'SELECT COUNT(*) FROM "{table}" '
-    'WHERE "{column}" !~ \'^[A-Z]+-[0-9]{{8}}-[0-9]+$\''
+    'WHERE "{column}" !~ \'' + NUMBERING_FORMAT_REGEX + '\''
 )
 
 
@@ -48,8 +49,10 @@ async def _audit_entity(
     两个查询都是集合式单语句；help 函数化以便 compute_audit 的循环体不含
     逐行查询（通过 N+1 静态扫描）。
     """
+    # 模板渲染用 replace（NUMBERING_FORMAT_REGEX 的 {8} 与 str.format 冲突）
+    max_sql = _ENTITY_MAX_SQL.replace('{column}', column).replace('{table}', table)
     data_max = int((await db.execute(
-        text(_ENTITY_MAX_SQL.format(column=column, table=table)),  # nosec B608 - 白名单常量
+        text(max_sql),  # nosec B608 - 白名单常量
         {'today': today},
     )).scalar() or 0)
     counter = (await db.execute(
@@ -60,7 +63,8 @@ async def _audit_entity(
     # 缺行（counter is None）不算 behind：新键首用前计数行不存在是正常态。
     behind = counter is not None and data_max > counter
     bad = int((await db.execute(
-        text(_ENTITY_VIOLATION_SQL.format(column=column, table=table)),  # nosec B608 - 白名单常量
+        text(_ENTITY_VIOLATION_SQL
+                     .replace('{column}', column).replace('{table}', table)),  # nosec B608 - 白名单常量
     )).scalar() or 0)
     violation = {'table': table, 'column': column, 'count': bad} if bad else None
     return (

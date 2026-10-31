@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, cast, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -54,7 +55,7 @@ class CaseMovement(Base):
             'idx_case_movement_no_date_seq',
             func.split_part(movement_no, '-', 2),
             cast(func.split_part(movement_no, '-', 3), BigInteger),
-            postgresql_where=text("movement_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+            postgresql_where=text(f"movement_no ~ '{NUMBERING_FORMAT_REGEX}'"),
         ),
         Index('idx_case_movement_case_date', 'case_id', 'movement_date'),
         Index('idx_case_movement_dir_date', 'direction', 'movement_date'),

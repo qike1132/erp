@@ -10,6 +10,7 @@ from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, S
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.core.business_time import fmt_business
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import Base
 
 
@@ -44,7 +45,7 @@ class PurchasePlan(Base):
         'idx_ppl_no_date_seq',
         func.split_part(plan_no, '-', 2),
         cast(func.split_part(plan_no, '-', 3), BigInteger),
-        postgresql_where=text("plan_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+        postgresql_where=text(f"plan_no ~ '{NUMBERING_FORMAT_REGEX}'"),
     ),
         Index('idx_ppl_customer_id', 'customer_id'),
         Index('idx_ppl_status', 'status'),

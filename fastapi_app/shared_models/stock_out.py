@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, cast, desc, func, text
 from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
 
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class StockOut(Base):
         'idx_stockout_no_date_seq',
         func.split_part(stockout_no, '-', 2),
         cast(func.split_part(stockout_no, '-', 3), BigInteger),
-        postgresql_where=text("stockout_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+        postgresql_where=text(f"stockout_no ~ '{NUMBERING_FORMAT_REGEX}'"),
     ),
         Index('idx_stockout_stockin', 'stockin_id'),
         Index('idx_stockout_product_date', 'product_id', 'stockout_date'),

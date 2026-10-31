@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.pg_locks import acquire_advisory_lock_async, number_lock_key
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ _ENTITY_UPSERT_SQL = (
     'SELECT split_part("{column}", \'-\', 2) AS number_date, '
     'CAST(MAX(CAST(split_part("{column}", \'-\', 3) AS BIGINT)) AS INTEGER) AS mx '
     'FROM "{table}" '
-    'WHERE "{column}" ~ \'^[A-Z]+-[0-9]{{8}}-[0-9]+$\' '
+    'WHERE "{column}" ~ \'' + NUMBERING_FORMAT_REGEX + '\' '
     'GROUP BY 1'
     ') AS d '
     'WHERE d.mx IS NOT NULL '
@@ -63,7 +64,10 @@ _ENTITY_UPSERT_SQL = (
 
 async def _reconcile_entity(db: AsyncSession, prefix: str, table: str, column: str) -> tuple[int, int]:
     """对单个实体对账一次，返回 (inserted, raised)。"""
-    sql = text(_ENTITY_UPSERT_SQL.format(column=column, table=table))  # nosec B608 - 白名单常量
+    # 模板渲染用 replace 而非 str.format：NUMBERING_FORMAT_REGEX 拼接进模板后
+    # 含 {8}（正则量词），str.format 会把它当位置占位符而 IndexError。
+    sql = text(_ENTITY_UPSERT_SQL
+               .replace('{column}', column).replace('{table}', table))  # nosec B608 - 白名单常量
     returned = (await db.execute(sql, {'prefix': prefix})).fetchall()
     inserted = sum(1 for (was_inserted,) in returned if was_inserted)
     return inserted, len(returned) - inserted

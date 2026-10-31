@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, cast, func, text
 from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
 
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ class StockReturn(Base):
         'idx_stockreturn_no_date_seq',
         func.split_part(return_no, '-', 2),
         cast(func.split_part(return_no, '-', 3), BigInteger),
-        postgresql_where=text("return_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+        postgresql_where=text(f"return_no ~ '{NUMBERING_FORMAT_REGEX}'"),
     ),
         Index('idx_stockreturn_stockout', 'stockout_id'),
         Index('idx_stockreturn_order', 'order_id'),

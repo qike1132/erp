@@ -33,6 +33,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import Base
 
@@ -154,7 +155,7 @@ class CustomerSamplingProject(Base):
         'idx_csp_no_date_seq',
         func.split_part(sequence_no, '-', 2),
         cast(func.split_part(sequence_no, '-', 3), BigInteger),
-        postgresql_where=text("sequence_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+        postgresql_where=text(f"sequence_no ~ '{NUMBERING_FORMAT_REGEX}'"),
     ),
         Index('idx_csp_pattern_maker', 'pattern_maker_id'),
         Index('idx_csp_sequence_no', 'sequence_no'),

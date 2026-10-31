@@ -21,6 +21,7 @@ from sqlalchemy import BigInteger, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_time import _BUSINESS_TZ  # 业务时区唯一定义点已下沉到 core.business_time
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ async def read_daily_max(db: AsyncSession, model, number_field: str, date_str: s
     seq = func.cast(func.split_part(col, '-', 3), BigInteger)
     result = await db.execute(
         select(func.max(seq)).where(
-            col.op('~')('^[A-Z]+-[0-9]{8}-[0-9]+$'),
+            col.op('~')(NUMBERING_FORMAT_REGEX),
             func.split_part(col, '-', 2) == date_str,
         )
     )

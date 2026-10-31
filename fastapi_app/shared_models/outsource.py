@@ -34,6 +34,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -231,7 +232,7 @@ class OutsourceShipment(Base):
         'idx_outsource_shipment_no_date_seq',
         func.split_part(shipment_no, '-', 2),
         cast(func.split_part(shipment_no, '-', 3), BigInteger),
-        postgresql_where=text("shipment_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+        postgresql_where=text(f"shipment_no ~ '{NUMBERING_FORMAT_REGEX}'"),
     ),
         Index('ix_outsource_shipment_status_create', 'status', 'create_time'),
     )

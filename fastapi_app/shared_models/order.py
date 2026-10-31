@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, cast, desc, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import Base
 
 if TYPE_CHECKING:
@@ -118,7 +119,7 @@ class Order(Base):
         'idx_order_no_date_seq',
         func.split_part(order_no, '-', 2),
         cast(func.split_part(order_no, '-', 3), BigInteger),
-        postgresql_where=text("order_no ~ '^[A-Z]+-[0-9]{8}-[0-9]+$'"),
+        postgresql_where=text(f"order_no ~ '{NUMBERING_FORMAT_REGEX}'"),
     ),
         Index('idx_order_customer_status', 'customer', 'status'),
         Index('idx_order_product_status', 'product_id', 'status'),
