@@ -68,9 +68,11 @@ describe('整页布局契约（弹窗 → 页面视图）', () => {
     w.unmount()
   })
 
-  it('头部含「汇总下单」标题与「返回订单列表」按钮', () => {
+  it('头部无「汇总下单」标题（已删）、含「返回订单列表」按钮', () => {
     const w = mountPanel()
-    expect(w.find('.sm-title').text()).toContain('汇总下单')
+    // 2026-10-31 用户要求删除左上角标题与图标：页签已说明所在
+    expect(w.find('.sm-title').exists()).toBe(false)
+    expect(w.text()).not.toContain('汇总下单')
     const back = w.find('.sm-back-btn')
     expect(back.exists()).toBe(true)
     expect(back.text()).toContain('返回订单列表')
@@ -97,7 +99,7 @@ describe('整页布局契约（弹窗 → 页面视图）', () => {
   })
 })
 
-describe('返回按钮 → close 事件链', () => {
+describe('头部操作组（2026-10-31：导出/打印从底部移到头部）', () => {
   it('点头部「返回订单列表」→ emit close', async () => {
     const w = mountPanel()
     await w.find('.sm-back-btn').trigger('click')
@@ -106,12 +108,36 @@ describe('返回按钮 → close 事件链', () => {
     w.unmount()
   })
 
-  it('点工厂页签底部「返回订单列表」→ emit close（经 Panel 转发）', async () => {
+  it('工厂页签：头部「导出」→ emit exportFactory，「打印预览」→ emit printFactory', async () => {
     const w = mountPanel()
-    const backBtn = w.findAll('button').find((b) => b.text().includes('返回订单列表') && !b.classes().includes('sm-back-btn'))
-    expect(backBtn).toBeTruthy()
-    await backBtn!.trigger('click')
-    expect(w.emitted('close')).toBeTruthy()
+    const exportBtn = w.find('.sm-action-btn--export')
+    expect(exportBtn.text()).toContain('导出')
+    await exportBtn.trigger('click')
+    await w.find('.sm-action-btn--primary').trigger('click')
+    expect(w.emitted('exportFactory')).toBeTruthy()
+    expect(w.emitted('printFactory')).toBeTruthy()
+    w.unmount()
+  })
+
+  it('供应商页签：头部「导出」→ emit exportSupplier，「打印预览」→ emit printSupplier', async () => {
+    const w = mountPanel()
+    await w.findAll('.sm-tab-btn')[1]!.trigger('click')
+    await w.find('.sm-action-btn--export').trigger('click')
+    await w.find('.sm-action-btn--primary').trigger('click')
+    expect(w.emitted('exportSupplier')).toBeTruthy()
+    expect(w.emitted('printSupplier')).toBeTruthy()
+    w.unmount()
+  })
+
+  it('页签内不再有底部操作条（导出/打印/返回都只在头部）', () => {
+    const w = mountPanel()
+    const buttons = w.findAll('button')
+    // 页签内只剩「自定义编辑」等工具按钮；不再有「返回订单列表」「导出 Excel」「打印预览」的底部副本
+    const bottomActionTexts = buttons.filter((b) =>
+      ['导出 Excel', '导出汇总'].includes(b.text()))
+    expect(bottomActionTexts).toHaveLength(0)
+    const backButtons = buttons.filter((b) => b.text().includes('返回订单列表'))
+    expect(backButtons).toHaveLength(1) // 仅头部一个
     w.unmount()
   })
 })

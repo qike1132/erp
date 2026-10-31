@@ -2,30 +2,26 @@
   <!-- 整页视图内的页签：自身也是 flex 列（父级 .sm-body 是 flex），
        中段表格是唯一滚动区（flex:1 + min-h:0 撑满剩余高度），顶/底条常驻。 -->
   <div class="sms-tab">
-    <div
-      class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-rose/10 to-rose-deep/10 flex-shrink-0"
-    >
-      <div>
-        <div class="font-semibold text-sm mb-1.5">
-          <FontAwesomeIcon icon="truck" class="text-rose" aria-hidden="true" /> 供应商采购订单汇总
-        </div>
-        <div class="text-xs text-text-secondary">
-          已选择 <strong class="text-rose">{{ supplierData.order_count || orderCount }}</strong> 个订单，涵盖
-          <strong class="text-rose">{{ supplierGroups.length }}</strong> 家供应商，共
-          <strong class="text-rose">{{ (supplierData.materials || []).length }}</strong> 种物料
-        </div>
+    <!-- 概要行（2026-10-31 用户嫌空白多）：删渐变底色大条，压成单行紧凑文字。 -->
+    <div class="sms-toolbar flex-shrink-0">
+      <div class="text-[13px] text-text-secondary">
+        已选择 <strong class="text-rose">{{ supplierData.order_count || orderCount }}</strong> 个订单，涵盖
+        <strong class="text-rose">{{ supplierGroups.length }}</strong> 家供应商，共
+        <strong class="text-rose">{{ (supplierData.materials || []).length }}</strong> 种物料
       </div>
     </div>
 
     <div class="sms-scroll">
-      <table class="w-full border-collapse font-sans text-[13px] bg-white">
+      <!-- 2026-10-31 用户反馈：不铺满、但也不要太小——取 72% 宽度居中，
+           比例适中；窄屏由 min-w 兜底（容器内可横向滚动）。 -->
+      <table class="w-[72%] min-w-[680px] mx-auto border-collapse font-sans text-[13px] bg-white">
         <thead>
           <tr class="bg-border-light">
-            <th class="w-[12%]">供应商</th>
-            <th class="w-[30%]">物料名称</th>
-            <th class="w-[28%]">规格型号</th>
-            <th class="w-[18%]">数量</th>
-            <th class="w-[12%]">单位</th>
+            <th>供应商</th>
+            <th class="w-[240px]">物料名称</th>
+            <th>规格型号</th>
+            <th>数量</th>
+            <th>单位</th>
           </tr>
         </thead>
         <tbody>
@@ -43,35 +39,14 @@
         </tbody>
       </table>
     </div>
-
-    <div class="mt-4 pt-3 border-t border-border flex justify-between items-center flex-shrink-0">
-      <div class="flex gap-2">
-        <button
-          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
-          @click="$emit('exportSupplier')"
-        >
-          <FontAwesomeIcon icon="file-archive" aria-hidden="true" /> 导出汇总
-        </button>
-      </div>
-      <div class="flex gap-2">
-        <button
-          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
-          @click="$emit('close')"
-        >
-          返回订单列表
-        </button>
-        <button
-          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
-          @click="$emit('printSupplier')"
-        >
-          <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
-        </button>
-      </div>
-    </div>
+    <!-- 底部操作条已删（2026-10-31 用户要求）：导出/打印移至头部右侧（SummaryPanel），
+         返回按钮也在头部，页签内不再有操作条。 -->
   </div>
 </template>
 
 <script setup lang="ts">
+/* 2026-10-31 整页化第二轮：导出/打印/返回按钮移到 SummaryPanel 头部，
+   本页签不再有操作条，也无自有事件（原 close/exportSupplier/printSupplier 已删）。 */
 import { qtyDisplayText } from '../composables/useSummaryModal'
 import type { MaterialItem, SupplierSummaryData } from '../composables/useSummaryModal'
 
@@ -79,12 +54,6 @@ defineProps<{
   supplierData: SupplierSummaryData
   orderCount: number
   supplierGroups: { supplierName: string; materials: MaterialItem[] }[]
-}>()
-
-defineEmits<{
-  close: []
-  exportSupplier: []
-  printSupplier: []
 }>()
 </script>
 
@@ -103,7 +72,13 @@ defineEmits<{
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 12px 16px;
+  padding: 8px 12px;
+}
+/* 概要行：单行紧凑文字，不再用渐变条占两行高度 */
+.sms-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
 }
 .sms-scroll {
   flex: 1;

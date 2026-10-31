@@ -38,9 +38,10 @@ export interface FactoryTabProps {
   groupSpareRates?: number[]
 }
 
-/** 组件 emit（自 `SummaryFactoryTab.vue` 的 `defineEmits` 逐字抽出，组件与本模块两处共用）。 */
+/** 组件 emit（自 `SummaryFactoryTab.vue` 的 `defineEmits` 逐字抽出，组件与本模块两处共用）。
+ *  2026-10-31 整页化第二轮：导出/打印/返回按钮移到 SummaryPanel 头部，
+ *  close / exportFactory / printFactory 不再由本页签触发，从类型中删除。 */
 export type FactoryTabEmit = {
-  close: []
   toggleEditMode: [enable: boolean]
   saveEdits: []
   updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
@@ -48,8 +49,6 @@ export type FactoryTabEmit = {
   lossRateInput: [rate: number]
   /** 单个布料行损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
   fabricLossRateInput: [gi: number, si: number, fi: number, rate: number]
-  exportFactory: []
-  printFactory: []
 }
 
 /**

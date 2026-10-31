@@ -2,18 +2,13 @@
   <!-- 整页视图内的页签：自身也是 flex 列（父级 .sm-body 是 flex），
        中段表格是唯一滚动区（flex:1 + min-h:0 撑满剩余高度），顶/底条常驻。 -->
   <div class="smf-tab">
-    <div
-      class="mb-3 p-3 rounded-lg flex justify-between items-center bg-gradient-to-r from-primary-400/10 to-purple-600/10 flex-shrink-0"
-    >
-      <div>
-        <div class="font-semibold text-sm mb-1.5">
-          <FontAwesomeIcon icon="industry" class="text-primary-400" aria-hidden="true" /> 工厂内部采购订单汇总
-        </div>
-        <div class="text-xs text-text-secondary">
-          已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
-        </div>
+    <!-- 概要行（2026-10-31 用户嫌空白多）：删渐变底色大条，压成单行紧凑文字+操作。
+         「工厂内部采购订单汇总」标题删掉——页签已说明所在；只保留订单计数。 -->
+    <div class="smf-toolbar flex-shrink-0">
+      <div class="text-[13px] text-text-secondary whitespace-nowrap">
+        已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
       </div>
-      <div class="flex gap-2 items-center">
+      <div class="flex gap-2 items-center ml-auto">
         <div v-if="!editMode" class="flex items-center gap-2">
           <button
             class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
@@ -70,19 +65,21 @@
     </div>
 
     <div class="smf-scroll">
-      <table class="w-full border-collapse font-sans text-[13px] bg-white">
+      <!-- 2026-10-31 用户反馈：不铺满、但也不要太小——取 82% 宽度居中，
+           比例适中；窄屏由 min-w 兜底（容器内可横向滚动）。 -->
+      <table class="w-[82%] min-w-[900px] mx-auto border-collapse font-sans text-[13px] bg-white">
         <thead>
           <tr class="bg-border-light">
-            <th class="w-[9%]">客户</th>
-            <th class="w-[15%]">产品名称</th>
-            <th class="w-[7%]">订单数量</th>
-            <th class="w-[7%]">备品数量</th>
-            <th class="w-[10%]">供应商</th>
-            <th class="w-[16%]">布料名称</th>
-            <th class="w-[12%]">规格型号</th>
-            <th class="w-[6%]">损耗率</th>
-            <th class="w-[8%]">数量</th>
-            <th class="w-[6%]">单位</th>
+            <th>客户</th>
+            <th class="w-[280px]">产品名称</th>
+            <th>订单数量</th>
+            <th>备品数量</th>
+            <th>供应商</th>
+            <th class="w-[200px]">布料名称</th>
+            <th>规格型号</th>
+            <th>损耗率</th>
+            <th>数量</th>
+            <th>单位</th>
           </tr>
         </thead>
         <tbody>
@@ -162,31 +159,8 @@
         </tbody>
       </table>
     </div>
-
-    <div class="mt-4 pt-3 border-t border-border flex justify-between items-center flex-shrink-0">
-      <div class="flex gap-2">
-        <button
-          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600"
-          @click="$emit('exportFactory')"
-        >
-          <FontAwesomeIcon icon="file-excel" aria-hidden="true" /> 导出 Excel
-        </button>
-      </div>
-      <div class="flex gap-2">
-        <button
-          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
-          @click="$emit('close')"
-        >
-          返回订单列表
-        </button>
-        <button
-          class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 rounded-lg border-none transition-colors hover:bg-primary-600"
-          @click="$emit('printFactory')"
-        >
-          <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
-        </button>
-      </div>
-    </div>
+    <!-- 底部操作条已删（2026-10-31 用户要求）：导出/打印移至头部右侧（SummaryPanel），
+         返回按钮也在头部，页签内不再有操作条。 -->
   </div>
 </template>
 
@@ -239,7 +213,14 @@ const {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 12px 16px;
+  padding: 8px 12px;
+}
+/* 概要行：单行紧凑（数字+操作按钮），不再用渐变条占两行高度 */
+.smf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
 }
 .smf-scroll {
   flex: 1;

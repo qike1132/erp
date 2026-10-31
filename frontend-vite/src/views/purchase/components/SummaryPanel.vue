@@ -5,44 +5,78 @@
     侧边栏保留；「编辑态离开需确认」由 PurchaseView 的 useSummaryLeaveGuard 把守。
   -->
   <div class="sm-panel">
-    <!-- 头部：标题 + 页签（左） / 返回订单列表（右） -->
+    <!-- 头部：页签（左） / 返回订单列表（右）。
+         标题「汇总下单」+图标已删（2026-10-31 用户要求）：整页视图里页签本身已说明所在，
+         顶部留白更紧凑。 -->
     <div class="sm-header">
-      <div class="sm-title-block">
-        <div class="sm-title">
-          <FontAwesomeIcon icon="clipboard-list" class="text-primary-500" aria-hidden="true" /> 汇总下单
+      <div class="sm-tab-group" role="tablist">
+        <div
+          role="tab"
+          :aria-selected="activeTab === 'factory'"
+          :class="['sm-tab-btn', { active: activeTab === 'factory' }]"
+          @click="activeTab = 'factory'"
+        >
+          <FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂内部订单
         </div>
-        <div class="sm-tab-group" role="tablist">
-          <div
-            role="tab"
-            :aria-selected="activeTab === 'factory'"
-            :class="['sm-tab-btn', { active: activeTab === 'factory' }]"
-            @click="activeTab = 'factory'"
-          >
-            <FontAwesomeIcon icon="industry" aria-hidden="true" /> 工厂内部订单
-          </div>
-          <div
-            role="tab"
-            :aria-selected="activeTab === 'supplier'"
-            :class="['sm-tab-btn', { active: activeTab === 'supplier', 'out-mode': activeTab === 'supplier' }]"
-            @click="activeTab = 'supplier'"
-          >
-            <FontAwesomeIcon icon="truck" aria-hidden="true" /> 供应商采购订单
-          </div>
+        <div
+          role="tab"
+          :aria-selected="activeTab === 'supplier'"
+          :class="['sm-tab-btn', { active: activeTab === 'supplier', 'out-mode': activeTab === 'supplier' }]"
+          @click="activeTab = 'supplier'"
+        >
+          <FontAwesomeIcon icon="truck" aria-hidden="true" /> 供应商采购订单
         </div>
       </div>
-      <button
-        class="sm-back-btn"
-        :title="editMode ? '编辑态返回需确认' : '返回订单列表'"
-        @click="$emit('close')"
-      >
-        <FontAwesomeIcon icon="arrow-left" aria-hidden="true" /> 返回订单列表
-      </button>
+      <!-- 头部右侧操作组（2026-10-31 用户要求：导出/打印从底部移到头部，与返回同行）。
+           统一风格：返回=描边灰（离开）、导出=描边（次要操作）、打印=实心主色（主操作）。
+           按钮文案随页签走：工厂=导出 Excel / 供应商=导出汇总（用户要求统一显示「导出」）。 -->
+      <div class="sm-header-actions">
+        <button
+          class="sm-back-btn"
+          :title="editMode ? '编辑态返回需确认' : '返回订单列表'"
+          @click="$emit('close')"
+        >
+          <FontAwesomeIcon icon="arrow-left" aria-hidden="true" /> 返回订单列表
+        </button>
+        <button
+          v-if="activeTab === 'factory'"
+          class="sm-action-btn sm-action-btn--export"
+          title="导出 Excel"
+          @click="$emit('exportFactory')"
+        >
+          <FontAwesomeIcon icon="file-excel" aria-hidden="true" /> 导出
+        </button>
+        <button
+          v-else
+          class="sm-action-btn sm-action-btn--export"
+          title="导出汇总"
+          @click="$emit('exportSupplier')"
+        >
+          <FontAwesomeIcon icon="file-archive" aria-hidden="true" /> 导出
+        </button>
+        <button
+          v-if="activeTab === 'factory'"
+          class="sm-action-btn sm-action-btn--primary"
+          title="打印预览（工厂内部采购订单汇总）"
+          @click="$emit('printFactory')"
+        >
+          <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
+        </button>
+        <button
+          v-else
+          class="sm-action-btn sm-action-btn--primary"
+          title="打印预览（供应商采购订单汇总）"
+          @click="$emit('printSupplier')"
+        >
+          <FontAwesomeIcon icon="print" aria-hidden="true" /> 打印预览
+        </button>
+      </div>
     </div>
 
     <!-- 表体：唯一滚动区。页签切换用 v-if（不换页签不卸载子组件的表格 DOM 无益，
          但换页签卸载可减轻长表格的常驻 DOM——与拆分前的弹窗行为一致） -->
     <div class="sm-body">
-      <!-- Factory Tab -->
+      <!-- Factory Tab（底部操作条已删：导出/打印/返回都在头部，操作事件由 Panel 直接 emit） -->
       <SummaryFactoryTab
         v-if="activeTab === 'factory' && factoryData"
         :factory-data="factoryData"
@@ -54,14 +88,11 @@
         :fabric-loss-rates="fabricLossRates"
         :fabric-loss-rate-mixed="fabricLossRateMixed"
         :group-spare-rates="groupSpareRates"
-        @close="$emit('close')"
         @toggle-edit-mode="onToggleEditMode"
         @save-edits="$emit('saveEdits')"
         @update-qty="(gi, si, fi, value) => $emit('updateQty', gi, si, fi, value)"
         @loss-rate-input="applyLossRateDebounced"
         @fabric-loss-rate-input="applyFabricLossRateDebounced"
-        @export-factory="$emit('exportFactory')"
-        @print-factory="$emit('printFactory')"
       />
 
       <!-- Supplier Tab -->
@@ -70,9 +101,6 @@
         :supplier-data="supplierData"
         :order-count="orderCount"
         :supplier-groups="supplierGroups"
-        @close="$emit('close')"
-        @export-supplier="$emit('exportSupplier')"
-        @print-supplier="$emit('printSupplier')"
       />
     </div>
   </div>
@@ -188,30 +216,16 @@ onUnmounted(cancelPendingRateEdits)
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--color-border-light);
   flex-shrink: 0;
-}
-.sm-title-block {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-}
-.sm-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--color-text);
-  white-space: nowrap;
 }
 .sm-back-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
+  height: 32px;
+  padding: 0 12px;
   font-size: 13px;
   font-weight: 600;
   border: 1px solid var(--color-border-light);
@@ -219,13 +233,56 @@ onUnmounted(cancelPendingRateEdits)
   background: white;
   color: var(--color-text-secondary);
   cursor: pointer;
-  transition: color 0.3s ease, background 0.3s ease;
+  transition: color 0.3s ease, background 0.3s ease, border-color 0.3s ease;
   white-space: nowrap;
   flex-shrink: 0;
 }
 .sm-back-btn:hover {
   background: var(--color-primary-50);
   color: var(--color-primary-600);
+  border-color: var(--color-primary-500);
+}
+
+/* 头部操作组（方案 B：三个都描边，主操作只用主色文字+浅色底，不加实心色块）
+   统一 32px 高 / 9px 圆角 / 8px 间距，视觉节奏一致。 */
+.sm-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.sm-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: color 0.3s ease, background 0.3s ease, border-color 0.3s ease;
+  white-space: nowrap;
+}
+/* 导出：与返回同款中性描边（次操作） */
+.sm-action-btn--export {
+  border: 1px solid var(--color-border-light);
+  background: white;
+  color: var(--color-text-secondary);
+}
+.sm-action-btn--export:hover {
+  background: var(--color-primary-50);
+  color: var(--color-primary-600);
+  border-color: var(--color-primary-500);
+}
+/* 打印预览：主操作——描边+浅色底+主色文字（不抢眼但可辨） */
+.sm-action-btn--primary {
+  border: 1px solid var(--color-primary-100);
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+}
+.sm-action-btn--primary:hover {
+  background: var(--color-primary-100);
   border-color: var(--color-primary-500);
 }
 .sm-body {

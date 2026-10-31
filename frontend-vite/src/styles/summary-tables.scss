@@ -14,12 +14,20 @@
 //   </style>
 // ============================================================================
 
+/* 2026-10-31 用户反馈演进：「左右空白太多」→「不用占满整个 UI」→「也别太小，居中」。
+   最终口径：表格取容器宽度的 72%（供应商）/ 82%（工厂）并水平居中，min-w 兜底窄屏；
+   长文本列给 px 上限并在格内换行。 */
+
 table th,
 table td {
   border: 1px solid var(--color-text);
-  padding: 8px;
+  /* 2026-10-31 用户反馈空白多：整页视图下行高收紧（8px → 5px 6px），
+     屏幕密度优先；打印/导出走 useSummaryModal 的独立 HTML 样式，不受此影响。 */
+  padding: 5px 6px;
   vertical-align: middle;
   text-align: center;
+  /* 长文本在格内换行，不把列宽顶开 */
+  overflow-wrap: anywhere;
 }
 table th {
   font-weight: bold;
