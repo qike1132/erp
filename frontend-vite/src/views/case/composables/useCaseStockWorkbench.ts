@@ -38,7 +38,10 @@ export interface StagedRowInput {
 
 /** 批量提交结果（含部分失败明细） */
 export interface SubmitFailure {
+  /** 服务端回传的请求内下标（仅用于文案追溯，**不要**用它回写暂存单） */
   index: number
+  /** 暂存行的稳定 id（2026-10-30 审计 A-M38）：失败行靠它对回原行 */
+  key: number
   productName: string
   error: string
 }
@@ -86,6 +89,8 @@ export function useCaseStockWorkbench() {
   }
 
   async function removeStaged(key: number) {
+    // 提交在途：此时改清单会让「按请求快照对回失败行」失去依据（A-M38）
+    if (submitting.value) return
     const ok = await confirmDialog.confirm('移除该条暂存记录？', '仅从暂存单移除，不影响已提交数据')
     if (!ok) return
     staged.value = staged.value.filter((s) => s.key !== key)
@@ -93,6 +98,7 @@ export function useCaseStockWorkbench() {
 
   /** 行内直接改数量；越界时回退为 1 并提示 */
   function updateStagedQuantity(key: number, quantity: number) {
+    if (submitting.value) return
     const item = staged.value.find((s) => s.key === key)
     if (!item) return
     if (!Number.isInteger(quantity) || quantity < 1) {
@@ -105,6 +111,7 @@ export function useCaseStockWorkbench() {
 
   /** 暂存行行内编辑方向（点击徽标切换） */
   function updateStagedDirection(key: number, direction: Direction) {
+    if (submitting.value) return
     const item = staged.value.find((s) => s.key === key)
     if (item) item.direction = direction
   }
@@ -113,17 +120,20 @@ export function useCaseStockWorkbench() {
    *  忽略会让输入框看起来已清空（Vue 只在 vnode 值变化时写 DOM，新旧都是旧日期
    *  → 不回写），用户以为走了「今天」，实际提交的还是旧日期（台账日期错记）。 */
   function updateStagedDate(key: number, date: string) {
+    if (submitting.value) return
     const item = staged.value.find((s) => s.key === key)
     if (item) item.date = date || toISODate()
   }
 
   /** 暂存行行内编辑备注 */
   function updateStagedNote(key: number, note: string) {
+    if (submitting.value) return
     const item = staged.value.find((s) => s.key === key)
     if (item) item.note = note
   }
 
   function clearStaged() {
+    if (submitting.value) return
     staged.value = []
   }
 
@@ -134,24 +144,43 @@ export function useCaseStockWorkbench() {
     if (!staged.value.length) return
     submitting.value = true
     lastFailures.value = []
-    const items: CaseMovementPayload[] = staged.value.map((s) => ({
-      case_id: Number(s.caseId),
-      direction: s.direction,
-      quantity: s.quantity,
-      movement_date: s.date,
-      note: s.note,
+    /**
+     * 提交快照（A-M38）：请求发出后清单仍可能被改动（清空/删除/改数量），
+     * 之前用「失败下标 → staged[i]」对回，一旦有行被移除就会错位——把成功行
+     * 留在清单里、把失败行悄悄丢掉（用户以为提交成功，实际台账缺记录）。
+     * 这里固定快照的 key 与 payload，失败一律按 key 对回。
+     */
+    const snapshot = staged.value.map((s) => ({
+      key: s.key,
+      caseName: s.caseName,
+      payload: {
+        case_id: Number(s.caseId),
+        direction: s.direction,
+        quantity: s.quantity,
+        movement_date: s.date,
+        note: s.note,
+      } satisfies CaseMovementPayload,
     }))
+    const items: CaseMovementPayload[] = snapshot.map((s) => s.payload)
+    const keyByIndex = snapshot.map((s) => s.key)
+    const nameByKey = new Map(snapshot.map((s) => [s.key, s.caseName]))
     try {
       const res = await caseApi.batchMovements(items)
       const failed = res.failed ?? []
       if (failed.length) {
-        const failedIdx = new Set(failed.map((f) => f.index))
-        lastFailures.value = failed.map((f) => ({
-          index: f.index,
-          productName: staged.value[f.index]?.caseName ?? `#${f.index + 1}`,
-          error: f.error,
-        }))
-        staged.value = staged.value.filter((_, i) => failedIdx.has(i))
+        const failedKeys = new Set<number>()
+        lastFailures.value = failed.map((f) => {
+          const key = keyByIndex[f.index]
+          if (key !== undefined) failedKeys.add(key)
+          return {
+            index: f.index,
+            key: key ?? -1,
+            productName: (key !== undefined ? nameByKey.get(key) : undefined) ?? `#${f.index + 1}`,
+            error: f.error,
+          }
+        })
+        // 只保留失败行（按稳定 id），与请求顺序、清单当前顺序都无关
+        staged.value = staged.value.filter((s) => failedKeys.has(s.key))
         showToast(`部分失败：成功 ${items.length - failed.length} 条，失败 ${failed.length} 条`, 'error')
       } else {
         staged.value = []

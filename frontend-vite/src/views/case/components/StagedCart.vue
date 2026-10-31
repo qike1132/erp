@@ -27,6 +27,7 @@
               :class="['sc-dir', item.direction === 'in' ? 'sc-dir-in' : 'sc-dir-out']"
               :aria-label="`切换方向（当前${item.direction === 'in' ? '入库' : '出库'}）`"
               title="点击切换入库/出库"
+              :disabled="submitting"
               @click="emit('direction-change', item.key, item.direction === 'in' ? 'out' : 'in')"
             >
               {{ item.direction === 'in' ? '入库' : '出库' }}
@@ -41,6 +42,7 @@
               type="date"
               class="sc-meta-input sc-meta-date"
               :value="item.date"
+              :disabled="submitting"
               :aria-label="`${item.caseName} 日期`"
               @change="emit('date-change', item.key, ($event.target as HTMLInputElement).value)"
             />
@@ -49,6 +51,7 @@
               class="sc-meta-input sc-meta-note"
               :value="item.note"
               placeholder="备注"
+              :disabled="submitting"
               :aria-label="`${item.caseName} 备注`"
               @change="emit('note-change', item.key, ($event.target as HTMLInputElement).value)"
             />
@@ -56,7 +59,7 @@
         </div>
         <div class="sc-item-side">
           <div class="sc-qty-editor">
-            <button type="button" class="sc-qty-btn" aria-label="减少" @click="emit('quantity-change', item.key, item.quantity - 1)">
+            <button type="button" class="sc-qty-btn" aria-label="减少" :disabled="submitting" @click="emit('quantity-change', item.key, item.quantity - 1)">
               <FontAwesomeIcon icon="minus" />
             </button>
             <input
@@ -65,14 +68,15 @@
               class="sc-qty-input"
               min="1"
               step="1"
+              :disabled="submitting"
               :aria-label="`${item.caseName} 数量`"
               @change="emit('quantity-change', item.key, Number(($event.target as HTMLInputElement).value))"
             />
-            <button type="button" class="sc-qty-btn" aria-label="增加" @click="emit('quantity-change', item.key, item.quantity + 1)">
+            <button type="button" class="sc-qty-btn" aria-label="增加" :disabled="submitting" @click="emit('quantity-change', item.key, item.quantity + 1)">
               <FontAwesomeIcon icon="plus" />
             </button>
           </div>
-          <button class="sc-remove-btn" aria-label="移除" @click="emit('remove', item.key)">
+          <button class="sc-remove-btn" aria-label="移除" :disabled="submitting" @click="emit('remove', item.key)">
             <FontAwesomeIcon icon="trash" />
           </button>
         </div>
@@ -85,7 +89,7 @@
         以下记录提交失败，已保留在清单中：
       </div>
       <ul>
-        <li v-for="f in lastFailures" :key="f.index">
+        <li v-for="f in lastFailures" :key="f.key">
           <strong>{{ f.productName }}</strong>：{{ f.error }}
         </li>
       </ul>
