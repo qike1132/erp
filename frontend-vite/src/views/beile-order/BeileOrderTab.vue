@@ -7,6 +7,13 @@
       <div v-if="isLoading && orders.length === 0" class="bo-empty">
         <UiSpinner />
       </div>
+      <!-- 加载失败与「暂无订单」必须分开（A-M32）：把 5xx/超时渲染成空列表，
+           等于告诉用户「这单不存在」，既不会重试也不会报障 -->
+      <div v-else-if="isError && orders.length === 0" class="bo-empty" role="alert">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        <span>订单加载失败，请检查网络后重试</span>
+        <UiButton variant="outline" @click="refetch()">重试</UiButton>
+      </div>
       <div v-else-if="orders.length === 0" class="bo-empty">
         <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" />
         <span>暂无订单</span>
@@ -107,6 +114,7 @@
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import VirtualList from '@/components/ui/VirtualList.vue'
 import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
@@ -132,6 +140,8 @@ const {
   totalPages,
   isLoading,
   isFetching,
+  isError,
+  refetch,
   orders,
   displayOrders,
   highlightId,

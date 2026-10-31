@@ -66,6 +66,13 @@
             @refresh="refetch()"
             @request-complete="openCompleteConfirm"
           />
+          <!-- 查询失败与「暂无批次数据」必须分开（A-M32）：本页是「完成批次」的
+               决策依据，把 5xx/超时渲染成空列表会让人误判为「这批已经没了」 -->
+          <div v-else-if="isError" class="bt-empty" role="alert">
+            <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+            <span>批次数据加载失败，请检查网络后重试</span>
+            <UiButton variant="outline" @click="refetch()">重试</UiButton>
+          </div>
           <div v-else class="bt-empty">
             <FontAwesomeIcon icon="inbox" aria-hidden="true" />
             <span>暂无批次数据</span>
@@ -108,6 +115,7 @@ const {
   allCustomers,
   isLoading,
   isFetching,
+  isError,
   refetch,
   grouped,
   switchCustomer,

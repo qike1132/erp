@@ -32,9 +32,17 @@
           :page-size-options="[]"
           hide-paginator-on-single-page
           row-key="id"
-          empty-message="暂无退货记录"
           @page="onPage"
         >
+          <!-- 加载失败与「暂无退货记录」必须分开（A-M32）：把 5xx/超时渲染成空表，
+               用户会以为这段时间真的没有退货 -->
+          <template #empty>
+            <div v-if="isError" class="sr-empty" role="alert">
+              <span>退货记录加载失败，请检查网络后重试</span>
+              <UiButton variant="outline" @click="refetch()">重试</UiButton>
+            </div>
+            <div v-else class="sr-empty">暂无退货记录</div>
+          </template>
           <template #column-body-return_no="{ row }">
             <span class="sr-mono">{{ (row as StockReturnRow).return_no }}</span>
           </template>
@@ -121,6 +129,7 @@
  */
 import { computed } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import UiSearchInput from '@/components/ui/UiSearchInput.vue'
@@ -154,6 +163,8 @@ const {
   onSearchInput,
   clearSearch,
   isLoading,
+  isError,
+  refetch,
   returns,
   totalItems,
   goPage,
@@ -197,6 +208,16 @@ const columns: TableColumn[] = [
 </script>
 
 <style scoped>
+/* 表格空/错误态（A-M32）：原先靠 UiDataTable 的 empty-message，无法区分加载失败 */
+.sr-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 16px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
 /* 卡片样式走全局 .page-card 系列（src/styles/app.css，18px 圆角），与 /report 一致 */
 
 .sr-container {

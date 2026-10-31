@@ -34,6 +34,12 @@
           <!-- 首屏未命中缓存时后端要跑一次全量 CTE（实测冷缓存 4~5s），
                用骨架屏替代 PrimeVue 的空白加载遮罩，避免「白屏数秒」的观感 -->
           <UiSkeleton v-if="isLoading" variant="table" :rows="8" class="sk-loading-skeleton" />
+          <!-- 加载失败与「暂无库存」必须分开（A-M32） -->
+          <div v-else-if="isError" class="sk-empty" role="alert">
+            <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+            <span>库存数据加载失败，请检查网络后重试</span>
+            <UiButton variant="outline" @click="refetch()">重试</UiButton>
+          </div>
           <div v-else class="sk-empty">
             <FontAwesomeIcon icon="warehouse" aria-hidden="true" />
             <span>暂无库存数据</span>
@@ -81,6 +87,7 @@ import type { InventoryItem } from '@/types'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
 import { useExport } from '@/composables/useExport'
 import { formatNumber } from '@/utils/format'
@@ -102,6 +109,8 @@ const {
   data: invData,
   isLoading,
   isFetching,
+  /** 首屏/翻页失败（A-M32）：原先只取 isLoading，失败会落到「暂无库存数据」 */
+  isError,
   refetch,
 } = useQuery({
   queryKey: ['inventory', () => filters.customer, debouncedProduct, () => page.value, () => perPage.value],

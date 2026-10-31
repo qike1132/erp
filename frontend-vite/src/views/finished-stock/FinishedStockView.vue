@@ -96,7 +96,12 @@
             />
           </template>
           <template #empty>
-            <div class="fs-empty"><FontAwesomeIcon icon="boxes-stacked" aria-hidden="true" /><span>暂无成品库存</span></div>
+            <!-- 加载失败与「暂无成品库存」必须分开（A-M32） -->
+            <div v-if="isError" class="fs-empty" role="alert">
+              <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" /><span>成品库存加载失败，请检查网络后重试</span>
+              <UiButton variant="outline" @click="refetch()">重试</UiButton>
+            </div>
+            <div v-else class="fs-empty"><FontAwesomeIcon icon="boxes-stacked" aria-hidden="true" /><span>暂无成品库存</span></div>
           </template>
         </UiDataTable>
       </div>
@@ -124,6 +129,7 @@
 import { ref, computed, watch } from 'vue'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/vue-query'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import CustomerChipBar from '@/components/ui/CustomerChipBar.vue'
 import ImagePreviewModal from '@/components/ui/ImagePreviewModal.vue'
@@ -149,7 +155,8 @@ const page = ref(1)
 const perPage = ref(20)
 const queryClient = useQueryClient()
 
-const { data, isLoading } = useQuery({
+/** isError（A-M32）：原先只取 isLoading，失败会落到「暂无成品库存」 */
+const { data, isLoading, isError, refetch } = useQuery({
   queryKey: ['finished-stock', () => filters.value.customer, debouncedProduct, () => page.value, () => perPage.value],
   queryFn: () => finishedStockApi.summary({
     customer: filters.value.customer || undefined,

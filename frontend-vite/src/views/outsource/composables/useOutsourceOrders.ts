@@ -47,6 +47,8 @@ export function useOutsourceOrders(props: { productFilter: string; customerFilte
     data: ordersData,
     isLoading,
     isFetching,
+    /** 首屏/翻页失败（A-M32）：原先只取 isLoading，失败会落到「暂无外发订单」 */
+    isError,
     refetch,
   } = useQuery({
     queryKey: ['outsource-orders', appliedCustomer, appliedProduct, () => page.value, () => perPage.value],
@@ -131,6 +133,7 @@ export function useOutsourceOrders(props: { productFilter: string; customerFilte
     appliedCustomer,
     isLoading,
     isFetching,
+    isError,
     refetch,
     orders,
     totalItems,

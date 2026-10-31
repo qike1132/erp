@@ -5,6 +5,12 @@
       <div v-if="isLoading && orders.length === 0" class="oso-empty">
         <UiSpinner />
       </div>
+      <!-- 加载失败与「暂无」必须分开（A-M32） -->
+      <div v-else-if="isError && orders.length === 0" class="oso-empty" role="alert">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        <span>外发订单加载失败，请检查网络后重试</span>
+        <UiButton variant="outline" @click="refetch()">重试</UiButton>
+      </div>
       <div v-else-if="orders.length === 0" class="oso-empty">
         <FontAwesomeIcon icon="clipboard-list" aria-hidden="true" />
         <span>暂无湖北外发订单</span>
@@ -127,6 +133,7 @@
 import { ref } from 'vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import OutsourceProcessDialog from '@/views/outsource/components/OutsourceProcessDialog.vue'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useOutsourceOrders } from '@/views/outsource/composables/useOutsourceOrders'
@@ -144,6 +151,7 @@ const {
   currentPage,
   isLoading,
   isFetching,
+  isError,
   refetch,
   orders,
   totalItems,

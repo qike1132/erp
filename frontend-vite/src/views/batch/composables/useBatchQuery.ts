@@ -65,6 +65,8 @@ export function useBatchQuery() {
     data: result,
     isLoading,
     isFetching,
+    /** 查询失败（A-M32）：原先只取 isLoading，失败会落到「暂无批次数据」 */
+    isError,
     refetch,
   } = useQuery({
     queryKey: ['batch-query', perPage, filters],
@@ -175,6 +177,7 @@ export function useBatchQuery() {
     allCustomers,
     isLoading,
     isFetching,
+    isError,
     refetch,
     grouped,
     switchCustomer,

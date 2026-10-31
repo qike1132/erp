@@ -103,7 +103,13 @@ export function useStockReturn() {
     currentPage.value = 1
   }
 
-  const { data: result, isLoading } = useQuery({
+  const {
+    data: result,
+    isLoading,
+    /** 首屏/翻页失败（A-M32）：原先只取 isLoading，失败会落到「暂无退货记录」 */
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: [
       'stock-returns-list',
       () => debouncedSearch.value,
@@ -290,6 +296,8 @@ export function useStockReturn() {
     clearSearch,
     applyFilter,
     isLoading,
+    isError,
+    refetch,
     returns,
     totalItems,
     goPage,

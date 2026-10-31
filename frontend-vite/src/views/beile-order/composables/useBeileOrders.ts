@@ -389,6 +389,13 @@ export function useBeileOrders() {
     data: ordersData,
     isLoading,
     isFetching,
+    /**
+     * 首屏/翻页请求失败（2026-10-30 审计 A-M32）。
+     *
+     * 原先只取 isLoading，失败时 data 为空、loading 结束，模板落到「暂无订单」——
+     * 5xx/超时被渲染成「没有数据」这一业务结论，用户不会重试也不会报障。
+     */
+    isError,
     refetch,
   } = useQuery({
     /**
@@ -736,6 +743,7 @@ export function useBeileOrders() {
     totalPages,
     isLoading,
     isFetching,
+    isError,
     refetch,
     orders,
     unconfirmedCount,
