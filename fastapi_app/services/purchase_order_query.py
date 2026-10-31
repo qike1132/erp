@@ -12,7 +12,7 @@ purchase_order_query_helpers.py，并在文件末尾 re-export，
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import desc, func, literal, or_, select, union_all
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,7 +27,6 @@ from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.export_limits import EXPORT_MAX_ROWS
 from fastapi_app.services.purchase_utils import magnified_purchase_qty, resolve_item_loss_rate
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, Supplier
-from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 from fastapi_app.utils import calc_total_pages
 
@@ -545,33 +544,15 @@ async def export_completed_orders(
 def _build_unprocessed_unified_query(sku_available: bool = True):
     """构建「未处理订单」的 UNION ALL 子查询（Order 待备货 + StockIn）。
 
+    2026-10-30 审计 A-M20：本函数原先**复制**了 `purchase/_unprocessed.py` 的同一段
+    SQL。两处一旦分叉，「待审核列表里看到的记录」与「自动生成采购单时的候选集」就会
+    不一致——最典型的表现是某条记录在页面上永远可见却永不被自动生成（静默漏单），
+    或者相反。现统一委托给唯一实现 `_build_unprocessed_union`（模块底部 re-export），
+    本函数仅作为既有调用点的稳定入口，不再持有 SQL 副本。
+
     P-1：数据库层完成排序/分页（轻量列）；P-6：NOT EXISTS + JSONB @> 替代预查询。
     """
-    from fastapi_app.shared_models import Order as CustomerOrder
-    from fastapi_app.shared_models import StockIn
-
-    # Order 部分：status='待备货' 且未删除，NOT EXISTS 排除已被采购单关联的 ID
-    order_part = select(
-        literal('order').label('record_type'),
-        CustomerOrder.id.label('source_id'),
-        CustomerOrder.order_no.label('order_no'),
-        CustomerOrder.customer.label('customer'),
-        CustomerOrder.order_date.label('sort_date'),
-    ).where(
-        CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
-        CustomerOrder.is_deleted == False,  # noqa: E712
-        _build_not_processed_filter(CustomerOrder.id, 'order', sku_available),
-    )
-    # StockIn 部分：NOT EXISTS 排除已被采购单 source_order_ids 关联的 ID
-    # （source_order_ids 中可能同时包含 Order ID 和 StockIn ID）
-    stockin_part = select(
-        literal('stockin').label('record_type'),
-        StockIn.id.label('source_id'),
-        StockIn.stockin_no.label('order_no'),
-        StockIn.customer.label('customer'),
-        StockIn.stockin_date.label('sort_date'),
-    ).where(_build_not_processed_filter(StockIn.id, 'stockin', sku_available))
-    return union_all(order_part, stockin_part).subquery()
+    return _build_unprocessed_union(sku_available)
 
 
 async def _fetch_unprocessed_source_objects(db: AsyncSession, rows):
