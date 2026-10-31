@@ -9,6 +9,7 @@ import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { batchApi, orderBatchApi, customerApi } from '@/api'
 import type { BatchQueryItem } from '@/types'
 import { showToast } from '@/composables/useToast'
+import { useDebouncedRef } from '@/composables/useDebouncedRef'
 
 /** 产品分组：同一产品下的订单/备货记录 */
 export interface ProductGroup {
@@ -34,6 +35,23 @@ export function useBatchQuery() {
   const perPage = ref(500)
 
   const filters = reactive({ batch_no: '', customer: '', status: '', keyword: '' })
+  /**
+   * 实际参与查询的关键字（2026-10-30 审计 A-M37）。
+   *
+   * 现场：queryKey 直接塞了 reactive 的 filters，于是每敲一个字都触发一次主查询——
+   * 而主查询一次要翻最多 20 页 × 500 行。改成「输入文本 / 已应用关键字」分离后，
+   * 键里只剩原始值，且关键字走 400ms 防抖：连续输入只发最后一次。
+   */
+  const appliedKeyword = ref('')
+  const debouncedKeyword = useDebouncedRef(computed(() => filters.keyword), 400)
+  watch(debouncedKeyword, (v) => {
+    appliedKeyword.value = v
+  })
+
+  /** 立即应用当前输入（「查询」按钮 / 回车），不等防抖窗口 */
+  function applyFilters() {
+    appliedKeyword.value = filters.keyword
+  }
 
   // ---- Whitelist customers ----
   const { data: whitelistData, refetch: refetchWhitelist } = useQuery({
@@ -69,13 +87,21 @@ export function useBatchQuery() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['batch-query', perPage, filters],
+    // 键里只放原始值（A-M37）：reactive 对象进 key 会让输入框每次击键都换 key
+    queryKey: [
+      'batch-query',
+      () => perPage.value,
+      () => filters.batch_no,
+      () => filters.customer,
+      () => filters.status,
+      () => appliedKeyword.value,
+    ],
     queryFn: async () => {
       const base: Record<string, unknown> = {}
       if (filters.batch_no) base.batch_no = filters.batch_no
       if (filters.customer) base.customer = filters.customer
       if (filters.status) base.status = filters.status
-      if (filters.keyword) base.keyword = filters.keyword
+      if (appliedKeyword.value) base.keyword = appliedKeyword.value
       // F1a-04（2026-10-24 审计）：分页拉全部——原先单页 500 不翻页不校验
       // total，记录超 500 静默截断，「完成批次」决策基于残缺列表（同类问题
       // 已在 OutsourcePresetTab P1-23 修复，本页漏修）。
@@ -172,6 +198,7 @@ export function useBatchQuery() {
 
   return {
     filters,
+    applyFilters,
     result,
     whitelistCustomers,
     allCustomers,

@@ -17,7 +17,8 @@
         </span>
         <div class="bt-header-search">
           <UiInput v-model="filters.keyword" placeholder="搜索" style="width: 160px" />
-          <UiButton variant="primary" @click="refetch()"> 查询 </UiButton>
+          <!-- 立即应用关键字（不等 400ms 防抖）；键变化本身会触发一次查询 -->
+          <UiButton variant="primary" @click="applyFilters"> 查询 </UiButton>
           <button class="bt-whitelist-btn" aria-label="设置" @click="showWhitelistModal = true">
             <FontAwesomeIcon icon="cog" aria-hidden="true" />
           </button>
@@ -110,6 +111,7 @@ const showWhitelistModal = ref(false)
 
 const {
   filters,
+  applyFilters,
   result,
   whitelistCustomers,
   allCustomers,
