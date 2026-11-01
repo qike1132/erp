@@ -999,6 +999,44 @@ def test_signal_exposes_ledger_corrupt_marker(tmp_path, monkeypatch):
     assert sig['ledger_corrupt']['value'] == '1,234'
 
 
+def test_signal_shape_is_identical_across_branches(tmp_path, monkeypatch):
+    """五种分支必须返回**同一套键**——契约快照只能钉住一种结构。
+
+    结构随运行状态变（禁用/误配/从未运行/停摆或损坏/正常）时：契约快照钉住哪个
+    分支都只是碰运气（CI 上是「从未运行」，装了任务的机器上是「正常」），前端也
+    只能按「字段可能不存在」写防御代码。CI 就是这么红过一次（health 契约漂移）。
+    变异验证：让任一分支少返回一个键，本测试失败。
+    """
+    shapes: list[set[str]] = []
+    state_path = tmp_path / 'state.json'
+    monkeypatch.setattr(art, 'STATE_PATH', state_path)
+
+    monkeypatch.setattr(settings, 'AUDIT_RETENTION_MONTHS', 0, raising=False)
+    shapes.append(set(art.audit_retention_signal()))            # 禁用
+
+    monkeypatch.setattr(settings, 'AUDIT_RETENTION_MONTHS', 3, raising=False)
+    shapes.append(set(art.audit_retention_signal()))            # 低于法定下限
+
+    monkeypatch.setattr(settings, 'AUDIT_RETENTION_MONTHS', 12, raising=False)
+    shapes.append(set(art.audit_retention_signal()))            # 从未运行（文件不存在）
+
+    state_path.write_text(json.dumps({
+        'last_attempt_at': datetime.now(UTC).isoformat(),
+        'last_error': 'RuntimeError: boom',
+    }), encoding='utf-8')
+    shapes.append(set(art.audit_retention_signal()))            # 跑过但从未成功
+
+    state_path.write_text(json.dumps({
+        'last_success_at': datetime.now(UTC).isoformat(),
+        'retention_months': 12, 'deleted_rows_total': 5,
+        'pending_errors': [],
+    }), encoding='utf-8')
+    shapes.append(set(art.audit_retention_signal()))            # 正常
+
+    for idx, shape in enumerate(shapes[1:], start=2):
+        assert shape == shapes[0], f'第 {idx} 个分支的键集与「禁用」分支不同：{shape ^ shapes[0]}'
+
+
 def test_signal_ok_when_fresh(tmp_path, monkeypatch):
     _write_signal_state(tmp_path, monkeypatch,
                         last_success_at=datetime.now(UTC).isoformat(),

@@ -357,3 +357,13 @@ to the given transaction`。于是 `_delete_ids_batched` 每批 `db.commit()` �
 - keep-3/6/12/24mo 当前均保留 100%（数据仅 5 周龄）
 - L2 指纹 EXPLAIN：Aggregate 1865ms，external merge 41MB temp，buffers hit 7103
 - 法规原文：网安法第 21 条（cac.gov.cn 权威文本）；等保 2.0 GB/T 22239-2019 安全审计条款；审计执法案例（汕尾市审计局 2023-08 以案释法）
+
+**CI 首跑暴露的契约问题（2026-11-01，已修）**：`/api/health` 的 `audit_retention`
+块原先随运行状态有五套结构（禁用/误配/从未运行/停摆或损坏/正常），契约快照只能钉住
+其中一种——CI 上恰好是「从未运行」，于是 `test_contract_snapshots_match` 直接红。
+这不是快照该迁就的事：结构随状态变，前端就只能按「字段可能不存在」写防御代码，而
+本仓库的契约门禁原则是「结构变了 = 契约变了」。修法：信号统一成**固定键集**
+（`_signal()` 骨架，未知值 `null`），并加 `test_signal_shape_is_identical_across_branches`
+锁住五个分支的键集一致；快照按「从未运行」分支（= CI 条件）重录 `audit_retention.*`
+18 个条目。`/api/health` 无需鉴权，`state_path` 默认 `null`、只在需要定位文件的分支
+填真实路径，避免无条件打字服务器绝对路径。

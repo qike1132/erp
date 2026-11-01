@@ -721,6 +721,40 @@ async def audit_retention_task(ctx) -> dict:
     return report
 
 
+def _signal(**overrides) -> dict:
+    """健康信号的**固定键集**骨架（各分支只覆盖值，不增删键）。
+
+    为什么必须固定：``/api/health`` 的 ``audit_retention`` 块随运行状态有五种
+    形态（禁用/误配/从未运行/停摆或损坏/正常）。结构随状态变会让契约快照只能钉
+    住其中一种，也让前端只能按「字段可能不存在」写防御代码——而本仓库的契约
+    门禁原则是「结构变了 = 契约变了」。这里统一成一套键，未知值给 None。
+    """
+    base = {
+        'ok': True,
+        'disabled': False,
+        'misconfigured': False,
+        'note': None,
+        'last_success_at': None,
+        'last_attempt_at': None,
+        'last_skipped_at': None,
+        'skip_reason': None,
+        'last_error': None,
+        'age_days': None,
+        'stale_threshold_days': STALE_DAYS,
+        'retention_months': None,
+        'min_retention_months': MIN_RETENTION_MONTHS,
+        'deleted_rows_total': None,
+        'ledger_corrupt': None,
+        'pending_errors': [],
+        'pending_error_count': 0,
+        # 默认 null：只有确实需要定位文件的分支才填真实路径
+        # （/api/health 无需鉴权，别无条件把服务器绝对路径打字出来）
+        'state_path': None,
+    }
+    base.update(overrides)
+    return base
+
+
 def audit_retention_signal() -> dict:
     """健康信号（health 端点调用；绝不抛）。
 
@@ -736,53 +770,51 @@ def audit_retention_signal() -> dict:
 
     状态文件存在但读不出来 / 缺 last_success_at / 时间戳不可解析 → ok=False。
     其中「跑过但从未成功」与「文件损坏」用不同 note 区分（前者查任务，后者查文件）。
+
+    **返回结构固定**（见 ``_signal``）：键集不随分支变化，契约才能被快照钉住。
     """
     months = settings.AUDIT_RETENTION_MONTHS
     if months <= 0:
-        return {'ok': True, 'disabled': True, 'retention_months': 0}
+        return _signal(disabled=True, retention_months=0)
     if months < MIN_RETENTION_MONTHS:
-        return {'ok': False, 'misconfigured': True, 'retention_months': months,
-                'min_retention_months': MIN_RETENTION_MONTHS,
-                'note': 'below_statutory_minimum'}
+        return _signal(ok=False, misconfigured=True, retention_months=months,
+                       note='below_statutory_minimum')
     state = read_retention_state()
     if state is None or not state.get('last_success_at'):
         if not STATE_PATH.exists():
-            return {'ok': True, 'last_success_at': None, 'note': 'not_yet_run'}
+            return _signal(note='not_yet_run')
         attempted = bool((state or {}).get('last_attempt_at'))
-        return {
-            'ok': False,
-            'last_success_at': None,
+        return _signal(
+            ok=False,
             # 「跑过但从未成功」≠「文件坏了」：前者查任务，后者查文件
-            'note': 'never_succeeded' if attempted else 'state_unreadable',
-            'last_attempt_at': (state or {}).get('last_attempt_at'),
-            'last_error': (state or {}).get('last_error'),
-            'last_skipped_at': (state or {}).get('last_skipped_at'),
-            'skip_reason': (state or {}).get('skip_reason'),
-            'state_path': str(STATE_PATH),
-        }
+            note='never_succeeded' if attempted else 'state_unreadable',
+            last_attempt_at=(state or {}).get('last_attempt_at'),
+            last_error=(state or {}).get('last_error'),
+            last_skipped_at=(state or {}).get('last_skipped_at'),
+            skip_reason=(state or {}).get('skip_reason'),
+            state_path=str(STATE_PATH),
+        )
     try:
         last = datetime.fromisoformat(state['last_success_at'])
     except (TypeError, ValueError):
-        return {'ok': False, 'last_success_at': None, 'note': 'state_unreadable',
-                'state_path': str(STATE_PATH)}
+        return _signal(ok=False, note='state_unreadable', state_path=str(STATE_PATH))
     if last.tzinfo is None:
         # 手改/旧格式写入的 naive 时间戳：按 UTC 解释，而不是让
         # datetime.now(UTC) - last 抛 TypeError 逃出「绝不抛」的承诺
         last = last.replace(tzinfo=UTC)
     age_days = (datetime.now(UTC) - last) / timedelta(days=1)
     pending = state.get('pending_errors') or []
-    return {
-        'ok': age_days <= STALE_DAYS and not pending,
-        'last_success_at': state['last_success_at'],
-        'age_days': round(age_days, 1),
-        'stale_threshold_days': STALE_DAYS,
-        'retention_months': state.get('retention_months'),
-        'deleted_rows_total': state.get('deleted_rows_total'),
+    return _signal(
+        ok=age_days <= STALE_DAYS and not pending,
+        last_success_at=state['last_success_at'],
+        age_days=round(age_days, 1),
+        retention_months=state.get('retention_months'),
+        deleted_rows_total=state.get('deleted_rows_total'),
         # 「账本曾被动过」在 pending_errors 清空后仍要可见（否则只有主动翻
         # 状态文件/备份目录才看得出来）。不参与 ok 判据：损坏本身已在发现轮
         # 让 ok=False，之后属于待人工回填的已知状态。
-        'ledger_corrupt': state.get('deleted_rows_total_corrupt') or None,
+        ledger_corrupt=state.get('deleted_rows_total_corrupt') or None,
         # 只暴露前几条，避免健康响应被长列表撑爆
-        'pending_errors': pending[:5],
-        'pending_error_count': len(pending),
-    }
+        pending_errors=pending[:5],
+        pending_error_count=len(pending),
+    )
