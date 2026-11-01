@@ -34,7 +34,7 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
-import ProductionEntryDialog from '@/views/production/components/ProductionEntryDialog.vue'
+import ProductionEntryPanel from '@/views/production/components/ProductionEntryPanel.vue'
 import CustomerSelect from '@/views/production/components/CustomerSelect.vue'
 import { showToast } from '@/composables/useToast'
 
@@ -56,7 +56,7 @@ let wrapper: VueWrapper | null = null
 
 function mountDialog() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  wrapper = mount(ProductionEntryDialog, {
+  wrapper = mount(ProductionEntryPanel, {
     props: { open: true, selectedDate: '2026-09-30' },
     attachTo: document.body,
     global: { plugins: [[VueQueryPlugin, { queryClient }]], stubs },

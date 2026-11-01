@@ -49,7 +49,7 @@ function mountView() {
         // 编辑弹窗的 stub 带 name：保存失效用例要能对它 emit('saved')。
         RecordEditDialog: { name: 'RecordEditDialog', template: '<div />' },
         // 录入弹窗的 stub 带 name 与 open prop：快捷键用例要能读到它是否被打开。
-        ProductionEntryDialog: { name: 'ProductionEntryDialog', props: ['open', 'selectedDate'], template: '<div />' },
+        ProductionEntryPanel: { name: 'ProductionEntryPanel', props: ['open', 'selectedDate'], template: '<div />' },
         teleport: true,
       },
     },
@@ -96,7 +96,7 @@ describe('ProductionView（驾驶舱编排）', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true }))
     await nextTick()
 
-    expect(wrapper.findComponent({ name: 'ProductionEntryDialog' }).props('open')).toBe(true)
+    expect(wrapper.findComponent({ name: 'ProductionEntryPanel' }).props('open')).toBe(true)
   })
 
   it('保存成功后失效记录查询并重新拉取（否则抽屉里那一行一直是旧值）', async () => {

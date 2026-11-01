@@ -2,7 +2,7 @@
  * 录入弹窗（方向 A）—— 布局、合计与「少录错 / 不重复建单」护栏。
  *
  * 核心契约：一张单 = 多行 SKU，底部一次提交；部分失败只保留失败的行；
- * 整批撤销必须先确认，且确认框要抬到嵌套层级。
+ * 整批撤销必须先确认（物理删除不可恢复）。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
@@ -35,7 +35,7 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
-import ProductionEntryDialog from '@/views/production/components/ProductionEntryDialog.vue'
+import ProductionEntryPanel from '@/views/production/components/ProductionEntryPanel.vue'
 import CustomerSelect from '@/views/production/components/CustomerSelect.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
@@ -60,7 +60,7 @@ let wrapper: VueWrapper | null = null
 
 function mountDialog() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  wrapper = mount(ProductionEntryDialog, {
+  wrapper = mount(ProductionEntryPanel, {
     props: { open: true, selectedDate: '2026-09-30' },
     attachTo: document.body,
     global: { plugins: [[VueQueryPlugin, { queryClient }]], stubs },
@@ -71,7 +71,7 @@ function mountDialog() {
 /** 不 stub UiConfirmDialog 的挂载：层级断言只有挂真组件才有意义 */
 function mountDialogRealConfirm() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  wrapper = mount(ProductionEntryDialog, {
+  wrapper = mount(ProductionEntryPanel, {
     props: { open: true, selectedDate: '2026-09-30' },
     attachTo: document.body,
     global: { plugins: [[VueQueryPlugin, { queryClient }]] },
@@ -240,7 +240,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
     let release!: (v: unknown) => void
     createMock.mockImplementation(() => new Promise((resolve) => { release = resolve }))
 
-    const modal = w.find('.pr-qe-modal')
+    const modal = w.find('.pr-qe-page')
     modal.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))
     modal.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))
     await nextTick()
@@ -338,7 +338,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
     expect(w.find('[data-test="qe-submit"]').exists()).toBe(true)
   })
 
-  it('撤销确认框被抬到嵌套层级——沿用默认层级会被录入弹窗盖住，点不到', async () => {
+  it('撤销确认框在整页面板下用默认层级即可（页面没有 z-modal 竞争，无需再抬层）', async () => {
     const w = mountDialogRealConfirm()
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('620')
@@ -350,8 +350,8 @@ describe('ProductionEntryDialog 提交护栏', () => {
 
     const confirm = w.findComponent(UiConfirmDialog)
     expect(confirm.props('open')).toBe(true)
-    expect(confirm.props('overlayZClass')).toBe('z-[var(--z-overlay-nested)]')
-    expect(confirm.props('contentZClass')).toBe('z-[var(--z-modal-nested)]')
+    expect(confirm.props('overlayZClass')).toBeUndefined()
+    expect(confirm.props('contentZClass')).toBeUndefined()
   })
 
   it('撤销失败时透出后端的 detail（物理删除失败的原因必须可见）', async () => {

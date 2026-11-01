@@ -28,7 +28,7 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
-import ProductionEntryDialog from '@/views/production/components/ProductionEntryDialog.vue'
+import ProductionEntryPanel from '@/views/production/components/ProductionEntryPanel.vue'
 
 const PRODUCTS = [
   { id: 1, name: '白兔公仔 40cm', barcode: '6901234', specification: '40cm' },
@@ -48,7 +48,7 @@ let wrapper: VueWrapper | null = null
 
 function mountDialog() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  wrapper = mount(ProductionEntryDialog, {
+  wrapper = mount(ProductionEntryPanel, {
     props: { open: true, selectedDate: '2026-09-30' },
     attachTo: document.body,
     global: { plugins: [[VueQueryPlugin, { queryClient }]], stubs },
@@ -120,7 +120,7 @@ describe('ProductionEntryDialog 键盘流', () => {
 
   it('Alt+1 / Alt+2 / Alt+3 切换生产部门', async () => {
     const w = mountDialog()
-    const modal = w.find('.pr-qe-modal')
+    const modal = w.find('.pr-qe-page')
 
     await modal.trigger('keydown', { key: '2', altKey: true })
     expect(activeDeptText(w)).toContain('手工部')
@@ -224,7 +224,7 @@ describe('ProductionEntryDialog 键盘流', () => {
     await selectFirstProduct(w)
     await w.find('[data-test="qe-qty"]').setValue('620')
 
-    await w.find('.pr-qe-modal').trigger('keydown', { key: 'Enter', ctrlKey: true })
+    await w.find('.pr-qe-page').trigger('keydown', { key: 'Enter', ctrlKey: true })
     await flushPromises()
 
     expect(createMock).toHaveBeenCalledTimes(1)
@@ -235,7 +235,7 @@ describe('ProductionEntryDialog 键盘流', () => {
     const w = mountDialog()
     expect(w.find('.pr-entry-dropdown').exists()).toBe(false)
 
-    await w.find('.pr-qe-modal').trigger('keydown', { key: 'Escape' })
+    await w.find('.pr-qe-page').trigger('keydown', { key: 'Escape' })
 
     expect(w.emitted('update:open')).toEqual([[false]])
   })
@@ -245,7 +245,7 @@ describe('ProductionEntryDialog 键盘流', () => {
     await typeSearch(w, '白兔')
     expect(w.find('.pr-entry-dropdown').exists()).toBe(true)
 
-    await w.find('.pr-qe-modal').trigger('keydown', { key: 'Escape' })
+    await w.find('.pr-qe-page').trigger('keydown', { key: 'Escape' })
     await nextTick()
 
     expect(w.find('.pr-entry-dropdown').exists()).toBe(false)
@@ -257,7 +257,7 @@ describe('ProductionEntryDialog 键盘流', () => {
     await w.find('[data-test="qe-paste-open"]').trigger('click')
     expect(w.find('[data-test="qe-paste"]').exists()).toBe(true)
 
-    await w.find('.pr-qe-modal').trigger('keydown', { key: 'Escape' })
+    await w.find('.pr-qe-page').trigger('keydown', { key: 'Escape' })
     await nextTick()
 
     expect(w.find('[data-test="qe-paste"]').exists()).toBe(false)

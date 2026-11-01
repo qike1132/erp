@@ -1,5 +1,9 @@
 <template>
-  <div class="page-card page-card-main m-0 h-full">
+  <!-- 录入生产数据整页视图：entryOpen 时替换整个日报卡片（参照 /purchase 汇总下单），侧边栏保留 -->
+  <div v-if="entryOpen" class="page-card page-card-main m-0 h-full">
+    <ProductionEntryPanel ref="entryPanelRef" v-model:open="entryOpen" v-model:selected-date="selectedDate" />
+  </div>
+  <div v-else class="page-card page-card-main m-0 h-full">
     <ProductionToolbar
       v-model:date="selectedDate"
       @prev-day="goPrevDay"
@@ -85,7 +89,7 @@ import DeptRankPanel from './components/DeptRankPanel.vue'
 import DeptDrillCards from './components/DeptDrillCards.vue'
 import RecordDrawer from './components/RecordDrawer.vue'
 import RecordEditDialog from './components/RecordEditDialog.vue'
-import ProductionEntryDialog from './components/ProductionEntryDialog.vue'
+import ProductionEntryPanel from './components/ProductionEntryPanel.vue'
 import { useProductionTrend } from './composables/useProductionTrend'
 import { useProductionRecords } from './composables/useProductionRecords'
 import { defaultRecordFilters, buildExportRange, type RecordFilters } from './composables/recordFilters'
@@ -99,7 +103,7 @@ const editOpen = ref(false)
 const editingRecord = ref<DailyProductionRecord | null>(null)
 const recordsOpen = ref(false)
 const recordsFilters = ref<RecordFilters>(defaultRecordFilters())
-const entryDialogRef = ref<InstanceType<typeof ProductionEntryDialog>>()
+const entryPanelRef = ref<InstanceType<typeof ProductionEntryPanel>>()
 
 function goPrevDay() {
   const d = new Date(`${selectedDate.value}T00:00:00`)
@@ -288,10 +292,10 @@ async function handleDrawerExport() {
   }, 3000)
 }
 
-// ===== 键盘快捷键：Ctrl+N 打开录入、Ctrl+Enter 提交、Esc 关闭录入弹窗 =====
-// Ctrl+N 只在这一层处理。Ctrl+Enter / Esc 弹窗内部也接了（挂在模态根节点，
-// 焦点在弹窗内时由它接管 —— Esc 还要先收浮层，且收浮层时会 stopPropagation 拦住这里）；
-// 这一层是「焦点不在弹窗内」时的兜底，故它 defineExpose 了 handleSubmit / closeEntryDrawer。
+// ===== 键盘快捷键：Ctrl+N 打开录入页、Ctrl+Enter 提交、Esc 返回日报 =====
+// Ctrl+N 只在这一层处理。Ctrl+Enter / Esc 录入页内部也接了（挂在面板根节点，
+// 焦点在面板内时由它接管 —— Esc 还要先收浮层，且收浮层时会 stopPropagation 拦住这里）；
+// 这一层是「焦点不在面板内」时的兜底，故它 defineExpose 了 handleSubmit / closeEntryDrawer。
 // 原来的 Ctrl+1/Ctrl+2 是给已删除的双 Tab 用的，不再需要。
 function handleKeydown(event: KeyboardEvent) {
   if (event.ctrlKey && (event.key === 'n' || event.key === 'N')) {
@@ -300,10 +304,10 @@ function handleKeydown(event: KeyboardEvent) {
   }
   if (event.ctrlKey && event.key === 'Enter' && entryOpen.value) {
     event.preventDefault()
-    entryDialogRef.value?.handleSubmit()
+    entryPanelRef.value?.handleSubmit()
   }
   if (event.key === 'Escape' && entryOpen.value) {
-    entryDialogRef.value?.closeEntryDrawer()
+    entryPanelRef.value?.closeEntryDrawer()
   }
 }
 
