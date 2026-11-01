@@ -232,13 +232,14 @@ async def _export_month_jsonl(
 
 
 def _jsonable(value):
-    """datetime → ISO 字符串；dict/list 保持 JSON 形态；其余原样。"""
+    """datetime → ISO 字符串；其余非基本类型 → str。
+
+    ``detail`` 列是 **Text** 不是 JSONB（``shared_models/audit_log.py``），驱动
+    交上来的本来就是 str，外层 ``json.dumps`` 会把它当成一个 JSON 字符串值写出
+    ——不需要也不应该在里层再 dumps 一次（那会变成双重编码的字符串）。
+    """
     if isinstance(value, datetime):
         return value.isoformat()
-    if isinstance(value, (dict, list)):
-        # detail 是 JSONB，落到 str() 会变成 Python repr（单引号），归档就不是
-        # 合法 JSONL 片段了——证据文件必须能被 jq/外部工具直接消费。
-        return json.dumps(value, ensure_ascii=False)
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
@@ -257,12 +258,17 @@ def _sha256_of(path: Path, chunk: int = 1 << 20) -> str:
 
 async def _delete_ids_batched(
     db: AsyncSession, ids: list[int], batch: int = DELETE_BATCH_ROWS,
+    progress: dict | None = None,
 ) -> int:
     """按归档的 id 集合分批删除，每批 commit（小事务）。返回总删除行数。
 
     删除对象**就是**归档过的 id：不做时间窗匹配、不设上界推导，所以
     「删的行 ⊆ 归档过的行」由构造保证。已删过的 id 再删一次命中 0 行，
     崩溃后重跑天然幂等。
+
+    ``progress`` 是可选的可变计数器：每批提交后写入累计值。中途抛错时调用方
+    还能拿到「已经真实提交了多少行」——否则已提交的批次会从账本里凭空消失
+    （等保账本与库不一致，且会让 ANALYZE 被跳过）。
     """
     total = 0
     for start in range(0, len(ids), batch):
@@ -273,6 +279,8 @@ async def _delete_ids_batched(
             text('DELETE FROM audit_log WHERE id = ANY(:ids)'), {'ids': chunk})
         await db.commit()  # 每批小事务：分批的全部意义
         total += result.rowcount or 0
+        if progress is not None:
+            progress['deleted'] = total
     return total
 
 
@@ -303,14 +311,13 @@ def _merge_state(fields: dict, state_path: Path | None = None) -> None:
     ``never_succeeded``。
     """
     state_path = state_path or STATE_PATH
-    merged = {**(read_retention_state(state_path) or {}), **fields}
-
+    # 落盘前**只读一次**、且以这一次为底：调用方没打算写的字段（pending_errors /
+    # last_error / 账本）一律取此刻的最新值。若先读一份快照再合并，旧快照里的
+    # 值会覆盖最新值——持锁方刚清掉的错误会被"复活"，健康端点在下一轮成功之前
+    # 一直假 degraded（反向则是把刚记下的错误静默清掉）。
     disk = read_retention_state(state_path) or {}
-    # 以**最新快照**为底：调用方没打算写的字段（pending_errors / last_error 等）
-    # 一律取落盘前那一刻的值。只修时间戳是不够的——跳过方若拿旧快照写回，
-    # 会把持锁方刚记下的 archive_incomplete 静默清掉（健康转绿），或反向复活
-    # 已被清掉的旧错误（假 degraded）。
-    merged = {**disk, **merged}
+    merged = {**disk, **fields}
+    # 时间戳单调：调用方若带着更旧的值（字段可能在很久以前算好），只准变新。
     for key in ('last_success_at', 'last_attempt_at', 'last_skipped_at'):
         mine, theirs = _parse_ts(merged.get(key)), _parse_ts(disk.get(key))
         if theirs is not None and (mine is None or theirs > mine):
@@ -413,18 +420,24 @@ async def _process_month(db: AsyncSession, plan: dict, archive_dir: Path) -> dic
     entry = {'month': month_key, 'rows': plan['rows'], 'archive_rows': archive['rows'],
              'archived': True, 'archive_path': archive['path'],
              'sha256': archive['sha256'], 'deleted': 0}
+    progress = {'deleted': 0}
     try:
         # 删除**前**的窗口行数：与 deleted 一起构成等式，用来发现「删到了窗口外」。
         before = await window_count(db, month_start, month_end)
-        deleted = await _delete_ids_batched(db, archive['ids'])
+        deleted = await _delete_ids_batched(db, archive['ids'], progress=progress)
         leftover = await window_count(db, month_start, month_end)
     except (OSError, SQLAlchemyError) as exc:
         # 归档已落盘（证据在），只是没删成：entry 仍带 archive_path/sha256 进账本，
         # 否则等保取证会缺一条 sha256 记录，而磁盘上明明有这份证据。
-        logger.error('audit_log 保留治理: %s 删除失败，归档已保留: %s', month_key, exc)
-        return {'entry': entry, 'deleted': 0, 'error': {
+        # 已提交的批次是真删了，必须计入账本（report/state 都按 deleted_total 走）。
+        partial = int(progress['deleted'])
+        entry['deleted'] = partial
+        logger.error('audit_log 保留治理: %s 删除失败（已提交 %d 行），归档已保留: %s',
+                     month_key, partial, exc)
+        return {'entry': entry, 'deleted': partial, 'error': {
             'month': month_key, 'error': 'delete_failed',
             'detail': f'{type(exc).__name__}: {exc}',
+            'deleted_rows': partial,
             'archive_path': archive['path'], 'archived_rows': archive['rows'],
             'remediation': '归档已完成，下一轮会复用该归档续删；若持续失败，'
                            '查 pg_stat_activity 的锁等待、长事务与连接数'}}
@@ -541,7 +554,9 @@ async def run_retention_once(
         'last_success_at': now.isoformat(),
         'last_attempt_at': now.isoformat(),
         'retention_months': settings.AUDIT_RETENTION_MONTHS,
-        'deleted_rows_total': int(prev.get('deleted_rows_total') or 0) + report['deleted_total'],
+        # 账本被手改坏（"1,234" 之类）不能让整轮在**已删完数据之后**抛 ValueError
+        # ——那一抛会让本轮的 last_success_at/archive_files 都不落盘。
+        'deleted_rows_total': _as_int(prev.get('deleted_rows_total')) + report['deleted_total'],
         'archive_files': archives,
         # 上一轮错误不累加：本轮成功即清空（错误是「当前是否卡着」的信号，
         # 不是历史账本；历史归档证据在 archive_files 里）
@@ -595,12 +610,19 @@ async def audit_retention_task(ctx) -> dict:
             with suppress(SQLAlchemyError):
                 await conn.rollback()
             with suppress(SQLAlchemyError):
+                await conn.rollback()
+            try:
                 released = (await conn.execute(
                     text('SELECT pg_advisory_unlock(:k)'),
                     {'k': RETENTION_LOCK_KEY})).scalar()
                 if not released:
-                    # 不再静默吞掉：这是「锁没释放」的唯一信号
+                    # 「锁没释放」的两条信号之一：返回 false
                     logger.error('audit_log 保留治理: advisory lock 未能释放（键 %#x）',
+                                 RETENTION_LOCK_KEY)
+            except SQLAlchemyError:
+                # 另一条信号：解锁语句本身失败。这里若也 suppress，最需要告警的
+                # 路径就彻底沉默了（锁会跟着回池的连接，后续每轮都 lock_busy）。
+                logger.exception('audit_log 保留治理: advisory lock 释放失败（键 %#x）',
                                  RETENTION_LOCK_KEY)
             if report is None:
                 # 任何异常（含 CancelledError）走到这里：先留痕再让异常继续上抛。

@@ -210,9 +210,20 @@ async def test_task_persists_deletions_through_entry_point(pg_engine, tmp_path, 
     monkeypatch.setattr(art, 'require_async_engine', lambda: pg_engine)
     monkeypatch.setattr(art, 'archive_dir_path', lambda _raw=None: tmp_path)
     monkeypatch.setattr(art, 'STATE_PATH', tmp_path / 'state.json')
+    # 共享测试库里可能残留 12 个月前的历史行（备份/恢复用例灌进来的 dump）。
+    # 真实入口会用真实 now 计算计划、把**所有**过期月一起归档并删除——那会把
+    # 别的套件的数据不可逆删掉，也会让「只碰哨兵 id 段」的隔离承诺失效。
+    # 这里只收窄**计划**，锁/事务/会话/删除/复核全部仍是生产代码。
+    real_plan = art.compute_retention_plan
+
+    async def _only_sentinel_month(db, now=None):
+        return [p for p in await real_plan(db, now) if p['month'] == '2019-03']
+
+    monkeypatch.setattr(art, 'compute_retention_plan', _only_sentinel_month)
 
     report = await art.audit_retention_task({})
-    assert report['deleted_total'] >= len(ids)
+    assert [m['month'] for m in report['months']] == ['2019-03']
+    assert report['deleted_total'] == len(ids), '只应删掉本用例插入的这几行'
 
     # pg_engine 是 NullPool：这条连接是全新的，只看得到已提交的数据
     async with pg_engine.connect() as conn:

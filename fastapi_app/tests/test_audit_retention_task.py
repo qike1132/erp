@@ -89,12 +89,15 @@ class FakeDB:
         export_error: Exception | None = None,
         delete_error: Exception | None = None,
         delete_error_month: str | None = None,
+        delete_error_after: int | None = None,
         hidden_ids: set[int] | None = None,
     ):
         self.months = months or {}
         self.export_error = export_error
         self.delete_error = delete_error
         self.delete_error_month = delete_error_month
+        # 前 N 次 DELETE 成功、之后才抛：模拟「第 2 批锁超时」（已提交批不丢账）
+        self.delete_error_after = delete_error_after
         # 导出时看不到、但确实在表里的 id：模拟「导出完成后才落进该窗口」的行
         self.hidden_ids = hidden_ids or set()
         self.calls: list[str] = []
@@ -143,7 +146,10 @@ class FakeDB:
             chunk = list(params['ids'])
             month = next((m for m, rs in self.rows.items()
                           if any(r[0] in chunk for r in rs)), None)
-            if self.delete_error and self.delete_error_month in (None, month):
+            already = len(self.delete_batches)
+            if (self.delete_error and self.delete_error_month in (None, month)
+                    and (self.delete_error_after is None
+                         or already >= self.delete_error_after)):
                 raise self.delete_error
             existing = {r[0] for m in self.rows for r in self.rows[m]}
             matched = [i for i in chunk if i in existing]
@@ -478,6 +484,28 @@ async def test_delete_failure_keeps_archive_in_ledger(tmp_path):
     assert state['archive_files'][month]['sha256'] == entry['sha256']
 
 
+async def test_partial_delete_is_accounted(tmp_path):
+    """第 2 批失败：第 1 批已经 commit 了，账本必须记这 5000 行。
+
+    `_delete_ids_batched` 每批一次 commit —— 失败时异常上抛会带走累计值，
+    账本于是比库「少记」。等保检查看的就是这份账本，少记=对不上。
+    变异验证：去掉 progress 计数（固定 deleted:0）后本测试失败。
+    """
+    month = '2025-10'
+    ids = list(range(1, 12001))
+    db = FakeDB(months={month: len(ids)}, ids_by_month={month: ids},
+                delete_error=SQLAlchemyError('lock timeout'), delete_error_after=1)
+    report = await art.run_retention_once(
+        db, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=tmp_path / 'state.json',
+    )
+    assert report['deleted_total'] == 5000          # 第 1 批已提交
+    assert report['months'][0]['deleted'] == 5000
+    assert report['analyzed'] is True               # 有删除就要 ANALYZE
+    err = report['errors'][0]
+    assert err['error'] == 'delete_failed' and err['deleted_rows'] == 5000
+
+
 async def test_unexpected_export_error_propagates(tmp_path):
     """未知异常（编程错误）必须上抛，不能被按月吞成 pending_error。"""
     state_path = tmp_path / 'state.json'
@@ -639,49 +667,33 @@ def test_write_skip_state_records_reason(tmp_path):
     assert 'last_skipped_at' in state
 
 
-def test_skip_state_does_not_clobber_concurrent_success(tmp_path, monkeypatch):
-    """因锁跳过的一轮绝不能抹掉持锁方刚写的成功账本（读-改-写竞态）。
+def test_skip_state_preserves_sibling_fields(tmp_path):
+    """因锁跳过只该写它自己那两个字段，其它字段（尤其 pending_errors）必须原样保留。
 
-    ``write_skip_state`` 只在**别人持锁运行**时被调用，所以竞态是结构性的：
-    跳过方读到旧状态 → 持锁方落盘新成功 → 跳过方写回旧状态，``last_success_at``
-    退回旧值甚至消失，健康端点随即误报 never_succeeded。
-    变异验证：去掉 _merge_state 里的「落盘前再读一次」后本测试失败。
+    ``write_skip_state`` 只在**别人持锁运行**时被调用：若它拿一份旧快照整体写回，
+    持锁方刚清掉的错误会被「复活」（假 degraded），刚记下的错误会被静默清掉
+    （健康转绿）。所以合并必须以**落盘前那一刻的磁盘状态**为底。
+    变异验证：把合并改成 `merged = {**fields}` 后本测试失败。
     """
     state_path = tmp_path / 'state.json'
-    stale = {
-        'last_success_at': '2026-10-01T00:00:00+00:00',
-        'archive_files': {'2025-09': {'path': 'a', 'rows': 1, 'sha256': 'x'}},
-        'deleted_rows_total': 5,
-    }
-    fresh = {
+    existing = {
         'last_success_at': '2026-11-01T03:00:00+00:00',
-        'last_attempt_at': '2026-11-01T03:00:00+00:00',
-        'archive_files': {
-            '2025-09': {'path': 'a', 'rows': 1, 'sha256': 'x'},
-            '2025-10': {'path': 'b', 'rows': 2, 'sha256': 'y'},
-        },
+        'archive_files': {'2025-10': {'path': 'b', 'rows': 2, 'sha256': 'y'}},
         'deleted_rows_total': 9,
-        # 持锁方刚记下的错误：跳过方拿旧快照写回会把它静默清掉（健康转绿）
         'pending_errors': [{'month': '2025-10', 'error': 'archive_incomplete'}],
+        'last_error': 'OSError: disk full',
     }
-    state_path.write_text(json.dumps(stale), encoding='utf-8')
+    state_path.write_text(json.dumps(existing), encoding='utf-8')
 
-    calls = {'n': 0}
-    real = art.read_retention_state
-
-    def _racing_read(path=None):
-        calls['n'] += 1
-        return fresh if calls['n'] > 1 else real(path)
-
-    monkeypatch.setattr(art, 'read_retention_state', _racing_read)
     art.write_skip_state('lock_busy', state_path)
 
     state = json.loads(state_path.read_text(encoding='utf-8'))
-    assert state['last_success_at'] == fresh['last_success_at']   # 未被退回旧值
-    assert set(state['archive_files']) == {'2025-09', '2025-10'}  # 账本只增不减
+    assert state['skip_reason'] == 'lock_busy' and 'last_skipped_at' in state
+    assert state['last_success_at'] == existing['last_success_at']
+    assert state['pending_errors'] == existing['pending_errors']   # 不许复活/清掉
+    assert state['last_error'] == existing['last_error']
     assert state['deleted_rows_total'] == 9
-    assert state['pending_errors'] == fresh['pending_errors']     # 错误不能被抹掉
-    assert state['skip_reason'] == 'lock_busy'
+    assert set(state['archive_files']) == {'2025-10'}
 
 
 # ---------------------------------------------------------------------------
