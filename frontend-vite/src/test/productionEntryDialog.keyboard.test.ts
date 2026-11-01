@@ -1,8 +1,8 @@
 /**
- * 录入弹窗 —— 键盘流（本次改版的核心）。
+ * 录入弹窗 —— 键盘流（方向 A：一张单多行 SKU）。
  *
- * 设计目标：产品 → 数量 → 提交 全程不碰鼠标。每一行快捷键单独一个用例钉死，
- * 因为这些行为最容易在后续重构里被悄悄改掉，而改掉之后数据录入员只会「感觉变卡了」。
+ * 目标：搜索 → 数量 → 下一条 全程不碰鼠标。
+ * 与旧版的差别：⏎ 不再是「提交一条」，而是「追加一行」；提交统一走 Ctrl+⏎ / 批量提交按钮。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
@@ -64,7 +64,7 @@ async function typeSearch(w: VueWrapper, text: string) {
   await flushPromises()
 }
 
-/** 键盘走完「搜索 → ↓ 选中第一条 → ⏎ 确认」 */
+/** 键盘走完「搜索 → ↓ 选中第一条 → ⏎ 追加一行」 */
 async function selectFirstProduct(w: VueWrapper) {
   await typeSearch(w, '白兔')
   const input = w.find('[data-test="qe-search"]')
@@ -73,18 +73,15 @@ async function selectFirstProduct(w: VueWrapper) {
   await flushPromises()
 }
 
-/** 取第 index 个下拉项（显式断言存在，避免索引访问的类型空洞） */
 function dropdownItemAt(w: VueWrapper, index: number) {
   const item = w.findAll('.pr-entry-dropdown-item')[index]
   if (!item) throw new Error(`下拉项缺失: index=${index}`)
   return item
 }
 
-/** 取第一次 createRecord 的入参（显式断言调用已发生） */
-function firstCreatePayload(): Record<string, unknown> {
-  const call = createMock.mock.calls[0]
-  if (!call) throw new Error('createRecord 未被调用')
-  return call[0] as Record<string, unknown>
+function activeDeptText(w: VueWrapper) {
+  const on = w.find('[data-test="qe-dept"] .pr-qe-seg-btn.on')
+  return on.exists() ? on.text() : ''
 }
 
 beforeEach(() => {
@@ -107,6 +104,7 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
+  document.body.innerHTML = ''
 })
 
 describe('ProductionEntryDialog 键盘流', () => {
@@ -123,13 +121,13 @@ describe('ProductionEntryDialog 键盘流', () => {
     const modal = w.find('.pr-qe-modal')
 
     await modal.trigger('keydown', { key: '2', altKey: true })
-    expect(w.find('[data-test="qe-dept"]').text()).toContain('手工部')
+    expect(activeDeptText(w)).toContain('手工部')
 
     await modal.trigger('keydown', { key: '3', altKey: true })
-    expect(w.find('[data-test="qe-dept"]').text()).toContain('包装部')
+    expect(activeDeptText(w)).toContain('包装部')
 
     await modal.trigger('keydown', { key: '1', altKey: true })
-    expect(w.find('[data-test="qe-dept"]').text()).toContain('充棉部')
+    expect(activeDeptText(w)).toContain('充棉部')
   })
 
   it('搜索框 ↑/↓ 在产品结果间移动高亮', async () => {
@@ -147,30 +145,41 @@ describe('ProductionEntryDialog 键盘流', () => {
     expect(dropdownItemAt(w, 0).classes()).toContain('active')
   })
 
-  it('搜索框按 ⏎ 选中产品并把焦点移到数量输入', async () => {
+  it('搜索框按 ⏎ 追加一行、清空搜索框并把焦点移到该行数量', async () => {
     const w = mountDialog()
     await selectFirstProduct(w)
 
-    expect((w.find('[data-test="qe-search"]').element as HTMLInputElement).value).toBe('白兔公仔 40cm')
-    expect(document.activeElement).toBe(w.find('[data-test="qe-quantity"]').element)
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(1)
+    expect(w.find('[data-test="qe-row"]').text()).toContain('白兔公仔 40cm')
+    expect((w.find('[data-test="qe-search"]').element as HTMLInputElement).value).toBe('')
+    expect(document.activeElement).toBe(w.find('[data-test="qe-qty"]').element)
   })
 
-  it('搜索框没按过 ↑↓ 时直接 ⏎ 也能选中第一条（不能是静默无反应）', async () => {
+  it('没按过 ↑↓ 直接 ⏎ 也能追加第一条（不能是静默无反应）', async () => {
     const w = mountDialog()
     await typeSearch(w, '白兔')
     const input = w.find('[data-test="qe-search"]')
-    // 刻意不按 ↓：这是最自然的动作 —— 输入产品名，回车
     await input.trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
-    expect((w.find('[data-test="qe-search"]').element as HTMLInputElement).value).toBe('白兔公仔 40cm')
-    expect(document.activeElement).toBe(w.find('[data-test="qe-quantity"]').element)
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(1)
+    expect(w.find('[data-test="qe-row"]').text()).toContain('白兔公仔 40cm')
+    expect(document.activeElement).toBe(w.find('[data-test="qe-qty"]').element)
+  })
+
+  it('连续两次「搜索 + ⏎」得到两行 SKU', async () => {
+    const w = mountDialog()
+    await selectFirstProduct(w)
+    await selectFirstProduct(w)
+
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(2)
+    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('2')
   })
 
   it('数量输入 ↑/↓ 让数量 ∓1', async () => {
     const w = mountDialog()
     await selectFirstProduct(w)
-    const qty = w.find('[data-test="qe-quantity"]')
+    const qty = w.find('[data-test="qe-qty"]')
 
     await qty.trigger('keydown', { key: 'ArrowUp' })
     await qty.trigger('keydown', { key: 'ArrowUp' })
@@ -180,10 +189,10 @@ describe('ProductionEntryDialog 键盘流', () => {
     expect((qty.element as HTMLInputElement).value).toBe('1')
   })
 
-  it('数量输入 Shift+↑/↓ 让数量 ∓10', async () => {
+  it('数量输入 Shift+↑/↓ 让数量 ∓10，且不会退成负数', async () => {
     const w = mountDialog()
     await selectFirstProduct(w)
-    const qty = w.find('[data-test="qe-quantity"]')
+    const qty = w.find('[data-test="qe-qty"]')
 
     await qty.trigger('keydown', { key: 'ArrowUp', shiftKey: true })
     expect((qty.element as HTMLInputElement).value).toBe('10')
@@ -191,37 +200,33 @@ describe('ProductionEntryDialog 键盘流', () => {
     await qty.trigger('keydown', { key: 'ArrowDown', shiftKey: true })
     expect((qty.element as HTMLInputElement).value).toBe('0')
 
-    // 不能退化成负库存：到底后再按 ↓ 仍是 0
     await qty.trigger('keydown', { key: 'ArrowDown', shiftKey: true })
     expect((qty.element as HTMLInputElement).value).toBe('0')
   })
 
-  it('数量输入按 ⏎ 提交；成功后清空表单并把焦点送回搜索框', async () => {
+  it('数量框按 ⏎ 回到搜索框，继续加下一条', async () => {
     const w = mountDialog()
     await selectFirstProduct(w)
-    await w.find('[data-test="qe-quantity"]').setValue('620')
+    await w.find('[data-test="qe-qty"]').setValue('620')
 
-    await w.find('[data-test="qe-quantity"]').trigger('keydown', { key: 'Enter' })
-    await flushPromises()
+    await w.find('[data-test="qe-qty"]').trigger('keydown', { key: 'Enter' })
+    await nextTick()
 
-    expect(createMock).toHaveBeenCalledTimes(1)
-    expect(firstCreatePayload()).toMatchObject({ quantity: 620, product_name: '白兔公仔 40cm' })
-    // 表单已清空：搜索框为空、数量归零
-    expect((w.find('[data-test="qe-search"]').element as HTMLInputElement).value).toBe('')
-    expect((w.find('[data-test="qe-quantity"]').element as HTMLInputElement).value).toBe('0')
-    // 焦点回到搜索框，下一条可以立刻继续录
     expect(document.activeElement).toBe(w.find('[data-test="qe-search"]').element)
+    // 回车只是移动焦点，不能顺手把这一批提交了
+    expect(createMock).not.toHaveBeenCalled()
   })
 
-  it('Ctrl+⏎ 在弹窗内任意位置都能提交', async () => {
+  it('Ctrl+⏎ 在弹窗内任意位置批量提交', async () => {
     const w = mountDialog()
     await selectFirstProduct(w)
-    await w.find('[data-test="qe-quantity"]').setValue('5')
+    await w.find('[data-test="qe-qty"]').setValue('620')
 
     await w.find('.pr-qe-modal').trigger('keydown', { key: 'Enter', ctrlKey: true })
     await flushPromises()
 
     expect(createMock).toHaveBeenCalledTimes(1)
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ quantity: 620, product_name: '白兔公仔 40cm' })
   })
 
   it('下拉已收起时 Esc 关闭弹窗', async () => {
@@ -245,15 +250,15 @@ describe('ProductionEntryDialog 键盘流', () => {
     expect(w.emitted('update:open')).toBeUndefined()
   })
 
-  it('Esc 分层：部门菜单打开时只收菜单，不关弹窗', async () => {
+  it('Esc 分层：粘贴层打开时只收粘贴层，不关弹窗', async () => {
     const w = mountDialog()
-    await w.find('[data-test="qe-dept"]').trigger('click')
-    expect(w.find('.pr-qe-dept-menu').exists()).toBe(true)
+    await w.find('[data-test="qe-paste-open"]').trigger('click')
+    expect(w.find('[data-test="qe-paste"]').exists()).toBe(true)
 
     await w.find('.pr-qe-modal').trigger('keydown', { key: 'Escape' })
     await nextTick()
 
-    expect(w.find('.pr-qe-dept-menu').exists()).toBe(false)
+    expect(w.find('[data-test="qe-paste"]').exists()).toBe(false)
     expect(w.emitted('update:open')).toBeUndefined()
   })
 })

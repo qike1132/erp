@@ -1,10 +1,8 @@
 /**
- * 录入弹窗 —— 单行快捷录入的布局与三条「少录错」护栏。
+ * 录入弹窗（方向 A）—— 布局、合计与「少录错 / 不重复建单」护栏。
  *
- * 1) 未选产品 / 数量 ≤ 0 → 录入按钮禁用
- * 2) 提交中 → 禁用（防双击/连按 Ctrl+⏎ 重复建单）
- * 3) 今日同部门同产品已有记录 → 提示，但**绝不阻断**（一天两批同产品是合法的）
- * 4) 撤销 → 先确认再物理删除
+ * 核心契约：一张单 = 多行 SKU，底部一次提交；部分失败只保留失败的行；
+ * 整批撤销必须先确认，且确认框要抬到嵌套层级。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
@@ -38,7 +36,10 @@ import CustomerSelect from '@/views/production/components/CustomerSelect.vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
 
-const PRODUCTS = [{ id: 1, name: '白兔公仔 40cm', barcode: '6901234', specification: '40cm' }]
+const PRODUCTS = [
+  { id: 1, name: '白兔公仔 40cm', barcode: '6901234', specification: '40cm' },
+  { id: 2, name: '白兔公仔 60cm', barcode: '6901235', specification: '60cm' },
+]
 
 const stubs = {
   UiConfirmDialog: {
@@ -63,11 +64,7 @@ function mountDialog() {
   return wrapper
 }
 
-/**
- * 不 stub UiConfirmDialog 的挂载。
- * 撤销确认框的层级问题只有挂真组件才看得见 —— stub 掉之后它是个普通 div，
- * 有没有 z-class 都一样，这正是当初漏掉这个 bug 的原因。
- */
+/** 不 stub UiConfirmDialog 的挂载：层级断言只有挂真组件才有意义 */
 function mountDialogRealConfirm() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   wrapper = mount(ProductionEntryDialog, {
@@ -86,23 +83,25 @@ async function typeSearch(w: VueWrapper, text: string) {
   await flushPromises()
 }
 
-async function selectFirstProduct(w: VueWrapper) {
+/** 搜索后选中第 index 条（0 起），追加一行 */
+async function selectProductAt(w: VueWrapper, index = 0) {
   await typeSearch(w, '白兔')
   const input = w.find('[data-test="qe-search"]')
-  await input.trigger('keydown', { key: 'ArrowDown' })
+  for (let i = 0; i <= index; i += 1) {
+    await input.trigger('keydown', { key: 'ArrowDown' })
+  }
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
 }
 
-function submitDisabled(w: VueWrapper) {
-  return w.find('[data-test="qe-submit"]').attributes('disabled') !== undefined
+function qtyAt(w: VueWrapper, index: number) {
+  const input = w.findAll('[data-test="qe-qty"]')[index]
+  if (!input) throw new Error(`数量输入缺失: index=${index}`)
+  return input
 }
 
-/** 取第 index 个部门菜单项（显式断言存在，避免索引访问的类型空洞） */
-function deptOptionAt(w: VueWrapper, index: number) {
-  const option = w.findAll('.pr-qe-dept-option')[index]
-  if (!option) throw new Error(`部门选项缺失: index=${index}`)
-  return option
+function submitDisabled(w: VueWrapper) {
+  return w.find('[data-test="qe-submit"]').attributes('disabled') !== undefined
 }
 
 beforeEach(() => {
@@ -114,7 +113,7 @@ beforeEach(() => {
   searchMock.mockReset()
   customerActiveNamesMock.mockReset()
   customerActiveNamesMock.mockResolvedValue([{ id: 5, name: '客户A' }])
-  // 无 keyword 的查询 = 头部「今天已录 N 条」；带 keyword 的 = 重复校验
+  // 无 keyword = 头部「今天已录 N 条」；带 keyword = 行级重复提示
   recordsMock.mockImplementation(async (params: { keyword?: string }) => {
     if (params?.keyword) {
       return {
@@ -126,9 +125,10 @@ beforeEach(() => {
   })
   createMock.mockResolvedValue({ success: true, message: 'ok', id: 42 })
   deleteMock.mockResolvedValue({ success: true, message: 'ok' })
-  productInfoMock.mockResolvedValue({
-    success: true, data: { id: 1, name: '白兔公仔 40cm', barcode: '6901234', price: 7 },
-  })
+  productInfoMock.mockImplementation(async (id: number) => ({
+    success: true,
+    data: { id, name: id === 2 ? '白兔公仔 60cm' : '白兔公仔 40cm', barcode: '6901234', price: 7 },
+  }))
 })
 
 afterEach(() => {
@@ -138,40 +138,17 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('ProductionEntryDialog 快捷行布局', () => {
-  it('渲染部门 chip / 产品搜索框 / 数量 / 录入按钮；「详细」默认折叠', () => {
+describe('ProductionEntryDialog 布局与合计', () => {
+  it('渲染部门分段 / 搜索 / 粘贴入口 / 合计 / 批量提交；空表有引导，默认无批次列', () => {
     const w = mountDialog()
 
     expect(w.find('[data-test="qe-dept"]').exists()).toBe(true)
     expect(w.find('[data-test="qe-search"]').exists()).toBe(true)
-    expect(w.find('[data-test="qe-quantity"]').exists()).toBe(true)
+    expect(w.find('[data-test="qe-paste-open"]').exists()).toBe(true)
     expect(w.find('[data-test="qe-submit"]').exists()).toBe(true)
-    expect(w.find('[data-test="qe-detail"]').exists()).toBe(false)
-  })
-
-  it('提示行显示自动单价 / 备注 / 日期', async () => {
-    const w = mountDialog()
-    await selectFirstProduct(w)
-
-    const hint = w.find('[data-test="qe-hint"]').text()
-    expect(hint).toContain('¥7.00')
-    expect(hint).toContain('备注（空）')
-    expect(hint).toContain('2026-09-30')
-  })
-
-  it('选择客户后提交带 customer_id', async () => {
-    const w = mountDialog()
-    await flushPromises()
-
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
-    await selectFirstProduct(w)
-    await w.find('[data-test="qe-quantity"]').setValue('10')
-    await w.find('[data-test="qe-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ customer_id: 5 }))
-    expect(w.find('[data-test="qe-hint"]').text()).toContain('客户A')
+    expect(w.find('[data-test="qe-empty"]').exists()).toBe(true)
+    expect(w.find('[data-test="qe-batch"]').exists()).toBe(false)
+    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('0')
   })
 
   it('头部显示「今天已录 N 条」（按选中日期取记录总数）', async () => {
@@ -179,85 +156,91 @@ describe('ProductionEntryDialog 快捷行布局', () => {
     await flushPromises()
 
     expect(w.find('.pr-qe-sub').text()).toContain('今天已录 3 条')
-    expect(recordsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ production_date: '2026-09-30' }),
-    )
+    expect(recordsMock).toHaveBeenCalledWith(expect.objectContaining({ production_date: '2026-09-30' }))
   })
 
-  it('点「详细」展开日期 / 单价 / 产值 / 备注', async () => {
+  it('两行数量与单价汇总成合计件数与货值', async () => {
     const w = mountDialog()
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('10')
+    await selectProductAt(w, 1)
+    await qtyAt(w, 1).setValue('20')
 
-    await w.find('[data-test="qe-detail-toggle"]').trigger('click')
-
-    const detail = w.find('[data-test="qe-detail"]')
-    expect(detail.exists()).toBe(true)
-    expect(detail.text()).toContain('日期')
-    expect(detail.text()).toContain('单价')
-    expect(detail.text()).toContain('产值')
-    expect(detail.text()).toContain('备注')
+    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('2')
+    expect(w.find('[data-test="qe-total-qty"]').text()).toBe('30')
+    expect(w.find('[data-test="qe-total-value"]').text()).toBe('¥210.00')
   })
 
-  it('「详细」里改备注会同步到提示行（慢路径与快捷行共用同一份状态）', async () => {
+  it('删行后合计同步减少', async () => {
     const w = mountDialog()
-    await w.find('[data-test="qe-detail-toggle"]').trigger('click')
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('10')
+    await selectProductAt(w, 1)
+    await qtyAt(w, 1).setValue('20')
 
-    await w.find('[data-test="qe-detail"] input[aria-label="备注"]').setValue('第二批')
+    await w.findAll('[data-test="qe-remove"]')[0]!.trigger('click')
 
-    expect(w.find('[data-test="qe-hint"]').text()).toContain('备注（第二批）')
+    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('1')
+    expect(w.find('[data-test="qe-total-qty"]').text()).toBe('20')
   })
 
-  it('「详细」里改日期会 emit update:selectedDate（对外契约不变）', async () => {
+  it('选品后单价自动带出到行内（可改）', async () => {
     const w = mountDialog()
-    await w.find('[data-test="qe-detail-toggle"]').trigger('click')
+    await selectProductAt(w, 0)
 
-    await w.find('[data-test="qe-detail"] input[aria-label="生产日期"]').setValue('2026-09-29')
-
-    expect(w.emitted('update:selectedDate')).toEqual([['2026-09-29']])
+    const price = w.find('[data-test="qe-price"]').element as HTMLInputElement
+    expect(price.value).toBe('7')
   })
 
-  it('不再有「保存后继续录入下一条」复选框（提交本身就是连续的）', () => {
-    const w = mountDialog()
-
-    expect(w.text()).not.toContain('保存后继续录入下一条')
-  })
-
-  it('点「最近使用」chip 带入该产品及其单价（鼠标捷径）', async () => {
-    localStorage.setItem(
-      'production.recentProducts',
-      JSON.stringify([{ id: 9, name: '熊猫抱枕', barcode: '699' }]),
-    )
-    productInfoMock.mockResolvedValue({
-      success: true, data: { id: 9, name: '熊猫抱枕', barcode: '699', price: 12 },
-    })
+  it('点「最近使用」chip 追加一行并带出单价', async () => {
+    localStorage.setItem('production.recentProducts', JSON.stringify([{ id: 9, name: '熊猫抱枕', barcode: '699' }]))
+    productInfoMock.mockResolvedValue({ success: true, data: { id: 9, name: '熊猫抱枕', barcode: '699', price: 12 } })
     const w = mountDialog()
 
     await w.find('[data-test="qe-recent"]').trigger('click')
     await flushPromises()
 
-    expect((w.find('[data-test="qe-search"]').element as HTMLInputElement).value).toBe('熊猫抱枕')
-    expect(w.find('[data-test="qe-hint"]').text()).toContain('¥12.00')
+    expect(w.find('[data-test="qe-row"]').text()).toContain('熊猫抱枕')
+    expect((w.find('[data-test="qe-price"]').element as HTMLInputElement).value).toBe('12')
+  })
+
+  it('改日期会 emit update:selectedDate（对外契约不变）', async () => {
+    const w = mountDialog()
+    await w.find('[data-test="qe-date"]').setValue('2026-09-29')
+
+    expect(w.emitted('update:selectedDate')).toEqual([['2026-09-29']])
+  })
+
+  it('部门默认取上次使用的部门，点分段按钮后写回 localStorage', async () => {
+    localStorage.setItem('production.lastDepartment', 'packaging')
+    const w = mountDialog()
+    expect(w.find('[data-test="qe-dept"] .pr-qe-seg-btn.on').text()).toContain('包装部')
+
+    await w.find('[data-dept="handcraft"]').trigger('click')
+
+    expect(localStorage.getItem('production.lastDepartment')).toBe('handcraft')
   })
 })
 
-describe('ProductionEntryDialog 护栏', () => {
-  it('未选产品或数量 ≤ 0 时录入按钮禁用', async () => {
+describe('ProductionEntryDialog 提交护栏', () => {
+  it('空表或有行数量为 0 时批量提交禁用', async () => {
     const w = mountDialog()
     expect(submitDisabled(w)).toBe(true)
 
-    await selectFirstProduct(w)
-    expect(submitDisabled(w)).toBe(true) // 数量仍为 0
+    await selectProductAt(w, 0)
+    expect(submitDisabled(w)).toBe(true) // 新行数量仍是 0
 
-    await w.find('[data-test="qe-quantity"]').setValue('0')
-    expect(submitDisabled(w)).toBe(true)
-
-    await w.find('[data-test="qe-quantity"]').setValue('5')
+    await qtyAt(w, 0).setValue('5')
     expect(submitDisabled(w)).toBe(false)
+
+    await selectProductAt(w, 1)
+    expect(submitDisabled(w)).toBe(true) // 第二行还没填数量，整单不许提交
   })
 
-  it('快速连按两次 Ctrl+⏎ 只创建一条记录，且提交期间按钮禁用', async () => {
+  it('连按两次 Ctrl+⏎ 只提交一批，提交中按钮禁用', async () => {
     const w = mountDialog()
-    await selectFirstProduct(w)
-    await w.find('[data-test="qe-quantity"]').setValue('10')
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('10')
 
     let release!: (v: unknown) => void
     createMock.mockImplementation(() => new Promise((resolve) => { release = resolve }))
@@ -274,44 +257,80 @@ describe('ProductionEntryDialog 护栏', () => {
     await flushPromises()
   })
 
-  it('选中产品后查询今日同部门同产品已录数量，命中则提示——只是提示，不阻断', async () => {
+  it('选中产品后查询今日同部门同产品已录数量，命中则在行内提示——只提示，不阻断', async () => {
     const w = mountDialog()
-
-    await selectFirstProduct(w)
+    await selectProductAt(w, 0)
     await flushPromises()
 
-    expect(recordsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        production_date: '2026-09-30',
-        department: 'filling',
-        keyword: '白兔公仔 40cm',
-      }),
-    )
-    expect(w.find('[data-test="qe-dup"]').text()).toContain('今天已录 400 件 · 仍要录入')
+    expect(recordsMock).toHaveBeenCalledWith(expect.objectContaining({
+      production_date: '2026-09-30',
+      department: 'filling',
+      keyword: '白兔公仔 40cm',
+    }))
+    expect(w.find('[data-test="qe-dup"]').text()).toContain('今日已录 400')
 
-    // 提示不阻断：数量填好后照样能提交
-    await w.find('[data-test="qe-quantity"]').setValue('10')
+    await qtyAt(w, 0).setValue('10')
     expect(submitDisabled(w)).toBe(false)
   })
 
-  it('提交成功后显示「刚才录的」条，撤销先弹确认框，确认后才物理删除', async () => {
+  it('两行一起提交：逐条创建、带上 customer_id，成功后进入完成态', async () => {
     const w = mountDialog()
-    await selectFirstProduct(w)
-    await w.find('[data-test="qe-quantity"]').setValue('620')
+    await flushPromises()
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await nextTick()
+
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('10')
+    await selectProductAt(w, 1)
+    await qtyAt(w, 1).setValue('20')
 
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
-    const strip = w.find('[data-test="qe-just"]')
-    expect(strip.exists()).toBe(true)
-    expect(strip.text()).toContain('白兔公仔 40cm')
-    expect(strip.text()).toContain('620')
+    expect(createMock).toHaveBeenCalledTimes(2)
+    const payloads = createMock.mock.calls.map((c) => c[0] as Record<string, unknown>)
+    expect(payloads[0]).toMatchObject({ product_name: '白兔公仔 40cm', quantity: 10, customer_id: 5 })
+    expect(payloads[1]).toMatchObject({ product_name: '白兔公仔 60cm', quantity: 20, customer_id: 5 })
+    expect(w.find('[data-test="qe-done"]').exists()).toBe(true)
+    expect(w.find('[data-test="qe-done"]').text()).toContain('已录入 2 条生产记录')
+    expect(w.find('[data-test="qe-submit"]').exists()).toBe(false)
+  })
 
-    // 点撤销：只弹确认框，不能删
+  it('部分失败：成功的行不再重复建单，只把失败的行留在表里并透出后端原因', async () => {
+    const w = mountDialog()
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('10')
+    await selectProductAt(w, 1)
+    await qtyAt(w, 1).setValue('20')
+
+    createMock
+      .mockResolvedValueOnce({ success: true, message: 'ok', id: 42 })
+      .mockRejectedValueOnce({ response: { data: { detail: '数量超出当班上限' } } })
+
+    await w.find('[data-test="qe-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(1)
+    expect(w.find('[data-test="qe-row"]').text()).toContain('白兔公仔 60cm')
+    expect(w.find('[data-test="qe-row-error"]').text()).toContain('数量超出当班上限')
+    expect(w.find('[data-test="qe-done"]').exists()).toBe(false)
+  })
+
+  it('完成态撤销整批：先弹确认框，确认后逐条物理删除并回到录入态', async () => {
+    const w = mountDialog()
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('620')
+    createMock.mockResolvedValueOnce({ success: true, message: 'ok', id: 42 })
+
+    await w.find('[data-test="qe-submit"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-test="qe-done"]').exists()).toBe(true)
+
     await w.find('[data-test="qe-undo"]').trigger('click')
     await nextTick()
-
     expect(deleteMock).not.toHaveBeenCalled()
+
     const confirm = w.findComponent({ name: 'UiConfirmDialog' })
     expect(confirm.props('open')).toBe(true)
     expect(confirm.props('text')).toContain('白兔公仔 40cm')
@@ -320,15 +339,14 @@ describe('ProductionEntryDialog 护栏', () => {
     await flushPromises()
 
     expect(deleteMock).toHaveBeenCalledWith(42)
-    expect(w.find('[data-test="qe-just"]').exists()).toBe(false)
+    expect(w.find('[data-test="qe-done"]').exists()).toBe(false)
+    expect(w.find('[data-test="qe-submit"]').exists()).toBe(true)
   })
 
   it('撤销确认框被抬到嵌套层级——沿用默认层级会被录入弹窗盖住，点不到', async () => {
-    // 挂**真** UiConfirmDialog：stub 掉它之后它只是个普通 div，有没有 z-class 都一样，
-    // 这个 bug 就是这么漏过去的。jsdom 验不了绘制，但能钉住「类名确实传下去了」。
     const w = mountDialogRealConfirm()
-    await selectFirstProduct(w)
-    await w.find('[data-test="qe-quantity"]').setValue('620')
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('620')
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
@@ -337,15 +355,14 @@ describe('ProductionEntryDialog 护栏', () => {
 
     const confirm = w.findComponent(UiConfirmDialog)
     expect(confirm.props('open')).toBe(true)
-    // 遮罩与弹窗卡都是 var(--z-modal)=40，确认框必须抬到 60/70 才在它们之上
     expect(confirm.props('overlayZClass')).toBe('z-[var(--z-overlay-nested)]')
     expect(confirm.props('contentZClass')).toBe('z-[var(--z-modal-nested)]')
   })
 
   it('撤销失败时透出后端的 detail（物理删除失败的原因必须可见）', async () => {
     const w = mountDialog()
-    await selectFirstProduct(w)
-    await w.find('[data-test="qe-quantity"]').setValue('620')
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('620')
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
@@ -355,27 +372,5 @@ describe('ProductionEntryDialog 护栏', () => {
     await flushPromises()
 
     expect(showToast).toHaveBeenCalledWith('记录已被他人删除', 'error')
-  })
-
-  it('点部门菜单以外的地方会收起菜单', async () => {
-    const w = mountDialog()
-    await w.find('[data-test="qe-dept"]').trigger('click')
-    expect(w.find('.pr-qe-dept-menu').exists()).toBe(true)
-
-    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await nextTick()
-
-    expect(w.find('.pr-qe-dept-menu').exists()).toBe(false)
-  })
-
-  it('部门默认取上次使用的部门，切换后写回 localStorage', async () => {
-    localStorage.setItem('production.lastDepartment', 'packaging')
-    const w = mountDialog()
-    expect(w.find('[data-test="qe-dept"]').text()).toContain('包装部')
-
-    await w.find('[data-test="qe-dept"]').trigger('click')
-    await deptOptionAt(w, 1).trigger('click')
-
-    expect(localStorage.getItem('production.lastDepartment')).toBe('handcraft')
   })
 })

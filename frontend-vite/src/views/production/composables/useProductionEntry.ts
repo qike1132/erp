@@ -1,13 +1,15 @@
 /**
- * useProductionEntry — 生产数据录入弹窗业务逻辑（单行快捷录入）
+ * useProductionEntry — 生产数据录入弹窗业务逻辑（方向 A：一张单 = 多行 SKU）
  *
- * 封装录入表单状态、产品搜索（防抖 + 键盘导航）、最近使用产品、数量调整、
- * 字段校验、连续提交（提交后清空表单并把焦点送回搜索框）、今日重复提示与撤销。
+ * 与旧版（单对象 form）的根本差别：录入主体是 `rows`，一行一个 SKU，
+ * 底部一次性提交。提交是**顺序**的——同一部门同一天的记录有先后语义，
+ * 且部分失败时能精确说出是哪几行没进去，成功的行不会重来一遍。
  *
- * 键盘流是本次改版的核心：Alt+1/2/3 切部门、搜索框 ↑↓ 选品 + ⏎ 确认并跳到数量、
- * 数量框 ↑↓ ∓1 / Shift+↑↓ ∓10、⏎ 提交、Ctrl+⏎ 任意位置提交、Esc 关闭。
+ * 保留的键盘流：Alt+1/2/3 切部门、搜索框 ↑↓ 选品 + ⏎ 加入一行并跳到该行数量、
+ * 数量框 ↑↓ ∓1 / Shift+↑↓ ∓10、数量框 ⏎ 回搜索框继续加下一条、
+ * Ctrl+⏎ 任意位置批量提交、Esc 分层（产品下拉 → 粘贴层 → 弹窗）。
  */
-import { ref, reactive, computed, watch, nextTick, onUnmounted, type WritableComputedRef } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted, type WritableComputedRef } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { customerApi, dailyProductionApi, productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
@@ -20,31 +22,35 @@ export interface DepartmentOption {
   icon: string
 }
 
-/** 录入表单状态 */
-export interface ProductionEntryForm {
-  product_id: number | null
-  customer_id: number | null
-  customer_name: string
+/** 一行 = 一个 SKU。key 是本地行号，与后端记录 id 无关。 */
+export interface EntryRow {
+  key: number
+  product_id: number
   product_name: string
   barcode: string
   unit_price: number
   quantity: number
   remark: string
-  /** 包装部成品库存：批次号（复用订单批次体系） */
+  /** 批次号：包装部成品库存沿用订单批次体系；其它部门按客户要求也可带 */
   batch_no: string
-  /** 包装部成品库存：是否定制 */
   is_custom: boolean
-  /** 包装部成品库存：定制国家（仅 is_custom 时有意义） */
   custom_country: string
+  /** 今日同部门同产品已录数量——只提示，绝不阻断 */
+  duplicate_qty: number
+  /** 行级错误（校验失败 / 提交失败），展示在行下方，不清空用户输入 */
+  error: string
+  saving: boolean
 }
 
-/** 刚创建的记录（用于「刚才录的」条与撤销） */
+/** 刚创建的记录（用于完成态清单与「撤销本批」） */
 export interface CreatedRecordSummary {
   id: number
   product_name: string
   department: string
   quantity: number
   customer_name?: string
+  batch_no?: string
+  unit_price?: number
 }
 
 /** 包装部部门码：成品库存相关字段/校验只对它生效（避免字面量在多处漂移） */
@@ -58,14 +64,34 @@ export const PRODUCTION_DEPARTMENTS: readonly DepartmentOption[] = [
 
 const RECENT_PRODUCTS_KEY = 'production.recentProducts'
 const LAST_DEPT_KEY = 'production.lastDepartment'
+const DRAFT_KEY = 'production.entryDraft'
+/** 按客户记住「这个客户要批次号」——后端客户档案暂无该字段，先存在本机 */
+const BATCH_PREF_KEY = 'production.batchCustomers'
 const MAX_RECENT = 6
 const DEFAULT_DEPT = 'filling'
+/** 一张单的上限：再多的行既滚不动，也让部分失败的排查变长 */
+export const MAX_ROWS = 50
 /** Alt+1/2/3 对应 departments 的下标 */
 const ALT_DEPT_KEYS = ['1', '2', '3'] as const
 
+function readStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    /* localStorage 不可用时静默忽略（隐私模式等） */
+  }
+}
+
 function loadRecent(): Product[] {
   try {
-    const raw = localStorage.getItem(RECENT_PRODUCTS_KEY)
+    const raw = readStorage(RECENT_PRODUCTS_KEY)
     const arr = raw ? JSON.parse(raw) : []
     return Array.isArray(arr) ? arr.slice(0, MAX_RECENT) : []
   } catch {
@@ -73,13 +99,19 @@ function loadRecent(): Product[] {
   }
 }
 
-/** 上次使用的部门；非法/不可读时回落到默认部门（localStorage 不可用时静默） */
+/** 上次使用的部门；非法/不可读时回落到默认部门 */
 function loadLastDept(): string {
+  const v = readStorage(LAST_DEPT_KEY)
+  return v && PRODUCTION_DEPARTMENTS.some((d) => d.value === v) ? v : DEFAULT_DEPT
+}
+
+function loadBatchPrefs(): Record<string, boolean> {
   try {
-    const v = localStorage.getItem(LAST_DEPT_KEY)
-    return v && PRODUCTION_DEPARTMENTS.some((d) => d.value === v) ? v : DEFAULT_DEPT
+    const raw = readStorage(BATCH_PREF_KEY)
+    const obj = raw ? JSON.parse(raw) : {}
+    return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {}
   } catch {
-    return DEFAULT_DEPT
+    return {}
   }
 }
 
@@ -87,6 +119,10 @@ function loadLastDept(): string {
 function monthParts(dateStr: string): { year: number; month: number } {
   const d = new Date(dateStr + 'T00:00:00')
   return { year: d.getFullYear(), month: d.getMonth() + 1 }
+}
+
+function errorDetail(error: unknown, fallback: string): string {
+  return (error as { response?: { data?: { detail?: string } } } | null)?.response?.data?.detail ?? fallback
 }
 
 export function useProductionEntry(
@@ -98,18 +134,14 @@ export function useProductionEntry(
 
   const formDept = ref(loadLastDept())
   const isSubmitting = ref(false)
-  const detailOpen = ref(false)
-  const deptMenuOpen = ref(false)
-  const deptMenuRef = ref<HTMLElement>()
+  const submitState = ref<'editing' | 'done'>('editing')
+  const createdBatch = ref<CreatedRecordSummary[]>([])
+  const undoConfirmOpen = ref(false)
+  const pasteOpen = ref(false)
 
   const recentProducts = ref<Product[]>(loadRecent())
-
   function saveRecent() {
-    try {
-      localStorage.setItem(RECENT_PRODUCTS_KEY, JSON.stringify(recentProducts.value.slice(0, MAX_RECENT)))
-    } catch {
-      /* localStorage 不可用时静默忽略 */
-    }
+    writeStorage(RECENT_PRODUCTS_KEY, JSON.stringify(recentProducts.value.slice(0, MAX_RECENT)))
   }
   function pushRecent(product: Product) {
     if (!product || product.id == null) return
@@ -123,29 +155,12 @@ export function useProductionEntry(
     saveRecent()
   }
 
-  const form = reactive<ProductionEntryForm>({
-    product_id: null,
-    customer_id: null,
-    customer_name: '',
-    product_name: '',
-    barcode: '',
-    unit_price: 0,
-    quantity: 0,
-    remark: '',
-    batch_no: '',
-    is_custom: false,
-    custom_country: '',
-  })
-  const formErrors = reactive<Record<string, string>>({})
+  // ===== 行（录入主体） =====
+  const rows = ref<EntryRow[]>([])
+  let _rowKey = 0
 
-  /** 批次/定制属「某个产品的生产批次」，换产品必须一并清掉，否则会串到另一个产品。 */
-  function clearFinishedStockFields() {
-    form.batch_no = ''
-    form.is_custom = false
-    form.custom_country = ''
-    formErrors.custom_country = ''
-  }
-  const computedValue = computed(() => (form.quantity || 0) * (form.unit_price || 0))
+  const customerId = ref<number | null>(null)
+  const customerName = ref('')
 
   const { data: customerData } = useQuery({
     queryKey: ['customer-active-names'],
@@ -154,43 +169,79 @@ export function useProductionEntry(
   })
   const customerOptions = computed(() => customerData.value ?? [])
 
-  // ===== 少录错护栏 =====
-  /** 未选产品或数量 ≤ 0 时不允许提交（按钮禁用 + handleSubmit 兜底） */
-  const canSubmit = computed(() => form.product_id != null && Number(form.quantity) > 0)
+  // ===== 批次号列：包装部自动出现，其它部门按客户记住 =====
+  const batchPrefs = ref<Record<string, boolean>>(loadBatchPrefs())
+  /** 未选客户时的会话级开关；null = 跟随部门默认 */
+  const batchManual = ref<boolean | null>(null)
+  const isPackaging = computed(() => formDept.value === PACKAGING_DEPT)
+  /** 这一单是「客户要求批次」驱动的吗？决定批次是必填还是选填 */
+  const customerDriven = computed(() => {
+    if (customerId.value != null) return batchPrefs.value[String(customerId.value)] === true
+    return batchManual.value === true
+  })
+  const batchColumnOn = computed(() => {
+    if (customerId.value != null) {
+      const pref = batchPrefs.value[String(customerId.value)]
+      // 选定了客户就听这个客户的；没记过就回到部门默认，
+      // 不能把「上个客户/无客户时」的临时开关带过来
+      return pref === undefined ? isPackaging.value : pref
+    }
+    if (batchManual.value !== null) return batchManual.value
+    return isPackaging.value
+  })
+  /** 包装部单独出现批次列时保持旧行为（选填）；客户明确要求时才必填 */
+  const batchRequired = computed(() => batchColumnOn.value && customerDriven.value)
+  const batchFilledCount = computed(() => rows.value.filter((r) => r.batch_no.trim()).length)
 
-  const todayCount = ref(0)
-  const duplicateTotal = ref(0)
-  /** 今日同部门同产品已有数量 —— 只提示，绝不阻断（一天两批同产品是合法的） */
-  const duplicateHint = computed(() =>
-    duplicateTotal.value > 0 ? `今天已录 ${duplicateTotal.value} 件 · 仍要录入` : '',
+  function toggleBatchColumn(on: boolean) {
+    if (customerId.value != null) {
+      batchPrefs.value = { ...batchPrefs.value, [String(customerId.value)]: on }
+      writeStorage(BATCH_PREF_KEY, JSON.stringify(batchPrefs.value))
+    } else {
+      batchManual.value = on
+    }
+  }
+
+  // ===== 合计与提交门槛 =====
+  const totals = computed(() => {
+    const qty = rows.value.reduce((s, r) => s + (Number(r.quantity) || 0), 0)
+    const value = rows.value.reduce((s, r) => s + (Number(r.quantity) || 0) * (Number(r.unit_price) || 0), 0)
+    return { sku: rows.value.length, qty, value }
+  })
+  const canSubmit = computed(
+    () => rows.value.length > 0 && rows.value.every((r) => Number(r.quantity) > 0) && !isSubmitting.value,
   )
 
-  const lastCreated = ref<CreatedRecordSummary | null>(null)
-  const undoConfirmOpen = ref(false)
-  const undoText = computed(() => {
-    const c = lastCreated.value
-    return c ? `撤销刚才录入的「${c.product_name}」${c.quantity} 件？` : '撤销刚才录入的记录？'
-  })
-
+  const todayCount = ref(0)
   const currentDept = computed(
     () => PRODUCTION_DEPARTMENTS.find((d) => d.value === formDept.value) ?? PRODUCTION_DEPARTMENTS[0]!,
   )
-
   function deptLabel(value: string): string {
     return PRODUCTION_DEPARTMENTS.find((d) => d.value === value)?.label ?? value
   }
 
-  function adjustQty(delta: number) {
-    const cur = Number(form.quantity) || 0
-    form.quantity = Math.max(0, cur + delta)
+  function adjustRowQty(row: EntryRow, delta: number) {
+    const cur = Number(row.quantity) || 0
+    row.quantity = Math.max(0, Math.min(999999, cur + delta))
+    if (row.error) row.error = ''
   }
-
   /** 数量框 ↑↓（Shift 时为 ±10） */
-  function onQtyArrow(direction: number, event: KeyboardEvent) {
-    adjustQty(direction * (event.shiftKey ? 10 : 1))
+  function onRowQtyArrow(row: EntryRow, direction: number, event: KeyboardEvent) {
+    adjustRowQty(row, direction * (event.shiftKey ? 10 : 1))
+  }
+  /** 数量框 ⏎ = 这一条录完，回搜索框加下一条（键盘流不断线） */
+  function onRowQtyEnter() {
+    productSearchRef.value?.focus()
   }
 
-  // ===== 产品搜索 =====
+  function focusRowQty(key: number) {
+    nextTick(() => {
+      const el = document.querySelector<HTMLInputElement>(`[data-qty-key="${key}"]`)
+      el?.focus()
+    })
+  }
+
+  // ===== 产品搜索（保留 H7 竞态护栏） =====
   const searchQuery = ref('')
   const searchResults = ref<Product[]>([])
   const showDropdown = ref(false)
@@ -198,28 +249,24 @@ export function useProductionEntry(
   const searchError = ref('')
   const searchActiveIndex = ref(-1)
   const productSearchRef = ref<HTMLInputElement>()
-  const quantityRef = ref<HTMLInputElement>()
   let searchTimer: ReturnType<typeof setTimeout> | null = null
-  // selectProduct 的单价请求序号（丢弃过期响应，防止乱序覆盖）
-  let _priceSeq = 0
-  // H7（2026-10-26）：搜索请求序号。输入一变就作废在途请求——否则先发的慢响应
-  // 会覆盖后发的新结果，而 `confirmSearchSelection` 在未按 ↑↓ 时默认选第一条，
-  // 于是「输入 AB + 回车」可能落成「A 的第一条」，选到与输入毫不相干的产品。
   let _searchSeq = 0
+
+  function resetSearch() {
+    searchQuery.value = ''
+    searchResults.value = []
+    showDropdown.value = false
+    searchActiveIndex.value = -1
+    searchLoading.value = false
+    searchError.value = ''
+    _searchSeq += 1
+  }
 
   function onSearchInput() {
     if (searchTimer) clearTimeout(searchTimer)
     searchError.value = ''
     const kw = searchQuery.value.trim()
     const seq = ++_searchSeq
-    if (form.product_name && searchQuery.value !== form.product_name) {
-      form.product_id = null
-      form.product_name = ''
-      form.barcode = ''
-      form.unit_price = 0
-      clearFinishedStockFields()
-      duplicateTotal.value = 0
-    }
     if (!kw) {
       searchResults.value = []
       showDropdown.value = false
@@ -232,7 +279,6 @@ export function useProductionEntry(
     searchTimer = setTimeout(async () => {
       try {
         const res = (await productApi.search(kw)) as unknown as Product[] & { products?: Product[] }
-        // 序号或关键字任一不匹配即丢弃（输入又变了 / 已选中产品）
         if (seq !== _searchSeq || searchQuery.value.trim() !== kw) return
         searchResults.value = res.products ?? res ?? []
         searchError.value = ''
@@ -265,285 +311,440 @@ export function useProductionEntry(
   }
   function confirmSearchSelection() {
     if (!searchResults.value.length) return
-    // 没按过 ↑↓ 时回落到第一条：否则「输入产品名 → ⏎」这个最自然的动作是静默无反应
-    //（`.prevent` 吞掉了按键，下拉还开着），而这正是设计里写明的那一行。
+    // 没按过 ↑↓ 时回落到第一条：否则「输入产品名 → ⏎」是静默无反应
     const idx = searchActiveIndex.value >= 0 ? searchActiveIndex.value : 0
     const product = searchResults.value[idx]
     if (product) void selectProduct(product)
   }
+
+  /** 选中产品 = 追加一行（不再覆盖某个表单），随后焦点落到该行数量 */
   async function selectProduct(product: Product) {
-    form.product_id = product.id
-    form.product_name = product.name
-    form.barcode = product.barcode || ''
-    // 必须先归零：否则新产品无单价（price 为 0/null）时会**沿用上一个产品的单价**，
-    // 提交后 create_record 直接把错误单价写进生产记录，产值失真（后端不重算单价）。
-    form.unit_price = 0
-    clearFinishedStockFields()
-    searchQuery.value = product.name
-    searchResults.value = []
-    showDropdown.value = false
-    searchActiveIndex.value = -1
-    // H7：选中即定稿，任何在途搜索响应都不得再把下拉/结果写回来
-    _searchSeq += 1
-    searchLoading.value = false
+    if (rows.value.length >= MAX_ROWS) {
+      showToast(`一张单最多 ${MAX_ROWS} 个 SKU，请先提交这一批`, 'warning')
+      return
+    }
+    const row: EntryRow = {
+      key: ++_rowKey,
+      product_id: product.id,
+      product_name: product.name,
+      barcode: product.barcode || '',
+      unit_price: 0,
+      quantity: 0,
+      remark: '',
+      batch_no: '',
+      is_custom: false,
+      custom_country: '',
+      duplicate_qty: 0,
+      error: '',
+      saving: false,
+    }
+    rows.value.push(row)
+    // push 进去的是原始对象，后续必须改**响应式代理**（rows.value 里那一个），
+    // 直接写 row 只会改到 raw target：值变了但视图不重渲染（单价/重复提示会一直显示 0）。
+    const liveRow = rows.value[rows.value.length - 1]!
     pushRecent(product)
-    // 请求序号：连点 chip/快速换产品时，慢响应不得覆盖新产品的单价
-    const seq = ++_priceSeq
+    resetSearch()
+    // 焦点必须立刻落到新行数量：单价要等接口回来，等到那时候再聚焦，
+    // 用户前几百毫秒敲的数字会全部丢失（键盘流的致命回退）
+    focusRowQty(liveRow.key)
+    // 单价按行取：只写回这一行，行被删或用户已手填就不再覆盖
     try {
       const infoRes = await dailyProductionApi.productInfo(product.id)
-      if (seq === _priceSeq && infoRes?.data?.price) {
-        form.unit_price = infoRes.data.price
+      if (infoRes?.data?.price && rows.value.includes(liveRow) && !liveRow.unit_price) {
+        liveRow.unit_price = infoRes.data.price
       }
     } catch {
-      // 获取单价失败不影响主流程（此时 unit_price 保持 0，由用户手填）
+      // 获取单价失败不阻断（保持 0，行内可手填）
     }
-    // 选品即完成 → 焦点直奔数量框，键盘流不断线（鼠标点 chip 时同样受益）
-    nextTick(() => quantityRef.value?.focus())
-    void checkDuplicate()
-  }
-  function clearProduct() {
-    form.product_id = null
-    form.product_name = ''
-    form.barcode = ''
-    searchQuery.value = ''
-    form.unit_price = 0
-    clearFinishedStockFields()
-    duplicateTotal.value = 0
+    void checkDuplicateFor(liveRow)
   }
 
-  function selectCustomer(customerId: number | null) {
-    form.customer_id = customerId
-    form.customer_name = customerId == null
-      ? ''
-      : customerOptions.value.find((c) => c.id === customerId)?.name ?? ''
+  function removeRow(row: EntryRow) {
+    rows.value = rows.value.filter((r) => r !== row)
+  }
+  function clearRows() {
+    rows.value = []
+    clearDraft()
   }
 
-  function validateField(field: string): boolean {
-    formErrors[field] = ''
-    if (field === 'quantity') {
-      if (!form.quantity || form.quantity <= 0) {
-        formErrors.quantity = '生产数量必须大于0'
-        return false
+  function selectCustomer(id: number | null) {
+    customerId.value = id
+    customerName.value = id == null ? '' : customerOptions.value.find((c) => c.id === id)?.name ?? ''
+  }
+
+  /** 把第一个已填批次的行作为样本，铺满所有空行（同批次几十个 SKU 时最关键） */
+  function fillBatchColumn() {
+    const sample = rows.value.find((r) => r.batch_no.trim())?.batch_no ?? ''
+    if (!sample) {
+      showToast('先在一行填好批次号，再铺满整列', 'warning')
+      return
+    }
+    let n = 0
+    rows.value.forEach((r) => {
+      if (!r.batch_no.trim()) {
+        r.batch_no = sample
+        n += 1
       }
-      if (form.quantity > 999999) {
-        formErrors.quantity = '生产数量不能超过999999'
-        return false
-      }
-    }
-    if (field === 'product_name' && !form.product_name) {
-      formErrors.product_name = '请选择产品'
-      return false
-    }
-    return true
+      if (r.error) r.error = ''
+    })
+    showToast(n ? `已把 ${sample} 填入 ${n} 行` : '所有行都已有批次号', 'success')
   }
-
-  function validateForm(): boolean {
-    let valid = true
-    if (!validateField('product_name')) valid = false
-    if (!validateField('quantity')) valid = false
-    if (!formDept.value) {
-      showToast('请选择生产部门', 'warning')
-      valid = false
-    }
-    // 包装部：标了定制就必须填国家（与后端 _validate_custom 同口径）
-    if (formDept.value === PACKAGING_DEPT && form.is_custom && !form.custom_country.trim()) {
-      formErrors.custom_country = '定制产品必须填写定制国家'
-      valid = false
-    }
-    return valid
-  }
-
-  // 定制国家错误在输入变化后即时清除：该字段由子组件渲染、没有 blur/input 钩子，
-  // 不清会一直红着，直到某次提交成功（clearEntryFields）才消失。
-  watch(() => [form.is_custom, form.custom_country], () => {
-    if (formErrors.custom_country) formErrors.custom_country = ''
-  })
 
   // ===== 今日计数与重复提示 =====
   async function refreshTodayCount() {
     const { year, month } = monthParts(selectedDateModel.value)
     try {
-      const res = await dailyProductionApi.records({
-        year, month, production_date: selectedDateModel.value,
-      })
+      const res = await dailyProductionApi.records({ year, month, production_date: selectedDateModel.value })
       todayCount.value = res?.total ?? 0
     } catch {
       todayCount.value = 0
     }
   }
 
-  /**
-   * 今日 + 当前部门 + 该产品是否已有记录。
-   * 用列表接口的 stats.total_quantity（跨页口径，与当前分页无关），不自己加总页面行。
-   */
-  async function checkDuplicate() {
-    duplicateTotal.value = 0
-    if (form.product_id == null || !form.product_name) return
-    const { year, month } = monthParts(selectedDateModel.value)
+  /** 今日同部门同产品已录数量：按「日期|部门|产品」缓存，换部门/日期才重查 */
+  const dupCache = new Map<string, number>()
+  async function checkDuplicateFor(row: EntryRow) {
+    const cacheKey = `${selectedDateModel.value}|${formDept.value}|${row.product_id}`
+    const cached = dupCache.get(cacheKey)
+    if (cached !== undefined) {
+      row.duplicate_qty = cached
+      return
+    }
     try {
+      const { year, month } = monthParts(selectedDateModel.value)
       const res = await dailyProductionApi.records({
-        year,
-        month,
+        year, month,
         production_date: selectedDateModel.value,
         department: formDept.value,
-        keyword: form.product_name,
+        keyword: row.product_name,
       })
-      duplicateTotal.value = res?.stats?.total_quantity ?? 0
+      const q = res?.stats?.total_quantity ?? 0
+      dupCache.set(cacheKey, q)
+      if (rows.value.includes(row)) row.duplicate_qty = q
     } catch {
-      duplicateTotal.value = 0
+      /* 提示性信息，失败不打扰录入 */
     }
   }
-
-  function pickDept(value: string) {
-    formDept.value = value
-    deptMenuOpen.value = false
-  }
-  function pickDeptByIndex(index: number) {
-    const dept = PRODUCTION_DEPARTMENTS[index]
-    if (dept) pickDept(dept.value)
+  function recheckDuplicates() {
+    dupCache.clear()
+    rows.value.forEach((r) => {
+      r.duplicate_qty = 0
+      void checkDuplicateFor(r)
+    })
   }
 
-  function clearEntryFields() {
-    form.product_id = null
-    form.customer_id = null
-    form.customer_name = ''
-    form.product_name = ''
-    form.barcode = ''
-    form.unit_price = 0
-    form.quantity = 0
-    form.remark = ''
-    form.batch_no = ''
-    form.is_custom = false
-    form.custom_country = ''
-    searchQuery.value = ''
-    Object.keys(formErrors).forEach((k) => (formErrors[k] = ''))
+  // ===== 校验 =====
+  function validateRows(): boolean {
+    if (!rows.value.length) {
+      showToast('请先加入至少一个 SKU', 'warning')
+      return false
+    }
+    let ok = true
+    rows.value.forEach((r) => {
+      r.error = ''
+      const qty = Number(r.quantity)
+      if (!qty || qty <= 0) {
+        r.error = '生产数量必须大于 0'
+        ok = false
+      } else if (qty > 999999) {
+        r.error = '生产数量不能超过 999999'
+        ok = false
+      } else if (batchRequired.value && !r.batch_no.trim()) {
+        r.error = '该客户要求批次号，请填写'
+        ok = false
+      } else if (isPackaging.value && r.is_custom && !r.custom_country.trim()) {
+        // 与后端 _validate_custom 同口径
+        r.error = '定制产品必须填写定制国家'
+        ok = false
+      }
+    })
+    if (!ok) showToast('有 SKU 未通过校验，按行内红字修正后再提交', 'error')
+    return ok
   }
 
-  /** 提交成功后的清空：保留部门（连续录入同一部门是常态） */
-  function resetQuickForm() {
-    const customerId = form.customer_id
-    const customerName = form.customer_name
-    clearEntryFields()
-    form.customer_id = customerId
-    form.customer_name = customerName
-    duplicateTotal.value = 0
-    searchResults.value = []
-    showDropdown.value = false
-    searchActiveIndex.value = -1
-  }
-
-  function resetForm() {
-    clearEntryFields()
-    duplicateTotal.value = 0
-    detailOpen.value = false
-    deptMenuOpen.value = false
-    lastCreated.value = null
-    undoConfirmOpen.value = false
-    searchResults.value = []
-    showDropdown.value = false
-    searchActiveIndex.value = -1
-  }
-
-  function closeEntryDrawer() {
-    openModel.value = false
-    resetForm()
+  function payloadOf(row: EntryRow): Record<string, unknown> {
+    return {
+      department: formDept.value,
+      product_id: row.product_id,
+      customer_id: customerId.value,
+      product_name: row.product_name,
+      barcode: row.barcode,
+      unit_price: row.unit_price || 0,
+      quantity: row.quantity,
+      production_value: Number((row.quantity || 0) * (row.unit_price || 0)),
+      production_date: selectedDateModel.value,
+      remark: row.remark,
+      // batch_no 后端不限部门存储，客户要求时其它部门也要带上；
+      // 定制字段仅包装部有意义，不传避免脏数据
+      batch_no: row.batch_no.trim() || null,
+      ...(isPackaging.value
+        ? { is_custom: row.is_custom, custom_country: row.is_custom ? row.custom_country.trim() || null : null }
+        : {}),
+    }
   }
 
   function invalidateSummaries() {
     queryClient.invalidateQueries({ queryKey: ['daily-production-records'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-daily-summary'] })
     queryClient.invalidateQueries({ queryKey: ['daily-production-monthly-summary'] })
-    // 包装部生产记录直接进成品库存聚合（finished_stock_service），
-    // 不同步失效会让成品库存页在 staleTime 内读到旧快照（vue-query 缓存持久化到
-    // sessionStorage，切换过去不重新发请求）。
     queryClient.invalidateQueries({ queryKey: ['finished-stock'] })
   }
 
-  async function confirmSubmit() {
-    isSubmitting.value = true
-    try {
-      const res = (await dailyProductionApi.createRecord({
-        department: formDept.value,
-        product_id: form.product_id,
-        customer_id: form.customer_id,
-        product_name: form.product_name,
-        barcode: form.barcode,
-        unit_price: form.unit_price || 0,
-        quantity: form.quantity,
-        production_value: Number(computedValue.value),
-        production_date: selectedDateModel.value,
-        remark: form.remark,
-        // 成品库存字段仅包装部有意义；其它部门不传，避免脏数据
-        ...(formDept.value === PACKAGING_DEPT
-          ? {
-              batch_no: form.batch_no.trim() || null,
-              is_custom: form.is_custom,
-              custom_country: form.is_custom ? (form.custom_country.trim() || null) : null,
-            }
-          : {}),
-      } as Record<string, unknown>)) as { id?: number | null } | null
-
-      const createdId = res?.id ?? null
-      if (createdId != null) {
-        lastCreated.value = {
-          id: createdId,
-          product_name: form.product_name,
-          department: formDept.value,
-          quantity: form.quantity,
-          customer_name: form.customer_name,
-        }
-      }
-      showToast('录入成功', 'success')
-      // 提交即连续：清空表单、焦点回到搜索框，下一条可以立刻录
-      resetQuickForm()
-      nextTick(() => productSearchRef.value?.focus())
-      invalidateSummaries()
-      void refreshTodayCount()
-    } catch (error: unknown) {
-      const detail = (error as { response?: { data?: { detail?: string } } } | null)?.response?.data?.detail
-      showToast(detail ?? '录入失败', 'error')
-    } finally {
-      isSubmitting.value = false
-    }
-  }
-
-  async function handleSubmit() {
-    // 防重复提交：连按 Ctrl+⏎ / 双击按钮都不能建出两条
-    if (isSubmitting.value) return
-    if (!validateForm()) return
-    await confirmSubmit()
-  }
-
-  // ===== 撤销（物理删除，必须二次确认） =====
-  function requestUndo() {
-    if (lastCreated.value) undoConfirmOpen.value = true
-  }
-
-  async function confirmUndo() {
-    const created = lastCreated.value
-    undoConfirmOpen.value = false
-    if (!created) return
-    try {
-      await dailyProductionApi.deleteRecord(created.id)
-      lastCreated.value = null
-      showToast('已撤销', 'success')
-      invalidateSummaries()
-      void refreshTodayCount()
-      void checkDuplicate()
-    } catch (error: unknown) {
-      // 与 confirmSubmit 同一口径：物理删除失败时，后端给的原因必须让用户看见
-      const detail = (error as { response?: { data?: { detail?: string } } } | null)?.response?.data?.detail
-      showToast(detail ?? '撤销失败', 'error')
-    }
-  }
-
   /**
-   * 弹窗内的键盘流（挂在模态根节点，靠冒泡覆盖所有子输入框）。
-   *
-   * Esc 分层：先收最上面那层浮层（部门菜单 → 产品下拉），都没有才关弹窗。
-   * 收起浮层时 stopPropagation —— 编排层还挂着一个 window 级 Esc 兜底
-   * （焦点不在弹窗内时用），不放行的话它会越过分层把关掉整个弹窗。
+   * 批量提交：顺序逐条创建。
+   * 全部成功 → 进完成态（可整批撤销）；有失败 → 只把失败的行留在表里，
+   * 成功的行从表中移除，不会重复建单，用户只需重试剩下的。
    */
+  async function submitBatch() {
+    if (isSubmitting.value) return
+    if (submitState.value === 'done') return
+    if (!validateRows()) return
+    isSubmitting.value = true
+    const created: CreatedRecordSummary[] = []
+    const failed: EntryRow[] = []
+    for (const row of [...rows.value]) {
+      row.saving = true
+      row.error = ''
+      try {
+        const res = (await dailyProductionApi.createRecord(payloadOf(row))) as { id?: number | null } | null
+        const createdId = res?.id ?? null
+        if (createdId == null) throw new Error('创建未返回记录 id')
+        created.push({
+          id: createdId,
+          product_name: row.product_name,
+          department: formDept.value,
+          quantity: row.quantity,
+          customer_name: customerName.value,
+          batch_no: row.batch_no,
+          unit_price: row.unit_price,
+        })
+      } catch (error: unknown) {
+        row.error = errorDetail(error, '提交失败，请重试')
+        failed.push(row)
+      } finally {
+        row.saving = false
+      }
+    }
+    isSubmitting.value = false
+    invalidateSummaries()
+    void refreshTodayCount()
+
+    if (!failed.length) {
+      createdBatch.value = created
+      rows.value = []
+      clearDraft()
+      submitState.value = 'done'
+      showToast(`已录入 ${created.length} 条生产记录`, 'success')
+      return
+    }
+    rows.value = failed
+    if (created.length) {
+      showToast(`已录入 ${created.length} 条，${failed.length} 条失败——只剩失败的行，可直接重试`, 'warning')
+    } else {
+      showToast('提交失败，请检查行内提示', 'error')
+    }
+  }
+
+  // ===== 撤销整批（物理删除，必须二次确认） =====
+  const undoText = computed(() => {
+    const n = createdBatch.value.length
+    const first = createdBatch.value[0]
+    return first ? `撤销刚才录入的 ${n} 条记录（含「${first.product_name}」等）？` : '撤销刚才录入的记录？'
+  })
+  function requestUndo() {
+    if (createdBatch.value.length) undoConfirmOpen.value = true
+  }
+  async function confirmUndo() {
+    const targets = [...createdBatch.value]
+    undoConfirmOpen.value = false
+    if (!targets.length) return
+    const remaining: CreatedRecordSummary[] = []
+    for (const item of targets) {
+      try {
+        await dailyProductionApi.deleteRecord(item.id)
+      } catch (error: unknown) {
+        remaining.push(item, ...targets.slice(targets.indexOf(item) + 1))
+        createdBatch.value = remaining
+        showToast(errorDetail(error, '撤销失败'), 'error')
+        invalidateSummaries()
+        void refreshTodayCount()
+        return
+      }
+    }
+    createdBatch.value = []
+    showToast('已撤销本批录入', 'success')
+    invalidateSummaries()
+    void refreshTodayCount()
+    // 整批都删掉了就回到录入态，否则完成态会停在「已录入 0 条」的空回执上
+    submitState.value = 'editing'
+    nextTick(() => productSearchRef.value?.focus())
+  }
+
+  // ===== 草稿（关弹窗自动留底，避免多行录入被一次误关清掉） =====
+  function saveDraft(silent = false) {
+    if (!rows.value.length) return
+    writeStorage(DRAFT_KEY, JSON.stringify({
+      date: selectedDateModel.value,
+      department: formDept.value,
+      customer_id: customerId.value,
+      customer_name: customerName.value,
+      rows: rows.value.map((r) => ({
+        product_id: r.product_id,
+        product_name: r.product_name,
+        barcode: r.barcode,
+        unit_price: r.unit_price,
+        quantity: r.quantity,
+        remark: r.remark,
+        batch_no: r.batch_no,
+        is_custom: r.is_custom,
+        custom_country: r.custom_country,
+      })),
+    }))
+    if (!silent) showToast(`草稿已保存到本机（${rows.value.length} 个 SKU）`, 'success')
+  }
+  function clearDraft() {
+    try {
+      localStorage.removeItem(DRAFT_KEY)
+    } catch {
+      /* 忽略 */
+    }
+  }
+  function restoreDraft() {
+    const raw = readStorage(DRAFT_KEY)
+    if (!raw) return
+    try {
+      const draft = JSON.parse(raw) as {
+        date?: string
+        department?: string
+        customer_id?: number | null
+        customer_name?: string
+        rows?: Array<Partial<EntryRow>>
+      }
+      if (!Array.isArray(draft.rows) || !draft.rows.length) return
+      // 草稿是「某一天的单据」，跨日期恢复会把昨天的数量记到今天头上
+      if (draft.date && draft.date !== selectedDateModel.value) {
+        showToast(`上次草稿属于 ${draft.date}，未恢复`, 'info')
+        return
+      }
+      if (draft.department && PRODUCTION_DEPARTMENTS.some((d) => d.value === draft.department)) {
+        formDept.value = draft.department
+      }
+      customerId.value = draft.customer_id ?? null
+      customerName.value = draft.customer_name ?? ''
+      rows.value = draft.rows.slice(0, MAX_ROWS).map((r) => ({
+        key: ++_rowKey,
+        product_id: Number(r.product_id),
+        product_name: String(r.product_name ?? ''),
+        barcode: String(r.barcode ?? ''),
+        unit_price: Number(r.unit_price) || 0,
+        quantity: Number(r.quantity) || 0,
+        remark: String(r.remark ?? ''),
+        batch_no: String(r.batch_no ?? ''),
+        is_custom: Boolean(r.is_custom),
+        custom_country: String(r.custom_country ?? ''),
+        duplicate_qty: 0,
+        error: '',
+        saving: false,
+      }))
+      showToast(`已恢复上次未提交的 ${rows.value.length} 个 SKU`, 'info')
+      recheckDuplicates()
+    } catch {
+      clearDraft()
+    }
+  }
+
+  // ===== 粘贴导入（Excel：产品名或 69 码 / 数量 / 批次号） =====
+  async function importPaste(text: string): Promise<void> {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    if (!lines.length) return
+    const matched: Array<{ product: Product; qty: number; batch: string }> = []
+    const unmatched: string[] = []
+    for (const line of lines) {
+      const cols = line.split(/\t|,|\s{2,}/).map((s) => s.trim()).filter(Boolean)
+      const nameOrCode = cols[0] ?? ''
+      if (!nameOrCode) continue
+      try {
+        const res = (await productApi.search(nameOrCode)) as unknown as Product[] & { products?: Product[] }
+        const list = res.products ?? res ?? []
+        // 只接受精确命中（产品名或 69 码）：退而求其次取第一条会录错产品
+        const product = list.find((p) => p.name === nameOrCode || p.barcode === nameOrCode)
+        if (!product) {
+          unmatched.push(nameOrCode)
+          continue
+        }
+        matched.push({ product, qty: Math.max(0, parseInt(cols[1] ?? '0', 10) || 0), batch: cols[2] ?? '' })
+      } catch {
+        unmatched.push(nameOrCode)
+      }
+    }
+    if (!matched.length) {
+      showToast('没有识别到可导入的行（需精确匹配产品名或 69 码）', 'error')
+      return
+    }
+    const room = MAX_ROWS - rows.value.length
+    matched.slice(0, Math.max(0, room)).forEach(({ product, qty, batch }) => {
+      rows.value.push({
+        key: ++_rowKey,
+        product_id: product.id,
+        product_name: product.name,
+        barcode: product.barcode || '',
+        unit_price: 0,
+        quantity: qty,
+        remark: '',
+        batch_no: batch,
+        is_custom: false,
+        custom_country: '',
+        duplicate_qty: 0,
+        error: '',
+        saving: false,
+      })
+      pushRecent(product)
+    })
+    // 单价并行补齐；重复提示走缓存
+    await Promise.all(rows.value.filter((r) => !r.unit_price).map(async (r) => {
+      try {
+        const infoRes = await dailyProductionApi.productInfo(r.product_id)
+        if (infoRes?.data?.price && rows.value.includes(r) && !r.unit_price) r.unit_price = infoRes.data.price
+      } catch {
+        /* 单价失败可手填 */
+      }
+    }))
+    recheckDuplicates()
+    const dropped = matched.length - Math.min(matched.length, Math.max(0, room))
+    const parts = [`已导入 ${Math.min(matched.length, Math.max(0, room))} 行`]
+    if (unmatched.length) parts.push(`${unmatched.length} 行未精确匹配到产品`)
+    if (dropped > 0) parts.push(`${dropped} 行超出单张上限被跳过`)
+    showToast(parts.join('，'), unmatched.length || dropped > 0 ? 'warning' : 'success')
+  }
+
+  // ===== 开关与部门 =====
+  function pickDept(value: string) {
+    formDept.value = value
+  }
+  function pickDeptByIndex(index: number) {
+    const dept = PRODUCTION_DEPARTMENTS[index]
+    if (dept) pickDept(dept.value)
+  }
+
+  function startNewBatch() {
+    submitState.value = 'editing'
+    createdBatch.value = []
+    rows.value = []
+    resetSearch()
+    nextTick(() => productSearchRef.value?.focus())
+  }
+
+  function closeEntryDrawer() {
+    // 有未提交的行就留草稿：多行录入被一次 Esc/误关清掉是这版最不能接受的回退
+    if (rows.value.length) saveDraft(true)
+    openModel.value = false
+    submitState.value = 'editing'
+    createdBatch.value = []
+    undoConfirmOpen.value = false
+    pasteOpen.value = false
+    resetSearch()
+  }
+
   function onModalKeydown(event: KeyboardEvent) {
     if (event.altKey && !event.ctrlKey && !event.metaKey) {
       const idx = ALT_DEPT_KEYS.indexOf(event.key as (typeof ALT_DEPT_KEYS)[number])
@@ -554,19 +755,21 @@ export function useProductionEntry(
       }
     }
     if (event.ctrlKey && event.key === 'Enter') {
+      // 粘贴层里的 Ctrl+⏎ 是「导入」，不是提交整单
+      if (pasteOpen.value) return
       event.preventDefault()
-      void handleSubmit()
+      void submitBatch()
       return
     }
     if (event.key === 'Escape') {
-      if (deptMenuOpen.value) {
-        deptMenuOpen.value = false
-        event.stopPropagation()
-        return
-      }
       if (showDropdown.value) {
         showDropdown.value = false
         searchActiveIndex.value = -1
+        event.stopPropagation()
+        return
+      }
+      if (pasteOpen.value) {
+        pasteOpen.value = false
         event.stopPropagation()
         return
       }
@@ -574,24 +777,13 @@ export function useProductionEntry(
     }
   }
 
-  /** 点部门菜单以外的任何地方都收起菜单（只在菜单打开期间挂 document 监听） */
-  function onDocumentClick(event: MouseEvent) {
-    const target = event.target as Node | null
-    if (target && deptMenuRef.value?.contains(target)) return
-    deptMenuOpen.value = false
-  }
-  watch(deptMenuOpen, (open) => {
-    if (open) document.addEventListener('click', onDocumentClick)
-    else document.removeEventListener('click', onDocumentClick)
-  })
-
   watch(formDept, (value) => {
-    try {
-      localStorage.setItem(LAST_DEPT_KEY, value)
-    } catch {
-      /* localStorage 不可用时静默忽略 */
-    }
-    if (form.product_id != null) void checkDuplicate()
+    writeStorage(LAST_DEPT_KEY, value)
+    recheckDuplicates()
+  })
+  watch(selectedDateModel, () => {
+    recheckDuplicates()
+    void refreshTodayCount()
   })
 
   watch(
@@ -599,6 +791,7 @@ export function useProductionEntry(
     (v) => {
       if (v) {
         void refreshTodayCount()
+        if (!rows.value.length) restoreDraft()
         nextTick(() => productSearchRef.value?.focus())
       }
     },
@@ -608,7 +801,6 @@ export function useProductionEntry(
   onUnmounted(() => {
     if (searchTimer) clearTimeout(searchTimer)
     _timers.forEach(clearTimeout)
-    document.removeEventListener('click', onDocumentClick)
   })
 
   return {
@@ -616,18 +808,33 @@ export function useProductionEntry(
     formDept,
     currentDept,
     deptLabel,
+    isPackaging,
     isSubmitting,
-    detailOpen,
-    deptMenuOpen,
-    deptMenuRef,
+    submitState,
+    createdBatch,
+    undoConfirmOpen,
+    undoText,
+    pasteOpen,
     recentProducts,
     clearRecent,
-    form,
-    formErrors,
-    computedValue,
+    rows,
+    totals,
     canSubmit,
-    adjustQty,
-    onQtyArrow,
+    customerId,
+    customerName,
+    customerOptions,
+    selectCustomer,
+    batchColumnOn,
+    batchRequired,
+    batchFilledCount,
+    toggleBatchColumn,
+    fillBatchColumn,
+    adjustRowQty,
+    onRowQtyArrow,
+    onRowQtyEnter,
+    selectProduct,
+    removeRow,
+    clearRows,
     searchQuery,
     searchResults,
     showDropdown,
@@ -635,26 +842,21 @@ export function useProductionEntry(
     searchError,
     searchActiveIndex,
     productSearchRef,
-    quantityRef,
     onSearchInput,
     onSearchFocus,
     onSearchBlur,
     moveSearchIndex,
     confirmSearchSelection,
-    selectProduct,
-    clearProduct,
-    selectCustomer,
-    customerOptions,
-    validateField,
-    closeEntryDrawer,
-    handleSubmit,
-    todayCount,
-    duplicateHint,
-    lastCreated,
-    undoConfirmOpen,
-    undoText,
+    resetSearch,
+    submitBatch,
     requestUndo,
     confirmUndo,
+    saveDraft,
+    clearDraft,
+    importPaste,
+    startNewBatch,
+    todayCount,
+    closeEntryDrawer,
     pickDept,
     onModalKeydown,
   }

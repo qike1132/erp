@@ -111,8 +111,10 @@ describe('useProductionEntry 搜索竞态（H7）', () => {
     entry.confirmSearchSelection()
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(entry.form.product_id).toBe(2)
-    expect(entry.form.product_name).toBe('AB-产品')
+    // 方向 A：选中即追加一行，行上的产品必须来自当前关键字
+    const row = entry.rows.value[0]
+    expect(row?.product_id).toBe(2)
+    expect(row?.product_name).toBe('AB-产品')
   })
 
   it('清空输入后在途响应不得把下拉重新填满', async () => {
