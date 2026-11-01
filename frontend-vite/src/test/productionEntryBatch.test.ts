@@ -132,8 +132,11 @@ describe('批次号列', () => {
     expect(createMock.mock.calls[0]?.[0]).toMatchObject({ department: 'packaging', batch_no: null })
   })
 
-  it('充棉部默认没有批次列；打开开关后出现并要求必填，空批次会被拦下', async () => {
+  it('充棉部默认没有批次列；给客户打开「需批次号」后出现并要求必填，空批次会被拦下', async () => {
     const w = mountDialog()
+    await flushPromises()
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await nextTick()
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('10')
     expect(w.find('[data-test="qe-batch"]').exists()).toBe(false)
@@ -155,8 +158,11 @@ describe('批次号列', () => {
     expect(createMock.mock.calls[0]?.[0]).toMatchObject({ batch_no: 'B20261101' })
   })
 
-  it('「铺满空行」把第一行的批次号铺到其它空行', async () => {
+  it('「本列同批次」把第一行的批次号铺到其它空行', async () => {
     const w = mountDialog()
+    await flushPromises()
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await nextTick()
     await w.find('[data-test="qe-batch-switch"]').setValue(true)
     await selectProductAt(w, 0)
     await selectProductAt(w, 1)
@@ -172,6 +178,9 @@ describe('批次号列', () => {
 
   it('批次状态是行内小标签：填满即消失，也不再单独占一行放「铺满空行」', async () => {
     const w = mountDialog()
+    await flushPromises()
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await nextTick()
     await w.find('[data-test="qe-batch-switch"]').setValue(true)
     await selectProductAt(w, 0)
     await selectProductAt(w, 1)
@@ -184,6 +193,19 @@ describe('批次号列', () => {
 
     await batchAt(w, 1).setValue('B001')
     expect(w.find('[data-test="qe-banner"]').exists()).toBe(false)
+  })
+
+  it('没选客户时「该客户需批次号」开关禁用，选了客户才可设置', async () => {
+    const w = mountDialog()
+    await flushPromises()
+
+    const sw = w.find('[data-test="qe-batch-switch"]')
+    expect((sw.element as HTMLInputElement).disabled).toBe(true)
+    expect(w.find('[data-test="qe-banner"]').exists()).toBe(false)
+
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await nextTick()
+    expect((w.find('[data-test="qe-batch-switch"]').element as HTMLInputElement).disabled).toBe(false)
   })
 
   it('批次开关按客户记住：客户A 打开后，换到客户B 不带上，回来自动恢复', async () => {
@@ -202,19 +224,6 @@ describe('批次号列', () => {
     w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
     await nextTick()
     expect((w.find('[data-test="qe-batch-switch"]').element as HTMLInputElement).checked).toBe(true)
-  })
-
-  it('无客户时打开的开关不会泄漏到没记住的客户身上', async () => {
-    const w = mountDialog()
-    await w.find('[data-test="qe-batch-switch"]').setValue(true)
-    expect((w.find('[data-test="qe-batch-switch"]').element as HTMLInputElement).checked).toBe(true)
-
-    await flushPromises()
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 6)
-    await nextTick()
-
-    // 客户B 没有批次要求：回到部门默认（充棉部 = 不显示），不能沿用上一个临时开关
-    expect((w.find('[data-test="qe-batch-switch"]').element as HTMLInputElement).checked).toBe(false)
   })
 
   it('重新打开弹窗后，该客户的批次要求仍然生效', async () => {

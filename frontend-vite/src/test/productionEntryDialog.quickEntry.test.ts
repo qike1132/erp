@@ -158,11 +158,11 @@ describe('ProductionEntryDialog 布局与合计', () => {
     expect(w.find('[data-test="qe-total-sku"]').text()).toBe('0')
   })
 
-  it('头部显示「今天已录 N 条」（按选中日期取记录总数）', async () => {
+  it('底栏显示「今日 N 条」（按选中日期取记录总数）', async () => {
     const w = mountDialog()
     await flushPromises()
 
-    expect(w.find('.pr-qe-sub').text()).toContain('今日已录 3 条')
+    expect(w.find('[data-test="qe-total-day"]').text()).toBe('3')
     expect(recordsMock).toHaveBeenCalledWith(expect.objectContaining({ production_date: '2026-09-30' }))
   })
 

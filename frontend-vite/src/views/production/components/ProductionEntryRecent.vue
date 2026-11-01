@@ -61,7 +61,7 @@ const emit = defineEmits<{
 </script>
 
 <style scoped>
-.pr-recent { flex: 0 0 190px; width: 190px; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: 12px; background: #fcfdff; overflow: hidden; }
+.pr-recent { flex: 0 0 180px; width: 180px; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: 12px; background: #fcfdff; overflow: hidden; }
 .pr-recent-head { flex: 0 0 auto; padding: 10px 12px; border-bottom: 1px solid var(--color-border-light); display: flex; align-items: flex-start; gap: 8px; background: #fff; }
 .pr-recent-title { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .pr-recent-title b { font-size: 13px; font-weight: 800; color: var(--color-text); }
@@ -70,7 +70,7 @@ const emit = defineEmits<{
 .pr-recent-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
 .pr-recent-item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; font-family: inherit; transition: background 0.14s, border-color 0.14s; }
 .pr-recent-item:hover { background: #fff; border-color: var(--color-primary-200); }
-.pr-recent-item .n { font-size: 13px; font-weight: 700; color: var(--color-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+.pr-recent-item .n { font-size: 14px; font-weight: 700; color: var(--color-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
 .pr-recent-item .m { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--color-text-placeholder); }
 .pr-recent-item .code { font-family: 'SF Mono', Consolas, monospace; }
 .pr-recent-item .qty { color: var(--color-text-muted); }

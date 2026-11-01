@@ -2,18 +2,7 @@
   <Transition name="pr-qe">
     <!-- 遮罩不绑点击关闭：误触空白会丢掉已输一半的录入内容，只能用右上角 ✕ 或 Esc 关（关闭时自动留草稿） -->
     <div v-if="openModel" class="pr-qe-overlay">
-      <div class="pr-qe-modal" role="dialog" aria-labelledby="pr-qe-title" @keydown="onModalKeydown">
-        <header class="pr-qe-header">
-          <div class="pr-qe-head-left">
-            <h3 id="pr-qe-title">录入生产数据</h3>
-            <span class="pr-qe-sub">{{ currentDept.label }} · {{ selectedDate }} · 今日已录 {{ todayCount }} 条</span>
-          </div>
-          <div class="pr-qe-head-right">
-            <span class="pr-qe-head-meta">可一次提交多个 SKU</span>
-            <button class="pr-qe-close" aria-label="关闭" @click="closeEntryDrawer"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
-          </div>
-        </header>
-
+      <div class="pr-qe-modal" role="dialog" aria-label="录入生产数据" @keydown="onModalKeydown">
         <template v-if="submitState === 'editing'">
           <!-- 整单共用的上下文：部门 / 客户 / 日期，只选一次 -->
           <div class="pr-qe-ctx">
@@ -51,10 +40,17 @@
               批次 {{ batchFilledCount }}/{{ rows.length }}
               <b v-if="batchRequired">必填</b>
             </span>
-            <label class="pr-qe-switch" title="包装部自动开启；其它部门按客户记住，下次选这个客户会自动带上">
-              <input type="checkbox" :checked="batchColumnOn" data-test="qe-batch-switch" @change="onBatchSwitch" />
-              <i /><span>批次号列</span>
+            <label class="pr-qe-switch" :title="customerId == null ? '先选客户，再按客户设置是否需要批次号' : '按客户记住（存本机）；开启后批次号必填'">
+              <input
+                type="checkbox"
+                :checked="batchRequired"
+                :disabled="customerId == null"
+                data-test="qe-batch-switch"
+                @change="onBatchSwitch"
+              />
+              <i /><span>该客户需批次号</span>
             </label>
+            <button class="pr-qe-close" aria-label="关闭" data-test="qe-close" @click="closeEntryDrawer"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
 
           <div class="pr-qe-body">
@@ -123,6 +119,7 @@
               <span>共 <b data-test="qe-total-sku">{{ totals.sku }}</b> 个 SKU</span>
               <span>合计 <b data-test="qe-total-qty">{{ totals.qty }}</b> 件</span>
               <span>货值 <b class="val" data-test="qe-total-value">{{ formatCurrency(totals.value) }}</b></span>
+              <span class="day">今日 <b data-test="qe-total-day">{{ todayCount }}</b> 条</span>
             </div>
             <button type="button" class="pr-qe-btn" data-test="qe-draft" :disabled="!rows.length" @click="saveDraft()">存草稿</button>
             <button type="button" class="pr-qe-btn" data-test="qe-clear" :disabled="!rows.length || isSubmitting" @click="clearRows">清空</button>
@@ -221,55 +218,52 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 
 <style scoped>
 .pr-qe-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px); z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
-.pr-qe-modal { position: relative; width: 1360px; min-height: 600px; max-width: 100%; max-height: 100%; background: white; border-radius: 14px; display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.06); overflow: hidden; }
-.pr-qe-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 30px; background: #fff; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
-.pr-qe-head-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.pr-qe-header h3 { margin: 0; font-size: 19px; font-weight: 700; color: var(--color-text); letter-spacing: 0.01em; }
-.pr-qe-sub { font-size: 13px; color: var(--color-text-muted); }
-.pr-qe-head-right { display: flex; align-items: center; gap: 14px; }
-.pr-qe-head-meta { font-size: 12.5px; color: var(--color-text-placeholder); white-space: nowrap; }
-.pr-qe-close { width: 32px; height: 32px; border: none; background: transparent; color: var(--color-text-muted); border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-.pr-qe-close:hover { background: var(--color-surface); color: var(--color-text); }
+.pr-qe-modal { position: relative; width: 1480px; min-height: 620px; max-width: 100%; max-height: 100%; background: white; border-radius: 14px; display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.06); overflow: hidden; }
+.pr-qe-close { width: 36px; height: 36px; border: none; background: transparent; color: var(--color-text-muted); border-radius: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 17px; flex: 0 0 36px; }
+.pr-qe-close:hover { background: var(--color-danger-50); color: var(--color-danger-600); }
 
 .pr-qe-ctx { display: flex; align-items: center; gap: 16px; padding: 14px 30px; border-bottom: 1px solid var(--color-border-light); background: #fcfdff; flex-shrink: 0; flex-wrap: wrap; }
 .pr-qe-ctx :deep(.pr-customer-select) { width: 250px; }
 .pr-qe-seg { display: inline-flex; align-items: center; padding: 4px; gap: 2px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; }
-.pr-qe-seg-btn { height: 44px; padding: 0 18px; border: none; border-radius: 8px; background: transparent; color: var(--color-text-muted); font-size: 15px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; }
+.pr-qe-seg-btn { height: 48px; padding: 0 20px; border: none; border-radius: 9px; background: transparent; color: var(--color-text-muted); font-size: 16px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; white-space: nowrap; }
 .pr-qe-seg-btn.on { background: #fff; color: var(--color-primary-700); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14); }
 .pr-qe-seg-btn.on[data-dept='packaging'] { color: var(--color-warning-600); }
 .pr-qe-seg-btn.on[data-dept='handcraft'] { color: var(--color-success-700); }
 .pr-qe-date { display: flex; align-items: center; gap: 7px; }
-.pr-qe-date span { font-size: 13px; font-weight: 700; color: var(--color-text-muted); }
-.pr-qe-date input { height: 44px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: 10px; font-size: 15px; font-family: inherit; color: var(--color-text); background: #fff; }
+.pr-qe-date span { font-size: 14px; font-weight: 700; color: var(--color-text-muted); }
+.pr-qe-date input { height: 48px; padding: 0 13px; border: 1px solid var(--color-border); border-radius: 10px; font-size: 16px; font-family: inherit; color: var(--color-text); background: #fff; }
 .pr-qe-sp { flex: 1; min-width: 8px; }
-.pr-qe-switch { display: inline-flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; user-select: none; }
+.pr-qe-switch { display: inline-flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; user-select: none; }
+.pr-qe-switch input:disabled { cursor: not-allowed; }
+.pr-qe-switch input:disabled + i { opacity: 0.45; }
 .pr-qe-switch input { position: absolute; opacity: 0; pointer-events: none; }
-.pr-qe-switch i { width: 44px; height: 24px; border-radius: 99px; background: var(--color-border-strong); position: relative; transition: 0.18s; flex: 0 0 44px; }
-.pr-qe-switch i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25); transition: 0.18s; }
+.pr-qe-switch i { width: 48px; height: 26px; border-radius: 99px; background: var(--color-border-strong); position: relative; transition: 0.18s; flex: 0 0 48px; }
+.pr-qe-switch i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25); transition: 0.18s; }
 .pr-qe-switch input:checked + i { background: var(--color-primary-500); }
-.pr-qe-switch input:checked + i::after { transform: translateX(20px); }
+.pr-qe-switch input:checked + i::after { transform: translateX(22px); }
 
-.pr-qe-batchstat { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 99px; background: var(--color-warning-50); border: 1px solid var(--color-warning-300); color: var(--color-warning-700); font-size: 13px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pr-qe-batchstat { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; border-radius: 99px; background: var(--color-warning-50); border: 1px solid var(--color-warning-300); color: var(--color-warning-700); font-size: 14px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pr-qe-batchstat b { font-size: 11px; font-weight: 800; color: #fff; background: var(--color-warning-500); border-radius: 4px; padding: 1px 5px; }
 
 .pr-qe-body { flex: 1; min-height: 0; overflow: hidden; padding: 14px 30px 0; display: flex; gap: 12px; }
 .pr-qe-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .pr-qe-add { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 .pr-qe-search { position: relative; flex: 1; min-width: 0; }
-.pr-qe-input { width: 100%; padding: 14px 18px; font-size: 17px; line-height: 1.5; color: var(--color-text); background: #fff; border: 1px solid var(--color-border); border-radius: 12px; outline: none; min-height: 56px; box-sizing: border-box; font-family: inherit; }
+.pr-qe-input { width: 100%; padding: 15px 20px; font-size: 18px; line-height: 1.5; color: var(--color-text); background: #fff; border: 1px solid var(--color-border); border-radius: 12px; outline: none; min-height: 60px; box-sizing: border-box; font-family: inherit; }
 .pr-qe-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.13); }
-.pr-qe-search-input { padding-left: 48px !important; }
-.pr-qe-search-icon { position: absolute; left: 17px; top: 50%; transform: translateY(-50%); color: var(--color-text-placeholder); font-size: 18px; pointer-events: none; }
-.pr-qe-paste { display: inline-flex; align-items: center; gap: 9px; height: 56px; padding: 0 20px; border: 1px solid var(--color-border); border-radius: 12px; background: #fff; color: var(--color-text-secondary); font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.pr-qe-search-input { padding-left: 52px !important; }
+.pr-qe-search-icon { position: absolute; left: 19px; top: 50%; transform: translateY(-50%); color: var(--color-text-placeholder); font-size: 20px; pointer-events: none; }
+.pr-qe-paste { display: inline-flex; align-items: center; gap: 10px; height: 60px; padding: 0 22px; border: 1px solid var(--color-border); border-radius: 12px; background: #fff; color: var(--color-text-secondary); font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
 .pr-qe-paste:hover { border-color: var(--color-primary-400); color: var(--color-primary-700); background: var(--color-primary-50); }
 
 .pr-qe-foot { display: flex; align-items: center; gap: 12px; padding: 14px 30px; border-top: 1px solid var(--color-border-light); flex-shrink: 0; margin-top: 16px; }
-.pr-qe-totals { flex: 1; min-width: 0; display: flex; align-items: center; gap: 18px; font-size: 15px; color: var(--color-text-muted); }
-.pr-qe-totals b { font-size: 18px; color: var(--color-text); font-variant-numeric: tabular-nums; }
+.pr-qe-totals { flex: 1; min-width: 0; display: flex; align-items: center; gap: 20px; font-size: 16px; color: var(--color-text-muted); }
+.pr-qe-totals b { font-size: 20px; color: var(--color-text); font-variant-numeric: tabular-nums; }
+.pr-qe-totals .day b { color: var(--color-text-secondary); }
 .pr-qe-totals b.val { color: var(--color-primary-700); }
-.pr-qe-btn { height: 46px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.pr-qe-btn { height: 50px; padding: 0 20px; border-radius: 10px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; }
 .pr-qe-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.pr-qe-submit { display: inline-flex; align-items: center; gap: 10px; height: 52px; padding: 0 28px; border: none; border-radius: 12px; background: linear-gradient(135deg, var(--color-primary-500) 0%, var(--color-primary-700) 100%); color: white; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; box-shadow: 0 4px 12px rgba(30, 64, 175, 0.25); white-space: nowrap; }
+.pr-qe-submit { display: inline-flex; align-items: center; gap: 10px; height: 56px; padding: 0 30px; border: none; border-radius: 12px; background: linear-gradient(135deg, var(--color-primary-500) 0%, var(--color-primary-700) 100%); color: white; font-size: 17px; font-weight: 700; cursor: pointer; font-family: inherit; box-shadow: 0 4px 12px rgba(30, 64, 175, 0.25); white-space: nowrap; }
 .pr-qe-submit:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
 .pr-qe-submit-hint { padding: 3px 8px; background: rgba(255, 255, 255, 0.22); border-radius: 4px; font-size: 12px; font-weight: 700; font-family: 'SF Mono', Consolas, monospace; }
 

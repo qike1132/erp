@@ -157,35 +157,23 @@ export function useProductionEntry(
 
   // ===== 批次号列：包装部自动出现，其它部门按客户记住 =====
   const batchPrefs = ref<Record<string, boolean>>(loadBatchPrefs())
-  /** 未选客户时的会话级开关；null = 跟随部门默认 */
-  const batchManual = ref<boolean | null>(null)
   const isPackaging = computed(() => formDept.value === PACKAGING_DEPT)
-  /** 这一单是「客户要求批次」驱动的吗？决定批次是必填还是选填 */
-  const customerDriven = computed(() => {
-    if (customerId.value != null) return batchPrefs.value[String(customerId.value)] === true
-    return batchManual.value === true
-  })
-  const batchColumnOn = computed(() => {
-    if (customerId.value != null) {
-      const pref = batchPrefs.value[String(customerId.value)]
-      // 选定了客户就听这个客户的；没记过就回到部门默认，
-      // 不能把「上个客户/无客户时」的临时开关带过来
-      return pref === undefined ? isPackaging.value : pref
-    }
-    if (batchManual.value !== null) return batchManual.value
-    return isPackaging.value
-  })
+  /** 该客户被标记「需要批次号」（按客户记住，存本机） */
+  const customerDriven = computed(() => customerId.value != null && batchPrefs.value[String(customerId.value)] === true)
+  /** 批次列出现 = 包装部（成品库存口径，选填）或客户要求（必填） */
+  const batchColumnOn = computed(() => isPackaging.value || customerDriven.value)
   /** 包装部单独出现批次列时保持旧行为（选填）；客户明确要求时才必填 */
   const batchRequired = computed(() => batchColumnOn.value && customerDriven.value)
   const batchFilledCount = computed(() => rows.value.filter((r) => r.batch_no.trim()).length)
 
   function toggleBatchColumn(on: boolean) {
-    if (customerId.value != null) {
-      batchPrefs.value = { ...batchPrefs.value, [String(customerId.value)]: on }
-      writeStorage(BATCH_PREF_KEY, JSON.stringify(batchPrefs.value))
-    } else {
-      batchManual.value = on
+    if (customerId.value == null) {
+      showToast('先选择客户，再设置该客户是否需要批次号', 'warning')
+      return
     }
+    batchPrefs.value = { ...batchPrefs.value, [String(customerId.value)]: on }
+    writeStorage(BATCH_PREF_KEY, JSON.stringify(batchPrefs.value))
+    showToast(on ? `${customerName.value || '该客户'}：批次号必填（已按客户记住）` : `${customerName.value || '该客户'}：批次号不再必填`, 'success')
   }
 
   // ===== 合计与提交门槛 =====
