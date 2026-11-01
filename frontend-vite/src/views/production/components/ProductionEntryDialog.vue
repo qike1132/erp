@@ -5,14 +5,11 @@
       <div class="pr-qe-modal" role="dialog" aria-labelledby="pr-qe-title" @keydown="onModalKeydown">
         <header class="pr-qe-header">
           <div class="pr-qe-head-left">
-            <span class="pr-qe-icon"><FontAwesomeIcon icon="pen-to-square" aria-hidden="true" /></span>
-            <div>
-              <h3 id="pr-qe-title">录入生产数据</h3>
-              <span class="pr-qe-sub">{{ currentDept.label }} · {{ selectedDate }} · 今天已录 {{ todayCount }} 条</span>
-            </div>
+            <h3 id="pr-qe-title">录入生产数据</h3>
+            <span class="pr-qe-sub">{{ currentDept.label }} · {{ selectedDate }} · 今日已录 {{ todayCount }} 条</span>
           </div>
           <div class="pr-qe-head-right">
-            <span class="pr-qe-head-pill">一次可提交多个 SKU</span>
+            <span class="pr-qe-head-meta">可一次提交多个 SKU</span>
             <button class="pr-qe-close" aria-label="关闭" @click="closeEntryDrawer"><FontAwesomeIcon icon="times" aria-hidden="true" /></button>
           </div>
         </header>
@@ -61,67 +58,63 @@
           </div>
 
           <div class="pr-qe-body">
-            <!-- 连续加 SKU：搜索回车即追加一行，焦点落到该行数量 -->
-            <div class="pr-qe-add">
-              <div class="pr-qe-search">
-                <FontAwesomeIcon icon="search" class="pr-qe-search-icon" aria-hidden="true" />
-                <input
-                  ref="productSearchRef"
-                  v-model="searchQuery"
-                  type="text"
-                  data-test="qe-search"
-                  class="pr-qe-input pr-qe-search-input"
-                  placeholder="输入产品名称或 69 码，回车加入一行（可连续加）"
-                  autocomplete="off"
-                  @input="onSearchInput"
-                  @focus="onSearchFocus"
-                  @blur="onSearchBlur"
-                  @keydown.down.prevent="moveSearchIndex(1)"
-                  @keydown.up.prevent="moveSearchIndex(-1)"
-                  @keydown.enter.prevent="confirmSearchSelection"
-                />
-                <ProductSearchDropdown
-                  v-if="showDropdown"
-                  :search-loading="searchLoading"
-                  :search-error="searchError"
-                  :search-results="searchResults"
-                  :search-active-index="searchActiveIndex"
-                  :hint="searchHint"
-                  @select="selectProduct"
-                />
+            <div class="pr-qe-main">
+              <!-- 连续加 SKU：搜索回车即追加一行，焦点落到该行数量 -->
+              <div class="pr-qe-add">
+                <div class="pr-qe-search">
+                  <FontAwesomeIcon icon="search" class="pr-qe-search-icon" aria-hidden="true" />
+                  <input
+                    ref="productSearchRef"
+                    v-model="searchQuery"
+                    type="text"
+                    data-test="qe-search"
+                    class="pr-qe-input pr-qe-search-input"
+                    placeholder="输入产品名称或 69 码，回车加入一行（可连续加）"
+                    autocomplete="off"
+                    @input="onSearchInput"
+                    @focus="onSearchFocus"
+                    @blur="onSearchBlur"
+                    @keydown.down.prevent="moveSearchIndex(1)"
+                    @keydown.up.prevent="moveSearchIndex(-1)"
+                    @keydown.enter.prevent="confirmSearchSelection"
+                  />
+                  <ProductSearchDropdown
+                    v-if="showDropdown"
+                    :search-loading="searchLoading"
+                    :search-error="searchError"
+                    :search-results="searchResults"
+                    :search-active-index="searchActiveIndex"
+                    :hint="searchHint"
+                    @select="selectProduct"
+                  />
+                </div>
+                <button type="button" class="pr-qe-paste" data-test="qe-paste-open" @click="pasteOpen = true">
+                  <FontAwesomeIcon icon="paste" aria-hidden="true" /> 粘贴 Excel
+                </button>
               </div>
-              <button type="button" class="pr-qe-paste" data-test="qe-paste-open" @click="pasteOpen = true">
-                <FontAwesomeIcon icon="paste" aria-hidden="true" /> 粘贴 Excel
-              </button>
+
+              <ProductionEntryTable
+                :rows="rows"
+                :batch-column-on="batchColumnOn"
+                :batch-required="batchRequired"
+                :is-packaging="isPackaging"
+                :disabled="isSubmitting"
+                @remove="removeRow"
+                @adjust="adjustRowQty"
+                @qty-arrow="onRowQtyArrow"
+                @qty-enter="onRowQtyEnter"
+                @fill-batch="fillBatchColumn"
+              />
             </div>
 
-            <div v-if="recentProducts.length" class="pr-qe-recents">
-              <span class="pr-qe-recents-label">最近使用</span>
-              <button
-                v-for="p in recentProducts"
-                :key="p.id"
-                type="button"
-                class="pr-qe-recent-chip"
-                data-test="qe-recent"
-                :title="p.barcode || ''"
-                @click="selectProduct(p)"
-              >
-                {{ p.name }}
-              </button>
-              <button type="button" class="pr-qe-recents-clear" @click="clearRecent">清空</button>
-            </div>
-
-            <ProductionEntryTable
-              :rows="rows"
-              :batch-column-on="batchColumnOn"
-              :batch-required="batchRequired"
-              :is-packaging="isPackaging"
-              :disabled="isSubmitting"
-              @remove="removeRow"
-              @adjust="adjustRowQty"
-              @qty-arrow="onRowQtyArrow"
-              @qty-enter="onRowQtyEnter"
-              @fill-batch="fillBatchColumn"
+            <!-- 右侧：该客户最近录入过的 SKU，点一条直接加一行 -->
+            <ProductionEntryRecent
+              v-if="customerId != null"
+              :items="customerRecent"
+              :loading="recentLoading"
+              :customer-name="customerName"
+              @add="addRecentSku"
+              @browse="browseProducts"
             />
           </div>
 
@@ -185,6 +178,7 @@ import CustomerSelect from './CustomerSelect.vue'
 import ProductionEntryTable from './ProductionEntryTable.vue'
 import ProductionEntryPaste from './ProductionEntryPaste.vue'
 import ProductionEntryDone from './ProductionEntryDone.vue'
+import ProductionEntryRecent from './ProductionEntryRecent.vue'
 import { useProductionEntry } from '@/views/production/composables/useProductionEntry'
 
 const props = defineProps<{
@@ -208,8 +202,9 @@ const selectedDateModel = computed({
 
 const {
   departments, formDept, currentDept, isPackaging, isSubmitting, submitState, createdBatch,
-  undoConfirmOpen, undoText, pasteOpen, recentProducts, clearRecent, rows, totals, canSubmit,
-  customerId, customerOptions, selectCustomer, batchColumnOn, batchRequired, batchFilledCount,
+  undoConfirmOpen, undoText, pasteOpen, customerRecent, recentLoading, addRecentSku, browseProducts,
+  rows, totals, canSubmit,
+  customerId, customerName, customerOptions, selectCustomer, batchColumnOn, batchRequired, batchFilledCount,
   toggleBatchColumn, fillBatchColumn, adjustRowQty, onRowQtyArrow, onRowQtyEnter,
   selectProduct, removeRow, clearRows, searchQuery, searchResults, showDropdown, searchLoading,
   searchError, searchActiveIndex, searchHint, productSearchRef, onSearchInput, onSearchFocus, onSearchBlur,
@@ -226,16 +221,15 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 
 <style scoped>
 .pr-qe-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(6px); z-index: var(--z-modal); display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
-.pr-qe-modal { position: relative; width: 1360px; min-height: 600px; max-width: 100%; max-height: 100%; background: white; border-radius: 18px; display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.08); overflow: hidden; }
-.pr-qe-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 30px; background: linear-gradient(135deg, var(--color-primary-700) 0%, var(--color-primary-500) 100%); color: white; flex-shrink: 0; }
-.pr-qe-head-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.pr-qe-icon { width: 52px; height: 52px; border-radius: 15px; background: rgba(255, 255, 255, 0.18); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
-.pr-qe-header h3 { margin: 0; font-size: 22px; font-weight: 700; color: white; }
-.pr-qe-sub { display: block; font-size: 15px; font-weight: 500; color: rgba(255, 255, 255, 0.85); margin-top: 3px; }
-.pr-qe-head-right { display: flex; align-items: center; gap: 10px; }
-.pr-qe-head-pill { font-size: 13px; font-weight: 600; padding: 5px 13px; border-radius: 99px; background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.22); }
-.pr-qe-close { width: 42px; height: 42px; border: none; background: rgba(255, 255, 255, 0.15); color: white; border-radius: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 18px; }
-.pr-qe-close:hover { background: rgba(255, 255, 255, 0.28); }
+.pr-qe-modal { position: relative; width: 1360px; min-height: 600px; max-width: 100%; max-height: 100%; background: white; border-radius: 14px; display: flex; flex-direction: column; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.06); overflow: hidden; }
+.pr-qe-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 30px; background: #fff; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
+.pr-qe-head-left { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pr-qe-header h3 { margin: 0; font-size: 19px; font-weight: 700; color: var(--color-text); letter-spacing: 0.01em; }
+.pr-qe-sub { font-size: 13px; color: var(--color-text-muted); }
+.pr-qe-head-right { display: flex; align-items: center; gap: 14px; }
+.pr-qe-head-meta { font-size: 12.5px; color: var(--color-text-placeholder); white-space: nowrap; }
+.pr-qe-close { width: 32px; height: 32px; border: none; background: transparent; color: var(--color-text-muted); border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.pr-qe-close:hover { background: var(--color-surface); color: var(--color-text); }
 
 .pr-qe-ctx { display: flex; align-items: center; gap: 16px; padding: 14px 30px; border-bottom: 1px solid var(--color-border-light); background: #fcfdff; flex-shrink: 0; flex-wrap: wrap; }
 .pr-qe-ctx :deep(.pr-customer-select) { width: 250px; }
@@ -258,7 +252,8 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-batchstat { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 99px; background: var(--color-warning-50); border: 1px solid var(--color-warning-300); color: var(--color-warning-700); font-size: 13px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pr-qe-batchstat b { font-size: 11px; font-weight: 800; color: #fff; background: var(--color-warning-500); border-radius: 4px; padding: 1px 5px; }
 
-.pr-qe-body { flex: 1; min-height: 0; overflow: hidden; padding: 14px 30px 0; display: flex; flex-direction: column; gap: 12px; }
+.pr-qe-body { flex: 1; min-height: 0; overflow: hidden; padding: 14px 30px 0; display: flex; gap: 12px; }
+.pr-qe-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .pr-qe-add { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 .pr-qe-search { position: relative; flex: 1; min-width: 0; }
 .pr-qe-input { width: 100%; padding: 14px 18px; font-size: 17px; line-height: 1.5; color: var(--color-text); background: #fff; border: 1px solid var(--color-border); border-radius: 12px; outline: none; min-height: 56px; box-sizing: border-box; font-family: inherit; }
@@ -267,12 +262,6 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-search-icon { position: absolute; left: 17px; top: 50%; transform: translateY(-50%); color: var(--color-text-placeholder); font-size: 18px; pointer-events: none; }
 .pr-qe-paste { display: inline-flex; align-items: center; gap: 9px; height: 56px; padding: 0 20px; border: 1px solid var(--color-border); border-radius: 12px; background: #fff; color: var(--color-text-secondary); font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
 .pr-qe-paste:hover { border-color: var(--color-primary-400); color: var(--color-primary-700); background: var(--color-primary-50); }
-.pr-qe-recents { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; flex-shrink: 0; }
-.pr-qe-recents-label { font-size: 12px; font-weight: 800; color: var(--color-text-placeholder); letter-spacing: 0.04em; }
-.pr-qe-recent-chip { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 7px 14px; border: 1px solid var(--color-border); border-radius: 999px; background: white; font-size: 14px; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; font-family: inherit; }
-.pr-qe-recent-chip:hover { border-color: var(--color-primary-500); color: var(--color-primary-700); background: var(--color-primary-50); }
-.pr-qe-recents-clear { border: none; background: transparent; font-size: 13px; color: var(--color-text-placeholder); cursor: pointer; font-family: inherit; }
-.pr-qe-recents-clear:hover { color: var(--color-danger-600); }
 
 .pr-qe-foot { display: flex; align-items: center; gap: 12px; padding: 14px 30px; border-top: 1px solid var(--color-border-light); flex-shrink: 0; margin-top: 16px; }
 .pr-qe-totals { flex: 1; min-width: 0; display: flex; align-items: center; gap: 18px; font-size: 15px; color: var(--color-text-muted); }

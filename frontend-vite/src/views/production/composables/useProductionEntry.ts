@@ -53,6 +53,15 @@ export interface CreatedRecordSummary {
   unit_price?: number
 }
 
+/** 右侧「最近客户添加」栏的一行 */
+export interface RecentSku {
+  product_id: number
+  product_name: string
+  barcode: string
+  /** 最近一次给该客户录入的数量，仅作参考展示 */
+  quantity: number
+}
+
 /** 包装部部门码：成品库存相关字段/校验只对它生效（避免字面量在多处漂移） */
 export const PACKAGING_DEPT = 'packaging'
 
@@ -62,12 +71,10 @@ export const PRODUCTION_DEPARTMENTS: readonly DepartmentOption[] = [
   { value: 'packaging', label: '包装部', icon: 'fas fa-box' },
 ]
 
-const RECENT_PRODUCTS_KEY = 'production.recentProducts'
 const LAST_DEPT_KEY = 'production.lastDepartment'
 const DRAFT_KEY = 'production.entryDraft'
 /** 按客户记住「这个客户要批次号」——后端客户档案暂无该字段，先存在本机 */
 const BATCH_PREF_KEY = 'production.batchCustomers'
-const MAX_RECENT = 6
 const DEFAULT_DEPT = 'filling'
 /** 一张单的上限：再多的行既滚不动，也让部分失败的排查变长 */
 export const MAX_ROWS = 50
@@ -86,16 +93,6 @@ function writeStorage(key: string, value: string) {
     localStorage.setItem(key, value)
   } catch {
     /* localStorage 不可用时静默忽略（隐私模式等） */
-  }
-}
-
-function loadRecent(): Product[] {
-  try {
-    const raw = readStorage(RECENT_PRODUCTS_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr.slice(0, MAX_RECENT) : []
-  } catch {
-    return []
   }
 }
 
@@ -139,21 +136,10 @@ export function useProductionEntry(
   const undoConfirmOpen = ref(false)
   const pasteOpen = ref(false)
 
-  const recentProducts = ref<Product[]>(loadRecent())
-  function saveRecent() {
-    writeStorage(RECENT_PRODUCTS_KEY, JSON.stringify(recentProducts.value.slice(0, MAX_RECENT)))
-  }
-  function pushRecent(product: Product) {
-    if (!product || product.id == null) return
-    const filtered = recentProducts.value.filter((x) => x.id !== product.id)
-    filtered.unshift(product)
-    recentProducts.value = filtered.slice(0, MAX_RECENT)
-    saveRecent()
-  }
-  function clearRecent() {
-    recentProducts.value = []
-    saveRecent()
-  }
+  /** 右侧「最近客户添加」：该客户最近录入过生产记录的 SKU（按最近一次录入倒序） */
+  const customerRecent = ref<RecentSku[]>([])
+  const recentLoading = ref(false)
+  let _recentSeq = 0
 
   // ===== 行（录入主体） =====
   const rows = ref<EntryRow[]>([])
@@ -400,7 +386,6 @@ export function useProductionEntry(
     // push 进去的是原始对象，后续必须改**响应式代理**（rows.value 里那一个），
     // 直接写 row 只会改到 raw target：值变了但视图不重渲染（单价/重复提示会一直显示 0）。
     const liveRow = rows.value[rows.value.length - 1]!
-    pushRecent(product)
     resetSearch()
     // 焦点必须立刻落到新行数量：单价要等接口回来，等到那时候再聚焦，
     // 用户前几百毫秒敲的数字会全部丢失（键盘流的致命回退）
@@ -437,6 +422,77 @@ export function useProductionEntry(
     } else if (id == null) {
       showDropdown.value = false
     }
+    void loadCustomerRecent()
+  }
+
+  /** 'YYYY-MM-DD' 往前推 n 天（本地时区，避免 toISOString 的 UTC 偏移） */
+  function daysBefore(dateStr: string, n: number): string {
+    const d = new Date(dateStr + 'T00:00:00')
+    d.setDate(d.getDate() - n)
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${d.getFullYear()}-${m}-${day}`
+  }
+
+  /**
+   * 右侧「最近客户添加」：该客户近 90 天录入过的 SKU，按最近一次录入去重。
+   *
+   * 记录接口没有 customer_id 过滤参数，但每行都带 customer_id / customer_name，
+   * 一次 200 行足够覆盖活跃客户的近期 SKU；优先按 id 匹配，历史数据 id 为空时用名字兜底。
+   */
+  async function loadCustomerRecent() {
+    const cid = customerId.value
+    if (cid == null) {
+      customerRecent.value = []
+      recentLoading.value = false
+      return
+    }
+    const seq = ++_recentSeq
+    recentLoading.value = true
+    try {
+      const end = selectedDateModel.value
+      const res = await dailyProductionApi.records({
+        start_date: daysBefore(end, 90),
+        end_date: end,
+        sort: 'desc',
+        page: 1,
+        per_page: 200,
+      })
+      if (seq !== _recentSeq) return
+      const name = customerName.value
+      const seen = new Set<number>()
+      const list: RecentSku[] = []
+      for (const rec of res?.data ?? []) {
+        const sameCustomer = rec.customer_id != null
+          ? rec.customer_id === cid
+          : !!name && rec.customer_name === name
+        if (!sameCustomer || rec.product_id == null || seen.has(rec.product_id)) continue
+        seen.add(rec.product_id)
+        list.push({
+          product_id: rec.product_id,
+          product_name: rec.product_name,
+          barcode: rec.barcode ?? '',
+          quantity: rec.quantity,
+        })
+        if (list.length >= 10) break
+      }
+      customerRecent.value = list
+    } catch {
+      if (seq === _recentSeq) customerRecent.value = []
+    } finally {
+      if (seq === _recentSeq) recentLoading.value = false
+    }
+  }
+
+  /** 点右侧条目 = 直接加一行，和搜索选中走同一条路径 */
+  function addRecentSku(item: RecentSku) {
+    void selectProduct({ id: item.product_id, name: item.product_name, barcode: item.barcode } as Product)
+  }
+
+  /** 右侧栏空态里的「浏览该客户的产品」：聚焦搜索框即会拉该客户的产品 */
+  function browseProducts() {
+    productSearchRef.value?.focus()
+    if (customerId.value != null) void browseCustomerProducts()
   }
 
   /** 把第一个已填批次的行作为样本，铺满所有空行（同批次几十个 SKU 时最关键） */
@@ -601,6 +657,8 @@ export function useProductionEntry(
       rows.value = []
       clearDraft()
       submitState.value = 'done'
+      // 刚录的 SKU 应该立刻出现在右侧「最近客户添加」的顶部
+      void loadCustomerRecent()
       showToast(`已录入 ${created.length} 条生产记录`, 'success')
       return
     }
@@ -765,7 +823,6 @@ export function useProductionEntry(
         error: '',
         saving: false,
       })
-      pushRecent(product)
     })
     // 单价并行补齐；重复提示走缓存
     await Promise.all(rows.value.filter((r) => !r.unit_price).map(async (r) => {
@@ -851,6 +908,8 @@ export function useProductionEntry(
   watch(selectedDateModel, () => {
     recheckDuplicates()
     void refreshTodayCount()
+    // 最近 90 天的窗口以选中日期为终点，日期变了要重算
+    void loadCustomerRecent()
   })
 
   watch(
@@ -859,6 +918,7 @@ export function useProductionEntry(
       if (v) {
         void refreshTodayCount()
         if (!rows.value.length) restoreDraft()
+        void loadCustomerRecent()
         nextTick(() => productSearchRef.value?.focus())
       }
     },
@@ -882,8 +942,10 @@ export function useProductionEntry(
     undoConfirmOpen,
     undoText,
     pasteOpen,
-    recentProducts,
-    clearRecent,
+    customerRecent,
+    recentLoading,
+    addRecentSku,
+    browseProducts,
     rows,
     totals,
     canSubmit,

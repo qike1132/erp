@@ -162,7 +162,7 @@ describe('ProductionEntryDialog 布局与合计', () => {
     const w = mountDialog()
     await flushPromises()
 
-    expect(w.find('.pr-qe-sub').text()).toContain('今天已录 3 条')
+    expect(w.find('.pr-qe-sub').text()).toContain('今日已录 3 条')
     expect(recordsMock).toHaveBeenCalledWith(expect.objectContaining({ production_date: '2026-09-30' }))
   })
 
@@ -197,18 +197,6 @@ describe('ProductionEntryDialog 布局与合计', () => {
 
     const price = w.find('[data-test="qe-price"]').element as HTMLInputElement
     expect(price.value).toBe('7')
-  })
-
-  it('点「最近使用」chip 追加一行并带出单价', async () => {
-    localStorage.setItem('production.recentProducts', JSON.stringify([{ id: 9, name: '熊猫抱枕', barcode: '699' }]))
-    productInfoMock.mockResolvedValue({ success: true, data: { id: 9, name: '熊猫抱枕', barcode: '699', price: 12 } })
-    const w = mountDialog()
-
-    await w.find('[data-test="qe-recent"]').trigger('click')
-    await flushPromises()
-
-    expect(w.find('[data-test="qe-row"]').text()).toContain('熊猫抱枕')
-    expect((w.find('[data-test="qe-price"]').element as HTMLInputElement).value).toBe('12')
   })
 
   it('改日期会 emit update:selectedDate（对外契约不变）', async () => {
@@ -439,5 +427,96 @@ describe('按客户带出产品', () => {
 
     expect(productListMock).toHaveBeenLastCalledWith(expect.objectContaining({ customer_id: 6 }))
     expect(w.findAll('.pr-entry-dropdown-item').length).toBe(1)
+  })
+})
+
+describe('右侧「最近客户添加」', () => {
+  const RECORDS = [
+    {
+      id: 1, department: 'filling', product_id: 1, customer_id: 5, customer_name: '客户A',
+      product_name: '白兔公仔 40cm', barcode: '6901234', unit_price: 7, quantity: 120,
+      production_value: 840, production_date: '2026-09-28',
+    },
+    {
+      id: 2, department: 'filling', product_id: 2, customer_id: 6, customer_name: '客户B',
+      product_name: '白兔公仔 60cm', barcode: '6901235', unit_price: 7, quantity: 80,
+      production_value: 560, production_date: '2026-09-28',
+    },
+    {
+      id: 3, department: 'filling', product_id: 3, customer_id: 5, customer_name: '客户A',
+      product_name: '熊猫抱枕', barcode: '699', unit_price: 12, quantity: 60,
+      production_value: 720, production_date: '2026-09-27',
+    },
+  ]
+
+  function mockRecentRecords() {
+    recordsMock.mockImplementation(async (params: { start_date?: string; keyword?: string }) => {
+      if (params.start_date) {
+        return { success: true, data: RECORDS, total: 3, page: 1, per_page: 200, pages: 1, stats: null }
+      }
+      if (params.keyword) {
+        return { success: true, data: [], total: 1, page: 1, per_page: 50, pages: 1, stats: { total_quantity: 0, total_value: 0, total_sku: 0 } }
+      }
+      return { success: true, data: [], total: 3, page: 1, per_page: 50, pages: 1, stats: null }
+    })
+  }
+
+  it('没选客户时不出现右侧栏', async () => {
+    const w = mountDialog()
+    await flushPromises()
+
+    expect(w.find('[data-test="qe-recent"]').exists()).toBe(false)
+  })
+
+  it('选了客户后列出该客户最近录入的 SKU，别的客户不混进来', async () => {
+    mockRecentRecords()
+    const w = mountDialog()
+    await flushPromises()
+
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await flushPromises()
+
+    const rail = w.find('[data-test="qe-recent"]')
+    expect(rail.exists()).toBe(true)
+    expect(rail.text()).toContain('最近客户添加')
+    expect(rail.text()).toContain('白兔公仔 40cm')
+    expect(rail.text()).toContain('熊猫抱枕')
+    expect(rail.text()).not.toContain('60cm')
+    expect(recordsMock).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-07-02', end_date: '2026-09-30' }))
+  })
+
+  it('点右侧条目直接加一行（和搜索选中同一条路径）', async () => {
+    mockRecentRecords()
+    const w = mountDialog()
+    await flushPromises()
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await flushPromises()
+
+    await w.findAll('[data-test="qe-recent"] .pr-recent-item')[0]!.trigger('click')
+    await flushPromises()
+
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(1)
+    expect(w.find('[data-test="qe-row"]').text()).toContain('白兔公仔 40cm')
+    expect(document.activeElement).toBe(w.find('[data-test="qe-qty"]').element)
+  })
+
+  it('该客户近 90 天没有记录时给空态与「浏览该客户的产品」入口', async () => {
+    recordsMock.mockImplementation(async (params: { start_date?: string }) => {
+      if (params.start_date) return { success: true, data: [], total: 0, page: 1, per_page: 200, pages: 1, stats: null }
+      return { success: true, data: [], total: 0, page: 1, per_page: 50, pages: 1, stats: null }
+    })
+    productListMock.mockResolvedValue({ items: PRODUCTS, total: 2 })
+    const w = mountDialog()
+    await flushPromises()
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+    await flushPromises()
+
+    const rail = w.find('[data-test="qe-recent"]')
+    
+    expect(rail.text()).toContain('没有录入记录')
+
+    await rail.find('.browse').trigger('click')
+    await flushPromises()
+    expect(w.findAll('.pr-entry-dropdown-item').length).toBe(2)
   })
 })
