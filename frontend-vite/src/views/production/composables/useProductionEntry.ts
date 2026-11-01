@@ -262,6 +262,53 @@ export function useProductionEntry(
     _searchSeq += 1
   }
 
+  /** 搜索框提示语：选了客户又没输关键字时，下拉里铺的是该客户可见的 SKU */
+  const searchHint = computed(() => {
+    if (searchQuery.value.trim()) return ''
+    if (customerId.value == null) return ''
+    return `${customerName.value || '该客户'} 可见的产品`
+  })
+
+  /**
+   * 取产品。选了客户走 /products/list + customer_id：后端 visible_to_customer 的语义是
+   * 「属于该客户，或未挂客户」——未分配归属的通用 SKU 不会被挡掉，和生产现场一致。
+   * 没选客户时沿用 /products/search 的全库搜索。
+   */
+  async function fetchProducts(keyword: string): Promise<Product[]> {
+    if (customerId.value != null) {
+      const res = await productApi.list({
+        customer_id: customerId.value,
+        search: keyword || undefined,
+        page: 1,
+        per_page: 20,
+      })
+      return res?.items ?? []
+    }
+    const res = (await productApi.search(keyword)) as unknown as Product[] & { products?: Product[] }
+    return res.products ?? res ?? []
+  }
+
+  /** 聚焦且没输关键字：直接把该客户可见的产品铺出来，省掉「先想关键词」这一步 */
+  async function browseCustomerProducts() {
+    if (customerId.value == null) return
+    const seq = ++_searchSeq
+    searchLoading.value = true
+    searchActiveIndex.value = -1
+    showDropdown.value = true
+    try {
+      const list = await fetchProducts('')
+      if (seq !== _searchSeq) return
+      searchResults.value = list
+      searchError.value = ''
+    } catch {
+      if (seq !== _searchSeq) return
+      searchError.value = '产品加载失败，请重试'
+      searchResults.value = []
+    } finally {
+      if (seq === _searchSeq) searchLoading.value = false
+    }
+  }
+
   function onSearchInput() {
     if (searchTimer) clearTimeout(searchTimer)
     searchError.value = ''
@@ -269,8 +316,14 @@ export function useProductionEntry(
     const seq = ++_searchSeq
     if (!kw) {
       searchResults.value = []
-      showDropdown.value = false
-      searchLoading.value = false
+      searchActiveIndex.value = -1
+      if (customerId.value != null) {
+        // 清空关键字 = 回到「这个客户有哪些 SKU」，而不是把下拉收掉
+        void browseCustomerProducts()
+      } else {
+        showDropdown.value = false
+        searchLoading.value = false
+      }
       return
     }
     searchLoading.value = true
@@ -278,9 +331,9 @@ export function useProductionEntry(
     searchActiveIndex.value = -1
     searchTimer = setTimeout(async () => {
       try {
-        const res = (await productApi.search(kw)) as unknown as Product[] & { products?: Product[] }
+        const list = await fetchProducts(kw)
         if (seq !== _searchSeq || searchQuery.value.trim() !== kw) return
-        searchResults.value = res.products ?? res ?? []
+        searchResults.value = list
         searchError.value = ''
       } catch {
         if (seq !== _searchSeq || searchQuery.value.trim() !== kw) return
@@ -292,9 +345,14 @@ export function useProductionEntry(
     }, 300)
   }
   function onSearchFocus() {
-    if (searchQuery.value.trim() && (searchResults.value.length || searchError.value)) {
-      showDropdown.value = true
+    const kw = searchQuery.value.trim()
+    if (kw) {
+      if (searchResults.value.length || searchError.value) showDropdown.value = true
+      return
     }
+    if (customerId.value == null) return
+    if (searchResults.value.length) showDropdown.value = true
+    else void browseCustomerProducts()
   }
   function onSearchBlur() {
     const _t = setTimeout(() => {
@@ -370,6 +428,15 @@ export function useProductionEntry(
   function selectCustomer(id: number | null) {
     customerId.value = id
     customerName.value = id == null ? '' : customerOptions.value.find((c) => c.id === id)?.name ?? ''
+    // 客户变了，上一批结果属于别的客户，必须作废；搜索框正开着就立刻换成本客户的
+    _searchSeq += 1
+    searchResults.value = []
+    searchActiveIndex.value = -1
+    if (id != null && document.activeElement === productSearchRef.value) {
+      void browseCustomerProducts()
+    } else if (id == null) {
+      showDropdown.value = false
+    }
   }
 
   /** 把第一个已填批次的行作为样本，铺满所有空行（同批次几十个 SKU 时最关键） */
@@ -842,6 +909,7 @@ export function useProductionEntry(
     searchError,
     searchActiveIndex,
     productSearchRef,
+    searchHint,
     onSearchInput,
     onSearchFocus,
     onSearchBlur,

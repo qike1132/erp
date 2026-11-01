@@ -15,6 +15,7 @@ const createMock = vi.fn()
 const deleteMock = vi.fn()
 const productInfoMock = vi.fn()
 const searchMock = vi.fn()
+const productListMock = vi.fn()
 const customerActiveNamesMock = vi.fn()
 
 vi.mock('@/api', () => ({
@@ -25,7 +26,10 @@ vi.mock('@/api', () => ({
     productInfo: (...a: unknown[]) => productInfoMock(...a),
   },
   customerApi: { activeNames: (...a: unknown[]) => customerActiveNamesMock(...a) },
-  productApi: { search: (...a: unknown[]) => searchMock(...a) },
+  productApi: {
+    search: (...a: unknown[]) => searchMock(...a),
+    list: (...a: unknown[]) => productListMock(...a),
+  },
 }))
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
@@ -62,6 +66,7 @@ function mountDialog() {
 
 async function selectProductAt(w: VueWrapper, index = 0) {
   searchMock.mockResolvedValue({ products: PRODUCTS })
+  productListMock.mockResolvedValue({ items: PRODUCTS, total: PRODUCTS.length })
   const input = w.find('[data-test="qe-search"]')
   await input.setValue('白兔')
   await new Promise((resolve) => setTimeout(resolve, 320))
@@ -92,6 +97,7 @@ beforeEach(() => {
   deleteMock.mockReset()
   productInfoMock.mockReset()
   searchMock.mockReset()
+  productListMock.mockReset()
   customerActiveNamesMock.mockReset()
   customerActiveNamesMock.mockResolvedValue([
     { id: 5, name: '客户A' },
@@ -156,11 +162,28 @@ describe('批次号列', () => {
     await selectProductAt(w, 1)
     await batchAt(w, 0).setValue('B001')
 
-    await w.find('[data-test="qe-banner-fill"]').trigger('click')
+    await w.find('[data-test="qe-fill-batch"]').trigger('click')
 
     expect((batchAt(w, 0).element as HTMLInputElement).value).toBe('B001')
     expect((batchAt(w, 1).element as HTMLInputElement).value).toBe('B001')
-    expect(w.find('[data-test="qe-banner"]').text()).toContain('2 条中 2 条已填批次')
+    // 填满后状态标签自己消失，不再白占一行
+    expect(w.find('[data-test="qe-banner"]').exists()).toBe(false)
+  })
+
+  it('批次状态是行内小标签：填满即消失，也不再单独占一行放「铺满空行」', async () => {
+    const w = mountDialog()
+    await w.find('[data-test="qe-batch-switch"]').setValue(true)
+    await selectProductAt(w, 0)
+    await selectProductAt(w, 1)
+
+    expect(w.find('[data-test="qe-banner"]').text()).toContain('批次 0/2')
+    expect(w.find('[data-test="qe-banner-fill"]').exists()).toBe(false)
+
+    await batchAt(w, 0).setValue('B001')
+    expect(w.find('[data-test="qe-banner"]').text()).toContain('批次 1/2')
+
+    await batchAt(w, 1).setValue('B001')
+    expect(w.find('[data-test="qe-banner"]').exists()).toBe(false)
   })
 
   it('批次开关按客户记住：客户A 打开后，换到客户B 不带上，回来自动恢复', async () => {
@@ -204,7 +227,7 @@ describe('批次号列', () => {
     await selectProductAt(w, 0)
 
     expect(w.find('[data-test="qe-batch"]').exists()).toBe(true)
-    expect(w.find('[data-test="qe-banner"]').text()).toContain('该客户要求录入批次号')
+    expect(w.find('[data-test="qe-banner"]').text()).toContain('必填')
   })
 
   it('包装部标了定制就必须填定制国家（与后端同口径）', async () => {

@@ -1,5 +1,8 @@
 <template>
   <div class="pr-entry-dropdown">
+    <div v-if="hint && !searchLoading && !searchError && searchResults.length" class="pr-entry-dropdown-hint">
+      {{ hint }}
+    </div>
     <div v-if="searchLoading" class="pr-entry-dropdown-state">
       <UiSpinner />
     </div>
@@ -38,6 +41,8 @@ defineProps<{
   searchError: string
   searchResults: Product[]
   searchActiveIndex: number
+  /** 下拉顶部的来源说明（如「客户A 可见的产品」），空则不显示 */
+  hint?: string
 }>()
 
 const emit = defineEmits<{
@@ -60,6 +65,14 @@ const emit = defineEmits<{
   overflow-y: auto;
   z-index: 20;
   padding: 6px;
+}
+.pr-entry-dropdown-hint {
+  padding: 8px 14px 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 4px;
 }
 .pr-entry-dropdown-state {
   padding: 24px;

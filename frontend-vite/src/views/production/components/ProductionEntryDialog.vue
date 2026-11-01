@@ -45,19 +45,19 @@
               <input v-model="selectedDateModel" type="date" data-test="qe-date" aria-label="生产日期" />
             </label>
             <div class="pr-qe-sp" />
+            <span
+              v-if="batchColumnOn && rows.length && batchFilledCount < rows.length"
+              class="pr-qe-batchstat"
+              data-test="qe-banner"
+              :title="batchRequired ? '该客户要求每条都填批次号' : '包装部成品库存批次，可按需填写'"
+            >
+              批次 {{ batchFilledCount }}/{{ rows.length }}
+              <b v-if="batchRequired">必填</b>
+            </span>
             <label class="pr-qe-switch" title="包装部自动开启；其它部门按客户记住，下次选这个客户会自动带上">
               <input type="checkbox" :checked="batchColumnOn" data-test="qe-batch-switch" @change="onBatchSwitch" />
               <i /><span>批次号列</span>
             </label>
-          </div>
-
-          <div v-if="batchColumnOn" class="pr-qe-banner" data-test="qe-banner">
-            <FontAwesomeIcon icon="info-circle" aria-hidden="true" />
-            <div class="pr-qe-banner-text">
-              <b>{{ bannerTitle }}</b>
-              <span>{{ rows.length }} 条中 {{ batchFilledCount }} 条已填批次{{ batchRequired ? '，该客户要求每条必填' : '，可按需填写' }}</span>
-            </div>
-            <button type="button" class="pr-qe-banner-fill" data-test="qe-banner-fill" @click="fillBatchColumn">铺满空行</button>
           </div>
 
           <div class="pr-qe-body">
@@ -86,6 +86,7 @@
                   :search-error="searchError"
                   :search-results="searchResults"
                   :search-active-index="searchActiveIndex"
+                  :hint="searchHint"
                   @select="selectProduct"
                 />
               </div>
@@ -211,15 +212,10 @@ const {
   customerId, customerOptions, selectCustomer, batchColumnOn, batchRequired, batchFilledCount,
   toggleBatchColumn, fillBatchColumn, adjustRowQty, onRowQtyArrow, onRowQtyEnter,
   selectProduct, removeRow, clearRows, searchQuery, searchResults, showDropdown, searchLoading,
-  searchError, searchActiveIndex, productSearchRef, onSearchInput, onSearchFocus, onSearchBlur,
+  searchError, searchActiveIndex, searchHint, productSearchRef, onSearchInput, onSearchFocus, onSearchBlur,
   moveSearchIndex, confirmSearchSelection, submitBatch, requestUndo, confirmUndo, saveDraft,
   importPaste, startNewBatch, todayCount, closeEntryDrawer, pickDept, onModalKeydown,
 } = useProductionEntry(openModel, selectedDateModel)
-
-const bannerTitle = computed(() => {
-  if (batchRequired.value) return '该客户要求录入批次号'
-  return isPackaging.value ? '包装部成品库存批次' : '本单启用批次号'
-})
 
 function onBatchSwitch(event: Event) {
   toggleBatchColumn((event.target as HTMLInputElement).checked)
@@ -259,9 +255,8 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-switch input:checked + i { background: var(--color-primary-500); }
 .pr-qe-switch input:checked + i::after { transform: translateX(20px); }
 
-.pr-qe-banner { display: flex; align-items: center; gap: 12px; margin: 14px 30px 0; padding: 12px 16px; border-radius: 10px; background: var(--color-warning-50); border: 1px solid var(--color-warning-300); color: var(--color-warning-700); font-size: 15px; flex-shrink: 0; }
-.pr-qe-banner-text { flex: 1; min-width: 0; display: flex; gap: 8px; flex-wrap: wrap; }
-.pr-qe-banner-fill { border: 1px solid var(--color-warning-300); background: #fff; color: var(--color-warning-700); font-size: 14px; font-weight: 700; border-radius: 8px; padding: 6px 12px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.pr-qe-batchstat { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 99px; background: var(--color-warning-50); border: 1px solid var(--color-warning-300); color: var(--color-warning-700); font-size: 13px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pr-qe-batchstat b { font-size: 11px; font-weight: 800; color: #fff; background: var(--color-warning-500); border-radius: 4px; padding: 1px 5px; }
 
 .pr-qe-body { flex: 1; min-height: 0; overflow: hidden; padding: 14px 30px 0; display: flex; flex-direction: column; gap: 12px; }
 .pr-qe-add { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }

@@ -14,6 +14,7 @@ const createMock = vi.fn()
 const deleteMock = vi.fn()
 const productInfoMock = vi.fn()
 const searchMock = vi.fn()
+const productListMock = vi.fn()
 const customerActiveNamesMock = vi.fn()
 
 vi.mock('@/api', () => ({
@@ -26,7 +27,10 @@ vi.mock('@/api', () => ({
   customerApi: {
     activeNames: (...a: unknown[]) => customerActiveNamesMock(...a),
   },
-  productApi: { search: (...a: unknown[]) => searchMock(...a) },
+  productApi: {
+    search: (...a: unknown[]) => searchMock(...a),
+    list: (...a: unknown[]) => productListMock(...a),
+  },
 }))
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
@@ -77,6 +81,8 @@ function mountDialogRealConfirm() {
 
 async function typeSearch(w: VueWrapper, text: string) {
   searchMock.mockResolvedValue({ products: PRODUCTS })
+  // 选了客户后搜索走 /products/list —— 两个入口都要给数据，否则「先选客户再加行」会静默空转
+  productListMock.mockResolvedValue({ items: PRODUCTS, total: PRODUCTS.length })
   const input = w.find('[data-test="qe-search"]')
   await input.setValue(text)
   await new Promise((resolve) => setTimeout(resolve, 320))
@@ -111,6 +117,7 @@ beforeEach(() => {
   deleteMock.mockReset()
   productInfoMock.mockReset()
   searchMock.mockReset()
+  productListMock.mockReset()
   customerActiveNamesMock.mockReset()
   customerActiveNamesMock.mockResolvedValue([{ id: 5, name: '客户A' }])
   // 无 keyword = 头部「今天已录 N 条」；带 keyword = 行级重复提示
@@ -372,5 +379,65 @@ describe('ProductionEntryDialog 提交护栏', () => {
     await flushPromises()
 
     expect(showToast).toHaveBeenCalledWith('记录已被他人删除', 'error')
+  })
+})
+
+describe('按客户带出产品', () => {
+  async function pickCustomer(w: VueWrapper, id: number) {
+    await flushPromises()
+    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', id)
+    await nextTick()
+  }
+
+  it('没选客户时聚焦搜索框不会主动拉列表', async () => {
+    const w = mountDialog()
+    await flushPromises()
+
+    await w.find('[data-test="qe-search"]').trigger('focus')
+    await flushPromises()
+
+    expect(productListMock).not.toHaveBeenCalled()
+  })
+
+  it('选了客户后聚焦搜索框，直接列出该客户可见的产品', async () => {
+    const w = mountDialog()
+    await pickCustomer(w, 5)
+    productListMock.mockResolvedValue({ items: PRODUCTS, total: 2 })
+
+    await w.find('[data-test="qe-search"]').trigger('focus')
+    await flushPromises()
+
+    expect(productListMock).toHaveBeenCalledWith(expect.objectContaining({ customer_id: 5, page: 1 }))
+    expect(w.findAll('.pr-entry-dropdown-item').length).toBe(2)
+    expect(w.find('.pr-entry-dropdown-hint').text()).toContain('客户A')
+  })
+
+  it('输入关键字后按客户过滤查询，不再走全库搜索', async () => {
+    const w = mountDialog()
+    await pickCustomer(w, 5)
+    productListMock.mockResolvedValue({ items: PRODUCTS, total: 2 })
+
+    const input = w.find('[data-test="qe-search"]')
+    await input.setValue('白兔')
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    await flushPromises()
+
+    expect(productListMock).toHaveBeenCalledWith(expect.objectContaining({ customer_id: 5, search: '白兔' }))
+    expect(searchMock).not.toHaveBeenCalled()
+  })
+
+  it('换客户后立刻改查新客户的产品，不留上一个客户的结果', async () => {
+    const w = mountDialog()
+    await pickCustomer(w, 5)
+    productListMock.mockResolvedValue({ items: PRODUCTS, total: 2 })
+    await w.find('[data-test="qe-search"]').trigger('focus')
+    await flushPromises()
+
+    productListMock.mockResolvedValue({ items: [PRODUCTS[0]!], total: 1 })
+    await pickCustomer(w, 6)
+    await flushPromises()
+
+    expect(productListMock).toHaveBeenLastCalledWith(expect.objectContaining({ customer_id: 6 }))
+    expect(w.findAll('.pr-entry-dropdown-item').length).toBe(1)
   })
 })

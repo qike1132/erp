@@ -14,6 +14,7 @@ const createMock = vi.fn()
 const deleteMock = vi.fn()
 const productInfoMock = vi.fn()
 const searchMock = vi.fn()
+const productListMock = vi.fn()
 
 vi.mock('@/api', () => ({
   dailyProductionApi: {
@@ -22,7 +23,7 @@ vi.mock('@/api', () => ({
     deleteRecord: (...a: unknown[]) => deleteMock(...a),
     productInfo: (...a: unknown[]) => productInfoMock(...a),
   },
-  productApi: { search: (...a: unknown[]) => searchMock(...a) },
+  productApi: { search: (...a: unknown[]) => searchMock(...a), list: (...a: unknown[]) => productListMock(...a) },
 }))
 
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
@@ -91,6 +92,7 @@ beforeEach(() => {
   deleteMock.mockReset()
   productInfoMock.mockReset()
   searchMock.mockReset()
+  productListMock.mockReset()
   recordsMock.mockResolvedValue({
     success: true, data: [], total: 3, page: 1, per_page: 50, pages: 1, stats: null,
   })
