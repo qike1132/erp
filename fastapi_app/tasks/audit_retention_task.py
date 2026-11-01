@@ -304,11 +304,9 @@ def _write_state(state: dict, state_path: Path) -> None:
 def _merge_state(fields: dict, state_path: Path | None = None) -> None:
     """把若干字段并入状态文件（保留既有账本），写失败只记日志。
 
-    落盘前**再读一次**并做「只准变新」的合并：``write_skip_state`` 恰恰是在
-    另一实例持锁运行期间被调用的，读-改-写窗口里持锁方可能刚落盘了更新的
-    ``last_success_at``。不兜这一手，「被锁挡住的一轮」就会把「刚成功的账本」
-    覆盖回旧值（极端情况下整个 ``last_success_at`` 被抹掉），健康端点随即误报
-    ``never_succeeded``。
+    ``write_skip_state`` 恰恰是在另一实例持锁运行期间被调用的，所以合并必须以
+    **落盘前那一刻的磁盘状态**为底、调用方字段覆盖其上；先读一份快照再合并会让
+    旧快照里的值赢过最新值（持锁方刚清掉的错误被"复活"，或刚记下的错误被清掉）。
     """
     state_path = state_path or STATE_PATH
     # 落盘前**只读一次**、且以这一次为底：调用方没打算写的字段（pending_errors /
@@ -432,6 +430,10 @@ async def _process_month(db: AsyncSession, plan: dict, archive_dir: Path) -> dic
         # 已提交的批次是真删了，必须计入账本（report/state 都按 deleted_total 走）。
         partial = int(progress['deleted'])
         entry['deleted'] = partial
+        # 让会话从 aborted 事务里出来：否则后续 ANALYZE 会抛 25P02
+        # (InFailedSqlTransaction)，把整轮报告连同根因一起吞掉。
+        with suppress(SQLAlchemyError):
+            await db.rollback()
         logger.error('audit_log 保留治理: %s 删除失败（已提交 %d 行），归档已保留: %s',
                      month_key, partial, exc)
         return {'entry': entry, 'deleted': partial, 'error': {
@@ -523,10 +525,36 @@ async def run_retention_once(
             report['errors'].append(result['error'])
 
     if report['deleted_total']:
+        await _maybe_analyze(db, report)
+
+    _persist_report_state(report, state_path, now)
+    return report
+
+
+async def _maybe_analyze(db: AsyncSession, report: dict) -> None:
+    """有删除时 ANALYZE；失败只记一条错误，绝不吞掉整轮报告。
+
+    ANALYZE 只是统计修复。某月删除失败后会话可能停在 aborted 事务里，这里再抛
+    25P02 就会把根因盖掉：整轮 report（含已提交的删除账目与其它月份的成功结果）
+    一起丢失，健康端点从「degraded + delete_failed」退化成「stale/never_succeeded」。
+    """
+    try:
         await db.execute(text('ANALYZE audit_log'))
         await db.commit()
         report['analyzed'] = True
+    except SQLAlchemyError as exc:
+        with suppress(SQLAlchemyError):
+            await db.rollback()
+        logger.warning('audit_log 保留治理: ANALYZE 失败（不影响删除结果）: %s', exc)
+        report['errors'].append({
+            'month': None, 'error': 'analyze_failed',
+            'detail': f'{type(exc).__name__}: {exc}',
+            'remediation': '统计信息未刷新，查询计划可能偏保守；下一轮成功删除后会'
+                           '自动重试，也可手工执行 ANALYZE audit_log'})
 
+
+def _persist_report_state(report: dict, state_path: Path, now: datetime) -> None:
+    """把本轮结果并入状态文件（账本只增不减，损坏留现场）。"""
     prev = read_retention_state(state_path)
     if prev is None and state_path.exists():
         # 状态文件存在却读不出来：先改名留现场（等保取证要的是这份账本），
@@ -543,6 +571,17 @@ async def run_retention_once(
                                                 f'人工核对后再决定是否回填账本'})
         prev = None
     prev = prev or {}
+    prev_deleted_raw = prev.get('deleted_rows_total')
+    if prev_deleted_raw is not None and not isinstance(prev_deleted_raw, int):
+        # 账本里的累计删除数不是整数：不能静默归零（等于账本凭空消失且无痕迹），
+        # 要像状态文件损坏那样留一条可见的错误。
+        logger.error('audit_log 保留治理: 账本 deleted_rows_total 非法（%r），按 0 起算',
+                     prev_deleted_raw)
+        report['errors'].append({
+            'month': None, 'error': 'ledger_corrupt',
+            'value': str(prev_deleted_raw)[:40],
+            'remediation': '核对 logs/audit_retention_state.json 的 deleted_rows_total，'
+                           '按备份/归档行数人工回填；该字段只用于展示与取证'})
     archives = dict(prev.get('archive_files') or {})
     for m in report['months']:
         if m.get('archive_path'):
@@ -554,16 +593,16 @@ async def run_retention_once(
         'last_success_at': now.isoformat(),
         'last_attempt_at': now.isoformat(),
         'retention_months': settings.AUDIT_RETENTION_MONTHS,
-        # 账本被手改坏（"1,234" 之类）不能让整轮在**已删完数据之后**抛 ValueError
-        # ——那一抛会让本轮的 last_success_at/archive_files 都不落盘。
-        'deleted_rows_total': _as_int(prev.get('deleted_rows_total')) + report['deleted_total'],
+        # 账本被手改坏（"1,234" 之类）不能在**已删完数据之后**抛 ValueError
+        # ——那一抛会让本轮的 last_success_at/archive_files 都不落盘
+        # （错误已记成 ledger_corrupt，不是静默归零）。
+        'deleted_rows_total': _as_int(prev_deleted_raw) + report['deleted_total'],
         'archive_files': archives,
         # 上一轮错误不累加：本轮成功即清空（错误是「当前是否卡着」的信号，
         # 不是历史账本；历史归档证据在 archive_files 里）
         'pending_errors': report['errors'],
     }
     _write_state(state, state_path)
-    return report
 
 
 async def audit_retention_task(ctx) -> dict:
@@ -609,8 +648,6 @@ async def audit_retention_task(ctx) -> dict:
             # 会话若停在 abort 事务里，先回滚才能执行下一条语句
             with suppress(SQLAlchemyError):
                 await conn.rollback()
-            with suppress(SQLAlchemyError):
-                await conn.rollback()
             try:
                 released = (await conn.execute(
                     text('SELECT pg_advisory_unlock(:k)'),
@@ -624,6 +661,10 @@ async def audit_retention_task(ctx) -> dict:
                 # 路径就彻底沉默了（锁会跟着回池的连接，后续每轮都 lock_busy）。
                 logger.exception('audit_log 保留治理: advisory lock 释放失败（键 %#x）',
                                  RETENTION_LOCK_KEY)
+                # 连接连同会话级锁一起丢弃：回池复用会让本任务下次「重入成功」，
+                # 而别的实例/手工补跑永远拿不到锁。
+                with suppress(SQLAlchemyError):
+                    await conn.invalidate()
             if report is None:
                 # 任何异常（含 CancelledError）走到这里：先留痕再让异常继续上抛。
                 # 没有这一步，「天天失败」会一直显示成「从未运行过」而免于降级。

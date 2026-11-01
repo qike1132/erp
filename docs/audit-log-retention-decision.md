@@ -109,7 +109,7 @@
 | 配置项 | `core/config.py` `AUDIT_RETENTION_MONTHS`(12) / `AUDIT_ARCHIVE_DIR` | ✅ `.env.example` 同步（含「不要调到 6 以下」的法定下限说明） |
 | 调度 | `core/arq_app.py` cron 03:00，timeout 600，入 `_DAILY_CRON_NAMES` | ✅ 已注册进 `WorkerSettings.functions`（守卫见 `test_arq_functions_registry.py`） |
 | 健康暴露 | `core/health.py` `audit_retention` 块 | ✅ ok=False → `status=degraded`（仍 200） |
-| 测试 | `fastapi_app/tests/test_audit_retention_task.py` + `test_audit_retention_pg.py` | ✅ 46 项单元 + 3 项真库集成；累计 26 处定点变异全部被杀死（第一轮 11 + 后两轮 15） |
+| 测试 | `fastapi_app/tests/test_audit_retention_task.py` + `test_audit_retention_pg.py` | ✅ 48 项单元 + 3 项真库集成；累计 28 处定点变异全部被杀死（第一轮 11 + 后两轮 17） |
 
 实施中确立的**六条不变式**（均有测试锁定）：
 
@@ -291,9 +291,9 @@ to the given transaction`。于是 `_delete_ids_batched` 每批 `db.commit()` �
 - **L**：真库用例的清理改为**只删本文件专用 id 段**（900000-999999），不再按
   时间窗宽删共享测试库。
 
-**验证证据（第三轮）**：46 项单测 + 3 项真库集成（本机无测试库凭据时 skip）；
-15 处定点变异全部被杀死（新增：去掉 `control_fully`、去掉越界删除核算、
-合并状态丢弃兄弟字段、部分删除不计数）；端到端探针在 sqlite 上跑**真实入口**
+**验证证据（第三轮）**：48 项单测 + 3 项真库集成（本机无测试库凭据时 skip）；
+17 处定点变异全部被杀死（新增：去掉 `control_fully`、去掉越界删除核算、
+合并状态丢弃兄弟字段、部分删除不计数、ANALYZE 失败不兜底、账本非法值静默归零）；端到端探针在 sqlite 上跑**真实入口**
 `audit_retention_task`，`visible_rows_after_task = 1`（修复前为 0）。
 
 **复审后的追加修复（同一轮）**：复审者判「通过」，但指出 2 条 Medium 与 4 条 Low，
@@ -317,7 +317,19 @@ to the given transaction`。于是 `_delete_ids_batched` 每批 `db.commit()` �
    驱动给到的就是 str，里层再 `json.dumps` 会变成双重编码的字符串；还给导出路径
    新增了一个 `TypeError` 出口。回退为 `str()` 并订正注释。
 6. **解锁语句自己抛错时被静默吞掉**：`suppress` 让最需要告警的路径彻底沉默。
-   改为 `try/except SQLAlchemyError: logger.exception(...)`。
+   改为 `try/except SQLAlchemyError: logger.exception(...)`，并在失败时
+   `conn.invalidate()`——否则会话级锁跟着回池的连接，本任务下次「重入成功」，
+   而别的实例/手工补跑永远 `lock_busy`。
+7. **（复审再次发现的真缺陷）删除失败后会话停在 aborted 事务，随后的 `ANALYZE`
+   抛 25P02，把整轮报告连同根因一起吞掉**——`L3` 想修的「部分删除记账」在最常见的
+   失败形态上根本没生效，其它月份的成功结果也一并丢失。修法两处：`_process_month`
+   的删除失败分支先 `rollback()` 救回会话；`ANALYZE` 包进 `try/except`，失败记
+   `analyze_failed` 但不影响删除结果落账。单测的替身不模拟事务中止，所以这条
+   只有靠「替身不知道事务会中止」这个盲区被复审者手写探针发现——已补
+   `FakeDB(analyze_error=...)` 与对应用例。
+8. **账本非法值不能静默归零**：`deleted_rows_total` 被手改成 `"1,234"` 时，上一版
+   按 0 起算且不留痕（等保账本凭空消失），与状态文件损坏时「另存 + 报错」自相矛盾。
+   现记 `ledger_corrupt` 进 `pending_errors`。
 
 **已知限制（未解决，需接受）**：归档落在 `backups/audit_archive/`，与数据库同盘，
 本仓库不存在异地副本机制（`core/config.py` 对 `BACKUP_DIR` 也明示「与数据库同盘，

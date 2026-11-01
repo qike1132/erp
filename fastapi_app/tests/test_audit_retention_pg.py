@@ -126,6 +126,33 @@ async def _insert(conn, ids: list[int], ts: datetime) -> None:
         })
 
 
+async def _require_month_clean(conn, month_start: datetime, month_end: datetime) -> None:
+    """哨兵月份必须本来是空的，否则**跳过**——宁可少一条集成证据，也不能为了
+    跑通用例去删共享测试库里别人的历史行（产品逻辑一旦跑起来是不可逆的）。
+    """
+    n = (await conn.execute(
+        text('SELECT count(*) FROM audit_log WHERE created_at >= :a AND created_at < :b'),
+        {'a': month_start, 'b': month_end})).scalar()
+    if n:
+        pytest.skip(f'测试库 {month_start:%Y-%m} 已有 {n} 行历史数据，跳过以免误删')
+
+
+def _restrict_plan(monkeypatch, month: str) -> None:
+    """把保留计划收窄到哨兵月份。
+
+    ``audit_retention_task`` 用真实 ``now`` 计算计划，会把测试库里**所有** 12 个
+    月前的 ``audit_log`` 行一起归档删除——那既破坏别的套件的数据，也让本文件
+    「只碰 900000-999999」的隔离承诺失效。收窄的只是计划；锁、事务、会话、
+    归档、删除、复核全是生产代码。
+    """
+    real_plan = art.compute_retention_plan
+
+    async def _only_sentinel_month(db, now=None):
+        return [p for p in await real_plan(db, now) if p['month'] == month]
+
+    monkeypatch.setattr(art, 'compute_retention_plan', _only_sentinel_month)
+
+
 async def test_month_bucket_matches_python_utc_on_real_pg(pg_engine):
     """PG 侧月键 == Python 侧 UTC 月键（会话时区非 UTC 时也必须一致）。
 
@@ -154,7 +181,7 @@ async def test_month_bucket_matches_python_utc_on_real_pg(pg_engine):
         f'UTC 口径应把 2019-03-31T23:30Z 归入 2019-03，实际 {[p["month"] for p in plans]}')
 
 
-async def test_archive_then_delete_end_to_end_on_real_pg(pg_engine, tmp_path):
+async def test_archive_then_delete_end_to_end_on_real_pg(pg_engine, tmp_path, monkeypatch):
     """真库端到端：归档 3 行 → 按归档 id 删除 → 未来行原样保留。
 
     这条同时验证 `id = ANY(:ids)` 的**列表绑定**（Python list → int 数组）：
@@ -162,7 +189,9 @@ async def test_archive_then_delete_end_to_end_on_real_pg(pg_engine, tmp_path):
     """
     old_ids = [910_001, 910_002, 910_003]
     future_ids = [910_101, 910_102]
+    _restrict_plan(monkeypatch, '2019-03')
     async with pg_engine.begin() as conn:
+        await _require_month_clean(conn, _OLD_START, _OLD_END)
         await _insert(conn, old_ids, datetime(2019, 3, 15, 3, 0, tzinfo=UTC))
         await _insert(conn, future_ids, datetime(2099, 1, 15, 3, 0, tzinfo=UTC))
 
@@ -205,21 +234,13 @@ async def test_task_persists_deletions_through_entry_point(pg_engine, tmp_path, 
     """
     ids = [920_001, 920_002, 920_003]
     async with pg_engine.begin() as conn:
+        await _require_month_clean(conn, _OLD_START, _OLD_END)
         await _insert(conn, ids, datetime(2019, 3, 15, 3, 0, tzinfo=UTC))
 
     monkeypatch.setattr(art, 'require_async_engine', lambda: pg_engine)
     monkeypatch.setattr(art, 'archive_dir_path', lambda _raw=None: tmp_path)
     monkeypatch.setattr(art, 'STATE_PATH', tmp_path / 'state.json')
-    # 共享测试库里可能残留 12 个月前的历史行（备份/恢复用例灌进来的 dump）。
-    # 真实入口会用真实 now 计算计划、把**所有**过期月一起归档并删除——那会把
-    # 别的套件的数据不可逆删掉，也会让「只碰哨兵 id 段」的隔离承诺失效。
-    # 这里只收窄**计划**，锁/事务/会话/删除/复核全部仍是生产代码。
-    real_plan = art.compute_retention_plan
-
-    async def _only_sentinel_month(db, now=None):
-        return [p for p in await real_plan(db, now) if p['month'] == '2019-03']
-
-    monkeypatch.setattr(art, 'compute_retention_plan', _only_sentinel_month)
+    _restrict_plan(monkeypatch, '2019-03')
 
     report = await art.audit_retention_task({})
     assert [m['month'] for m in report['months']] == ['2019-03']

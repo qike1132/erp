@@ -90,6 +90,7 @@ class FakeDB:
         delete_error: Exception | None = None,
         delete_error_month: str | None = None,
         delete_error_after: int | None = None,
+        analyze_error: Exception | None = None,
         hidden_ids: set[int] | None = None,
     ):
         self.months = months or {}
@@ -98,10 +99,13 @@ class FakeDB:
         self.delete_error_month = delete_error_month
         # 前 N 次 DELETE 成功、之后才抛：模拟「第 2 批锁超时」（已提交批不丢账）
         self.delete_error_after = delete_error_after
+        # ANALYZE 失败：模拟「删除已在 aborted 事务里中止，ANALYZE 抛 25P02」
+        self.analyze_error = analyze_error
         # 导出时看不到、但确实在表里的 id：模拟「导出完成后才落进该窗口」的行
         self.hidden_ids = hidden_ids or set()
         self.calls: list[str] = []
         self.commits = 0
+        self.rollbacks = 0
         self.deleted_ids: list[int] = []
         self.delete_batches: list[list[int]] = []
         self.plan_sql = ''
@@ -160,11 +164,17 @@ class FakeDB:
             return _Result([], rowcount=len(matched))
         if sql.startswith('ANALYZE'):
             self.calls.append('analyze')
+            if self.analyze_error:
+                raise self.analyze_error
             return _Result([])
         raise AssertionError(f'未预期的语句: {sql[:80]}')
 
     async def commit(self):
         self.commits += 1
+
+    async def rollback(self):
+        # 删除失败后会话停在 aborted 事务里，任务会用 rollback 把会话救回来
+        self.rollbacks += 1
 
 
 @pytest.fixture(autouse=True)
@@ -504,6 +514,51 @@ async def test_partial_delete_is_accounted(tmp_path):
     assert report['analyzed'] is True               # 有删除就要 ANALYZE
     err = report['errors'][0]
     assert err['error'] == 'delete_failed' and err['deleted_rows'] == 5000
+
+
+async def test_analyze_failure_does_not_swallow_the_report(tmp_path):
+    """ANALYZE 失败（aborted 事务里抛 25P02）不能把整轮报告和账本一起吞掉。
+
+    真实链路：某月删除分批中 PG 报错 → 会话停在 aborted 事务 → 有删除的轮次会
+    接着跑 ANALYZE → 25P02。若这里不兜，`run_retention_once` 整体抛出，
+    ① 根因被 25P02 覆盖；② 已提交的删除不进账本；③ 其它月份的成功结果全丢，
+    健康端点从「degraded + delete_failed」退化成「stale/never_succeeded」。
+    变异验证：去掉 ANALYZE 的 try/except 后本测试失败（run_retention_once 抛出）。
+    """
+    month = '2025-10'
+    db = FakeDB(months={month: 2}, ids_by_month={month: [1, 2]},
+                analyze_error=SQLAlchemyError('current transaction is aborted'))
+    report = await art.run_retention_once(
+        db, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=tmp_path / 'state.json',
+    )
+    assert report['deleted_total'] == 2          # 删除结果不丢
+    assert report['analyzed'] is False
+    assert report['errors'][0]['error'] == 'analyze_failed'
+    state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
+    assert state['last_success_at']               # 账本照常落盘
+    assert state['deleted_rows_total'] == 2
+
+
+async def test_corrupt_ledger_is_reported_not_silently_zeroed(tmp_path):
+    """账本里的 deleted_rows_total 被手改成非法值：按 0 起算，但必须留可见错误。
+
+    静默归零等于「账本凭空消失且无痕迹」，与状态文件损坏时的处理（另存 + 报错）
+    自相矛盾；等保检查看的就是这个累计值。
+    """
+    state_path = tmp_path / 'state.json'
+    state_path.write_text(json.dumps({
+        'deleted_rows_total': '1,234', 'archive_files': {},
+    }), encoding='utf-8')
+    db = FakeDB(months={})
+    report = await art.run_retention_once(
+        db, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=state_path,
+    )
+    assert report['errors'][0]['error'] == 'ledger_corrupt'
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    assert state['deleted_rows_total'] == 0
+    assert state['pending_errors'][0]['error'] == 'ledger_corrupt'
 
 
 async def test_unexpected_export_error_propagates(tmp_path):
