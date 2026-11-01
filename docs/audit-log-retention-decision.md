@@ -109,7 +109,7 @@
 | 配置项 | `core/config.py` `AUDIT_RETENTION_MONTHS`(12) / `AUDIT_ARCHIVE_DIR` | ✅ `.env.example` 同步（含「不要调到 6 以下」的法定下限说明） |
 | 调度 | `core/arq_app.py` cron 03:00，timeout 600，入 `_DAILY_CRON_NAMES` | ✅ 已注册进 `WorkerSettings.functions`（守卫见 `test_arq_functions_registry.py`） |
 | 健康暴露 | `core/health.py` `audit_retention` 块 | ✅ ok=False → `status=degraded`（仍 200） |
-| 测试 | `fastapi_app/tests/test_audit_retention_task.py` + `test_audit_retention_pg.py` | ✅ 48 项单元 + 3 项真库集成；累计 28 处定点变异全部被杀死（第一轮 11 + 后两轮 17） |
+| 测试 | `fastapi_app/tests/test_audit_retention_task.py` + `test_audit_retention_pg.py` | ✅ 49 项单元 + 3 项真库集成；累计 30 处定点变异全部被杀死（第一轮 11 + 后两轮 19） |
 
 实施中确立的**六条不变式**（均有测试锁定）：
 
@@ -291,13 +291,14 @@ to the given transaction`。于是 `_delete_ids_batched` 每批 `db.commit()` �
 - **L**：真库用例的清理改为**只删本文件专用 id 段**（900000-999999），不再按
   时间窗宽删共享测试库。
 
-**验证证据（第三轮）**：48 项单测 + 3 项真库集成（本机无测试库凭据时 skip）；
-17 处定点变异全部被杀死（新增：去掉 `control_fully`、去掉越界删除核算、
-合并状态丢弃兄弟字段、部分删除不计数、ANALYZE 失败不兜底、账本非法值静默归零）；端到端探针在 sqlite 上跑**真实入口**
+**验证证据（第三轮）**：49 项单测 + 3 项真库集成（本机无测试库凭据时 skip）；
+19 处定点变异全部被杀死（新增：去掉 `control_fully`、去掉越界删除核算、
+合并状态丢弃兄弟字段、部分删除不计数、ANALYZE 失败不兜底、账本非法值静默归零、
+解锁失败不丢连接、归档失败不回滚）；端到端探针在 sqlite 上跑**真实入口**
 `audit_retention_task`，`visible_rows_after_task = 1`（修复前为 0）。
 
-**复审后的追加修复（同一轮）**：复审者判「通过」，但指出 2 条 Medium 与 4 条 Low，
-逐条落地：
+**复审后的追加修复**：此后又走了两轮增量复审（一轮「通过」但附 2 Medium + 4 Low、
+一轮「打回」给 1 Medium + 4 Low），逐条落地：
 
 1. **`_merge_state` 的合并方向写反了**——`{**disk, **merged}` 会让**旧快照**赢过
    最新快照（`merged` 里已含旧快照），于是持锁方刚清掉的 `pending_errors` 被「复活」、
@@ -327,9 +328,17 @@ to the given transaction`。于是 `_delete_ids_batched` 每批 `db.commit()` �
    `analyze_failed` 但不影响删除结果落账。单测的替身不模拟事务中止，所以这条
    只有靠「替身不知道事务会中止」这个盲区被复审者手写探针发现——已补
    `FakeDB(analyze_error=...)` 与对应用例。
-8. **账本非法值不能静默归零**：`deleted_rows_total` 被手改成 `"1,234"` 时，上一版
-   按 0 起算且不留痕（等保账本凭空消失），与状态文件损坏时「另存 + 报错」自相矛盾。
-   现记 `ledger_corrupt` 进 `pending_errors`。
+8. **账本非法值不能静默归零，且痕迹不能只留一轮**：`deleted_rows_total` 被手改成
+   `"1,234"`（或 JSON 的 `true`——`bool` 是 `int` 子类，判定必须用 `type(x) is int`）
+   时，原实现按 0 起算且不留痕；只把错误塞进本轮 `errors` 也不够——下一轮
+   `pending_errors` 一清，痕迹全无。现三重留痕：错误进健康信号、原文件另存
+   `.corrupt-*`、原值长期保留在 `deleted_rows_total_corrupt` 字段。
+9. **归档失败分支同样要回滚**：只给删除分支加 `rollback()` 不够——某月导出抛
+   `SQLAlchemyError` 后会话停在 aborted 事务，后续每个月的错误都会变成
+   `25P02 current transaction is aborted`，真实根因只在首月出现一次。
+10. **解锁失败要把连接丢掉**：`conn.invalidate()`，否则会话级锁跟着回池的连接，
+   本任务下次「重入成功」而别的实例永远 `lock_busy`（该分支已补用例）。
+
 
 **已知限制（未解决，需接受）**：归档落在 `backups/audit_archive/`，与数据库同盘，
 本仓库不存在异地副本机制（`core/config.py` 对 `BACKUP_DIR` 也明示「与数据库同盘，

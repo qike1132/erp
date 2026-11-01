@@ -435,6 +435,8 @@ async def test_no_delete_when_export_raises(tmp_path):
     )
     assert report['deleted_total'] == 0
     assert 'delete' not in db.calls
+    # 归档失败也要把会话从 aborted 事务里救回来，否则后续月份的错误全是 25P02
+    assert db.rollbacks >= 1
     assert report['errors'][0]['error'] == 'archive_failed'
     assert 'OSError' in report['errors'][0]['detail']
     state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
@@ -514,6 +516,8 @@ async def test_partial_delete_is_accounted(tmp_path):
     assert report['analyzed'] is True               # 有删除就要 ANALYZE
     err = report['errors'][0]
     assert err['error'] == 'delete_failed' and err['deleted_rows'] == 5000
+    # 删除失败后必须把会话从 aborted 事务里救回来，否则后续 ANALYZE 抛 25P02
+    assert db.rollbacks >= 1
 
 
 async def test_analyze_failure_does_not_swallow_the_report(tmp_path):
@@ -559,6 +563,28 @@ async def test_corrupt_ledger_is_reported_not_silently_zeroed(tmp_path):
     state = json.loads(state_path.read_text(encoding='utf-8'))
     assert state['deleted_rows_total'] == 0
     assert state['pending_errors'][0]['error'] == 'ledger_corrupt'
+    # 原文件另存现场 + 原值长期保留（只报一轮等于没留痕）
+    assert list(tmp_path.glob('state.json.corrupt-*'))
+    assert state['deleted_rows_total_corrupt']['value'] == '1,234'
+
+    # 第二轮：pending_errors 清空，但「账本被动过」这件事仍然可见
+    db2 = FakeDB(months={})
+    report2 = await art.run_retention_once(
+        db2, now=datetime(2026, 11, 16, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=state_path,
+    )
+    assert report2['errors'] == []
+    state2 = json.loads(state_path.read_text(encoding='utf-8'))
+    assert state2['deleted_rows_total_corrupt']['value'] == '1,234'
+
+    # bool 是 int 子类：{"deleted_rows_total": true} 也必须判成损坏（不能用 isinstance）
+    p2 = tmp_path / 'state_bool.json'
+    p2.write_text(json.dumps({'deleted_rows_total': True}), encoding='utf-8')
+    report3 = await art.run_retention_once(
+        FakeDB(months={}), now=datetime(2026, 11, 17, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=p2,
+    )
+    assert report3['errors'][0]['error'] == 'ledger_corrupt'
 
 
 async def test_unexpected_export_error_propagates(tmp_path):
@@ -755,8 +781,10 @@ def test_skip_state_preserves_sibling_fields(tmp_path):
 # 5. ARQ 入口：专用连接 + 锁 + 失败留痕
 # ---------------------------------------------------------------------------
 class _FakeConn:
-    def __init__(self, lock_ok: bool = True):
+    def __init__(self, lock_ok: bool = True, unlock_error: Exception | None = None):
         self.lock_ok = lock_ok
+        self.unlock_error = unlock_error
+        self.invalidated = False
         self.calls: list[str] = []
 
     async def execute(self, statement, params=None):
@@ -765,11 +793,17 @@ class _FakeConn:
         if 'pg_try_advisory_lock' in sql:
             return _Result([], scalar=self.lock_ok)
         if 'pg_advisory_unlock' in sql:
+            if self.unlock_error:
+                raise self.unlock_error
             return _Result([], scalar=True)
         return _Result([], scalar=True)
 
     async def rollback(self):
         self.calls.append('rollback')
+
+    async def invalidate(self):
+        # 解锁失败时任务会把连接丢掉（会话级锁随后端连接终止释放）
+        self.invalidated = True
 
     async def __aenter__(self):
         return self
@@ -785,12 +819,13 @@ class _FakeEngine:
     前提——「锁挂在另一条连接上」这种回归在替身里根本表达不出来。
     """
 
-    def __init__(self, lock_ok: bool = True):
+    def __init__(self, lock_ok: bool = True, unlock_error: Exception | None = None):
         self.conns: list[_FakeConn] = []
         self._lock_ok = lock_ok
+        self._unlock_error = unlock_error
 
     def connect(self):
-        conn = _FakeConn(self._lock_ok)
+        conn = _FakeConn(self._lock_ok, self._unlock_error)
         self.conns.append(conn)
         return conn
 
@@ -880,6 +915,30 @@ async def test_task_writes_failure_state_on_error(monkeypatch, tmp_path):
     assert state['last_error'] == 'RuntimeError: plan query failed'
     assert 'last_success_at' not in state
     assert any('pg_advisory_unlock' in c for c in engine.conns[0].calls)
+
+
+async def test_unlock_failure_discards_the_connection(monkeypatch, tmp_path):
+    """解锁语句失败：连接必须被丢弃，否则会话级锁跟着回池、后续永远 lock_busy。
+
+    ``pg_advisory_lock`` 是**会话级**锁，回池复用的连接仍持有它；本任务下次
+    ``pg_try_advisory_lock`` 还会「重入成功」，而别的实例/手工补跑拿不到锁。
+    ``conn.invalidate()`` 让后端连接终止，锁随后端一起释放。
+    变异验证：去掉 invalidate() 调用后本测试失败。
+    """
+    state_path = tmp_path / 'state.json'
+    engine = _FakeEngine(unlock_error=SQLAlchemyError('server closed the connection'))
+    monkeypatch.setattr(art, 'require_async_engine', lambda: engine)
+    _patch_session(monkeypatch)
+
+    async def _run(db):
+        return {'months': [], 'deleted_total': 0, 'analyzed': False, 'errors': []}
+
+    monkeypatch.setattr(art, 'run_retention_once', _run)
+    monkeypatch.setattr(art, 'STATE_PATH', state_path)
+
+    report = await art.audit_retention_task({})
+    assert report['deleted_total'] == 0          # 解锁失败不该让成功的一轮变失败
+    assert engine.conns[0].invalidated is True
 
 
 async def test_task_skips_and_records_when_lock_busy(monkeypatch, tmp_path):

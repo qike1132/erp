@@ -387,34 +387,55 @@ async def _process_month(db: AsyncSession, plan: dict, archive_dir: Path) -> dic
     返回 {entry, error, deleted}：entry 进 report['months']，error 非 None 表示
     该月有问题（同时进 report['errors']）。
     """
+    archive, error = await _archive_for_month(db, plan, archive_dir)
+    if error is not None:
+        return _skip(plan['month'], plan, error)
+    return await _delete_for_month(db, plan, archive)
+
+
+async def _archive_for_month(
+    db: AsyncSession, plan: dict, archive_dir: Path,
+) -> tuple[dict | None, dict | None]:
+    """归档该月；返回 (archive, error)，error 非 None 表示本月应直接跳过。"""
     month_key = plan['month']
     month_start, month_end = _month_bounds(month_key)
     try:
         archive = await _export_month_jsonl(db, month_key, month_start, month_end, archive_dir)
-        if not archive['existed'] and archive['rows'] != plan['rows']:
-            # 本次导出的行数与计划不符：导出期间有并发写入（补录/回放）时会命中。
-            # 保守起见本轮不删；下一轮复用这份归档即可正常推进（幂等）。
-            logger.error(
-                'audit_log 保留治理: %s 归档行数 %d != 计划 %d，本轮跳过删除',
-                month_key, archive['rows'], plan['rows'])
-            return _skip(month_key, plan, {
-                'month': month_key, 'error': 'archive_row_mismatch',
-                'planned_rows': plan['rows'], 'archived_rows': archive['rows'],
-                'remediation': '下一轮会自动复用该归档并继续；若持续出现，检查是否有'
-                               '带显式 id 的补录/恢复任务在该月窗口内写入'})
     except (OSError, SQLAlchemyError) as exc:
         # 只兜「已知可恢复」的两类：文件系统（OSError：mkdir / gzip 写 / fsync /
         # os.replace / 归档 CRC 校验失败）与数据库（SQLAlchemyError：查询、
-        # 删除、锁等待超时）。其它异常（编程错误）照旧上抛——那类 bug 必须响，
+        # 锁等待超时）。其它异常（编程错误）照旧上抛——那类 bug 必须响，
         # 不能被按月吞成一条 pending_error。
         logger.error('audit_log 保留治理: %s 归档失败，跳过该月: %s', month_key, exc)
-        return _skip(month_key, plan, {
+        # 会话可能停在 aborted 事务：不回滚，后续每个月的归档都会以 25P02 失败，
+        # 真实根因只在首月出现一次，其余月份的错误信息全是假的。
+        with suppress(SQLAlchemyError):
+            await db.rollback()
+        return None, {
             'month': month_key, 'error': 'archive_failed',
             'detail': f'{type(exc).__name__}: {exc}',
             'remediation': 'OSError 查磁盘空间与归档目录权限（backups/audit_archive）；'
                            'SQLAlchemyError 查 pg_stat_activity 的锁等待与连接数；'
-                           '坏归档改名为 .corrupt-<时间戳> 后下一轮重导'})
+                           '坏归档改名为 .corrupt-<时间戳> 后下一轮重导'}
 
+    if not archive['existed'] and archive['rows'] != plan['rows']:
+        # 本次导出的行数与计划不符：导出期间有并发写入（补录/回放）时会命中。
+        # 保守起见本轮不删；下一轮复用这份归档即可正常推进（幂等）。
+        logger.error(
+            'audit_log 保留治理: %s 归档行数 %d != 计划 %d，本轮跳过删除',
+            month_key, archive['rows'], plan['rows'])
+        return None, {
+            'month': month_key, 'error': 'archive_row_mismatch',
+            'planned_rows': plan['rows'], 'archived_rows': archive['rows'],
+            'remediation': '下一轮会自动复用该归档并继续；若持续出现，检查是否有'
+                           '带显式 id 的补录/恢复任务在该月窗口内写入'}
+    return archive, None
+
+
+async def _delete_for_month(db: AsyncSession, plan: dict, archive: dict) -> dict:
+    """按归档的 id 集合删除并复核；返回 {entry, error, deleted}。"""
+    month_key = plan['month']
+    month_start, month_end = _month_bounds(month_key)
     entry = {'month': month_key, 'rows': plan['rows'], 'archive_rows': archive['rows'],
              'archived': True, 'archive_path': archive['path'],
              'sha256': archive['sha256'], 'deleted': 0}
@@ -572,16 +593,33 @@ def _persist_report_state(report: dict, state_path: Path, now: datetime) -> None
         prev = None
     prev = prev or {}
     prev_deleted_raw = prev.get('deleted_rows_total')
-    if prev_deleted_raw is not None and not isinstance(prev_deleted_raw, int):
-        # 账本里的累计删除数不是整数：不能静默归零（等于账本凭空消失且无痕迹），
-        # 要像状态文件损坏那样留一条可见的错误。
+    corrupt_ledger = None
+    if prev_deleted_raw is not None and type(prev_deleted_raw) is not int:
+        # 账本里的累计删除数不是整数：不能静默归零（等于账本凭空消失且无痕迹）。
+        # 只报一轮是不够的——本轮就会把值覆盖成 0，下一轮 pending_errors 一清，
+        # 痕迹全无。所以三重留痕：错误进健康信号、原文件另存 .corrupt-*、
+        # 并在状态里长期保留 original 值（等保要的是「账本被动过」这件事本身）。
         logger.error('audit_log 保留治理: 账本 deleted_rows_total 非法（%r），按 0 起算',
                      prev_deleted_raw)
+        corrupt_ledger = {
+            'value': str(prev_deleted_raw)[:40],
+            'detected_at': now.isoformat(),
+        }
+        try:
+            backup = state_path.parent / f'{state_path.name}.corrupt-{now:%Y%m%d%H%M%S}'
+            os.replace(state_path, backup)
+            corrupt_ledger['backup'] = backup.name
+        except OSError:
+            logger.exception('audit_log 保留治理: 账本损坏但无法另存现场')
         report['errors'].append({
             'month': None, 'error': 'ledger_corrupt',
-            'value': str(prev_deleted_raw)[:40],
-            'remediation': '核对 logs/audit_retention_state.json 的 deleted_rows_total，'
-                           '按备份/归档行数人工回填；该字段只用于展示与取证'})
+            'value': corrupt_ledger['value'],
+            'backup': corrupt_ledger.get('backup'),
+            'remediation': '核对 .corrupt-* 备份里的 deleted_rows_total，按备份/归档行数'
+                           '人工回填；原值同时保留在 deleted_rows_total_corrupt 字段'})
+    else:
+        # 没有新损坏就保留既有痕迹（人工回填前一直可见）
+        corrupt_ledger = prev.get('deleted_rows_total_corrupt')
     archives = dict(prev.get('archive_files') or {})
     for m in report['months']:
         if m.get('archive_path'):
@@ -598,6 +636,8 @@ def _persist_report_state(report: dict, state_path: Path, now: datetime) -> None
         # （错误已记成 ledger_corrupt，不是静默归零）。
         'deleted_rows_total': _as_int(prev_deleted_raw) + report['deleted_total'],
         'archive_files': archives,
+        # 「账本曾被动过」这件事本身要长期可见（值已按 0 起算，痕迹不能跟着消失）
+        'deleted_rows_total_corrupt': corrupt_ledger,
         # 上一轮错误不累加：本轮成功即清空（错误是「当前是否卡着」的信号，
         # 不是历史账本；历史归档证据在 archive_files 里）
         'pending_errors': report['errors'],
