@@ -967,6 +967,38 @@ def _write_signal_state(tmp_path, monkeypatch, **fields):
     return path
 
 
+def test_skip_state_keeps_corrupt_ledger_raw(tmp_path):
+    """抢锁失败写 skip 状态时，绝不能把非法账本值「取大」成 0。
+
+    跳过路径通常先于成功路径落盘；一旦在这里清零，成功路径就再看不到损坏，
+    「另存 .corrupt-* + ledger_corrupt + 原值字段」三重留痕一个都不会发生。
+    变异验证：把 _merge_state 的账本合并改回无条件 max(_as_int(...)) 后本测试失败。
+    """
+    state_path = tmp_path / 'state.json'
+    state_path.write_text(json.dumps({
+        'deleted_rows_total': '1,234', 'archive_files': {},
+    }), encoding='utf-8')
+
+    art.write_skip_state('lock_busy', state_path)
+
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    assert state['deleted_rows_total'] == '1,234'     # 原样保留，等成功路径处置
+    assert state['skip_reason'] == 'lock_busy'
+
+
+def test_signal_exposes_ledger_corrupt_marker(tmp_path, monkeypatch):
+    """账本损坏痕迹要能在健康响应里看到（pending_errors 清空后也不消失）。"""
+    _write_signal_state(
+        tmp_path, monkeypatch,
+        last_success_at=datetime.now(UTC).isoformat(),
+        pending_errors=[],
+        deleted_rows_total_corrupt={'value': '1,234', 'detected_at': '2026-11-01T00:00:00+00:00'},
+    )
+    sig = art.audit_retention_signal()
+    assert sig['ok'] is True                      # 已知状态，不再重复降级
+    assert sig['ledger_corrupt']['value'] == '1,234'
+
+
 def test_signal_ok_when_fresh(tmp_path, monkeypatch):
     _write_signal_state(tmp_path, monkeypatch,
                         last_success_at=datetime.now(UTC).isoformat(),

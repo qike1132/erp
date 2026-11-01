@@ -323,10 +323,15 @@ def _merge_state(fields: dict, state_path: Path | None = None) -> None:
     # 账本同理：只增不减（归档条目按月份合并，删除计数取大）
     merged['archive_files'] = {
         **(disk.get('archive_files') or {}), **(merged.get('archive_files') or {})}
-    merged['deleted_rows_total'] = max(
-        _as_int(disk.get('deleted_rows_total')),
-        _as_int(merged.get('deleted_rows_total')),
-    )
+    disk_total = disk.get('deleted_rows_total')
+    if disk_total is not None and type(disk_total) is not int:
+        # 非法账本值绝不能在这里被「取大」成 0：跳过/失败路径通常先于成功路径
+        # 落盘，清零之后成功路径就再也看不到损坏，三重留痕一个都不会发生。
+        # 原样保留，交给成功路径去另存现场 + 报 ledger_corrupt。
+        merged['deleted_rows_total'] = disk_total
+    else:
+        merged['deleted_rows_total'] = max(
+            _as_int(disk_total), _as_int(merged.get('deleted_rows_total')))
     try:
         _write_state(merged, state_path)
     except OSError:
@@ -773,6 +778,10 @@ def audit_retention_signal() -> dict:
         'stale_threshold_days': STALE_DAYS,
         'retention_months': state.get('retention_months'),
         'deleted_rows_total': state.get('deleted_rows_total'),
+        # 「账本曾被动过」在 pending_errors 清空后仍要可见（否则只有主动翻
+        # 状态文件/备份目录才看得出来）。不参与 ok 判据：损坏本身已在发现轮
+        # 让 ok=False，之后属于待人工回填的已知状态。
+        'ledger_corrupt': state.get('deleted_rows_total_corrupt') or None,
         # 只暴露前几条，避免健康响应被长列表撑爆
         'pending_errors': pending[:5],
         'pending_error_count': len(pending),
