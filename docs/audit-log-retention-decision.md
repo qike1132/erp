@@ -109,15 +109,15 @@
 | 配置项 | `core/config.py` `AUDIT_RETENTION_MONTHS`(12) / `AUDIT_ARCHIVE_DIR` | ✅ `.env.example` 同步（含「不要调到 6 以下」的法定下限说明） |
 | 调度 | `core/arq_app.py` cron 03:00，timeout 600，入 `_DAILY_CRON_NAMES` | ✅ 已注册进 `WorkerSettings.functions`（守卫见 `test_arq_functions_registry.py`） |
 | 健康暴露 | `core/health.py` `audit_retention` 块 | ✅ ok=False → `status=degraded`（仍 200） |
-| 测试 | `fastapi_app/tests/test_audit_retention_task.py` | ✅ 37 项；11 处定点变异全部被杀死 |
+| 测试 | `fastapi_app/tests/test_audit_retention_task.py` | ✅ 42 项；两轮共 21 处定点变异全部被杀死 |
 
 实施中确立的**六条不变式**（均有测试锁定）：
 
 1. **整月粒度**——「月结束 ≤ cutoff」才处理，月中部分过期整月保留（实际保留 12~13 个月，多留方向）；
-2. **删除范围 ⊆ 归档覆盖范围**——删除谓词带归档的 `max_id` 上界；复用既有归档时重新读回文件（CRC 校验）并校验剩余行是其子集；
+2. **删除对象 == 归档过的 id**——导出时收集 id，删除按 `id = ANY(:ids)` 分批执行；「删的行 ⊆ 归档过的行」是**同义反复**而不是校验结果（第二轮评审后由 `max_id` 上界改为 id 集合，见 §4.3）；
 3. **分批**——导出与删除都按批（≤5000），删除每批一次 commit（小事务，避免锁放大）；
-4. **幂等**——正式归档文件存在即不重导（不覆盖证据），重跑续删剩余部分；
-5. **错误不静默**——`pending_errors` 非空时健康信号 ok=False；任务整体失败也写状态（否则「天天失败」被读成「从未运行」而永久宽限）；
+4. **幂等**——正式归档文件存在即不重导（不覆盖证据），复用前重读文件（CRC 校验）重建 id 集合，重跑续删剩余部分；
+5. **错误不静默**——`pending_errors` 非空时健康信号 ok=False；任务整体失败也写状态（否则「天天失败」被读成「从未运行」而永久宽限）；因锁跳过要写 `last_skipped_at`；
 6. **时区口径显式 UTC**——不依赖会话 `TimeZone`。
 
 第 5 条是实现时新增的设计（原报告只提「停摆 >7 天」）：如果只有 staleness 判据，
@@ -166,6 +166,81 @@ M7（健康降级的回归测试恒真 → 抽出 `_resolve_status` 纯函数 + 
 > 杀后源文件带着变异留在盘上，下一轮把「坏文件」当成原文——守卫被永久删除且
 > 无人察觉。现改为旁车备份 + 每步立即还原 + 基线自检（未变异必须全绿，
 > 否则「pytest 起不来」会让所有变异假性 KILLED）。
+
+### 4.3 第二轮独立评审（2026-11-01）：1 条 High + 4 条 Medium，已全部闭环
+
+第二轮评审口径比第一轮更硬，问的是「**这条守卫是被证明的，还是被假设的**」。
+
+**H-1（High，已修，真库实测复现）：advisory lock 绑在连接上，第一次 `commit()` 后即随连接归还池。**
+`pg_try_advisory_lock` 是**会话（DBAPI 连接）级**锁，而 `Session.commit()` 在根事务结束
+时把连接还回池——本任务每批删除都 commit，所以锁会留在池里某条连接上，而
+`pg_advisory_unlock` 打在**另一条**连接上：PG 只回一个 WARNING + `false`，不报错。
+后果不是「锁没释放」这么温和，而是**后续每一轮都拿不到锁、永远 skip 到 `pool_recycle`**，
+而健康侧只会看到 `last_skipped_at` 不断刷新。
+
+真库探针（`logs/_lock_probe.py`，只读，advisory lock + `SELECT 1`）三组对照：
+
+| 组 | 做法 | `pg_locks` 观测 | 结论 |
+|---|---|---|---|
+| B | 池化会话 + `commit()` | `after_session_close=1`、`after_dispose=0` | 锁跟着连接回池，只有 dispose 才放 |
+| A | `engine.connect()` + `AsyncSession(bind=conn)` + `commit()` | `after_session_commit=1`、`conn_closed=false`、`unlock=true`、`after_unlock=0` | 修法成立 |
+| C | 在非持锁连接上 `unlock` | `unlock=false`、`still_present=1`、`try_lock_again=false` | 旧写法即使补 unlock 也放不掉，且下一轮永远抢不到 |
+
+修法：`require_async_engine()` 取引擎、`engine.connect()` **自己握住连接**，会话用
+`AsyncSession(bind=conn)` 绑定（绑定外部连接的会话在 commit 时不关闭它）；`finally`
+里先 `rollback()`（会话可能停在 abort 事务）再 `unlock`，并**检查 unlock 返回值**——
+这是「锁没释放」的唯一信号，不再静默。`core/database.py` 因此新增
+`require_async_engine()`（与既有 `require_async_session_local()` 对称），docstring
+明示不要 `from ... import async_engine`（模块级全局会被 init/dispose 重绑）。
+
+**M-1 / M-2（Medium，已修）：覆盖关系「被校验」而不是「被构造」。**
+`max_id` 上界 + 子集校验仍是一种**推导**：它假设「归档过的 id 是连续的、且 ≤ max_id」。
+本轮把删除谓词直接换成 `DELETE ... WHERE id = ANY(:ids)`，`ids` 就是归档文件里读回来的
+那一组——覆盖关系不再需要证明。删完再 `window_count()` 复核该月窗口剩余行数，>0 说明
+有行**从未进过归档**（补录/回放/旧备份恢复），记 `archive_incomplete` 并附 `remediation`
+处置步骤（改名 `.superseded-<ts>` 让下一轮重导），**绝不删**。顺带删掉了 `max_id` 推导
+与游标算术这两处最容易写错的代码。
+
+**M-3（Medium，已修）：`archive_incomplete` 没有恢复路径。** 上一版只报「窗口还剩 N 行」，
+运维拿不到下一步动作 → 永久 degraded 而无人会修。现每条错误都带可执行的 `remediation`。
+
+**M-4（Medium，已修）：测试替身替实现保证了前提。** 旧 `_FakeEngine.connect()` 对每次
+调用返回**同一个** conn 对象，于是「锁和解锁是否同一条连接」在替身层根本表达不出来；
+旧 `_FakeDB` 自己实现 `max_id` 过滤，把「SQL 谓词被删」也一并掩盖。现 `FakeDB` 以
+`{月份: [行]}` 为唯一真源（按 `created_at` 真判窗、删除真把行去掉、`hidden_ids` 模拟
+导出后才落进窗口的行），`_FakeEngine` 每次 `connect()` 发新连接并记录，测试断言
+**全程只允许出现一条连接**。
+
+**L-1 / L-2 / L-4（Low，已修）**：因锁跳过写 `last_skipped_at`/`skip_reason`（否则只能等
+7 天 staleness 且看不出原因）；`never_succeeded` 与 `state_unreadable` 用不同 note 区分
+（前者查任务、后者查文件）；`archive_dir_path()` 与 `STATE_PATH` 一样锚定项目根
+（worker 与手工补跑 CWD 不同会静默读到两个目录）。
+
+**验证证据（第二轮）**：43 项聚焦测试；11 处定点变异全部被杀死——删完不复核窗口、
+复用归档不读回文件、不核对导出/计划行数、**锁打在另一条连接上**、去掉 `fsync`、
+月键回退会话时区、去 `pending_errors` 判据、状态损坏静默清零、因锁跳过不留痕、
+health 忽略该项、**合并状态不重读**；每步还原后源文件 sha256 一致，恢复后全量 PASS。
+新增 `test_fsync_happens_after_gzip_trailer` 用事件顺序把「gzip 尾部先于 fsync」
+钉住（`GzipFile` 只在 `close()` 补 CRC 尾部，顺序反了就是「文件存在但内容截断」）。
+
+**顺带修掉的另一个竞态（自查发现，非评审项）**：`write_skip_state` 恰恰只在
+「别人持锁运行」时被调用，于是「跳过方读旧状态 → 持锁方落盘成功 → 跳过方写回」
+的顺序是**结构性**的，`last_success_at` 会被退回旧值、极端情况下整个字段消失，
+健康端点随即误报 `never_succeeded`。修法：`_merge_state` 落盘前**再读一次**，
+时间戳只准变新、`archive_files` 取并集、`deleted_rows_total` 取大。对应
+`test_skip_state_does_not_clobber_concurrent_success`。
+
+**补上「SQL 从未打到 PostgreSQL」的缺口**：新增 `test_audit_retention_pg.py`
+（`integration` + `db` 标记）。三条最危险的 SQL——月键 `to_char(... AT TIME ZONE 'UTC')`、
+`DELETE ... WHERE id = ANY(:ids)` 的**列表绑定**、分批 DELETE——在单元测试里只能
+断言「SQL 文本长这样」，参数能不能被驱动层正确适配永远测不到。真库用例显式
+`SET TIME ZONE 'Asia/Shanghai'`，让同一行在两种口径下给出不同月键（判别力不依赖
+机器配置）；测试库不可达/无权限时 `skip` 而不是 ERROR（环境问题不能伪装成缺陷）。
+
+
+**仍然存在的限制**：归档与库同盘（见上「已知限制」）；`logs/` 下的探针与变异驱动
+是**一次性诊断脚本**，不进产品代码路径。
+
 
 **已知限制（未解决，需接受）**：归档落在 `backups/audit_archive/`，与数据库同盘，
 本仓库不存在异地副本机制（`core/config.py` 对 `BACKUP_DIR` 也明示「与数据库同盘，

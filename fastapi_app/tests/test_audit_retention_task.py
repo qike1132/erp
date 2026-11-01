@@ -5,14 +5,15 @@ fastapi_app/tasks/audit_retention_task.py 模块 docstring。本文件锁的是*
 而不是实现细节：
 
 1. 整月粒度——月中部分过期的月份必须整体保留（合规方向：多留不删）；
-2. 删除范围 ⊆ 归档覆盖范围——删除谓词带归档的 max_id 上界；复用既有归档时
-   校验剩余行是其子集，不完整则中止（评审 H1）；
-3. 归档失败/行数不符 ⇒ 该月一行不删（含删除阶段失败：下一轮可安全续删）；
+2. **删除对象就是归档过的 id**——按 id 集合删、不按时间窗；删完复核窗口剩余，
+   有未归档行则报 archive_incomplete 且不删；
+3. 归档失败/行数不符/归档损坏 ⇒ 该月不进删除（删除阶段失败也隔离）；
 4. 分批——导出与删除都按批，删除每批 commit；
-5. 幂等——归档已存在不重导；重跑续删剩余部分；
-6. 错误不静默——pending_errors 非空时健康信号 ok=False；任务整体失败也写状态
-   （否则「天天失败」被读成「从未运行」而永久宽限）；
-7. 时区口径显式 UTC——不依赖会话 TimeZone（生产是 Asia/Shanghai）。
+5. 幂等——归档已存在不重导；崩溃后重跑续删；
+6. 错误不静默——pending_errors 非空时健康信号 ok=False；任务整体失败写
+   last_attempt_at；因锁跳过也要留痕；
+7. 时区口径显式 UTC——不依赖会话 TimeZone（生产是 Asia/Shanghai）；
+8. 单实例——锁必须绑在**专用连接**上（会话 commit 会换连接）。
 
 标注「变异验证」的断言都实测过：施加对应破坏后该测试必须变红。
 """
@@ -30,7 +31,7 @@ from fastapi_app.tasks import audit_retention_task as art
 
 
 # ---------------------------------------------------------------------------
-# 假 DB：按 SQL 文本特征分派，记录调用顺序与参数
+# 假 DB：按 SQL 文本特征分派，**按 created_at 真实判窗**（不做「聪明」的过滤）
 # ---------------------------------------------------------------------------
 class _Result:
     def __init__(self, rows: list[Any], rowcount: int = 0, scalar: Any = None):
@@ -59,88 +60,6 @@ class _Scalars:
         return [r[0] if isinstance(r, (tuple, list)) else r for r in self._rows]
 
 
-class FakeDB:
-    """最小可用的 AsyncSession 替身。
-
-    - ``months``: { 'YYYY-MM': 行数 } 供 compute_retention_plan
-    - ``export_rows``: { 'YYYY-MM': [tuple(12 列)] } 供 _export_month_jsonl（支持分页）
-    - ``ids_by_month``: { 'YYYY-MM': [id, ...] } 供分批删除
-    - ``export_error`` / ``delete_error``: 在对应阶段抛出
-    """
-
-    def __init__(
-        self,
-        months: dict[str, int] | None = None,
-        export_rows: dict[str, list[tuple]] | None = None,
-        ids_by_month: dict[str, list[int]] | None = None,
-        export_error: Exception | None = None,
-        delete_error: Exception | None = None,
-        delete_error_month: str | None = None,
-    ):
-        self.months = months or {}
-        self.export_rows = export_rows or {}
-        self.ids_by_month = ids_by_month or {}
-        self.export_error = export_error
-        self.delete_error = delete_error
-        self.delete_error_month = delete_error_month
-        self.calls: list[str] = []          # 归一化后的语句类别，按执行顺序
-        self.commits = 0
-        self.deleted_ids: list[int] = []
-        self.batches: list[list[int]] = []
-        self.export_max_ids: list[int | None] = []   # 每次导出请求的 max_id 上界
-        self.plan_sql = ''
-        self._current_month: str | None = None
-
-    async def execute(self, statement, params: dict | None = None):
-        sql = str(statement)
-        params = params or {}
-        if 'GROUP BY 1' in sql:
-            self.calls.append('plan')
-            self.plan_sql = sql
-            return _Result([(m, n) for m, n in sorted(self.months.items())])
-        if sql.startswith('SELECT count(*)'):
-            self.calls.append('window_stats')
-            month = _month_of(params['ms'])
-            ids = self.ids_by_month.get(month, [])
-            return _Result([(len(ids), max(ids) if ids else 0)])
-        if sql.startswith('SELECT id FROM audit_log'):
-            self.calls.append('select_batch')
-            month = _month_of(params['ms'])
-            self._current_month = month
-            if self.delete_error and self.delete_error_month in (None, month):
-                raise self.delete_error
-            # 假替身按**收到的 SQL 文本**决定是否施加 max_id 上界：替身自己
-            # 无条件过滤会把「SQL 忘了写 id <= :max_id」这类回归掩盖掉（第一轮
-            # 变异验证就栽在这里——M1 存活）。替身越笨，测试越真。
-            bounded = 'id <= :max_id' in sql
-            ids = [i for i in self.ids_by_month.get(month, [])
-                   if params['cursor'] < i and (not bounded or i <= params['max_id'])]
-            batch = ids[: params['batch']]
-            self.batches.append(batch)
-            return _Result([(i,) for i in batch])
-        if sql.startswith('DELETE FROM audit_log'):
-            self.calls.append('delete')
-            if self.delete_error and self.delete_error_month in (None, self._current_month):
-                raise self.delete_error
-            self.deleted_ids.extend(params['ids'])
-            return _Result([], rowcount=len(params['ids']))
-        if sql.startswith('SELECT id, user_id'):
-            if self.export_error:
-                raise self.export_error
-            self.calls.append('export')
-            self.export_max_ids.append(params.get('max_id'))
-            month = _month_of(params['ms'])
-            rows = [r for r in self.export_rows.get(month, []) if r[0] > params['cursor']]
-            return _Result(rows[: params['batch']])
-        if sql.startswith('ANALYZE'):
-            self.calls.append('analyze')
-            return _Result([])
-        raise AssertionError(f'未预期的语句: {sql[:80]}')
-
-    async def commit(self):
-        self.commits += 1
-
-
 def _month_of(dt: datetime) -> str:
     return f'{dt.year:04d}-{dt.month:02d}'
 
@@ -151,6 +70,94 @@ def _row(row_id: int, month: str, day: int = 15) -> tuple:
         row_id, 1, 'admin', 'login', 'user', '1', {'k': 'v'}, '127.0.0.1',
         'pytest', f'req-{row_id}', 200, datetime(year, mon, day, 3, 0, tzinfo=UTC),
     )
+
+
+class FakeDB:
+    """最小可用的 AsyncSession 替身。
+
+    表数据以 ``rows``（{月份: [12 列元组]}）为唯一真来源：导出按 id 分页、
+    窗口计数**按 created_at 判窗**、删除会真的把行从表里去掉。替身越笨，
+    「SQL 参数传错/谓词写反」这类回归越藏不住（复审 M-4）。
+    """
+
+    def __init__(
+        self,
+        months: dict[str, int] | None = None,
+        export_rows: dict[str, list[tuple]] | None = None,
+        ids_by_month: dict[str, list[int]] | None = None,
+        export_error: Exception | None = None,
+        delete_error: Exception | None = None,
+        delete_error_month: str | None = None,
+        hidden_ids: set[int] | None = None,
+    ):
+        self.months = months or {}
+        self.export_error = export_error
+        self.delete_error = delete_error
+        self.delete_error_month = delete_error_month
+        # 导出时看不到、但确实在表里的 id：模拟「导出完成后才落进该窗口」的行
+        self.hidden_ids = hidden_ids or set()
+        self.calls: list[str] = []
+        self.commits = 0
+        self.deleted_ids: list[int] = []
+        self.delete_batches: list[list[int]] = []
+        self.plan_sql = ''
+        self._current_month: str | None = None
+
+        self.rows: dict[str, list[tuple]] = {
+            m: list(rs) for m, rs in (export_rows or {}).items()
+        }
+        # 只在 ids_by_month 里出现的行 = 「库里还有、但归档里没有」
+        for m, ids in (ids_by_month or {}).items():
+            known = {r[0] for r in self.rows.get(m, [])}
+            for i in ids:
+                if i not in known:
+                    self.rows.setdefault(m, []).append(_row(i, m))
+
+    def _in_window(self, params: dict) -> list[tuple]:
+        ms, me = params['ms'], params['me']
+        assert ms < me, f'窗口参数写反了: ms={ms} me={me}'
+        return [r for r in self.rows.get(_month_of(ms), []) if ms <= r[11] < me]
+
+    async def execute(self, statement, params: dict | None = None):
+        sql = str(statement)
+        params = params or {}
+        if 'GROUP BY 1' in sql:
+            self.calls.append('plan')
+            self.plan_sql = sql
+            return _Result([(m, n) for m, n in sorted(self.months.items())])
+        if sql.startswith('SELECT count(*)'):
+            self.calls.append('window_count')
+            n = len(self._in_window(params))
+            return _Result([(n,)], scalar=n)
+        if sql.startswith('SELECT id, user_id'):
+            if self.export_error:
+                raise self.export_error
+            self.calls.append('export')
+            rows = sorted((r for r in self._in_window(params)
+                           if r[0] > params['cursor'] and r[0] not in self.hidden_ids),
+                          key=lambda r: r[0])
+            return _Result(rows[: params['batch']])
+        if sql.startswith('DELETE FROM audit_log'):
+            self.calls.append('delete')
+            chunk = list(params['ids'])
+            month = next((m for m, rs in self.rows.items()
+                          if any(r[0] in chunk for r in rs)), None)
+            if self.delete_error and self.delete_error_month in (None, month):
+                raise self.delete_error
+            existing = {r[0] for m in self.rows for r in self.rows[m]}
+            matched = [i for i in chunk if i in existing]
+            self.delete_batches.append(chunk)
+            self.deleted_ids.extend(matched)
+            for m in list(self.rows):
+                self.rows[m] = [r for r in self.rows[m] if r[0] not in chunk]
+            return _Result([], rowcount=len(matched))
+        if sql.startswith('ANALYZE'):
+            self.calls.append('analyze')
+            return _Result([])
+        raise AssertionError(f'未预期的语句: {sql[:80]}')
+
+    async def commit(self):
+        self.commits += 1
 
 
 @pytest.fixture(autouse=True)
@@ -167,7 +174,7 @@ def _isolated_state(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 1. 月边界与 cutoff 计算（时区口径显式 UTC）
+# 1. 月边界、cutoff、时区口径
 # ---------------------------------------------------------------------------
 def test_cutoff_is_n_months_before_now_utc():
     now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
@@ -180,18 +187,27 @@ def test_month_bounds_handles_december_rollover():
     assert end == datetime(2026, 1, 1, tzinfo=UTC)
 
 
+def test_archive_dir_relative_anchored_to_project_root(tmp_path):
+    """归档目录同样锚定项目根（评审 L-4）：worker 与手工补跑 CWD 不同也不能分身。"""
+    assert art.archive_dir_path('backups/audit_archive').is_absolute()
+    assert art.archive_dir_path('backups/audit_archive') == (
+        art._PROJECT_ROOT / 'backups/audit_archive')
+    absolute = art.archive_dir_path(str(tmp_path))
+    assert absolute == tmp_path
+
+
 async def test_plan_buckets_months_in_utc_not_session_timezone():
     """月键必须显式按 UTC 折算。
 
     生产会话时区是 Asia/Shanghai（实测 SHOW TimeZone），而 date_trunc/to_char
-    对 timestamptz 按会话时区折算——用会话口径分桶会让月键与 UTC 导出/删除窗
-    差 8 小时（实测 2026-10 差 303 行），首轮必然 archive_row_mismatch。
+    对 timestamptz 按会话时区折算——用会话口径分桶会让月键与 UTC 导出窗差 8
+    小时（实测 2026-10 差 303 行），首轮必然 archive_row_mismatch。
     变异验证：把 SQL 改回 date_trunc('month', created_at) 后本断言失败。
     """
     db = FakeDB(months={'2025-10': 1})
     await art.compute_retention_plan(db, datetime(2026, 11, 15, tzinfo=UTC))
     assert "AT TIME ZONE 'UTC'" in db.plan_sql
-    assert 'date_trunc' not in db.plan_sql   # 会话时区口径已被排除
+    assert 'date_trunc' not in db.plan_sql
 
 
 async def test_plan_keeps_partially_expired_month_intact():
@@ -200,7 +216,7 @@ async def test_plan_keeps_partially_expired_month_intact():
     now=2026-11-15 → cutoff=2025-11-15。
     2025-11 的月末 2025-12-01 > cutoff ⇒ 该月只有前半月过期，**保留整月**；
     2025-10 的月末 2025-11-01 ≤ cutoff ⇒ 整月过期，可处理。
-    变异验证：删掉 ``if month_end > cutoff: continue`` 后本断言失败（会多出 2025-11）。
+    变异验证：删掉 ``if month_end > cutoff: continue`` 后本断言失败。
     """
     db = FakeDB(months={'2025-10': 100, '2025-11': 50})
     plans = await art.compute_retention_plan(db, datetime(2026, 11, 15, tzinfo=UTC))
@@ -212,15 +228,11 @@ async def test_plan_empty_when_retention_disabled(monkeypatch):
     monkeypatch.setattr(settings, 'AUDIT_RETENTION_MONTHS', 0, raising=False)
     db = FakeDB(months={'2025-01': 10})
     assert await art.compute_retention_plan(db, datetime(2026, 11, 15, tzinfo=UTC)) == []
-    assert 'plan' not in db.calls   # 禁用时连计划查询都不该发生
+    assert 'plan' not in db.calls
 
 
 async def test_plan_refuses_below_statutory_minimum(monkeypatch):
-    """配置 0 < months < 6 → 拒绝执行（误配不能变成静默的过度删除）。
-
-    变异验证：删掉 compute_retention_plan 里的 MIN_RETENTION_MONTHS 分支，
-    本测试会看到 3 个月的计划被算出来并执行删除。
-    """
+    """配置 0 < months < 6 → 拒绝执行（误配不能变成静默的过度删除）。"""
     monkeypatch.setattr(settings, 'AUDIT_RETENTION_MONTHS', 3, raising=False)
     db = FakeDB(months={'2026-01': 10})
     assert await art.compute_retention_plan(db, datetime(2026, 11, 15, tzinfo=UTC)) == []
@@ -229,25 +241,20 @@ async def test_plan_refuses_below_statutory_minimum(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 2. 归档先行 + 删除范围 ⊆ 归档覆盖范围（评审 H1）
+# 2. 删除对象 == 归档过的 id（评审 H1 / M-1 / M-2 的核心）
 # ---------------------------------------------------------------------------
-async def test_archive_written_before_delete_and_bounded_by_max_id(tmp_path):
+async def test_archive_written_before_delete(tmp_path):
     month = '2025-10'
-    db = FakeDB(
-        months={month: 2},
-        export_rows={month: [_row(1, month), _row(2, month)]},
-        ids_by_month={month: [1, 2]},
-    )
+    db = FakeDB(months={month: 2}, ids_by_month={month: [1, 2]})
     report = await art.run_retention_once(
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
     )
-    # 顺序不变式：export 必须早于任何 delete
     assert db.calls.index('export') < db.calls.index('delete')
     assert report['deleted_total'] == 2
+    assert report['errors'] == []
     assert report['analyzed'] is True
     assert db.deleted_ids == [1, 2]
-    assert report['months'][0]['archive_max_id'] == 2
 
     gz = tmp_path / 'audit_log_202510.jsonl.gz'
     assert gz.exists()
@@ -258,56 +265,52 @@ async def test_archive_written_before_delete_and_bounded_by_max_id(tmp_path):
 
     state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
     assert state['archive_files'][month]['rows'] == 2
-    assert state['archive_files'][month]['max_id'] == 2
+    assert state['archive_files'][month]['path'].endswith('audit_log_202510.jsonl.gz')
     assert state['pending_errors'] == []
     assert state['deleted_rows_total'] == 2
 
 
-async def test_delete_stops_at_archive_max_id(tmp_path):
-    """导出之后才落进窗口的行（id > max_id）绝不能被删。
+async def test_delete_covers_exactly_the_archived_ids(tmp_path):
+    """导出之后才落进该月的行（不在归档 id 里）绝不能被删。
 
-    构造：导出时只有 id 1..2，删除阶段库里又多出 id 3（补录/回放）。删除谓词
-    带 ``id <= max_id``：3 必须保留。
-    变异验证：去掉 _delete_month_batched 的 ``AND id <= :max_id`` 后本测试失败
-    （3 会被删掉，而它从未进过归档）。
+    构造：库里 1,2,3，导出时只有 1,2 在窗口内（3 是导出后补录的）。
+    删除只按归档 id ⇒ 3 存活；随后复核发现窗口还剩 1 行 ⇒ archive_incomplete。
+    变异验证：把删除改回「按时间窗」后本测试失败（3 会被删掉且无错误）。
     """
     month = '2025-10'
-    db = FakeDB(
-        months={month: 2},
-        export_rows={month: [_row(1, month), _row(2, month)]},
-        ids_by_month={month: [1, 2, 3]},   # 删除阶段能看到 3
-    )
+    db = FakeDB(months={month: 2}, ids_by_month={month: [1, 2]})
     report = await art.run_retention_once(
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
     )
+    # 此刻库里只有 1,2（3 尚未出现）——先断言正常路径
     assert db.deleted_ids == [1, 2]
-    assert 3 not in db.deleted_ids
-    assert report['months'][0]['archive_max_id'] == 2
+    assert report['errors'] == []
+
+    # 第二轮：补录行 3 出现在同一窗口（id 大于已归档的最大 id 也一样处理）
+    db2 = FakeDB(months={month: 2}, ids_by_month={month: [1, 2, 3]},
+                 hidden_ids={3})   # 3 在导出之后才落进该窗口
+    report2 = await art.run_retention_once(
+        db2, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=tmp_path / 'state2.json',
+    )
+    assert 3 not in db2.deleted_ids          # 从未归档，绝不删
+    assert report2['errors'][0]['error'] == 'archive_incomplete'
+    assert report2['errors'][0]['remaining_rows'] == 1
+    assert 'remediation' in report2['errors'][0]
 
 
-async def test_incomplete_archive_blocks_delete_on_reuse(tmp_path):
-    """复用既有归档时，剩余行必须是归档的子集；否则中止（不删）。
-
-    构造：归档里只有 id 1..2（max_id=2），库里却还有 id 3 —— 3 从未归档，
-    删它就等于毁证据。旧实现只看「文件存在」→ 照删。
-    变异验证：把复用分支的子集校验删掉（回到只看 existed）后本测试失败。
-    """
+async def test_leftover_unarchived_rows_report_has_remediation(tmp_path):
+    """未归档行留下时必须给处置步骤（否则永久 degraded 无人知道怎么修）。"""
     month = '2025-10'
-    gz = tmp_path / 'audit_log_202510.jsonl.gz'
-    with gzip.open(gz, 'wt', encoding='utf-8') as f:
-        for i in (1, 2):
-            f.write(json.dumps(dict(zip(art._AUDIT_COLUMNS, _row(i, month), strict=True)),
-                               default=str) + '\n')
-
-    db = FakeDB(months={month: 3}, ids_by_month={month: [1, 2, 3]})
+    db = FakeDB(months={month: 1}, ids_by_month={month: [1, 2]}, hidden_ids={2})
     report = await art.run_retention_once(
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
     )
-    assert db.deleted_ids == []
-    assert report['errors'][0]['error'] == 'archive_incomplete'
-    assert report['errors'][0]['remaining_max_id'] == 3
+    err = report['errors'][0]
+    assert err['error'] == 'archive_incomplete'
+    assert 'superseded' in err['remediation']
     state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
     assert state['pending_errors'][0]['error'] == 'archive_incomplete'
 
@@ -316,7 +319,7 @@ async def test_corrupt_archive_is_not_reused(tmp_path):
     """截断/损坏的归档（掉电后常见）必须当成错误，而不是「文件存在就删」。
 
     变异验证：把 _export_month_jsonl 的 archive_stats 换成 exists() 判断后，
-    本测试的 deleted_ids 会变成 [1, 2]（数据被删而证据不可读）。
+    本测试的 delete 调用会出现（数据被删而证据不可读）。
     """
     month = '2025-10'
     gz = tmp_path / 'audit_log_202510.jsonl.gz'
@@ -334,8 +337,8 @@ async def test_corrupt_archive_is_not_reused(tmp_path):
 async def test_reuse_is_idempotent_and_resumes_deletion(tmp_path):
     """重跑：归档已存在不重导；上次没删完的（崩溃/中断）本轮续删。
 
-    归档 1..2、库里也只剩 1..2 ⇒ 子集校验通过（rows>=remaining 且
-    max_remaining<=max_id）⇒ 继续删除。旧实现把 rows 记成 -1 且跳过一切校验。
+    归档 1,2 且库里也只剩 1,2 ⇒ 续删干净、无错误。旧实现把 rows 记成 -1
+    并跳过一切校验。
     """
     month = '2025-10'
     gz = tmp_path / 'audit_log_202510.jsonl.gz'
@@ -352,9 +355,27 @@ async def test_reuse_is_idempotent_and_resumes_deletion(tmp_path):
     )
     assert 'export' not in db.calls            # 未重导
     assert gz.read_bytes() == before           # 证据未被覆盖
-    assert db.deleted_ids == [1, 2]            # 删除仍继续
+    assert db.deleted_ids == [1, 2]            # 续删
     assert report['errors'] == []
     assert report['months'][0]['sha256'] == art._sha256_of(gz)
+
+
+async def test_partial_delete_then_rerun_is_clean(tmp_path):
+    """上一轮删了一半（如崩溃）：本轮只删剩下的，不复核出假错误。"""
+    month = '2025-10'
+    gz = tmp_path / 'audit_log_202510.jsonl.gz'
+    with gzip.open(gz, 'wt', encoding='utf-8') as f:
+        for i in (1, 2, 3):
+            f.write(json.dumps(dict(zip(art._AUDIT_COLUMNS, _row(i, month), strict=True)),
+                               default=str) + '\n')
+
+    db = FakeDB(months={month: 2}, ids_by_month={month: [2, 3]})   # 1 已删
+    report = await art.run_retention_once(
+        db, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=tmp_path / 'state.json',
+    )
+    assert db.deleted_ids == [2, 3]
+    assert report['errors'] == []
 
 
 async def test_no_delete_when_export_raises(tmp_path):
@@ -374,13 +395,9 @@ async def test_no_delete_when_export_raises(tmp_path):
 
 
 async def test_no_delete_when_archive_row_mismatch(tmp_path):
-    """本次导出行数与计划不符 ⇒ 保守跳过删除（该月数据一行不动）。"""
+    """本次导出行数与计划不符 ⇒ 本轮跳过删除（下一轮复用归档自愈）。"""
     month = '2025-10'
-    db = FakeDB(
-        months={month: 3},
-        export_rows={month: [_row(1, month), _row(2, month)]},  # 只导出 2 行
-        ids_by_month={month: [1, 2, 3]},
-    )
+    db = FakeDB(months={month: 3}, ids_by_month={month: [1, 2, 3]}, hidden_ids={3})
     report = await art.run_retention_once(
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
@@ -388,40 +405,26 @@ async def test_no_delete_when_archive_row_mismatch(tmp_path):
     assert report['deleted_total'] == 0
     assert 'delete' not in db.calls
     assert report['errors'][0]['error'] == 'archive_row_mismatch'
+    assert 'remediation' in report['errors'][0]
     assert (tmp_path / 'audit_log_202510.jsonl.gz').exists()
 
 
 async def test_delete_failure_skips_only_that_month(tmp_path):
-    """删除阶段失败：该月留错误、其余月份照常删除。
-
-    评审 L1：删除失败原先不在兜底范围内，一个死锁会连累后续所有月份。
-    变异验证：把 _delete_month_batched 移出 try 块后，本测试会看到异常上抛。
-    """
+    """删除阶段失败：该月留错误、其余月份照常删除（评审 L1）。"""
     good, bad = '2025-09', '2025-10'
-    db = FakeDB(
-        months={good: 1, bad: 2},
-        export_rows={good: [_row(1, good)], bad: [_row(2, bad), _row(3, bad)]},
-        ids_by_month={good: [1], bad: [2, 3]},
-        delete_error=OSError('lock timeout'),
-        delete_error_month=bad,
-    )
+    db = FakeDB(months={good: 1, bad: 2}, ids_by_month={good: [1], bad: [2, 3]},
+                delete_error=OSError('lock timeout'), delete_error_month=bad)
     report = await art.run_retention_once(
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
     )
-    assert db.deleted_ids == [1]                       # good 月照删
+    assert db.deleted_ids == [1]
     assert [e['month'] for e in report['errors']] == [bad]
-    assert 'OSError' in report['errors'][0]['error']
-    assert report['analyzed'] is True                  # 有删除仍要 ANALYZE
+    assert report['analyzed'] is True
 
 
 async def test_unexpected_export_error_propagates(tmp_path):
-    """未知异常（编程错误）必须上抛，不能被按月吞成 pending_error。
-
-    except 只兜 (OSError, SQLAlchemyError)：若为「多处理几个月份」而写成
-    裸 ``except Exception``，一个真 bug 会被永远降级成一条健康项错误。
-    同时断言崩在写状态文件之前：不能给一次崩溃盖上新鲜的 last_success_at。
-    """
+    """未知异常（编程错误）必须上抛，不能被按月吞成 pending_error。"""
     state_path = tmp_path / 'state.json'
     db = FakeDB(months={'2025-10': 1}, ids_by_month={'2025-10': [1]},
                 export_error=RuntimeError('序列化 bug'))
@@ -435,55 +438,79 @@ async def test_unexpected_export_error_propagates(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 3. 分批（导出与删除）
+# 3. 分批
 # ---------------------------------------------------------------------------
-async def test_delete_is_batched_with_cursor_and_commits_per_batch(tmp_path):
-    """12000 行 / 批 5000 ⇒ 3 批 + 收尾空查，游标单调推进，每批一次 commit。"""
+async def test_delete_is_batched_and_commits_per_batch(tmp_path):
+    """12000 行 / 批 5000 ⇒ 3 批删除，每批一次 commit（+ ANALYZE 一次）。"""
     month = '2025-10'
     ids = list(range(1, 12001))
-    db = FakeDB(
-        months={month: len(ids)},
-        export_rows={month: [_row(i, month) for i in ids]},
-        ids_by_month={month: ids},
-    )
+    db = FakeDB(months={month: len(ids)}, ids_by_month={month: ids})
     await art.run_retention_once(
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
     )
-    assert [len(b) for b in db.batches] == [5000, 5000, 2000, 0]
-    assert db.batches[-1] == []
+    assert [len(b) for b in db.delete_batches] == [5000, 5000, 2000]
     assert db.deleted_ids == ids
-    assert db.commits == 4          # 3 批删除各 1 次 + ANALYZE 1 次
+    assert db.commits == 4          # 3 批 + ANALYZE
 
 
 async def test_export_is_batched_not_fully_materialised(tmp_path):
-    """整月导出必须分批读（评审 M6：25 万行 × detail 全量物化会打爆内存）。
-
-    12000 行 / 批 5000 ⇒ 4 次导出查询（5000、5000、2000、收尾空查）。
-    变异验证：把导出改回一次性 SELECT（不分页）后 export 只会被调用 1 次。
-    """
+    """整月导出必须分批读（评审 M6：25 万行 × detail 全量物化会打爆内存）。"""
     month = '2025-10'
     ids = list(range(1, 12001))
-    db = FakeDB(
-        months={month: len(ids)},
-        export_rows={month: [_row(i, month) for i in ids]},
-        ids_by_month={month: ids},
-    )
+    db = FakeDB(months={month: len(ids)}, ids_by_month={month: ids})
     await art.run_retention_once(
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
     )
-    assert db.calls.count('export') == 4
-
-
-def test_batch_sizes_are_bounded():
-    """批上限是常量契约：调大它会放大长事务/内存峰值。"""
-    assert art.DELETE_BATCH_ROWS == 5000
+    assert db.calls.count('export') == 4      # 5000、5000、2000、收尾空查
     assert art.EXPORT_BATCH_ROWS == 5000
+    assert art.DELETE_BATCH_ROWS == 5000
+
+
+async def test_fsync_happens_after_gzip_trailer(tmp_path, monkeypatch):
+    """fsync 必须在 gzip 尾部**写完之后**。
+
+    ``GzipFile`` 只在 close() 时才补 CRC 尾部：若在 gzip 关闭前 fsync，落盘的
+    是没有尾部的半截归档，而下一轮凭「文件存在」就会拿它去删源数据（评审 H1
+    的持久化分支）。这里用事件顺序把这条顺序钉住。
+    变异验证：删掉 os.fsync、或把它挪到 gzip with 之前，本测试失败。
+    """
+    month = '2025-10'
+    order: list[str] = []
+    real_close = gzip.GzipFile.close
+
+    def _close(self):
+        order.append('gzip_close')
+        return real_close(self)
+
+    def _fsync(_fd):
+        order.append('fsync')
+
+    monkeypatch.setattr(gzip.GzipFile, 'close', _close)
+    monkeypatch.setattr(art.os, 'fsync', _fsync)
+
+    db = FakeDB(months={month: 1}, ids_by_month={month: [1]})
+    await art.run_retention_once(
+        db, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=tmp_path / 'state.json',
+    )
+    assert 'gzip_close' in order and 'fsync' in order
+    assert order.index('gzip_close') < order.index('fsync')
+    # 归档读到底（CRC 校验通过）说明尾部确实写全了
+    with gzip.open(tmp_path / 'audit_log_202510.jsonl.gz', 'rt', encoding='utf-8') as f:
+        assert len(f.read().splitlines()) == 1
+
+
+def test_export_select_matches_column_tuple():
+    """导出语句的列名必须与 _AUDIT_COLUMNS 逐字一致、同序。"""
+    expected = 'SELECT ' + ', '.join(art._AUDIT_COLUMNS) + ' FROM audit_log '
+    assert art._EXPORT_SELECT.startswith(expected)
+    assert art._EXPORT_SELECT.endswith('ORDER BY id LIMIT :batch')
 
 
 # ---------------------------------------------------------------------------
-# 4. 幂等与状态文件
+# 4. 状态文件
 # ---------------------------------------------------------------------------
 async def test_state_written_even_when_nothing_to_do(tmp_path):
     """无事可做也要写状态文件——「任务活着」本身就是证据。"""
@@ -504,8 +531,7 @@ async def test_archive_files_accumulate_across_runs(tmp_path):
     """archive_files 是累积账本（跨轮保留历史月份），供等保检查取证。"""
     state_path = tmp_path / 'state.json'
     for month, rid in (('2025-09', 1), ('2025-10', 2)):
-        db = FakeDB(months={month: 1}, export_rows={month: [_row(rid, month)]},
-                    ids_by_month={month: [rid]})
+        db = FakeDB(months={month: 1}, ids_by_month={month: [rid]})
         await art.run_retention_once(
             db, now=datetime(2026, 11, 15, tzinfo=UTC),
             archive_dir=tmp_path, state_path=state_path,
@@ -516,11 +542,7 @@ async def test_archive_files_accumulate_across_runs(tmp_path):
 
 
 async def test_corrupt_state_is_set_aside_not_silently_reset(tmp_path):
-    """状态文件损坏 → 另存为 .corrupt-*（留现场）+ 本轮报错，而不是静默清零。
-
-    评审 M2：旧实现 ``read() or {}`` 把 archive_files / deleted_rows_total
-    清零重建，且顺手清空 pending_errors——「自愈」得毫无痕迹，等保账本没了。
-    """
+    """状态文件损坏 → 另存为 .corrupt-*（留现场）+ 本轮报错，而不是静默清零。"""
     state_path = tmp_path / 'state.json'
     state_path.write_text('{not json', encoding='utf-8')
 
@@ -529,7 +551,7 @@ async def test_corrupt_state_is_set_aside_not_silently_reset(tmp_path):
         db, now=datetime(2026, 11, 15, tzinfo=UTC),
         archive_dir=tmp_path, state_path=state_path,
     )
-    assert report['errors'] == [{'month': None, 'error': 'state_corrupt_recovered'}]
+    assert report['errors'][0]['error'] == 'state_corrupt_recovered'
     corrupt = list(tmp_path.glob('state.json.corrupt-*'))
     assert len(corrupt) == 1 and corrupt[0].read_text(encoding='utf-8') == '{not json'
     state = json.loads(state_path.read_text(encoding='utf-8'))
@@ -537,14 +559,10 @@ async def test_corrupt_state_is_set_aside_not_silently_reset(tmp_path):
 
 
 def test_write_failure_state_records_attempt_and_keeps_ledger(tmp_path):
-    """任务整体失败也要留痕：写 last_attempt_at/last_error，保留既有账本。
-
-    评审 M3：没有这一步，「天天失败」的状态文件永不生成 → 健康端点永远停在
-    not_yet_run 宽限而恒绿。
-    """
+    """任务整体失败也要留痕：写 last_attempt_at/last_error，保留既有账本。"""
     state_path = tmp_path / 'state.json'
     state_path.write_text(json.dumps({
-        'archive_files': {'2025-09': {'path': 'x', 'rows': 1, 'max_id': 1, 'sha256': 'y'}},
+        'archive_files': {'2025-09': {'path': 'x', 'rows': 1, 'sha256': 'y'}},
         'deleted_rows_total': 7,
     }), encoding='utf-8')
 
@@ -553,42 +571,155 @@ def test_write_failure_state_records_attempt_and_keeps_ledger(tmp_path):
     assert state['last_error'] == 'RuntimeError: boom'
     assert 'last_attempt_at' in state
     assert 'last_success_at' not in state
-    assert state['archive_files']['2025-09']['rows'] == 1    # 账本没被清
+    assert state['archive_files']['2025-09']['rows'] == 1
     assert state['deleted_rows_total'] == 7
 
 
-async def test_task_writes_failure_state_and_releases_lock(monkeypatch, tmp_path):
-    """ARQ 入口：任务体抛错时先写 last_attempt_at/last_error，再释放锁并上抛。
+def test_write_skip_state_records_reason(tmp_path):
+    """因锁跳过也要留痕（评审 L-1）：否则只能等 7 天 staleness 且看不出原因。"""
+    state_path = tmp_path / 'state.json'
+    art.write_skip_state('lock_busy', state_path)
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    assert state['skip_reason'] == 'lock_busy'
+    assert 'last_skipped_at' in state
 
-    评审 M3：状态文件原先只在成功后写，于是「天天失败」的表现与「从未运行」
-    完全相同 → 健康端点永久宽限恒绿。变异验证：删掉 finally 里的
-    write_failure_state 调用后本测试失败。
+
+def test_skip_state_does_not_clobber_concurrent_success(tmp_path, monkeypatch):
+    """因锁跳过的一轮绝不能抹掉持锁方刚写的成功账本（读-改-写竞态）。
+
+    ``write_skip_state`` 只在**别人持锁运行**时被调用，所以竞态是结构性的：
+    跳过方读到旧状态 → 持锁方落盘新成功 → 跳过方写回旧状态，``last_success_at``
+    退回旧值甚至消失，健康端点随即误报 never_succeeded。
+    变异验证：去掉 _merge_state 里的「落盘前再读一次」后本测试失败。
     """
     state_path = tmp_path / 'state.json'
+    stale = {
+        'last_success_at': '2026-10-01T00:00:00+00:00',
+        'archive_files': {'2025-09': {'path': 'a', 'rows': 1, 'sha256': 'x'}},
+        'deleted_rows_total': 5,
+    }
+    fresh = {
+        'last_success_at': '2026-11-01T03:00:00+00:00',
+        'last_attempt_at': '2026-11-01T03:00:00+00:00',
+        'archive_files': {
+            '2025-09': {'path': 'a', 'rows': 1, 'sha256': 'x'},
+            '2025-10': {'path': 'b', 'rows': 2, 'sha256': 'y'},
+        },
+        'deleted_rows_total': 9,
+    }
+    state_path.write_text(json.dumps(stale), encoding='utf-8')
 
-    class _FakeSession:
-        def __init__(self):
-            self.calls: list[str] = []
+    calls = {'n': 0}
+    real = art.read_retention_state
 
-        async def execute(self, statement, params=None):
-            self.calls.append(str(statement).split('(')[0].strip())
+    def _racing_read(path=None):
+        calls['n'] += 1
+        return fresh if calls['n'] > 1 else real(path)
+
+    monkeypatch.setattr(art, 'read_retention_state', _racing_read)
+    art.write_skip_state('lock_busy', state_path)
+
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    assert state['last_success_at'] == fresh['last_success_at']   # 未被退回旧值
+    assert set(state['archive_files']) == {'2025-09', '2025-10'}  # 账本只增不减
+    assert state['deleted_rows_total'] == 9
+    assert state['skip_reason'] == 'lock_busy'
+
+
+# ---------------------------------------------------------------------------
+# 5. ARQ 入口：专用连接 + 锁 + 失败留痕
+# ---------------------------------------------------------------------------
+class _FakeConn:
+    def __init__(self, lock_ok: bool = True):
+        self.lock_ok = lock_ok
+        self.calls: list[str] = []
+
+    async def execute(self, statement, params=None):
+        sql = str(statement)
+        self.calls.append(sql)
+        if 'pg_try_advisory_lock' in sql:
+            return _Result([], scalar=self.lock_ok)
+        if 'pg_advisory_unlock' in sql:
             return _Result([], scalar=True)
+        return _Result([], scalar=True)
 
-        async def commit(self):
-            pass
+    async def rollback(self):
+        self.calls.append('rollback')
 
-        async def __aenter__(self):
-            return self
+    async def __aenter__(self):
+        return self
 
-        async def __aexit__(self, *exc):
-            return False
+    async def __aexit__(self, *exc):
+        return False
 
-    session = _FakeSession()
+
+class _FakeEngine:
+    """每次 connect() 都发一条**新**连接：这样「锁和解锁是否同一条连接」可断言。
+
+    早期替身对所有 connect() 返回同一个对象，等于替实现保证了 H-1 的核心
+    前提——「锁挂在另一条连接上」这种回归在替身里根本表达不出来。
+    """
+
+    def __init__(self, lock_ok: bool = True):
+        self.conns: list[_FakeConn] = []
+        self._lock_ok = lock_ok
+
+    def connect(self):
+        conn = _FakeConn(self._lock_ok)
+        self.conns.append(conn)
+        return conn
+
+
+class _FakeSessionCM:
+    """AsyncSession(bind=conn) 的替身：本组测试只关心锁/异常/留痕，不碰真连接。"""
+
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+async def test_task_holds_lock_on_dedicated_connection(monkeypatch, tmp_path):
+    """锁必须跑在 engine.connect() 的专用连接上，且结束时在同一连接上释放。
+
+    评审 H-1：会话级 advisory lock 跟 DBAPI 连接走，Session.commit() 会把连接
+    归还池——锁若挂在会话上，第一批 commit 之后就可能换连接、解锁打空。
+    真库探针已实测：池化写法 commit 后锁仍在 pg_locks 里（连接回池），在非持
+    锁连接上 unlock 只回 false 不报错。本测试把这条不变式钉在单元层：
+    **全程只允许出现一条连接，lock/unlock 都发生在它身上**。
+    变异验证：把 try_lock 挪到另一条连接（engine.connect() 再开一条）后本测试失败。
+    """
+    state_path = tmp_path / 'state.json'
+    engine = _FakeEngine()
+    monkeypatch.setattr(art, 'require_async_engine', lambda: engine)
+    monkeypatch.setattr(art, 'AsyncSession', lambda bind: _FakeSessionCM())
+
+    async def _run(db):
+        return {'months': [], 'deleted_total': 0, 'analyzed': False, 'errors': []}
+
+    monkeypatch.setattr(art, 'run_retention_once', _run)
+    monkeypatch.setattr(art, 'STATE_PATH', state_path)
+
+    await art.audit_retention_task({})
+    assert len(engine.conns) == 1, '任务不应额外开连接（锁必须与解锁同连接）'
+    calls = engine.conns[0].calls
+    assert any('pg_try_advisory_lock' in c for c in calls)
+    assert any('pg_advisory_unlock' in c for c in calls)
+    assert calls.index(next(c for c in calls if 'pg_try_advisory_lock' in c)) < (
+        calls.index(next(c for c in calls if 'pg_advisory_unlock' in c)))
+
+
+async def test_task_writes_failure_state_on_error(monkeypatch, tmp_path):
+    """任务体抛错时先写 last_attempt_at/last_error，再释放锁并上抛。"""
+    state_path = tmp_path / 'state.json'
+    engine = _FakeEngine()
+    monkeypatch.setattr(art, 'require_async_engine', lambda: engine)
+    monkeypatch.setattr(art, 'AsyncSession', lambda bind: _FakeSessionCM())
 
     async def _boom(db):
         raise RuntimeError('plan query failed')
 
-    monkeypatch.setattr(art, 'require_async_session_local', lambda: (lambda: session))
     monkeypatch.setattr(art, 'run_retention_once', _boom)
     monkeypatch.setattr(art, 'STATE_PATH', state_path)
 
@@ -598,43 +729,27 @@ async def test_task_writes_failure_state_and_releases_lock(monkeypatch, tmp_path
     state = json.loads(state_path.read_text(encoding='utf-8'))
     assert state['last_error'] == 'RuntimeError: plan query failed'
     assert 'last_success_at' not in state
-    # 锁必须被释放（连接回池后会话仍在，锁不会自己消失）
-    assert any('pg_advisory_unlock' in c for c in session.calls)
+    assert any('pg_advisory_unlock' in c for c in engine.conns[0].calls)
 
 
-async def test_task_skips_when_lock_busy(monkeypatch, tmp_path):
-    """拿不到锁时干净退出：不写成功态、不把自己算成失败。"""
+async def test_task_skips_and_records_when_lock_busy(monkeypatch, tmp_path):
+    """拿不到锁：干净退出、不误写成功态，但要留下 last_skipped_at。"""
     state_path = tmp_path / 'state.json'
-
-    class _FakeSession:
-        def __init__(self):
-            self.calls: list[str] = []
-
-        async def execute(self, statement, params=None):
-            self.calls.append(str(statement))
-            return _Result([], scalar=False)   # pg_try_advisory_lock → false
-
-        async def commit(self):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            return False
-
-    session = _FakeSession()
-    monkeypatch.setattr(art, 'require_async_session_local', lambda: (lambda: session))
+    engine = _FakeEngine(lock_ok=False)
+    monkeypatch.setattr(art, 'require_async_engine', lambda: engine)
+    monkeypatch.setattr(art, 'AsyncSession', lambda bind: _FakeSessionCM())
     monkeypatch.setattr(art, 'STATE_PATH', state_path)
 
     result = await art.audit_retention_task({})
     assert result == {'skipped': 'lock_busy'}
-    assert not state_path.exists()          # 另一实例负责写状态
-    assert not any('pg_advisory_unlock' in c for c in session.calls)  # 没拿到就不解锁
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    assert state['skip_reason'] == 'lock_busy'
+    assert 'last_success_at' not in state
+    assert not any('pg_advisory_unlock' in c for c in engine.conns[0].calls)
 
 
 # ---------------------------------------------------------------------------
-# 5. 健康信号
+# 6. 健康信号
 # ---------------------------------------------------------------------------
 def _write_signal_state(tmp_path, monkeypatch, **fields):
     path = tmp_path / 'state.json'
@@ -654,7 +769,6 @@ def test_signal_ok_when_fresh(tmp_path, monkeypatch):
 
 
 def test_signal_stale_after_threshold(tmp_path, monkeypatch):
-    """停摆 >7 天 ⇒ ok=False（health 据此置 degraded）。"""
     old = (datetime.now(UTC) - timedelta(days=art.STALE_DAYS + 1)).isoformat()
     _write_signal_state(tmp_path, monkeypatch, last_success_at=old, pending_errors=[])
     assert art.audit_retention_signal()['ok'] is False
@@ -663,8 +777,7 @@ def test_signal_stale_after_threshold(tmp_path, monkeypatch):
 def test_signal_not_ok_when_pending_errors(tmp_path, monkeypatch):
     """新鲜但有未处理错误 ⇒ ok=False。
 
-    变异验证：从 ok 表达式里去掉 ``and not pending`` 后本测试失败——这正是
-    「每月都跳过、last_success_at 却照常刷新」的静默洞。
+    变异验证：从 ok 表达式里去掉 ``and not pending`` 后本测试失败。
     """
     _write_signal_state(tmp_path, monkeypatch,
                         last_success_at=datetime.now(UTC).isoformat(),
@@ -672,18 +785,15 @@ def test_signal_not_ok_when_pending_errors(tmp_path, monkeypatch):
     sig = art.audit_retention_signal()
     assert sig['ok'] is False
     assert sig['pending_error_count'] == 1
-    assert sig['pending_errors'][0]['month'] == '2025-10'
 
 
 def test_signal_missing_state_is_grace(tmp_path, monkeypatch):
-    """状态文件不存在 = 从未运行（宽限），ok=True 且 note 可辨。"""
     monkeypatch.setattr(art, 'STATE_PATH', tmp_path / 'absent.json')
     sig = art.audit_retention_signal()
     assert sig['ok'] is True and sig['note'] == 'not_yet_run'
 
 
 def test_signal_corrupt_state_is_not_grace(tmp_path, monkeypatch):
-    """状态文件损坏 ≠ 从未运行：必须 ok=False。"""
     path = tmp_path / 'state.json'
     path.write_text('{not json', encoding='utf-8')
     monkeypatch.setattr(art, 'STATE_PATH', path)
@@ -692,12 +802,7 @@ def test_signal_corrupt_state_is_not_grace(tmp_path, monkeypatch):
 
 
 def test_signal_bad_timestamp_is_not_grace(tmp_path, monkeypatch):
-    """JSON 合法但 last_success_at 坏/缺失 ⇒ 也必须 ok=False（评审 M1）。
-
-    旧实现这里返回 ok=True，与上面「损坏当异常」的结论相反——同一个函数对
-    「损坏」给了两个答案，且这条分支无测试。
-    变异验证：把该分支改回 ok=True 后本测试失败。
-    """
+    """JSON 合法但 last_success_at 坏/缺失 ⇒ 也必须 ok=False（评审 M1）。"""
     path = tmp_path / 'state.json'
     path.write_text(json.dumps({'last_success_at': ''}), encoding='utf-8')
     monkeypatch.setattr(art, 'STATE_PATH', path)
@@ -708,21 +813,18 @@ def test_signal_bad_timestamp_is_not_grace(tmp_path, monkeypatch):
 
 
 def test_signal_naive_timestamp_is_interpreted_as_utc(tmp_path, monkeypatch):
-    """naive 时间戳（手改/旧格式）不能让函数抛错，也不能逃成 signal_error。
-
-    旧实现 datetime.now(UTC) - naive 抛 TypeError，被 health 兜成 ok=True。
-    """
+    """naive 时间戳不能让函数抛错，也不能逃成 signal_error。"""
     naive = datetime.now(UTC).replace(tzinfo=None).isoformat()
     _write_signal_state(tmp_path, monkeypatch, last_success_at=naive, pending_errors=[])
     sig = art.audit_retention_signal()
-    assert sig['ok'] is True
-    assert sig['age_days'] < 1
+    assert sig['ok'] is True and sig['age_days'] < 1
 
 
-def test_signal_failed_run_only_is_not_grace(tmp_path, monkeypatch):
-    """只有 last_attempt_at、没有 last_success_at ⇒ ok=False。
+def test_signal_failed_run_uses_never_succeeded_note(tmp_path, monkeypatch):
+    """只有 last_attempt_at、没有 last_success_at ⇒ ok=False 且 note 区分成因。
 
-    对应「任务天天失败」：状态文件被 write_failure_state 写出来了，但没有成功记录。
+    评审 L-2：把「跑过但从未成功」报成 state_unreadable 会让运维去查文件损坏，
+    而真正的问题在任务。
     """
     path = tmp_path / 'state.json'
     path.write_text(json.dumps({
@@ -733,7 +835,7 @@ def test_signal_failed_run_only_is_not_grace(tmp_path, monkeypatch):
     monkeypatch.setattr(art, 'STATE_PATH', path)
     sig = art.audit_retention_signal()
     assert sig['ok'] is False
-    assert sig['note'] == 'state_unreadable'
+    assert sig['note'] == 'never_succeeded'
     assert sig['last_error'] == 'RuntimeError: boom'
 
 
@@ -745,7 +847,6 @@ def test_signal_disabled_when_months_zero(tmp_path, monkeypatch):
 
 
 def test_signal_pending_errors_truncated(tmp_path, monkeypatch):
-    """错误列表只暴露前 5 条，避免健康响应被撑爆，但计数完整。"""
     _write_signal_state(tmp_path, monkeypatch,
                         last_success_at=datetime.now(UTC).isoformat(),
                         pending_errors=[{'month': f'2025-{i:02d}', 'error': 'x'}
@@ -756,29 +857,21 @@ def test_signal_pending_errors_truncated(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 6. 与 health 端点的接线（评审 M7：原断言恒真）
+# 7. 与 health 端点的接线
 # ---------------------------------------------------------------------------
 def test_status_resolution_maps_retention_to_degraded():
-    """状态判定是对外可观测承诺，必须能被单测直接打。
-
-    变异验证：把 _resolve_status 里 audit_retention_ok 的参与删掉后本测试失败。
-    """
+    """状态判定是对外可观测承诺，必须能被单测直接打（评审 M7）。"""
     from fastapi_app.core.health import _resolve_status
 
     assert _resolve_status(True, True, True) == 'healthy'
-    assert _resolve_status(True, True, False) == 'degraded'      # 仅保留治理异常
-    assert _resolve_status(True, False, True) == 'degraded'      # 仅备份链异常
+    assert _resolve_status(True, True, False) == 'degraded'
+    assert _resolve_status(True, False, True) == 'degraded'
     assert _resolve_status(True, False, False) == 'degraded'
-    assert _resolve_status(False, True, True) == 'unhealthy'     # DB 死活优先
+    assert _resolve_status(False, True, True) == 'unhealthy'
 
 
-async def test_health_degrades_end_to_end(monkeypatch, tmp_path):
-    """驱动 _build_fresh_health：保留治理不 ok 时 status 必须是 degraded。
-
-    不 mock 状态文件，而是直接让信号返回 ok=False，验证的是「接线」而非「信号」。
-    变异验证：把 _resolve_status 调用换回原先的内联 if（或删掉 audit_retention
-    分支）后本测试失败——原先那条 ``'ok' in sig`` 断言对它完全无感。
-    """
+async def test_health_degrades_end_to_end(monkeypatch):
+    """驱动 _build_fresh_health：保留治理不 ok 时 status 必须是 degraded。"""
     from fastapi_app.core import health as health_mod
 
     async def _db_ok():

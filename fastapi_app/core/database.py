@@ -406,6 +406,21 @@ def require_async_session_local() -> async_sessionmaker:
     return _AsyncSessionLocal
 
 
+def require_async_engine() -> AsyncEngine:
+    """返回已初始化的异步引擎；未初始化时抛出可操作的错误。
+
+    与 ``require_async_session_local`` 同理，供需要**自己持有连接**的调用方使用：
+    会话级 advisory lock / LISTEN / 服务端游标这类资源绑在 DBAPI 连接上，而
+    ``Session.commit()`` 会把连接归还池——必须用一个显式 ``engine.connect()``
+    把连接的生死握在调用方手里，锁才不会「跟着 commit 换连接」。
+    注意这里读的是**模块全局**（init/dispose 会重绑），不要在模块顶部
+    ``from ... import async_engine``，那会固化成一个永远为 None 的快照。
+    """
+    if async_engine is None:
+        raise RuntimeError("数据库引擎未初始化，请先调用 init_async_engine()")
+    return async_engine
+
+
 # ==================== 只读副本（读写分离） ====================
 
 _read_engine = None

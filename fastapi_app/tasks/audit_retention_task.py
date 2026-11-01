@@ -1,4 +1,4 @@
-"""audit_log 保留期治理（ARQ cron 03:00）：归档先行 + 分批删除 + ANALYZE。
+"""audit_log 保留期治理（ARQ cron 03:00）：归档先行 + 按归档 id 删除 + ANALYZE。
 
 背景（docs/audit-log-retention-decision.md，owner 2026-11-01 批准）
 ----
@@ -14,27 +14,31 @@
 1. **月粒度**：只处理「整月完全过期」的月份（月结束 ≤ cutoff）——月中
    部分过期的数据保留整月，保留期实际为 12~13 个月（多留方向，合规安全）。
 2. **归档先行**：该月先导出 ``audit_log_<YYYYMM>.jsonl.gz``（分批读 + 原子写
-   + fsync），**归档成功且覆盖被删范围才删除**（见 3）。
-3. **删除范围由归档覆盖决定，而非时间窗**：导出时记录本次归档的 ``max_id``，
-   删除谓词带上 ``id <= max_id``——「删的行 ⊆ 归档过的行」由构造保证，不再
-   依赖「先导出后删除」这一时序假设。复用既有归档时重新读回文件得到
-   (行数, max_id) 并校验剩余行是其子集（``rows >= remaining`` 且
-   ``max(remaining_id) <= max_id``），任何不满足都中止该月并留痕。
-4. **分批删除**：pkey 游标分批（每批 ≤5000），避免长事务与锁放大；
-   audit_log 无二级索引（106 治理后仅 pkey），游标走 pkey 顺序扫描。
-5. **统计修复**：有删除时任务末尾 ``ANALYZE audit_log``（实测统计信息
-   曾滞后到 n_live_tup=1693 vs 实际 26 万）。
-6. **运维留痕**：状态文件 ``logs/audit_retention_state.json``（ARQ worker
-   写 / API health 读的同机共享通道，与 prod_runner.json 同模式）记录
-   last_success_at / 各月归档 sha256 与 max_id / 删除行数——证明是策略性
-   滚动清理而非人为删证（等保检查要点）。
-7. **失败可见**：距上次成功 >7 天、或 ``pending_errors`` 非空、或配置低于
-   法定下限，/api/health 的 audit_retention 块 ok=false 且 status=degraded
-   （沿用 F-BE-CORE-05 备份链停摆先例：仍 200，不触发监督器重启）。
-   任务体无论成败都写状态文件（``last_attempt_at``），否则「次次失败」会
-   被误读成「从未运行」而永久宽限。
-8. **单实例**：会话级 advisory lock（不是事务级——本任务每批 commit，
-   事务级锁会随首批提交释放）保证 cron 与日级补跑不会同时处理同一月。
+   + fsync）。
+3. **删除的对象就是归档里的 id**：导出时收集全部 id，删除按这些 id 分批执行
+   （``DELETE ... WHERE id = ANY(:ids)``）。「删的行 ⊆ 归档过的行」因此不是
+   被校验出来的，而是**同义反复**——不需要时间窗、不需要 max_id 上界、不需要
+   游标算术，也就不存在「导出后新落进行、却被时间窗带走」的缝。
+4. **删完复核**：删除后统计该月窗口剩余行数；>0 说明有行从未归档（补录/回放/
+   旧备份恢复），记 ``archive_incomplete`` 并让它出现在健康信号里，**绝不删**。
+5. **幂等**：正式归档文件存在即不重导（不覆盖证据）；复用时重读文件（gzip 读到
+   底即 CRC 校验）重建 id 集合，已删过的 id 自然不再命中，崩溃后可直接续删。
+6. **分批**：导出与删除都按批（≤5000），删除每批一次 commit（小事务，避免
+   锁放大）；audit_log 经 106 治理后仅剩 pkey。
+7. **单实例**：advisory lock 绑在**专用连接**上。会话级锁的生命周期跟 DBAPI
+   连接走，而 ``Session.commit()`` 会把连接归还池——把连接握在调用方手里，
+   锁才不会「跟着 commit 换连接」。
+8. **统计修复**：有删除时 ``ANALYZE audit_log``（实测统计信息曾滞后到
+   n_live_tup=1693 vs 实际 26 万）。
+9. **运维留痕**：状态文件 ``logs/audit_retention_state.json``（ARQ worker 写 /
+   API health 读的同机共享通道，与 prod_runner.json 同模式）记录
+   last_success_at / 各月归档 sha256 与行数 / 删除行数——证明是策略性滚动清理
+   而非人为删证（等保检查要点）。
+10. **失败可见**：距上次成功 >7 天、或 ``pending_errors`` 非空、或配置低于法定
+    下限，/api/health 的 audit_retention 块 ok=false 且 status=degraded（沿用
+    F-BE-CORE-05 备份链停摆先例：仍 200，不触发监督器重启）。任务体无论成败都
+    写状态文件（``last_attempt_at``），否则「次次失败」会被误读成「从未运行」
+    而永久宽限。
 
 时区口径
 ----
@@ -44,12 +48,13 @@
 ``to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM')``，不依赖会话默认值；
 导出口径与删除窗口也用 aware UTC 常量，三者严格同口径。
 
-事务边界：``run_retention_once(db)`` 在调用方会话上工作、每批删除后
-commit（分批的意义就是小事务）；ARQ 入口 ``audit_retention_task`` 开会话、
-持锁并负责最终 commit（与 numbering_audit_task 同模式）。
+事务边界：``run_retention_once(db)`` 在调用方会话上工作、每批删除后 commit
+（分批的意义就是小事务）；ARQ 入口 ``audit_retention_task`` 提供专用连接与
+advisory lock，并用 bind 到该连接的会话执行（commit 不会关闭外部连接）。
 """
 from __future__ import annotations
 
+import asyncio
 import gzip
 import hashlib
 import json
@@ -67,7 +72,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.config import settings
-from fastapi_app.core.database import require_async_session_local
+from fastapi_app.core.database import require_async_engine
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +98,7 @@ _AUDIT_COLUMNS = (
 )
 # 导出语句写成字面量而非 f-string 拼接列名：B608（SQL 由字符串插值构造）无从
 # 触发，扫描器不必靠 nosec 豁免；列名与 _AUDIT_COLUMNS 的一致性由
-# test_export_select_matches_column_tuple 锁定（拼接与常量脱钩是本设计唯一风险）。
+# test_export_select_matches_column_tuple 锁定。
 _EXPORT_SELECT = (
     'SELECT id, user_id, username, action, resource_type, resource_id, '
     'detail, ip_address, user_agent, request_id, status_code, created_at '
@@ -115,15 +120,17 @@ def _month_bounds(month_key: str) -> tuple[datetime, datetime]:
     return start, start + relativedelta(months=1)
 
 
-async def window_stats(
-    db: AsyncSession, month_start: datetime, month_end: datetime,
-) -> tuple[int, int]:
-    """某时间窗内的 (行数, 最大 id)；空窗返回 (0, 0)。"""
-    row = (await db.execute(text(
-        'SELECT count(*), coalesce(max(id), 0) FROM audit_log '
-        'WHERE created_at >= :ms AND created_at < :me'
-    ), {'ms': month_start, 'me': month_end})).one()
-    return int(row[0]), int(row[1])
+def archive_dir_path(raw: str | None = None) -> Path:
+    """归档目录：相对路径锚定项目根（与 STATE_PATH 同理，见上）。"""
+    path = Path(raw if raw is not None else settings.AUDIT_ARCHIVE_DIR)
+    return path if path.is_absolute() else _PROJECT_ROOT / path
+
+
+async def window_count(db: AsyncSession, month_start: datetime, month_end: datetime) -> int:
+    """某时间窗内的现存行数。"""
+    return int((await db.execute(text(
+        'SELECT count(*) FROM audit_log WHERE created_at >= :ms AND created_at < :me'
+    ), {'ms': month_start, 'me': month_end})).scalar() or 0)
 
 
 async def compute_retention_plan(db: AsyncSession, now: datetime | None = None) -> list[dict]:
@@ -155,30 +162,27 @@ async def compute_retention_plan(db: AsyncSession, now: datetime | None = None) 
 
 
 def archive_stats(path: Path) -> dict:
-    """校验并读回既有归档：{path, rows, max_id, sha256}。
+    """校验并读回既有归档：{path, rows, ids, sha256}。
 
-    读到底即触发 gzip 的 CRC 校验——截断/损坏的归档在这里就抛 OSError，
-    而不是被「文件存在」当成完整产物继续往下删源数据。
-    逐行流式处理，不把整月装进内存。同步实现：仅在复用既有归档时调用，
-    一个月一次、百毫秒级，不值得为它引入线程池。
+    读到底即触发 gzip 的 CRC 校验——截断/损坏的归档在这里就抛 OSError，而不是
+    被「文件存在」当成完整产物继续往下删源数据。**同步函数**：调用方用
+    ``asyncio.to_thread`` 跑，避免 25 万行解压把 worker 的事件循环卡住。
     """
-    rows = 0
-    max_id = 0
+    ids: list[int] = []
     try:
         with gzip.open(path, 'rt', encoding='utf-8') as gz:
             for line in gz:
                 if not line.strip():
                     continue
-                rows += 1
                 row_id = json.loads(line).get('id')
-                if isinstance(row_id, int) and row_id > max_id:
-                    max_id = row_id
+                if isinstance(row_id, int):
+                    ids.append(row_id)
     except (zlib.error, EOFError) as exc:
         # 完整性失败与「文件读不了」是同一类数据条件，统一成 OSError：
         # zlib.error / EOFError 都不继承 OSError，不归一就会穿透整轮任务
         # （所有月份一起失败），而不是只跳过坏掉的这个月。
         raise OSError(f'归档损坏或截断: {path}（{exc}）') from exc
-    return {'path': str(path), 'rows': rows, 'max_id': max_id, 'sha256': _sha256_of(path)}
+    return {'path': str(path), 'rows': len(ids), 'ids': ids, 'sha256': _sha256_of(path)}
 
 
 async def _export_month_jsonl(
@@ -187,17 +191,17 @@ async def _export_month_jsonl(
 ) -> dict:
     """导出一个整月到 jsonl.gz（分批读 + 原子写 + fsync）。
 
-    返回 {path, rows, max_id, sha256, existed}；existed=True 表示复用既有
-    归档（rows/max_id 从文件读回，不是计划值）。
+    返回 {path, rows, ids, sha256, existed}；existed=True 表示复用既有归档
+    （rows/ids 从文件读回，不是计划值）。
     """
     archive_dir.mkdir(parents=True, exist_ok=True)
     final_path = archive_dir / f'audit_log_{month_key.replace("-", "")}.jsonl.gz'
     if final_path.exists():
-        return {**archive_stats(final_path), 'existed': True}
+        stats = await asyncio.to_thread(archive_stats, final_path)
+        return {**stats, 'existed': True}
 
     tmp_path = final_path.parent / (final_path.name + '.tmp')
-    count = 0
-    max_id = 0
+    ids: list[int] = []
     cursor = -1
     with open(tmp_path, 'wb') as raw:
         # gzip 必须嵌套在 raw 里关闭：GzipFile 关闭时才写 CRC 尾部，若在它
@@ -215,16 +219,16 @@ async def _export_month_jsonl(
                     gz.write(json.dumps(
                         {c: _jsonable(v) for c, v in zip(_AUDIT_COLUMNS, row, strict=True)},
                         ensure_ascii=False, separators=(',', ':')).encode() + b'\n')
-                    count += 1
+                    ids.append(int(row[0]))
                 cursor = rows[-1][0]
-                max_id = cursor
         # 尾部已写全，再落盘：先 fsync 后 rename，避免掉电后留下
         # 「正式文件存在但内容截断」的证据黑洞。
         raw.flush()
         os.fsync(raw.fileno())
     os.replace(tmp_path, final_path)
-    return {'path': str(final_path), 'rows': count, 'max_id': max_id,
-            'sha256': _sha256_of(final_path), 'existed': False}
+    sha = await asyncio.to_thread(_sha256_of, final_path)
+    return {'path': str(final_path), 'rows': len(ids), 'ids': ids,
+            'sha256': sha, 'existed': False}
 
 
 def _jsonable(value):
@@ -247,31 +251,24 @@ def _sha256_of(path: Path, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
-async def _delete_month_batched(
-    db: AsyncSession, month_start: datetime, month_end: datetime, max_id: int,
-    batch: int = DELETE_BATCH_ROWS,
+async def _delete_ids_batched(
+    db: AsyncSession, ids: list[int], batch: int = DELETE_BATCH_ROWS,
 ) -> int:
-    """pkey 游标分批删除一个整月，每批 commit（小事务）。返回总删除行数。
+    """按归档的 id 集合分批删除，每批 commit（小事务）。返回总删除行数。
 
-    ``id <= max_id``：只删归档覆盖到的行。导出之后才落进该窗口的行（补录/
-    回放/旧备份恢复）不会被删——下一轮会因为「归档不完整」被显式报错。
+    删除对象**就是**归档过的 id：不做时间窗匹配、不设上界推导，所以
+    「删的行 ⊆ 归档过的行」由构造保证。已删过的 id 再删一次命中 0 行，
+    崩溃后重跑天然幂等。
     """
     total = 0
-    cursor = -1
-    while True:
-        ids = (await db.execute(text(
-            'SELECT id FROM audit_log '
-            'WHERE created_at >= :ms AND created_at < :me AND id > :cursor AND id <= :max_id '
-            'ORDER BY id LIMIT :batch'
-        ), {'ms': month_start, 'me': month_end, 'cursor': cursor,
-            'max_id': max_id, 'batch': batch})).scalars().all()
-        if not ids:
-            break
+    for start in range(0, len(ids), batch):
+        chunk = ids[start:start + batch]
         result = await db.execute(
-            text('DELETE FROM audit_log WHERE id = ANY(:ids)'), {'ids': list(ids)})
+            # batch-loop: 有意逐批删除（每批 5000 条一次往返），批数与总行数成正比
+            # 而与「每行一次查询」无关；这是分批小事务本身，不是 N+1。
+            text('DELETE FROM audit_log WHERE id = ANY(:ids)'), {'ids': chunk})
         await db.commit()  # 每批小事务：分批的全部意义
         total += result.rowcount or 0
-        cursor = ids[-1]
     return total
 
 
@@ -292,6 +289,47 @@ def _write_state(state: dict, state_path: Path) -> None:
     os.replace(tmp, state_path)
 
 
+def _merge_state(fields: dict, state_path: Path | None = None) -> None:
+    """把若干字段并入状态文件（保留既有账本），写失败只记日志。
+
+    落盘前**再读一次**并做「只准变新」的合并：``write_skip_state`` 恰恰是在
+    另一实例持锁运行期间被调用的，读-改-写窗口里持锁方可能刚落盘了更新的
+    ``last_success_at``。不兜这一手，「被锁挡住的一轮」就会把「刚成功的账本」
+    覆盖回旧值（极端情况下整个 ``last_success_at`` 被抹掉），健康端点随即误报
+    ``never_succeeded``。
+    """
+    state_path = state_path or STATE_PATH
+    merged = {**(read_retention_state(state_path) or {}), **fields}
+
+    disk = read_retention_state(state_path) or {}
+    for key in ('last_success_at', 'last_attempt_at', 'last_skipped_at'):
+        mine, theirs = _parse_ts(merged.get(key)), _parse_ts(disk.get(key))
+        if theirs is not None and (mine is None or theirs > mine):
+            merged[key] = disk[key]
+    # 账本同理：只增不减（归档条目按月份合并，删除计数取大）
+    merged['archive_files'] = {
+        **(disk.get('archive_files') or {}), **(merged.get('archive_files') or {})}
+    merged['deleted_rows_total'] = max(
+        int(disk.get('deleted_rows_total') or 0),
+        int(merged.get('deleted_rows_total') or 0),
+    )
+    try:
+        _write_state(merged, state_path)
+    except OSError:
+        logger.exception('audit_log 保留治理: 状态写入失败（%s）', state_path)
+
+
+def _parse_ts(value) -> datetime | None:
+    """ISO 时间戳 → aware datetime；不可解析返回 None（比较时视为「无」）。"""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
 def write_failure_state(
     exc: BaseException | None, state_path: Path | None = None,
 ) -> None:
@@ -300,98 +338,78 @@ def write_failure_state(
     没有这一步，「每天在 compute_retention_plan 上抛错」会让状态文件永不生成，
     健康端点永远停在 not_yet_run 宽限而恒绿——与 F-BE-CORE-05 同型。
     """
-    state_path = state_path or STATE_PATH
-    prev = read_retention_state(state_path) or {}
-    prev.update({
+    _merge_state({
         'last_attempt_at': datetime.now(UTC).isoformat(),
         'last_error': f'{type(exc).__name__}: {exc}' if exc is not None else 'aborted',
-    })
-    prev.setdefault('archive_files', {})
-    try:
-        _write_state(prev, state_path)
-    except OSError:
-        logger.exception('audit_log 保留治理: 失败状态写入失败（%s）', state_path)
+    }, state_path)
 
 
-async def _try_lock(db: AsyncSession) -> bool:
-    """会话级 advisory lock：cron 与日级补跑不会同时处理同一批月份。"""
-    return bool((await db.execute(
-        text('SELECT pg_try_advisory_lock(:k)'), {'k': RETENTION_LOCK_KEY})).scalar())
+def write_skip_state(reason: str, state_path: Path | None = None) -> None:
+    """本轮因故跳过（如另一实例持锁）：写 last_skipped_at，别让跳过无声无息。
 
-
-async def _unlock(db: AsyncSession) -> None:
-    """释放会话锁。必须显式释放：连接回池后会话仍在，锁不会自己消失。"""
-    await db.execute(text('SELECT pg_advisory_unlock(:k)'), {'k': RETENTION_LOCK_KEY})
+    跳过不写状态的话，健康侧只能等 staleness 满 7 天才红，且看不出是「被锁挡住」。
+    """
+    _merge_state({
+        'last_skipped_at': datetime.now(UTC).isoformat(),
+        'skip_reason': reason,
+    }, state_path)
 
 
 async def _process_month(db: AsyncSession, plan: dict, archive_dir: Path) -> dict:
-    """处理单个整月：归档 →（覆盖校验）→ 分批删除。
+    """处理单个整月：归档 → 按归档 id 删除 → 复核窗口已清空。
 
     返回 {entry, error, deleted}：entry 进 report['months']，error 非 None 表示
-    该月被跳过（error 同时进 report['errors']），deleted 为该月实删行数。
-    本函数是「只删归档覆盖到的行」这条不变式的唯一落点——所有提前返回都在
-    ``_delete_month_batched`` 之前，且删除动作带 ``id <= archive max_id`` 上界。
+    该月有问题（同时进 report['errors']）。
     """
     month_key = plan['month']
     month_start, month_end = _month_bounds(month_key)
     try:
         archive = await _export_month_jsonl(db, month_key, month_start, month_end, archive_dir)
-        if archive['existed']:
-            # 复用既有归档：不能假定「文件存在 = 内容完整」。读回文件（上一步
-            # 已校验 CRC 并取得行数/max_id），再确认待删剩余行是它的子集。
-            remaining, max_remaining = await window_stats(db, month_start, month_end)
-            if archive['rows'] < remaining or max_remaining > archive['max_id']:
-                logger.error(
-                    'audit_log 保留治理: %s 归档不完整（归档 %d 行/max_id=%d，'
-                    '库内剩余 %d 行/max_id=%d），跳过删除（人工核查）',
-                    month_key, archive['rows'], archive['max_id'],
-                    remaining, max_remaining)
-                return _skip(month_key, plan,
-                             {'month': month_key, 'error': 'archive_incomplete',
-                              'archived_rows': archive['rows'],
-                              'archive_max_id': archive['max_id'],
-                              'remaining_rows': remaining,
-                              'remaining_max_id': max_remaining})
-        elif archive['rows'] != plan['rows']:
-            # 本次导出的行数与计划不符：导出窗口内有并发写入（补录/回放）时
-            # 会命中——保守中止该月，不删除
+        if not archive['existed'] and archive['rows'] != plan['rows']:
+            # 本次导出的行数与计划不符：导出期间有并发写入（补录/回放）时会命中。
+            # 保守起见本轮不删；下一轮复用这份归档即可正常推进（幂等）。
             logger.error(
-                'audit_log 保留治理: %s 归档行数 %d != 计划 %d，跳过删除（人工核查）',
+                'audit_log 保留治理: %s 归档行数 %d != 计划 %d，本轮跳过删除',
                 month_key, archive['rows'], plan['rows'])
-            return _skip(month_key, plan,
-                         {'month': month_key, 'error': 'archive_row_mismatch',
-                          'planned_rows': plan['rows'], 'archived_rows': archive['rows']})
+            return _skip(month_key, plan, {
+                'month': month_key, 'error': 'archive_row_mismatch',
+                'planned_rows': plan['rows'], 'archived_rows': archive['rows'],
+                'remediation': '下一轮会自动复用该归档并继续；若持续出现，检查是否有'
+                               '带显式 id 的补录/恢复任务在该月窗口内写入'})
 
-        deleted = await _delete_month_batched(
-            db, month_start, month_end, max_id=archive['max_id'])
+        deleted = await _delete_ids_batched(db, archive['ids'])
+        leftover = await window_count(db, month_start, month_end)
     except (OSError, SQLAlchemyError) as exc:
         # 只兜「已知可恢复」的两类：文件系统（OSError：mkdir / gzip 写 / fsync /
         # os.replace / 归档 CRC 校验失败）与数据库（SQLAlchemyError：查询、
         # 删除、锁等待超时）。其它异常（编程错误）照旧上抛——那类 bug 必须响，
         # 不能被按月吞成一条 pending_error。
-        #
-        # 该月不删（若已删了前几批，剩余行仍在归档覆盖范围内，下一轮安全续删）。
         logger.error('audit_log 保留治理: %s 归档/删除失败，跳过该月: %s', month_key, exc)
-        return _skip(month_key, plan,
-                     {'month': month_key, 'error': f'{type(exc).__name__}: {exc}'})
+        return _skip(month_key, plan, {
+            'month': month_key, 'error': f'{type(exc).__name__}: {exc}'})
 
-    if archive['existed']:
-        # rows=-1 之类的哨兵不存在了（复用也读回真实行数），如实记录
-        logger.info(
-            'audit_log 保留治理: %s 复用归档(%d 行, max_id=%d) 删除 %d 行',
-            month_key, archive['rows'], archive['max_id'], deleted)
-    else:
-        logger.info(
-            'audit_log 保留治理: %s 归档 %d 行(max_id=%d, sha256=%s…) 删除 %d 行',
-            month_key, archive['rows'], archive['max_id'], archive['sha256'][:12], deleted)
-    return {
-        'entry': {'month': month_key, 'rows': plan['rows'],
-                  'archive_rows': archive['rows'], 'archive_max_id': archive['max_id'],
-                  'archived': True, 'archive_path': archive['path'],
-                  'sha256': archive['sha256'], 'deleted': deleted},
-        'error': None,
-        'deleted': deleted,
-    }
+    entry = {'month': month_key, 'rows': plan['rows'], 'archive_rows': archive['rows'],
+             'archived': True, 'archive_path': archive['path'],
+             'sha256': archive['sha256'], 'deleted': deleted}
+    logger.info(
+        'audit_log 保留治理: %s 归档 %d 行%s，删除 %d 行，窗口剩余 %d 行',
+        month_key, archive['rows'], '（复用）' if archive['existed'] else '',
+        deleted, leftover)
+    if leftover:
+        # 归档过的 id 都删完了，窗口里还有行 —— 它们从未进过归档（补录/回放/
+        # 旧备份恢复）。绝不能删，但要让它在健康信号里可见。
+        return {
+            'entry': entry,
+            'deleted': deleted,
+            'error': {
+                'month': month_key, 'error': 'archive_incomplete',
+                'remaining_rows': leftover, 'archived_rows': archive['rows'],
+                'remediation': f'这些行未进归档，故未删除。确认它们应当被保留后，把 '
+                               f'{archive["path"]} 改名为 .superseded-<时间戳>，'
+                               f'下一轮会重导整月归档并重新删除',
+            },
+        }
+    return {'entry': entry, 'error': None, 'deleted': deleted}
 
 
 def _skip(month_key: str, plan: dict, error: dict) -> dict:
@@ -410,13 +428,13 @@ async def run_retention_once(
     """执行一轮保留治理（调用方会话；每批删除后 commit）。
 
     返回 report：{ran_at, retention_months, months: [{month, rows, archive_rows,
-    archive_max_id, archived, sha256, deleted, error?}], deleted_total, analyzed,
-    errors: [{month, error}]}。months 为空（无需处理或禁用）也写状态文件
-    ——「任务活着」的证据本身。errors 非空表示有月份被跳过，会写进状态文件的
-    pending_errors 并让健康信号 ok=False。
+    archived, sha256, deleted}], deleted_total, analyzed, errors: [{month, error,
+    ...}]}。months 为空（无需处理或禁用）也写状态文件——「任务活着」的证据本身。
+    errors 非空表示有月份有问题，会写进状态文件的 pending_errors 并让健康信号
+    ok=False。
     """
     now = now or datetime.now(UTC)
-    archive_dir = archive_dir or Path(settings.AUDIT_ARCHIVE_DIR)
+    archive_dir = archive_dir or archive_dir_path()
     state_path = state_path or STATE_PATH
     plans = await compute_retention_plan(db, now)
 
@@ -451,15 +469,17 @@ async def run_retention_once(
             logger.error('audit_log 保留治理: 状态文件损坏，已另存为 %s', corrupt)
         except OSError:
             logger.exception('audit_log 保留治理: 状态文件损坏且无法另存')
-        report['errors'].append({'month': None, 'error': 'state_corrupt_recovered'})
+        report['errors'].append({'month': None, 'error': 'state_corrupt_recovered',
+                                 'remediation': f'原文件已另存为 {corrupt.name}，'
+                                                f'人工核对后再决定是否回填账本'})
         prev = None
     prev = prev or {}
     archives = dict(prev.get('archive_files') or {})
     for m in report['months']:
         if m.get('archive_path'):
             archives[m['month']] = {
-                'path': m['archive_path'], 'rows': m['archive_rows'],
-                'max_id': m['archive_max_id'], 'sha256': m['sha256'],
+                'path': str(Path(m['archive_path']).resolve()),
+                'rows': m['archive_rows'], 'sha256': m['sha256'],
             }
     state = {
         'last_success_at': now.isoformat(),
@@ -476,25 +496,39 @@ async def run_retention_once(
 
 
 async def audit_retention_task(ctx) -> dict:
-    """ARQ cron 入口（03:00，日级补跑机制覆盖）：持锁开会话执行一轮。"""
-    session_factory = require_async_session_local()
+    """ARQ cron 入口（03:00，日级补跑机制覆盖）：专用连接持锁后执行一轮。
+
+    为什么不用会话锁：``pg_try_advisory_lock`` 的生命周期跟 **DBAPI 连接**走，
+    而 ``Session.commit()`` 在根事务结束时把连接归还池，下一次 execute 可能拿到
+    另一条——锁会留在池里某条连接上，解锁还打在别的连接上（返回 false 被忽略）。
+    本任务每批都 commit，所以必须自己握住连接：``engine.connect()`` 拿到的连接
+    由调用方所有，``AsyncSession(bind=conn)`` 的 commit 不会关闭它。
+    """
+    engine = require_async_engine()
     report: dict | None = None
-    locked = False
-    async with session_factory() as db:
+    async with engine.connect() as conn:
+        locked = bool((await conn.execute(
+            text('SELECT pg_try_advisory_lock(:k)'), {'k': RETENTION_LOCK_KEY})).scalar())
+        if not locked:
+            # 另一实例在跑（cron 与日级补跑重叠）：留痕后干净退出
+            logger.warning('audit_log 保留治理: 已有实例持锁，跳过本轮')
+            write_skip_state('lock_busy')
+            return {'skipped': 'lock_busy'}
         try:
-            locked = await _try_lock(db)
-            if not locked:
-                # 另一实例在跑（cron 与日级补跑重叠）：让它写状态，本实例干净退出
-                logger.warning('audit_log 保留治理: 已有实例持锁，跳过本轮')
-                report = {'skipped': 'lock_busy'}
-                return report
-            report = await run_retention_once(db)
-            await db.commit()
+            async with AsyncSession(bind=conn) as db:
+                report = await run_retention_once(db)
         finally:
-            if locked:
-                # 释放失败不能让原始异常被掩盖（会话已坏时 unlock 也可能抛）
-                with suppress(SQLAlchemyError, OSError):
-                    await _unlock(db)
+            # 会话若停在 abort 事务里，先回滚才能执行下一条语句
+            with suppress(SQLAlchemyError):
+                await conn.rollback()
+            with suppress(SQLAlchemyError):
+                released = (await conn.execute(
+                    text('SELECT pg_advisory_unlock(:k)'),
+                    {'k': RETENTION_LOCK_KEY})).scalar()
+                if not released:
+                    # 不再静默吞掉：这是「锁没释放」的唯一信号
+                    logger.error('audit_log 保留治理: advisory lock 未能释放（键 %#x）',
+                                 RETENTION_LOCK_KEY)
             if report is None:
                 # 任何异常（含 CancelledError）走到这里：先留痕再让异常继续上抛。
                 # 没有这一步，「天天失败」会一直显示成「从未运行过」而免于降级。
@@ -509,18 +543,18 @@ async def audit_retention_task(ctx) -> dict:
 def audit_retention_signal() -> dict:
     """健康信号（health 端点调用；绝不抛）。
 
-    ok=False 的三种情形（任一即降级）：
+    ok=False 的情形（任一即降级）：
     - **配置低于法定下限**（0 < months < 6）：误配必须可见，否则一次运行就能
       把留存压到法定线以下；
     - **停摆**：距上次成功 > STALE_DAYS（沿用备份链停摆先例）；
-    - **有待处理错误**：``pending_errors`` 非空（某月归档失败会被逐日跳过，
+    - **有待处理错误**：``pending_errors`` 非空（某月归档失败会被逐轮跳过，
       若只看 staleness，``last_success_at`` 照常刷新会让积压永远不可见）。
     ok=True 的情形：任务被禁用（months ≤ 0，明确的人工选择）；状态文件不存在
-    （部署首日宽限——注意任务体失败时也会写 ``last_attempt_at``，所以「文件
-    持续不存在」只可能是从未部署过该任务，不是「天天失败」）。
+    （从未部署过该任务——注意任务体失败时会写 ``last_attempt_at``，所以
+    「文件持续不存在」不等于「天天失败」）。
 
-    状态文件存在但读不出来（JSON 坏 / 缺 last_success_at / 时间戳不可解析）
-    → ok=False：这与「从未运行」症状相同但性质是异常，且不会自愈。
+    状态文件存在但读不出来 / 缺 last_success_at / 时间戳不可解析 → ok=False。
+    其中「跑过但从未成功」与「文件损坏」用不同 note 区分（前者查任务，后者查文件）。
     """
     months = settings.AUDIT_RETENTION_MONTHS
     if months <= 0:
@@ -531,12 +565,20 @@ def audit_retention_signal() -> dict:
                 'note': 'below_statutory_minimum'}
     state = read_retention_state()
     if state is None or not state.get('last_success_at'):
-        # 区分「文件不存在」（宽限）与「文件存在但无成功记录/读不出」（异常）
-        if STATE_PATH.exists():
-            return {'ok': False, 'last_success_at': None, 'note': 'state_unreadable',
-                    'last_error': (state or {}).get('last_error'),
-                    'state_path': str(STATE_PATH)}
-        return {'ok': True, 'last_success_at': None, 'note': 'not_yet_run'}
+        if not STATE_PATH.exists():
+            return {'ok': True, 'last_success_at': None, 'note': 'not_yet_run'}
+        attempted = bool((state or {}).get('last_attempt_at'))
+        return {
+            'ok': False,
+            'last_success_at': None,
+            # 「跑过但从未成功」≠「文件坏了」：前者查任务，后者查文件
+            'note': 'never_succeeded' if attempted else 'state_unreadable',
+            'last_attempt_at': (state or {}).get('last_attempt_at'),
+            'last_error': (state or {}).get('last_error'),
+            'last_skipped_at': (state or {}).get('last_skipped_at'),
+            'skip_reason': (state or {}).get('skip_reason'),
+            'state_path': str(STATE_PATH),
+        }
     try:
         last = datetime.fromisoformat(state['last_success_at'])
     except (TypeError, ValueError):
