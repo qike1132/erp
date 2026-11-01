@@ -159,6 +159,30 @@ def _audit_retention_signal() -> dict:
         return {"ok": True, "note": "signal_error"}
 
 
+def _resolve_status(overall_healthy: bool, backup_ok: bool, audit_retention_ok: bool) -> str:
+    """健康状态判定（纯函数，便于回归：状态语义不能只活在 if 分支里）。
+
+    - DB 不通 → unhealthy（HTTP 503）；
+    - DB 通但**任一数据保护链**不 ok → degraded（仍 200，不触发监督器重启，
+      但 GUI/巡检可据 status 区分）。
+
+    两条链：
+    - ``backup``：2026-10-17 审计 F-BE-CORE-05——备份产物过期/ARQ 停摆原先只
+      写进 backup 字段，状态码仍 200 healthy，监督器与外部探活全绿，数据保护链
+      静默失效无人可见（2026-09-16 那类事故的观察缺口）。
+    - ``audit_retention``：P1-R2——日志留存是法定责任（《网络安全法》第 21 条
+      六个月），任务静默死掉等于「该删的没删、状态文件过期」，等保检查时无法
+      自证是策略性滚动清理。ARQ 整体停摆时两条链会同时不 ok（_backup_signal 含
+      arq_ok），根因仍只体现在 backup 字段，此处不重复报警，只为让「ARQ 在跑
+      但保留任务持续失败」这种更隐蔽的形态可见。
+    """
+    if not overall_healthy:
+        return "unhealthy"
+    if not backup_ok or not audit_retention_ok:
+        return "degraded"
+    return "healthy"
+
+
 def _with_security_degraded(payload: dict, reasons: list[str]) -> dict:
     """注入安全降级标记（P0-10）：degraded 列表 + security_degraded 布尔。
 
@@ -255,24 +279,11 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str]):
     }
     health_data["backup"] = await _backup_signal()
     health_data["audit_retention"] = _audit_retention_signal()
-    if not overall_healthy:
-        health_data["status"] = "unhealthy"
-    elif not health_data["audit_retention"].get("ok", False):
-        # P1-R2：audit_log 保留策略停摆 >STALE_DAYS 天 → degraded（仍 200）。
-        # 合规侧意义：日志留存是法定责任（《网络安全法》第 21 条六个月），
-        # 任务静默死掉等于「该删的没删、状态文件过期」，等保检查时无法自证
-        # 是策略性滚动清理。注：ARQ 整体停摆时 backup.audit_retention 两项
-        # 会同时不 ok（_backup_signal 含 arq_ok），根因仍只体现在 backup 字段，
-        # 此处不重复报警，仅保证「ARQ 在跑但本任务持续失败」这种更隐蔽的
-        # 形态可见。
-        health_data["status"] = "degraded"
-    elif not health_data["backup"].get("ok", False):
-        # 2026-10-17 审计 F-BE-CORE-05：备份产物过期/ARQ 停摆原先只写进
-        # backup 字段，状态码仍 200 healthy——监督器与外部探活全部绿灯，
-        # 数据保护链静默失效无人可见（2026-09-16 那类事故的观察缺口）。
-        # DB 正常但备份链异常时降级为 degraded（仍 200，不触发监督器重启，
-        # 但 GUI/巡检可据 status 区分）。
-        health_data["status"] = "degraded"
+    health_data["status"] = _resolve_status(
+        overall_healthy=overall_healthy,
+        backup_ok=health_data["backup"].get("ok", False),
+        audit_retention_ok=health_data["audit_retention"].get("ok", False),
+    )
     _set_cached_health(public_data=dict(health_data), internal_data=internal_checks)
 
     # P0-10：降级标记只加在响应上（缓存里存的是 DB/Redis 健康快照）

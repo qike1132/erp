@@ -109,21 +109,63 @@
 | 配置项 | `core/config.py` `AUDIT_RETENTION_MONTHS`(12) / `AUDIT_ARCHIVE_DIR` | ✅ `.env.example` 同步（含「不要调到 6 以下」的法定下限说明） |
 | 调度 | `core/arq_app.py` cron 03:00，timeout 600，入 `_DAILY_CRON_NAMES` | ✅ 已注册进 `WorkerSettings.functions`（守卫见 `test_arq_functions_registry.py`） |
 | 健康暴露 | `core/health.py` `audit_retention` 块 | ✅ ok=False → `status=degraded`（仍 200） |
-| 测试 | `fastapi_app/tests/test_audit_retention_task.py` | ✅ 22 项；4 处定点变异全部被杀死 |
+| 测试 | `fastapi_app/tests/test_audit_retention_task.py` | ✅ 37 项；11 处定点变异全部被杀死 |
 
-实施中确立的**五条不变式**（均有测试锁定）：
+实施中确立的**六条不变式**（均有测试锁定）：
 
 1. **整月粒度**——「月结束 ≤ cutoff」才处理，月中部分过期整月保留（实际保留 12~13 个月，多留方向）；
-2. **归档成功才删除**——归档抛错/行数不符时该月一行不删，`continue` 到下一月；
-3. **分批提交**——pkey 游标推进、每批一次 commit（小事务，避免锁放大）；
-4. **幂等**——正式归档文件存在即不重导（不覆盖证据），重跑仍继续删除未删部分；
-5. **错误不静默**——`pending_errors` 非空时健康信号 ok=False。
+2. **删除范围 ⊆ 归档覆盖范围**——删除谓词带归档的 `max_id` 上界；复用既有归档时重新读回文件（CRC 校验）并校验剩余行是其子集；
+3. **分批**——导出与删除都按批（≤5000），删除每批一次 commit（小事务，避免锁放大）；
+4. **幂等**——正式归档文件存在即不重导（不覆盖证据），重跑续删剩余部分；
+5. **错误不静默**——`pending_errors` 非空时健康信号 ok=False；任务整体失败也写状态（否则「天天失败」被读成「从未运行」而永久宽限）；
+6. **时区口径显式 UTC**——不依赖会话 `TimeZone`。
 
 第 5 条是实现时新增的设计（原报告只提「停摆 >7 天」）：如果只有 staleness 判据，
 某月归档持续失败会被逐日跳过，而 `last_success_at` 照常刷新 → 健康端点永远绿、
 积压无人处理。这与 F-BE-CORE-05（备份链静默失效）同型，故把错误同时写进状态文件
 并纳入 ok 判据。此外状态文件**损坏**与**不存在**在信号里区分：前者 ok=False
 （损坏不自愈），后者是部署首日宽限 ok=True。
+
+### 4.2 独立评审（2026-11-01）：1 条 High + 7 条 Medium，已全部闭环
+
+**H1（High，已修）：「归档成功才删除」在复用路径上退化成「文件存在就删除」。**
+原实现的删除谓词是时间窗，不是归档覆盖范围；`existed=True` 时跳过一切校验。
+两条触发路径都不需要人为误操作：① 写路径只有 `gzip.close()` 没有 `fsync`，
+掉电后可能出现「正式文件存在但内容截断」，下一轮凭「存在」把整月源行删光；
+② 导出与删除之间的时间差里落进该窗口的行（补录/回放/旧备份恢复）会被删掉却
+从未归档。洪峰月占全表 95%，一旦命中就是审计证据归零。
+修法：导出记录 `max_id` → 删除谓词加 `id <= max_id`；复用路径重新读回归档
+（gzip 读到底即 CRC 校验）取得行数与 `max_id`，校验剩余行是子集，不满足即中止
+并进 `pending_errors`；写路径改为「gzip 关闭后再 `flush+fsync` 再 `os.replace`」。
+**这使不变式 2 由「依赖时序」变成「由构造保证」。**
+
+**M4（Medium，已修，且实测为真实缺陷而非假设）**：原注释称「`date_trunc` 对
+`timestamptz` 默认 UTC」——不成立。生产实测 `SHOW TimeZone = Asia/Shanghai`，
+同一批数据在会话口径与 UTC 口径下的月桶差 **303 行**（2026-10：256,681 vs
+256,402）。即首轮真实运行必然 `archive_row_mismatch`，而旧代码第二天就靠
+「文件存在」绕过校验照删——安全网只在第一天生效过。修法：月键一律
+`to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM')`，并加回归测试断言 SQL 里
+没有 `date_trunc`。
+
+其余已修：M1（`last_success_at` 不可解析时返回 ok=True，与「损坏=异常」自相矛盾；
+naive 时间戳会让「绝不抛」的函数抛 TypeError）、M2（状态文件读不出来时
+`archive_files` 等保账本被静默清零 → 改为另存 `.corrupt-*` 留现场）、
+M3（`not_yet_run` 宽限无上限 → 任务失败也写 `last_attempt_at`）、
+M5（cron 与日级补跑可并发处理同一月 → 会话级 advisory lock）、
+M6（整月 25 万行一次性物化进内存 → 导出改分批）、
+M7（健康降级的回归测试恒真 → 抽出 `_resolve_status` 纯函数 + 端到端驱动
+`_build_fresh_health`）。另有 L1-L4 一并修（删除阶段失败隔离、账本记归档实际
+行数、`STATE_PATH` 锚定项目根、`0 < months < 6` 拒绝执行并报 misconfigured）。
+
+**验证证据**：37 项聚焦测试；11 处定点变异（去 `max_id` 上界、去子集校验、
+复用即信任、月键回退会话时区、去 `pending_errors` 判据、去法定下限校验、
+删除失败上抛、导出不分批、损坏静默清零、失败不留痕、health 忽略该项）
+**全部被杀死**，每步还原后源文件 sha256 一致；全量 pytest 见提交信息。
+
+> 变异验证本身踩过一次坑并已加固：第一版驱动只在整轮结束时还原，提权进程被
+> 杀后源文件带着变异留在盘上，下一轮把「坏文件」当成原文——守卫被永久删除且
+> 无人察觉。现改为旁车备份 + 每步立即还原 + 基线自检（未变异必须全绿，
+> 否则「pytest 起不来」会让所有变异假性 KILLED）。
 
 **已知限制（未解决，需接受）**：归档落在 `backups/audit_archive/`，与数据库同盘，
 本仓库不存在异地副本机制（`core/config.py` 对 `BACKUP_DIR` 也明示「与数据库同盘，
