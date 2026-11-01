@@ -461,11 +461,15 @@ describe('右侧「最近客户添加」', () => {
     })
   }
 
-  it('没选客户时不出现右侧栏', async () => {
+  it('右栏是固定区域：没选客户时也显示，只给引导不给空态按钮', async () => {
     const w = mountDialog()
     await flushPromises()
 
-    expect(w.find('[data-test="qe-recent"]').exists()).toBe(false)
+    const rail = w.find('[data-test="qe-recent"]')
+    expect(rail.exists()).toBe(true)
+    expect(rail.text()).toContain('最近客户添加')
+    expect(rail.text()).toContain('先选择客户')
+    expect(rail.find('.browse').exists()).toBe(false)
   })
 
   it('选了客户后列出该客户最近录入的 SKU，别的客户不混进来', async () => {

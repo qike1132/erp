@@ -3,13 +3,17 @@
     <div class="pr-recent-head">
       <div class="pr-recent-title">
         <b>最近客户添加</b>
-        <span :title="customerName">{{ customerName }}</span>
+        <span :title="customerName">{{ customerId == null ? '未选客户' : customerName }}</span>
       </div>
-      <span class="pr-recent-count">{{ items.length }}</span>
+      <span v-if="customerId != null" class="pr-recent-count">{{ items.length }}</span>
     </div>
 
     <div class="pr-recent-list">
       <div v-if="loading" class="pr-recent-state">加载中…</div>
+      <div v-else-if="customerId == null" class="pr-recent-state">
+        <span>先选择客户</span>
+        <span class="sub">这里会显示该客户最近录入的 SKU，点一条直接加一行</span>
+      </div>
       <template v-else-if="items.length">
         <button
           v-for="it in items"
@@ -38,12 +42,13 @@
 /**
  * ProductionEntryRecent — 表格右侧「最近客户添加」。
  *
- * 数据是「该客户近 90 天录入过的 SKU」（由 useProductionEntry 拉生产记录去重而来），
- * 点一条直接加一行，省掉「先搜再选」的两步。取代了原先存在 localStorage 里的全局最近使用。
+ * 固定占位的独立区域：没选客户时显示引导，选了客户后列出该客户近 90 天
+ * 录入过的 SKU（由 useProductionEntry 拉生产记录去重而来），点一条直接加一行。
  */
 import type { RecentSku } from '../composables/useProductionEntry'
 
 defineProps<{
+  customerId: number | null
   items: RecentSku[]
   loading: boolean
   customerName: string
@@ -70,6 +75,7 @@ const emit = defineEmits<{
 .pr-recent-item .code { font-family: 'SF Mono', Consolas, monospace; }
 .pr-recent-item .qty { color: var(--color-text-muted); }
 .pr-recent-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px 12px; font-size: 12px; line-height: 1.6; color: var(--color-text-placeholder); text-align: center; }
+.pr-recent-state .sub { font-size: 11.5px; color: var(--color-text-4, var(--color-text-placeholder)); }
 .pr-recent-state .browse { border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 12px; font-weight: 600; border-radius: 7px; padding: 5px 10px; cursor: pointer; font-family: inherit; }
 .pr-recent-state .browse:hover { border-color: var(--color-primary-400); color: var(--color-primary-700); }
 </style>

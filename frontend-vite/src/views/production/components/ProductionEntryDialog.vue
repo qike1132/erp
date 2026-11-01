@@ -107,9 +107,9 @@
               />
             </div>
 
-            <!-- 右侧：该客户最近录入过的 SKU，点一条直接加一行 -->
+            <!-- 右侧固定区域：该客户最近录入过的 SKU，点一条直接加一行 -->
             <ProductionEntryRecent
-              v-if="customerId != null"
+              :customer-id="customerId"
               :items="customerRecent"
               :loading="recentLoading"
               :customer-name="customerName"
