@@ -387,12 +387,12 @@ describe('按客户带出产品', () => {
     expect(productListMock).not.toHaveBeenCalled()
   })
 
-  it('选了客户后聚焦搜索框，直接列出该客户可见的产品', async () => {
+  it('选了客户后点击搜索框，直接列出该客户可见的产品', async () => {
     const w = mountDialog()
     await pickCustomer(w, 5)
     productListMock.mockResolvedValue({ items: PRODUCTS, total: 2 })
 
-    await w.find('[data-test="qe-search"]').trigger('focus')
+    await w.find('[data-test="qe-search"]').trigger('click')
     await flushPromises()
 
     expect(productListMock).toHaveBeenCalledWith(expect.objectContaining({ customer_id: 5, page: 1 }))
@@ -418,7 +418,7 @@ describe('按客户带出产品', () => {
     const w = mountDialog()
     await pickCustomer(w, 5)
     productListMock.mockResolvedValue({ items: PRODUCTS, total: 2 })
-    await w.find('[data-test="qe-search"]').trigger('focus')
+    await w.find('[data-test="qe-search"]').trigger('click')
     await flushPromises()
 
     productListMock.mockResolvedValue({ items: [PRODUCTS[0]!], total: 1 })

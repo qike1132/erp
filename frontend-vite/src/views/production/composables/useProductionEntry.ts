@@ -319,14 +319,19 @@ export function useProductionEntry(
     }, 300)
   }
   function onSearchFocus() {
+    // 聚焦只负责「收着的下拉重新展开」，不主动拉数据——
+    // 否则打开录入页时的自动聚焦会把产品列表整个弹出来（已定位过的 BUG）。
     const kw = searchQuery.value.trim()
     if (kw) {
       if (searchResults.value.length || searchError.value) showDropdown.value = true
       return
     }
-    if (customerId.value == null) return
-    if (searchResults.value.length) showDropdown.value = true
-    else void browseCustomerProducts()
+    if (customerId.value != null && searchResults.value.length) showDropdown.value = true
+  }
+  /** 用户点击搜索框才展开该客户的产品列表（键盘 Tab 聚焦不触发） */
+  function onSearchClick() {
+    if (searchQuery.value.trim()) return
+    if (customerId.value != null && !searchResults.value.length) void browseCustomerProducts()
   }
   function onSearchBlur() {
     const _t = setTimeout(() => {
@@ -962,6 +967,7 @@ export function useProductionEntry(
     searchHint,
     onSearchInput,
     onSearchFocus,
+    onSearchClick,
     onSearchBlur,
     moveSearchIndex,
     confirmSearchSelection,
