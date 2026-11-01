@@ -55,15 +55,15 @@ watch(
 
 <style scoped>
 .pr-paste-mask { position: absolute; inset: 0; z-index: 30; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(2px); display: grid; place-items: center; border-radius: 18px; }
-.pr-paste-card { width: min(560px, 92%); background: #fff; border-radius: 14px; padding: 18px 20px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.3); }
-.pr-paste-card h4 { margin: 0 0 6px; font-size: 16px; font-weight: 800; }
-.pr-paste-card p { margin: 0 0 10px; font-size: 13px; line-height: 1.7; color: var(--color-text-muted); }
+.pr-paste-card { width: min(640px, 92%); background: #fff; border-radius: 16px; padding: 22px 24px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.3); }
+.pr-paste-card h4 { margin: 0 0 8px; font-size: 18px; font-weight: 800; }
+.pr-paste-card p { margin: 0 0 12px; font-size: 14.5px; line-height: 1.7; color: var(--color-text-muted); }
 .pr-paste-card p b { color: var(--color-text-secondary); }
-.pr-paste-card textarea { width: 100%; height: 128px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 10px; font-family: 'SF Mono', Consolas, monospace; font-size: 12.5px; line-height: 1.8; resize: vertical; outline: none; color: var(--color-text-secondary); box-sizing: border-box; }
+.pr-paste-card textarea { width: 100%; height: 168px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: 11px; font-family: 'SF Mono', Consolas, monospace; font-size: 14px; line-height: 1.8; resize: vertical; outline: none; color: var(--color-text-secondary); box-sizing: border-box; }
 .pr-paste-card textarea:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.13); }
-.pr-paste-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.pr-paste-hint { margin-right: auto; font-size: 12px; color: var(--color-text-placeholder); }
-.pr-paste-btn { height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.pr-paste-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.pr-paste-hint { margin-right: auto; font-size: 13px; color: var(--color-text-placeholder); }
+.pr-paste-btn { height: 42px; padding: 0 18px; border-radius: 9px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
 .pr-paste-btn.pri { background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); border-color: transparent; color: #fff; }
 .pr-paste-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
