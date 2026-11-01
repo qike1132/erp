@@ -345,6 +345,15 @@ class Settings(BaseSettings):
     # ARQ 结果存储沿用 broker 实例（REDIS_BROKER_URL），未配置时使用通用 Redis
     REDIS_RESULT_URL: str = os.getenv("REDIS_RESULT_URL", "")
 
+    # audit_log 保留期治理（P1-R2，2026-11-01 owner 批准；决策依据
+    # docs/audit-log-retention-decision.md：网安法第 21 条日志留存 ≥6 个月
+    # 为法定底线，12 个月 = 2 倍余量 + 覆盖会计年度；0 = 禁用清理任务）。
+    # 清理由 ARQ cron audit-retention 每日 03:00 执行：整月归档先行
+    # （jsonl.gz，原子写）→ 分批删除 → ANALYZE；停摆 >7 天在
+    # /api/health 的 audit_retention 块可见并置 status=degraded。
+    AUDIT_RETENTION_MONTHS: int = int(os.getenv("AUDIT_RETENTION_MONTHS") or "12")
+    AUDIT_ARCHIVE_DIR: str = os.getenv("AUDIT_ARCHIVE_DIR", "backups/audit_archive")
+
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
     # 包含 Nginx 统一入口（端口80）、Python HTTP 服务（端口8000/8080）、
     # 直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）

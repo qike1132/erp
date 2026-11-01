@@ -218,6 +218,7 @@ class CommitBatcher:
 
 
 # 任务注册：ARQ 通过 functions 列表注册，按函数 __name__ 派发
+from fastapi_app.tasks.audit_retention_task import audit_retention_task
 from fastapi_app.tasks.backup_tasks import (
     apply_backup_policy_task,
     auto_daily_backup_task,
@@ -260,7 +261,7 @@ from fastapi_app.tasks.report_tasks import export_report_task
 # 注意它只是上限——任务体必须抛 ``Retry`` 才会真正重放（ARQ 0.28 语义）。
 
 # 日级 cron：worker 停机跨越触发点会永久漏跑，由 catch_up_daily_crons 补跑
-_DAILY_CRON_NAMES = {"sync-shipment-daily", "log-maintenance", "deadletter-patrol"}
+_DAILY_CRON_NAMES = {"sync-shipment-daily", "log-maintenance", "deadletter-patrol", "audit-retention"}
 _CRON_LAST_OK_PREFIX = "cron_last_ok:"
 
 
@@ -340,6 +341,18 @@ cron_schedules: list[dict[str, Any]] = [
         'cron': {'hour': 6, 'minute': 30},
         'schedule': '6:30',
         'timeout': 60,
+    },
+    {
+        # audit_log 保留期治理（P1-R2，docs/audit-log-retention-decision.md）：
+        # 整月归档先行（jsonl.gz 原子写）→ pkey 游标分批删除（每批 ≤5000 小
+        # 事务）→ ANALYZE。03:00 低峰（01:00 同步 / 02:00 备份 / 04:30 日志
+        # 维护之外）；归档+删除月级量（洪峰月 ~25 万行 → ~50 批），600s 足够。
+        # 停摆 >7 天由 /api/health 的 audit_retention 块可见（degraded）。
+        'name': 'audit-retention',
+        'func': audit_retention_task,
+        'cron': {'hour': 3, 'minute': 0},
+        'schedule': '3:00',
+        'timeout': 600,
     },
     {
         # 编号不变量巡检：counter_behind（数据号 > 水位）与格式违规落库，
@@ -509,6 +522,9 @@ class WorkerSettings:
             catch_up_daily_crons,
             # deadletter-patrol 同为日级 cron + catchup 按名入队（M-C），必须注册
             inspect_deadletter_task,
+            # audit-retention 亦为日级 cron + catchup 按名入队（P1-R2），必须注册，
+            # 否则停机跨触发点后的补跑会 KeyError 且静默失败
+            audit_retention_task,
         )
     ]
     cron_jobs = cron_jobs
