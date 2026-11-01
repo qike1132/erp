@@ -109,7 +109,7 @@
 | 配置项 | `core/config.py` `AUDIT_RETENTION_MONTHS`(12) / `AUDIT_ARCHIVE_DIR` | ✅ `.env.example` 同步（含「不要调到 6 以下」的法定下限说明） |
 | 调度 | `core/arq_app.py` cron 03:00，timeout 600，入 `_DAILY_CRON_NAMES` | ✅ 已注册进 `WorkerSettings.functions`（守卫见 `test_arq_functions_registry.py`） |
 | 健康暴露 | `core/health.py` `audit_retention` 块 | ✅ ok=False → `status=degraded`（仍 200） |
-| 测试 | `fastapi_app/tests/test_audit_retention_task.py` | ✅ 42 项；两轮共 21 处定点变异全部被杀死 |
+| 测试 | `fastapi_app/tests/test_audit_retention_task.py` + `test_audit_retention_pg.py` | ✅ 45 项单元 + 3 项真库集成；三轮共 25 处定点变异全部被杀死 |
 
 实施中确立的**六条不变式**（均有测试锁定）：
 
@@ -222,14 +222,6 @@ M7（健康降级的回归测试恒真 → 抽出 `_resolve_status` 纯函数 + 
 health 忽略该项、**合并状态不重读**；每步还原后源文件 sha256 一致，恢复后全量 PASS。
 新增 `test_fsync_happens_after_gzip_trailer` 用事件顺序把「gzip 尾部先于 fsync」
 钉住（`GzipFile` 只在 `close()` 补 CRC 尾部，顺序反了就是「文件存在但内容截断」）。
-
-**顺带修掉的另一个竞态（自查发现，非评审项）**：`write_skip_state` 恰恰只在
-「别人持锁运行」时被调用，于是「跳过方读旧状态 → 持锁方落盘成功 → 跳过方写回」
-的顺序是**结构性**的，`last_success_at` 会被退回旧值、极端情况下整个字段消失，
-健康端点随即误报 `never_succeeded`。修法：`_merge_state` 落盘前**再读一次**，
-时间戳只准变新、`archive_files` 取并集、`deleted_rows_total` 取大。对应
-`test_skip_state_does_not_clobber_concurrent_success`。
-
 **补上「SQL 从未打到 PostgreSQL」的缺口**：新增 `test_audit_retention_pg.py`
 （`integration` + `db` 标记）。三条最危险的 SQL——月键 `to_char(... AT TIME ZONE 'UTC')`、
 `DELETE ... WHERE id = ANY(:ids)` 的**列表绑定**、分批 DELETE——在单元测试里只能
@@ -241,6 +233,68 @@ health 忽略该项、**合并状态不重读**；每步还原后源文件 sha25
 **仍然存在的限制**：归档与库同盘（见上「已知限制」）；`logs/` 下的探针与变异驱动
 是**一次性诊断脚本**，不进产品代码路径。
 
+### 4.4 第三轮复审（2026-11-01）：1 条 Blocker，已闭环
+
+复审者把「会话绑定到已有事务的连接」这条 SQLAlchemy 语义挖了出来，并实测复现——
+**这是 §4.3 的 H-1 修复自己引入的回归**，比原缺陷更隐蔽。
+
+**Blocker：批次删除在真实入口上不再落盘，任务「成功」但一行没删。**
+取锁那条 `SELECT pg_try_advisory_lock(...)` 会让连接 **autobegin**；随后
+`AsyncSession(bind=conn)` 绑到「已有事务的连接」时，默认
+`join_transaction_mode='conditional_savepoint'` 会退化成 `rollback_only`——
+SQLAlchemy 文档原文：`"rollback_only" - ... .commit() calls will not be propagated
+to the given transaction`。于是 `_delete_ids_batched` 每批 `db.commit()` 只 flush，
+所有 DELETE 堆在外部事务里，最后被 `finally` 的 `conn.rollback()` 一起丢掉。
+
+三条独立验证（sqlite 注入同一套事务语义，其余为生产代码）：
+
+| 写法 | `commit()` 后 `conn.in_transaction()` | 外层 rollback 后可见行数 |
+|---|---|---|
+| A 现状 `AsyncSession(bind=conn)` | True | **0（删除被丢弃）** |
+| B `join_transaction_mode='control_fully'` | False | 1 |
+| C 先 `conn.rollback()` 再默认会话 | False | 1 |
+
+后果链：① 保留治理彻底失效、`audit_log` 无限膨胀；② 删完的 `window_count`
+在**同一事务**里看得见自己的删除 → 永远报「窗口已清空」，`archive_incomplete`
+形同虚设；③ `report['deleted_total']` 是真实 rowcount → 状态文件每轮虚增、
+`last_success_at` 持续刷新 → `/api/health` 常年绿，**完全静默**；④ 整轮变成
+一个大事务，分批小事务与 `ANALYZE` 的意义一并消失。
+
+修法（两道保险）：取锁后先 `conn.rollback()` 结束 autobegin（advisory lock 是
+**会话级**、不随事务回滚释放），再显式
+`AsyncSession(bind=conn, join_transaction_mode='control_fully')`。
+
+**为什么单测抓不到、以及怎么补上**：`FakeDB.commit()` 只计数，事务语义在替身层
+不可表达；`_FakeSessionCM` 又忽略 `bind`，于是「会话是否绑在持锁连接上」「是否
+接管事务」这两个前提**一个都没被断言**。补法：
+1. 单测断言构造参数——`session.kwargs['bind'] is engine.conns[0]` 且
+   `join_transaction_mode == 'control_fully'`；
+2. 真库用例 `test_task_persists_deletions_through_entry_point` **走真实入口**
+   `audit_retention_task()`，返回后另开连接（NullPool ⇒ 全新连接）必须查不到那批
+   行。原真库用例绑的是 `AsyncSession(bind=pg_engine)`（无预置事务），commit
+   天然生效，**恰好绕开了这个缝**——这正是它必须走入口的原因。
+3. 变异验证：去掉 `control_fully` 即红。
+
+同轮一并处理的其余项：
+- **M**：`_merge_state` 只护住 3 个时间戳，`pending_errors`/`last_error` 仍取旧快照
+  → 跳过方会把持锁方刚记下的 `archive_incomplete` 静默清掉（健康转绿）。改为以
+  **落盘前的最新快照为底**，调用方字段覆盖其上。
+- **M**：通用失败分支（`OSError`/`SQLAlchemyError`）没有 `remediation`，而这恰是
+  磁盘满/锁超时最常见的场景 → 补上按错误类型的处置步骤。
+- **L**：删除谓词改成纯 id 集合后，失去了「时间窗」这层纵深防御。补一条**等式
+  核算**：删除前的窗口行数 `before` 与 `deleted` 必须满足 `deleted <= before`，
+  否则说明归档里的 id 不属于这个月（改名复用/跨环境恢复/带显式 id 的补录），
+  记 `delete_exceeded_window` 并给处置步骤——`window_count` 只看本月，看不见越界。
+- **L**：`int()` 容错（手改坏的账本值不能让 `write_failure_state` 在 finally 里
+  抛异常顶掉原始异常）；`_jsonable` 对 dict/list 用 `json.dumps`（`detail` 落
+  `str()` 会变成 Python repr，归档就不是合法 JSONL）。
+- **L**：真库用例的清理改为**只删本文件专用 id 段**（900000-999999），不再按
+  时间窗宽删共享测试库。
+
+**验证证据（第三轮）**：45 项单测 + 3 项真库集成（本机无测试库凭据时 skip）；
+14 处定点变异全部被杀死（新增：去掉 `control_fully`、去掉越界删除核算、
+合并状态不取最新快照）；端到端探针在 sqlite 上跑**真实入口**
+`audit_retention_task`，`visible_rows_after_task = 1`（修复前为 0）。
 
 **已知限制（未解决，需接受）**：归档落在 `backups/audit_archive/`，与数据库同盘，
 本仓库不存在异地副本机制（`core/config.py` 对 `BACKUP_DIR` 也明示「与数据库同盘，

@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from fastapi_app.core.config import settings
 from fastapi_app.tasks import audit_retention_task as art
@@ -315,6 +316,34 @@ async def test_leftover_unarchived_rows_report_has_remediation(tmp_path):
     assert state['pending_errors'][0]['error'] == 'archive_incomplete'
 
 
+async def test_delete_that_exceeds_window_is_reported(tmp_path):
+    """归档被改名复用/来自别的环境时，删除会越出本月窗口 —— 必须报出来。
+
+    构造成 2025-10 的窗口里只有 1、2，但归档文件（被人改名复用）里还有 900，
+    而 900 属于 2025-09。按 id 删除会跨月删掉 900：`deleted(3) > before(2)`
+    就是唯一的信号——`window_count` 只看本月，看不出越界。
+    变异验证：去掉 `if deleted > before` 分支后本测试失败（静默返回无 error）。
+    """
+    month = '2025-10'
+    gz = tmp_path / 'audit_log_202510.jsonl.gz'
+    with gzip.open(gz, 'wt', encoding='utf-8') as f:
+        for i in (1, 2, 900):
+            f.write(json.dumps(dict(zip(art._AUDIT_COLUMNS, _row(i, month), strict=True)),
+                               default=str) + '\n')
+
+    db = FakeDB(months={month: 2}, ids_by_month={'2025-10': [1, 2], '2025-09': [900]})
+    report = await art.run_retention_once(
+        db, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=tmp_path / 'state.json',
+    )
+    err = report['errors'][0]
+    assert err['error'] == 'delete_exceeded_window'
+    assert err['deleted_rows'] == 3 and err['window_rows_before'] == 2
+    assert 'remediation' in err
+    state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
+    assert state['pending_errors'][0]['error'] == 'delete_exceeded_window'
+
+
 async def test_corrupt_archive_is_not_reused(tmp_path):
     """截断/损坏的归档（掉电后常见）必须当成错误，而不是「文件存在就删」。
 
@@ -331,7 +360,8 @@ async def test_corrupt_archive_is_not_reused(tmp_path):
         archive_dir=tmp_path, state_path=tmp_path / 'state.json',
     )
     assert db.deleted_ids == []
-    assert report['errors'][0]['error'].startswith('OSError')
+    assert report['errors'][0]['error'] == 'archive_failed'
+    assert 'OSError' in report['errors'][0]['detail']
 
 
 async def test_reuse_is_idempotent_and_resumes_deletion(tmp_path):
@@ -389,7 +419,8 @@ async def test_no_delete_when_export_raises(tmp_path):
     )
     assert report['deleted_total'] == 0
     assert 'delete' not in db.calls
-    assert 'OSError' in report['errors'][0]['error']
+    assert report['errors'][0]['error'] == 'archive_failed'
+    assert 'OSError' in report['errors'][0]['detail']
     state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
     assert state['pending_errors'][0]['month'] == month
 
@@ -421,6 +452,30 @@ async def test_delete_failure_skips_only_that_month(tmp_path):
     assert db.deleted_ids == [1]
     assert [e['month'] for e in report['errors']] == [bad]
     assert report['analyzed'] is True
+
+
+async def test_delete_failure_keeps_archive_in_ledger(tmp_path):
+    """删除阶段失败 ≠ 归档白做：账本必须留下该月的 path/sha256。
+
+    等保检查要看的是「这份证据在哪、指纹是多少」。删除失败时若把 entry 降级成
+    「未归档」，磁盘上有文件、账本上没记录，取证链就断了一环。
+    """
+    month = '2025-10'
+    db = FakeDB(months={month: 2}, ids_by_month={month: [1, 2]},
+                delete_error=SQLAlchemyError('lock timeout'), delete_error_month=month)
+    report = await art.run_retention_once(
+        db, now=datetime(2026, 11, 15, tzinfo=UTC),
+        archive_dir=tmp_path, state_path=tmp_path / 'state.json',
+    )
+    entry = report['months'][0]
+    assert entry['archived'] is True
+    assert entry['archive_path'].endswith('audit_log_202510.jsonl.gz')
+    assert len(entry['sha256']) == 64
+    assert report['errors'][0]['error'] == 'delete_failed'
+    assert 'remediation' in report['errors'][0]
+
+    state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
+    assert state['archive_files'][month]['sha256'] == entry['sha256']
 
 
 async def test_unexpected_export_error_propagates(tmp_path):
@@ -606,6 +661,8 @@ def test_skip_state_does_not_clobber_concurrent_success(tmp_path, monkeypatch):
             '2025-10': {'path': 'b', 'rows': 2, 'sha256': 'y'},
         },
         'deleted_rows_total': 9,
+        # 持锁方刚记下的错误：跳过方拿旧快照写回会把它静默清掉（健康转绿）
+        'pending_errors': [{'month': '2025-10', 'error': 'archive_incomplete'}],
     }
     state_path.write_text(json.dumps(stale), encoding='utf-8')
 
@@ -623,6 +680,7 @@ def test_skip_state_does_not_clobber_concurrent_success(tmp_path, monkeypatch):
     assert state['last_success_at'] == fresh['last_success_at']   # 未被退回旧值
     assert set(state['archive_files']) == {'2025-09', '2025-10'}  # 账本只增不减
     assert state['deleted_rows_total'] == 9
+    assert state['pending_errors'] == fresh['pending_errors']     # 错误不能被抹掉
     assert state['skip_reason'] == 'lock_busy'
 
 
@@ -671,13 +729,32 @@ class _FakeEngine:
 
 
 class _FakeSessionCM:
-    """AsyncSession(bind=conn) 的替身：本组测试只关心锁/异常/留痕，不碰真连接。"""
+    """``AsyncSession(bind=..., join_transaction_mode=...)`` 的替身：记录构造参数。
+
+    替身必须**看见**构造参数，否则「会话绑在哪条连接上」「是否显式接管事务」
+    这两个 H-1/Blocker 的核心前提在单测层无法断言（复审 Medium-1）。
+    """
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
 
     async def __aenter__(self):
         return object()
 
     async def __aexit__(self, *exc):
         return False
+
+
+def _patch_session(monkeypatch) -> dict:
+    """把 AsyncSession 换成记录构造参数的替身，返回 {session: _FakeSessionCM}。"""
+    seen: dict = {}
+
+    def _factory(**kwargs):
+        seen['session'] = _FakeSessionCM(**kwargs)
+        return seen['session']
+
+    monkeypatch.setattr(art, 'AsyncSession', _factory)
+    return seen
 
 
 async def test_task_holds_lock_on_dedicated_connection(monkeypatch, tmp_path):
@@ -687,13 +764,15 @@ async def test_task_holds_lock_on_dedicated_connection(monkeypatch, tmp_path):
     归还池——锁若挂在会话上，第一批 commit 之后就可能换连接、解锁打空。
     真库探针已实测：池化写法 commit 后锁仍在 pg_locks 里（连接回池），在非持
     锁连接上 unlock 只回 false 不报错。本测试把这条不变式钉在单元层：
-    **全程只允许出现一条连接，lock/unlock 都发生在它身上**。
-    变异验证：把 try_lock 挪到另一条连接（engine.connect() 再开一条）后本测试失败。
+    **全程只允许出现一条连接，lock/unlock 都发生在它身上**，且会话必须绑在
+    这条连接上、并显式 ``control_fully`` 接管事务（否则 commit 只是 flush，
+    删除会在 finally 的 rollback 里被丢掉——复审 Blocker）。
+    变异验证：把 try_lock 挪到另一条连接、或去掉 control_fully，本测试失败。
     """
     state_path = tmp_path / 'state.json'
     engine = _FakeEngine()
     monkeypatch.setattr(art, 'require_async_engine', lambda: engine)
-    monkeypatch.setattr(art, 'AsyncSession', lambda bind: _FakeSessionCM())
+    seen = _patch_session(monkeypatch)
 
     async def _run(db):
         return {'months': [], 'deleted_total': 0, 'analyzed': False, 'errors': []}
@@ -703,6 +782,10 @@ async def test_task_holds_lock_on_dedicated_connection(monkeypatch, tmp_path):
 
     await art.audit_retention_task({})
     assert len(engine.conns) == 1, '任务不应额外开连接（锁必须与解锁同连接）'
+    session = seen['session']
+    assert session.kwargs['bind'] is engine.conns[0], '会话必须绑在持锁连接上'
+    assert session.kwargs.get('join_transaction_mode') == 'control_fully', (
+        '取锁那条 SELECT 已 autobegin，不显式接管事务时 Session.commit() 只 flush')
     calls = engine.conns[0].calls
     assert any('pg_try_advisory_lock' in c for c in calls)
     assert any('pg_advisory_unlock' in c for c in calls)
@@ -715,7 +798,7 @@ async def test_task_writes_failure_state_on_error(monkeypatch, tmp_path):
     state_path = tmp_path / 'state.json'
     engine = _FakeEngine()
     monkeypatch.setattr(art, 'require_async_engine', lambda: engine)
-    monkeypatch.setattr(art, 'AsyncSession', lambda bind: _FakeSessionCM())
+    _patch_session(monkeypatch)
 
     async def _boom(db):
         raise RuntimeError('plan query failed')
@@ -737,7 +820,7 @@ async def test_task_skips_and_records_when_lock_busy(monkeypatch, tmp_path):
     state_path = tmp_path / 'state.json'
     engine = _FakeEngine(lock_ok=False)
     monkeypatch.setattr(art, 'require_async_engine', lambda: engine)
-    monkeypatch.setattr(art, 'AsyncSession', lambda bind: _FakeSessionCM())
+    _patch_session(monkeypatch)
     monkeypatch.setattr(art, 'STATE_PATH', state_path)
 
     result = await art.audit_retention_task({})

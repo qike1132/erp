@@ -37,6 +37,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.db]
 _OLD_START = datetime(2019, 3, 1, tzinfo=UTC)
 _OLD_END = datetime(2019, 4, 1, tzinfo=UTC)
 _FUTURE_START = datetime(2099, 1, 1, tzinfo=UTC)
+#: 本文件专用 id 段：清理只碰这一段，绝不按时间窗删其它测试/其它套件的数据。
+_ID_LO, _ID_HI = 900_000, 999_999
 #: cutoff = 2019-06-15 → 2019-03 整月过期；2099-01 远在窗口内。
 _NOW = datetime(2020, 6, 15, 12, 0, tzinfo=UTC)
 
@@ -72,9 +74,9 @@ def _tcp_reachable(url: str, timeout: float = 2.0) -> bool:
 
 
 async def _purge(conn) -> None:
-    await conn.execute(text('DELETE FROM audit_log WHERE created_at < :t'), {'t': _OLD_END})
-    await conn.execute(
-        text('DELETE FROM audit_log WHERE created_at >= :t'), {'t': _FUTURE_START})
+    """只清本文件的哨兵 id 段（900000-999999），绝不按时间窗删别人的数据。"""
+    await conn.execute(text(
+        'DELETE FROM audit_log WHERE id BETWEEN :lo AND :hi'), {'lo': _ID_LO, 'hi': _ID_HI})
 
 
 @pytest_asyncio.fixture
@@ -180,10 +182,41 @@ async def test_archive_then_delete_end_to_end_on_real_pg(pg_engine, tmp_path):
 
     async with pg_engine.connect() as conn:
         left_old = (await conn.execute(
-            text('SELECT count(*) FROM audit_log WHERE created_at < :t'),
-            {'t': _OLD_END})).scalar()
+            text('SELECT count(*) FROM audit_log WHERE id = ANY(:ids)'), {'ids': old_ids}
+        )).scalar()
         left_future = (await conn.execute(
-            text('SELECT count(*) FROM audit_log WHERE created_at >= :t'),
-            {'t': _FUTURE_START})).scalar()
+            text('SELECT count(*) FROM audit_log WHERE id = ANY(:ids)'), {'ids': future_ids}
+        )).scalar()
     assert left_old == 0, '归档过的行必须被删干净（否则下一轮重复归档）'
     assert left_future == len(future_ids), '窗口外的行绝不能被删'
+
+
+async def test_task_persists_deletions_through_entry_point(pg_engine, tmp_path, monkeypatch):
+    """走**真实入口** ``audit_retention_task``：返回后另开连接必须查不到那批行。
+
+    这是复审 Blocker 的定点回归。取锁那条 ``SELECT pg_try_advisory_lock`` 会让
+    连接 autobegin，若会话不与 ``join_transaction_mode='control_fully'`` 显式接管
+    事务，SQLAlchemy 会退到 ``rollback_only``：``commit()`` 只 flush 不发 COMMIT，
+    每批删除堆在外部事务里，最后被 finally 的 ``rollback()`` 全部丢掉——任务
+    报「删了 N 行」、库里一行没少、窗口复核在同一事务里自证清白、健康端点全程绿。
+
+    上面那条用例绑的是 ``AsyncSession(bind=pg_engine)``（没有预置事务），commit
+    天然生效，**覆盖不到这个缝**；必须走入口才有判别力。
+    """
+    ids = [920_001, 920_002, 920_003]
+    async with pg_engine.begin() as conn:
+        await _insert(conn, ids, datetime(2019, 3, 15, 3, 0, tzinfo=UTC))
+
+    monkeypatch.setattr(art, 'require_async_engine', lambda: pg_engine)
+    monkeypatch.setattr(art, 'archive_dir_path', lambda _raw=None: tmp_path)
+    monkeypatch.setattr(art, 'STATE_PATH', tmp_path / 'state.json')
+
+    report = await art.audit_retention_task({})
+    assert report['deleted_total'] >= len(ids)
+
+    # pg_engine 是 NullPool：这条连接是全新的，只看得到已提交的数据
+    async with pg_engine.connect() as conn:
+        left = (await conn.execute(
+            text('SELECT count(*) FROM audit_log WHERE id = ANY(:ids)'), {'ids': ids}
+        )).scalar()
+    assert left == 0, '任务返回后行还在 ⇒ 每批 commit 没真正提交（被 finally 回滚掉了）'

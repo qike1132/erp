@@ -232,9 +232,13 @@ async def _export_month_jsonl(
 
 
 def _jsonable(value):
-    """datetime → ISO 字符串；Decimal → str；其余原样。"""
+    """datetime → ISO 字符串；dict/list 保持 JSON 形态；其余原样。"""
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, (dict, list)):
+        # detail 是 JSONB，落到 str() 会变成 Python repr（单引号），归档就不是
+        # 合法 JSONL 片段了——证据文件必须能被 jq/外部工具直接消费。
+        return json.dumps(value, ensure_ascii=False)
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
@@ -302,6 +306,11 @@ def _merge_state(fields: dict, state_path: Path | None = None) -> None:
     merged = {**(read_retention_state(state_path) or {}), **fields}
 
     disk = read_retention_state(state_path) or {}
+    # 以**最新快照**为底：调用方没打算写的字段（pending_errors / last_error 等）
+    # 一律取落盘前那一刻的值。只修时间戳是不够的——跳过方若拿旧快照写回，
+    # 会把持锁方刚记下的 archive_incomplete 静默清掉（健康转绿），或反向复活
+    # 已被清掉的旧错误（假 degraded）。
+    merged = {**disk, **merged}
     for key in ('last_success_at', 'last_attempt_at', 'last_skipped_at'):
         mine, theirs = _parse_ts(merged.get(key)), _parse_ts(disk.get(key))
         if theirs is not None and (mine is None or theirs > mine):
@@ -310,8 +319,8 @@ def _merge_state(fields: dict, state_path: Path | None = None) -> None:
     merged['archive_files'] = {
         **(disk.get('archive_files') or {}), **(merged.get('archive_files') or {})}
     merged['deleted_rows_total'] = max(
-        int(disk.get('deleted_rows_total') or 0),
-        int(merged.get('deleted_rows_total') or 0),
+        _as_int(disk.get('deleted_rows_total')),
+        _as_int(merged.get('deleted_rows_total')),
     )
     try:
         _write_state(merged, state_path)
@@ -328,6 +337,18 @@ def _parse_ts(value) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _as_int(value) -> int:
+    """容错取整：手改/旧格式写坏的账本值不能把「干净退出」变成任务失败。
+
+    ``_merge_state`` 会走 ``write_failure_state``（在 finally 里）——那里抛异常
+    会顶掉原始异常，运维看到的就变成「账本解析错误」而不是真正的失败原因。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def write_failure_state(
@@ -376,25 +397,60 @@ async def _process_month(db: AsyncSession, plan: dict, archive_dir: Path) -> dic
                 'planned_rows': plan['rows'], 'archived_rows': archive['rows'],
                 'remediation': '下一轮会自动复用该归档并继续；若持续出现，检查是否有'
                                '带显式 id 的补录/恢复任务在该月窗口内写入'})
-
-        deleted = await _delete_ids_batched(db, archive['ids'])
-        leftover = await window_count(db, month_start, month_end)
     except (OSError, SQLAlchemyError) as exc:
         # 只兜「已知可恢复」的两类：文件系统（OSError：mkdir / gzip 写 / fsync /
         # os.replace / 归档 CRC 校验失败）与数据库（SQLAlchemyError：查询、
         # 删除、锁等待超时）。其它异常（编程错误）照旧上抛——那类 bug 必须响，
         # 不能被按月吞成一条 pending_error。
-        logger.error('audit_log 保留治理: %s 归档/删除失败，跳过该月: %s', month_key, exc)
+        logger.error('audit_log 保留治理: %s 归档失败，跳过该月: %s', month_key, exc)
         return _skip(month_key, plan, {
-            'month': month_key, 'error': f'{type(exc).__name__}: {exc}'})
+            'month': month_key, 'error': 'archive_failed',
+            'detail': f'{type(exc).__name__}: {exc}',
+            'remediation': 'OSError 查磁盘空间与归档目录权限（backups/audit_archive）；'
+                           'SQLAlchemyError 查 pg_stat_activity 的锁等待与连接数；'
+                           '坏归档改名为 .corrupt-<时间戳> 后下一轮重导'})
 
     entry = {'month': month_key, 'rows': plan['rows'], 'archive_rows': archive['rows'],
              'archived': True, 'archive_path': archive['path'],
-             'sha256': archive['sha256'], 'deleted': deleted}
+             'sha256': archive['sha256'], 'deleted': 0}
+    try:
+        # 删除**前**的窗口行数：与 deleted 一起构成等式，用来发现「删到了窗口外」。
+        before = await window_count(db, month_start, month_end)
+        deleted = await _delete_ids_batched(db, archive['ids'])
+        leftover = await window_count(db, month_start, month_end)
+    except (OSError, SQLAlchemyError) as exc:
+        # 归档已落盘（证据在），只是没删成：entry 仍带 archive_path/sha256 进账本，
+        # 否则等保取证会缺一条 sha256 记录，而磁盘上明明有这份证据。
+        logger.error('audit_log 保留治理: %s 删除失败，归档已保留: %s', month_key, exc)
+        return {'entry': entry, 'deleted': 0, 'error': {
+            'month': month_key, 'error': 'delete_failed',
+            'detail': f'{type(exc).__name__}: {exc}',
+            'archive_path': archive['path'], 'archived_rows': archive['rows'],
+            'remediation': '归档已完成，下一轮会复用该归档续删；若持续失败，'
+                           '查 pg_stat_activity 的锁等待、长事务与连接数'}}
+
+    entry['deleted'] = deleted
     logger.info(
         'audit_log 保留治理: %s 归档 %d 行%s，删除 %d 行，窗口剩余 %d 行',
         month_key, archive['rows'], '（复用）' if archive['existed'] else '',
         deleted, leftover)
+    if deleted > before:
+        # 删掉的行比该月窗口里原本存在的还多 ⇒ 归档里的 id 不属于这个月（归档被
+        # 改名复用/从别的环境恢复/带显式 id 的补录）。删除已发生，无法撤回，但
+        # 绝不能让它在「窗口剩余 0 行」的假象里静默过去。
+        return {
+            'entry': entry,
+            'deleted': deleted,
+            'error': {
+                'month': month_key, 'error': 'delete_exceeded_window',
+                'deleted_rows': deleted, 'window_rows_before': before,
+                'archived_rows': archive['rows'],
+                'remediation': f'本次删除了窗口外的行：核对 {archive["path"]} 是否属于 '
+                               f'{month_key}（该文件名可能被改名复用或来自其他环境），'
+                               f'并用 pg_dump/备份比对 id 段；确认后把该归档改名 '
+                               f'.superseded-<时间戳> 并人工复核被删除的 id',
+            },
+        }
     if leftover:
         # 归档过的 id 都删完了，窗口里还有行 —— 它们从未进过归档（补录/回放/
         # 旧备份恢复）。绝不能删，但要让它在健康信号里可见。
@@ -503,6 +559,12 @@ async def audit_retention_task(ctx) -> dict:
     另一条——锁会留在池里某条连接上，解锁还打在别的连接上（返回 false 被忽略）。
     本任务每批都 commit，所以必须自己握住连接：``engine.connect()`` 拿到的连接
     由调用方所有，``AsyncSession(bind=conn)`` 的 commit 不会关闭它。
+
+    为什么还要 ``join_transaction_mode='control_fully'``：绑定到**已经开了事务**
+    的连接时，SQLAlchemy 默认（``conditional_savepoint``）会退到 ``rollback_only``，
+    ``commit()`` 只 flush 不发 COMMIT。取锁那条 SELECT 恰好就 autobegin 了，
+    不显式接管事务，每批删除的 commit 全是空转，最后被 finally 的 rollback 丢掉
+    ——任务报成功、库里一行没删、健康端点全程绿。
     """
     engine = require_async_engine()
     report: dict | None = None
@@ -515,7 +577,18 @@ async def audit_retention_task(ctx) -> dict:
             write_skip_state('lock_busy')
             return {'skipped': 'lock_busy'}
         try:
-            async with AsyncSession(bind=conn) as db:
+            # 上面那条 SELECT 让连接进入事务（autobegin）。**必须先结束它**：
+            # 绑定到「已有事务的连接」的会话会退化，默认 join_transaction_mode
+            # （conditional_savepoint）在这种情况下落到 rollback_only ——
+            # `Session.commit()` 只 flush、不发 COMMIT，本任务每批删除的 commit
+            # 因此全部堆在外部事务里，最后由 finally 的 rollback 一起丢掉：
+            # 任务报「删了 N 行」、库里一行没少、窗口复核也看不见（同一事务内
+            # 自证清白），健康端点全程绿 —— 静默失效的教科书形态。
+            # 两道保险：先 rollback 结束 autobegin（advisory lock 是会话级、
+            # 不随事务回滚释放），再显式 control_fully 让会话自己掌管提交。
+            with suppress(SQLAlchemyError):
+                await conn.rollback()
+            async with AsyncSession(bind=conn, join_transaction_mode='control_fully') as db:
                 report = await run_retention_once(db)
         finally:
             # 会话若停在 abort 事务里，先回滚才能执行下一条语句
