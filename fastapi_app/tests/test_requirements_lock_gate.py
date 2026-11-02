@@ -44,7 +44,10 @@ def _check(gate, tmp_path: Path, txt_text: str, lock_text: str):
 
 
 def test_range_satisfied_passes(gate, tmp_path):
-    failures, n = _check(gate, tmp_path, "aiohttp>=3.14.4\n", "aiohttp==3.14.4\n")
+    failures, n = _check(
+        gate, tmp_path, "aiohttp>=3.14.4\n",
+        "aiohttp==3.14.4\n    # via -r t.txt\n",
+    )
     assert failures == []
     assert n == 1
 
@@ -66,13 +69,19 @@ def test_declared_but_not_locked_fails(gate, tmp_path):
 
 
 def test_unpinned_declaration_only_needs_presence(gate, tmp_path):
-    failures, _ = _check(gate, tmp_path, "pytest\n", "pytest==9.1.0\n")
+    failures, _ = _check(
+        gate, tmp_path, "pytest\n", "pytest==9.1.0\n    # via -r t.txt\n",
+    )
     assert failures == []
 
 
 def test_transitive_extras_do_not_fail(gate, tmp_path):
     """锁里多出的传递依赖（哪怕版本很旧）不应影响判定 —— 这是旧判据误红的地方。"""
-    lock = "fastapi==0.121.0\ngrpcio==1.84.1\nstarlette==0.50.0\n"
+    lock = (
+        "fastapi==0.121.0\n    # via -r t.txt\n"
+        "grpcio==1.84.1\n    # via fastapi\n"
+        "starlette==0.50.0\n    # via fastapi\n"
+    )
     failures, _ = _check(gate, tmp_path, "fastapi>=0.115\n", lock)
     assert failures == []
 
@@ -81,7 +90,7 @@ def test_platform_marker_without_lock_entry_is_skipped(gate, tmp_path):
     failures, _ = _check(
         gate, tmp_path,
         'colorama; sys_platform == "win32"\nuvloop; sys_platform != "win32"\n',
-        "colorama==0.4.6\n",
+        "colorama==0.4.6\n    # via -r t.txt\n",
     )
     assert failures == [], "非本平台标记的依赖不该被判缺锁"
 
@@ -100,7 +109,8 @@ def test_extras_and_canonical_names(gate, tmp_path):
     failures, _ = _check(
         gate, tmp_path,
         "uvicorn[standard]>=0.30\ntyping_extensions>=4.8\n",
-        "uvicorn==0.42.0\ntyping-extensions==4.15.0\n",
+        "uvicorn==0.42.0\n    # via -r t.txt\n"
+        "typing-extensions==4.15.0\n    # via uvicorn\n",
     )
     assert failures == []
 
@@ -110,7 +120,8 @@ def test_recursive_include_and_comments(gate, tmp_path):
     failures, n = _check(
         gate, tmp_path,
         "-r base.txt\n--index-url https://example.invalid/simple\nrequests>=2.32\n",
-        "boto3==1.41.0\nrequests==2.33.0\n",
+        "boto3==1.41.0\n    # via -r base.txt\n"
+        "requests==2.33.0\n    # via -r t.txt\n",
     )
     assert failures == []
     assert n == 2, "递归包含的声明也要计入"

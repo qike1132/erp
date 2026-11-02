@@ -380,6 +380,9 @@ jobs:
 
     # 锁同步门禁（B1）：requirements/<tier>.txt 改了必须重跑 uv pip compile 刷新 .lock，
     # 否则锁会悄悄与声明脱节（改了依赖却不生效）。
+    # C3：本步骤同时做**闭包校验**——锁内每个包都必须能从声明经 # via 图推导出来，
+    # 拦住「往 .lock 里塞一行任意包」的绕过。刻意不用 --strict：它会重新联网解析，
+    # 上游每发一个补丁就让全档同时失配（2026-10-26 已因此改判据）。
     - name: Check requirements lock freshness
       # 七档（N1 修复后 DEFAULT_TIERS 扩到全档）：缺 .lock 现在判失败而非跳过。
       run: python scripts/check_requirements_lock.py

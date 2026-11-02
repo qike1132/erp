@@ -83,6 +83,80 @@ def _canon_pins(text: str) -> dict[str, str]:
     return out
 
 
+def _lock_graph(text: str) -> dict[str, set[str]]:
+    """解析锁内 ``pkg -> {via 来源}`` 图（每条的 ``# via`` 块）。"""
+    graph: dict[str, set[str]] = {}
+    current: str | None = None
+    collecting = False
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        m = re.match(r"^([A-Za-z0-9_.\-]+)==([0-9][^\s\\]*)", line)
+        if m:
+            current = canonicalize_name(m.group(1))
+            graph.setdefault(current, set())
+            collecting = False
+            continue
+        stripped = line.strip()
+        if stripped.startswith("# via"):
+            collecting = True
+            rest = stripped[len("# via"):].strip()
+            if rest and current:
+                graph[current].add(rest)
+            continue
+        if collecting and stripped.startswith("#") and current:
+            entry = stripped[1:].strip()
+            if entry:
+                graph[current].add(entry)
+            continue
+        collecting = False
+    return graph
+
+
+def closure_failures(lock_text: str, declared_names: set[str]) -> list[str]:
+    """锁内每个包都必须能从声明经 ``# via`` 图推导出来。
+
+    为什么不用 ``--strict`` 做这件事：``--strict`` 会重新联网解析整棵树，
+    上游每发一个补丁就会让 7 个 tier 同时失配——2026-10-26 正是因为这种
+    「与本次提交无关的红」才把默认判据改成只看直接依赖。此处改用锁内自带的
+    ``# via`` 依赖图做**确定性**闭包校验：既不需要网络，也不受上游发版影响，
+    又能拦住「往 .lock 里塞一行任意包」这种门禁绕过。
+    """
+    graph = _lock_graph(lock_text)
+    roots = {canonicalize_name(n.split("[", 1)[0]) for n in declared_names}
+    failures: list[str] = []
+
+    no_source = sorted(pkg for pkg, via in graph.items() if not via)
+    if no_source:
+        failures.append(
+            "锁内条目缺少 # via 来源，无法证明它是声明的传递依赖: " + ", ".join(no_source)
+        )
+
+    children: dict[str, set[str]] = {}
+    for pkg, vias in graph.items():
+        for via in vias:
+            if via.startswith(("-r ", "-c ")):
+                continue  # 声明根 / 约束文件，不是包
+            parent = canonicalize_name(re.split(r"[\[<>=!~;\s]", via, maxsplit=1)[0])
+            if parent:
+                children.setdefault(parent, set()).add(pkg)
+
+    reachable = set(roots)
+    stack = list(roots)
+    while stack:
+        node = stack.pop()
+        for child in children.get(node, ()):
+            if child not in reachable:
+                reachable.add(child)
+                stack.append(child)
+
+    orphans = sorted(pkg for pkg in graph if pkg not in reachable)
+    if orphans:
+        failures.append(
+            "锁内存在无法从声明推导出的包（疑似注入）: " + ", ".join(orphans)
+        )
+    return failures
+
+
 def _strip_comment(line: str) -> str:
     """去掉行尾注释（pip/uv 口径：``#`` 在行首或前面是空白时才算注释）。"""
     idx = line.find("#")
@@ -120,7 +194,8 @@ def parse_declared(path: Path, seen: set[Path] | None = None) -> list[Requiremen
 
 def check_declared(tier: str, txt: Path, lock: Path) -> tuple[list[str], int]:
     """比对「声明 vs 锁」，返回 (失败项列表, 声明条数)。"""
-    commits = _canon_pins(lock.read_text(encoding="utf-8"))
+    lock_text = lock.read_text(encoding="utf-8")
+    commits = _canon_pins(lock_text)
     failures: list[str] = []
     declared = parse_declared(txt)
     for req in declared:
@@ -142,6 +217,7 @@ def check_declared(tier: str, txt: Path, lock: Path) -> tuple[list[str], int]:
             continue
         if not ok:
             failures.append(f"版本不满足: {req.name} 需要 {req.specifier}，锁内是 {locked}")
+    failures.extend(closure_failures(lock_text, {req.name for req in declared}))
     return failures, len(declared)
 
 
