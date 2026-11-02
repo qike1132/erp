@@ -43,6 +43,7 @@ from fastapi_app.services.backup import (
 )
 from fastapi_app.services.backup import restore_plan as restore_plan_service
 from fastapi_app.services.backup._constants import RESTORE_TOTAL_TIMEOUT
+from fastapi_app.services.backup.restore import revoke_all_sessions_after_restore
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -354,6 +355,13 @@ async def import_backup(
             ValueError: _restore_error_to_http,
         }):
             result = await backup_service.restore_legacy_json(backup_data, db)
+        # B3（NV-1，2026-11-02 审计核实）：JSON 整库恢复同样把 user 表回滚到备份时点
+        # （token_version/status/password_hash 随行回填），备份后撤销的凭据——改密/
+        # 禁用/删号前签发的 token、旧 refresh token——会重新通过 tv 相等判定。zip
+        # 路径已在 restore_from_zip 末尾统一 revoke；Legacy JSON 入口在此对齐。
+        # 必须在 db_transaction 提交之后调用：revoke 走独立 engine 事务（UPDATE
+        # user 表），放在提交前会与外层事务的行锁互等（同事件循环内死锁）。
+        await revoke_all_sessions_after_restore()
         verification_ok = result.get('verification', {}).get('overall_pass', True)
         return {
             'success': verification_ok, 'format': 'json',
@@ -462,6 +470,8 @@ async def restore_server_backup(
             ValueError: _restore_error_to_http,
         }):
             result = await backup_service.restore_legacy_json(backup_data, db)
+        # B3（NV-1）：同 /import 的 JSON 分支——提交后统一失效已撤销会话。
+        await revoke_all_sessions_after_restore()
     finally:
         await backup_service.release_restore_lock(json_lock_owner)
     verification_ok = result.get('verification', {}).get('overall_pass', True)
@@ -633,6 +643,21 @@ async def _report_restore_outcome(task_id: str, result: dict) -> None:
     await complete_progress(task_id, result)
 
 
+async def _parse_legacy_json_payload(task_id: str, content: bytes) -> dict | None:
+    """解析 Legacy JSON 备份载荷；格式非法时落失败进度并返回 None（调用方即收口）。"""
+    from fastapi_app.core.backup_progress import fail_progress
+
+    try:
+        backup_data = await asyncio.to_thread(json.loads, content)
+    except json.JSONDecodeError:
+        await fail_progress(task_id, '备份文件格式无效（非 ZIP 亦非有效 JSON）')
+        return None
+    if 'tables' not in backup_data:
+        await fail_progress(task_id, 'JSON 备份文件缺少 tables 字段')
+        return None
+    return backup_data
+
+
 async def _run_async_file_restore(
     task_id: str, content: bytes, is_zip: bool, filename: str,
     *, confirm_sensitive: bool = False, decrypt_password: str | None = None,
@@ -661,6 +686,10 @@ async def _run_async_file_restore(
         async with asyncio.timeout(RESTORE_TOTAL_TIMEOUT):
             await update_progress(task_id, 'pre_backup', detail='准备恢复')
             pre_restore_info = None
+            # B3（NV-1）：JSON 分支的 revoke 必须等 get_async_db_context 在 with
+            # 退出时提交之后再执行（独立 engine 事务，提交前调用会与外层行锁互等）。
+            # 失败路径（restore_legacy_json 抛错时内部已 rollback）不会置位，避免误 revoke。
+            json_restore_succeeded = False
 
             async with get_async_db_context() as db:
                 try:
@@ -681,17 +710,13 @@ async def _run_async_file_restore(
                             confirm_sensitive=confirm_sensitive,
                         )
                     else:
-                        try:
-                            backup_data = await asyncio.to_thread(json.loads, content)
-                        except json.JSONDecodeError:
-                            await fail_progress(task_id, '备份文件格式无效（非 ZIP 亦非有效 JSON）')
-                            return
-                        if 'tables' not in backup_data:
-                            await fail_progress(task_id, 'JSON 备份文件缺少 tables 字段')
+                        backup_data = await _parse_legacy_json_payload(task_id, content)
+                        if backup_data is None:
                             return
                         # JSON 恢复路径（Redis 还原锁已由入口端点获取，见 finally 统一释放）
                         await update_progress(task_id, 'restore_db', 0.0, '通过 JSON 恢复数据库')
                         result = await backup_service.restore_legacy_json(backup_data, db)
+                        json_restore_succeeded = True
 
                     result['pre_restore_backup'] = pre_restore_info
                     result['restored_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -711,6 +736,12 @@ async def _run_async_file_restore(
                 except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应
                     # fail_progress 内部经 _sanitize_error 清洗（去除路径并截断），可安全写入 str(e)
                     await fail_progress(task_id, str(e))
+
+            # B3（NV-1）：JSON 分支提交成功后统一失效已撤销会话（zip 分支的 revoke
+            # 已在 restore_from_zip 内部完成）。get_async_db_context 在 with 退出时
+            # 提交——失败会走 except 路径（rollback+raise），不会到达这里。
+            if json_restore_succeeded:
+                await revoke_all_sessions_after_restore()
     except TimeoutError:
         # asyncio.timeout 取消内层任务后在此收口：必须写明「可能已被重建」——
         # 超时点可能落在 DROP 之后，此时库是空壳/部分状态，恢复中断标记仍在。

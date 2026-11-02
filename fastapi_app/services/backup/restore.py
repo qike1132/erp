@@ -146,7 +146,15 @@ class _KernelProgressReporter:
 
 
 async def revoke_all_sessions_after_restore() -> None:
-    """整库恢复后强制全员重登（B3）。
+    """恢复后强制全员重登（B3）。
+
+    覆盖全部四类会把「撤销状态」回滚到备份时点的恢复路径：
+    1. zip/orchestrator 整库（restore_from_zip 末尾）——DB 与 Redis RDB 一起回滚；
+    2. 三条 Legacy JSON 整库入口（endpoints/backup/restore.py 的 /import、
+       /restore-by-name、/async-* JSON 分支，db_transaction 提交后）——user 表
+       整表回填，token_version/status/password_hash 随行回滚；
+    3. 含 redis/dump.rdb 的组件-only 包（_restore_components_only）——user 表
+       不动，但撤销黑名单随 RDB 回滚消失，登出 token 重新有效。
 
     备份时点之后的登出/撤销记录会随 DB 与 Redis RDB 一起回滚——备份后登出的
     token 会重新有效，已禁用/已撤权的账号也会复活。因此恢复成功后必须：
@@ -158,7 +166,9 @@ async def revoke_all_sessions_after_restore() -> None:
     与「缓存读写必须走 wrapper」的约定冲突，收益却是零。
 
     用独立 engine 事务而不是调用方 session：恢复内核已提交过，这里需要立即
-    生效的独立提交；任何一步失败都只记日志，不把恢复结果改判为失败。
+    生效的独立提交；任何一步失败都只记日志，不把恢复结果改判为失败。调用方
+    必须把本函数放在**提交点之后**——在调用方事务中途执行会与未释放的 user
+    表行锁互等（同一事件循环内即死锁）。幂等，多调无害（tv 多 +1 效果等价）。
     """
     try:
         from fastapi_app.core.database import require_async_engine
@@ -332,6 +342,14 @@ async def _restore_components_only(
     await _prog('restore_components', 1.0, '组件恢复完成')
 
     await db.commit()  # manual-tx: 组件还原后提交
+    # B3（组件通道，2026-11-02 审计核实）：组件包虽不覆盖 user 表，但含 redis/dump.rdb
+    # 的包会把撤销黑名单回滚到备份时点（restore_redis_rdb 整体替换 RDB）——备份后
+    # 登出的 token 在 tv 不变的情况下重新有效。RDB 落盘成功（含 auto_reload_failed
+    # 变体：RDB 已写盘，Redis 重启后同样回滚）即必须全员失效。整库 zip 路径已被
+    # restore_from_zip 末尾的 revoke 覆盖，这里只补组件-only 包的缺口。
+    redis_res = results.get('redis') or {}
+    if isinstance(redis_res, dict) and redis_res.get('status') == 'ok':
+        await revoke_all_sessions_after_restore()
     try:
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         await invalidate_related_caches(CacheDomain.ALL)
