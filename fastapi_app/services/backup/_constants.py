@@ -146,6 +146,12 @@ def config_files_to_package() -> list[tuple[Path, str]]:
         _config_entry('nginx-windows.conf'),
         _config_entry('security-headers.conf'),
         _config_entry('redis-broker.conf'),
+        # 生效 nginx 直接 include / ssl_certificate 引用的两项：缺了它们，
+        # 纯还原后 nginx 起不来，上传图片还会全部 403（secure_link 校验无密钥）。
+        _config_entry('uploads-signing.conf'),
+        (CONFIG_DIR / 'tls' / 'server.crt', f'{CONFIG_NAMESPACE}tls/server.crt'),
+        (CONFIG_DIR / 'tls' / 'server.key', f'{CONFIG_NAMESPACE}tls/server.key'),
+        (CONFIG_DIR / 'tls' / 'ca.crt', f'{CONFIG_NAMESPACE}tls/ca.crt'),
         # --- NSSM 服务定义（注册表参数的文件态快照） ---
         # 5 个生产服务（erp-prod / erp-arq / erp-web / erp-redis /
         # erp-redis-broker）的真实定义在注册表，不在仓库里；只恢复配置
@@ -165,6 +171,7 @@ def config_files_to_package() -> list[tuple[Path, str]]:
 # config 内相对名，保留以兼容手工/旧格式归档与 BACKUP_EXCLUDE_FILES 写法。
 _SENSITIVE_CONFIG_FILES = {
     '.env.production', '.env', 'root/.env', 'jwt/private.pem', 'jwt/public.pem',
+    'uploads-signing.conf', 'tls/server.key',
 }
 _SENSITIVE_CONFIG_FILES.update(active_jwt_key_relative_paths())
 # 从环境变量读取排除文件列表
