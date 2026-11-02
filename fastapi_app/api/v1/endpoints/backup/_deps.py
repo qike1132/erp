@@ -13,7 +13,7 @@ import os
 
 from fastapi import HTTPException
 
-from fastapi_app.core.deps import require_any_permission
+from fastapi_app.core.deps import require_any_permission, require_superuser
 from fastapi_app.services import backup as backup_service
 
 _background_tasks: set[asyncio.Task] = set()
@@ -119,6 +119,22 @@ def _get_backup_permission(endpoint_name: str) -> str:  # log-context: internal 
     return permission_map.get(endpoint_name, 'backup_manage')
 
 
+# 备份包内含运行时 .env、现役 JWT 私钥、上传签名密钥与全库用户口令哈希。
+# 这些端点会产出/下载/落盘/还原整个包，等于间接读出上述凭据，因此收窄到超管。
+# 只读列表/状态/预览保持原来的细粒度权限。
+_SUPERUSER_ONLY = frozenset({
+    'download_server_backup',
+    'export_backup',
+    'export_backup_enhanced',
+    'export_backup_chunk',
+    'save_backup_to_server',
+    'import_backup',
+    'restore_server_backup',
+    'async_import_backup',
+    'async_restore_server_backup',
+})
+
+
 def require_backup_permission(endpoint_name: str):  # log-context: internal helper 无请求上下文
     """
     细粒度权限检查依赖工厂。
@@ -128,7 +144,12 @@ def require_backup_permission(endpoint_name: str):  # log-context: internal help
     这些细粒度码 → 非超管对全部备份端点恒 403（导航却显示「数据备份」）。
     按本仓既有模式（require_any_permission 桥接导航码/接口码）放行 `backup_manage`：
     它语义上即「管理备份（所有权限）」，且是当前唯一可授予的码。
+
+    C 批补充：产出/下载/还原整个备份包的端点升级为**仅超管**——包内含现役私钥
+    与运行时 .env，备份读写权限不该等价于凭据读取权限。
     """
+    if endpoint_name in _SUPERUSER_ONLY:
+        return require_superuser()
     permission = _get_backup_permission(endpoint_name)
     return require_any_permission(permission, 'backup_manage')
 
