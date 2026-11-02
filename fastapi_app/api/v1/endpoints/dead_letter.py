@@ -157,13 +157,19 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_sup
         kwargs = _parse_dead_letter_kwargs(target_entry.get('kwargs', {}))
         from fastapi_app.core.arq_app import get_arq_pool
         pool = await get_arq_pool()
-        # Hardening#2（2026-11-02 审计）：重投必须保留原 job_id——导出任务的
-        # `exp-u{uid}-` 前缀是 tasks.py 归属校验的锚点，让 ARQ 重新生成 uuid4
-        # 会使 DLQ 重试后的导出任务失去归属（任何持权限者可凭 task_id 查询/
-        # 下载）。原任务已失败出队，同 id 重投无冲突；若同 id 任务仍在跑
-        # （enqueue 返回 None），由下方 new_id='' 口径兜底。
+        # Hardening#2（2026-11-02 审计）+ 推送前评审 [H]#2：重投必须保留原
+        # job_id——导出任务的 `exp-u{uid}-` 前缀是 tasks.py 归属校验的锚点。
+        # 但 arq 在 `arq:job:{id}` 或 `arq:result:{id}` 存在时 enqueue_job 返回
+        # None（connections.py:158），终态失败结果默认保留 3600s（WorkerSettings
+        # 未覆盖 keep_result）——失败后 1h 内重试必撞结果键。故先显式清理两个
+        # 键再入队（DLQ 条目本身保存完整失败档案，清 result 键不丢历史）。
+        await client.delete(f'arq:job:{task_id}', f'arq:result:{task_id}')
         job = await pool.enqueue_job(task_name, *args, _job_id=task_id, **kwargs)
-        new_id = job.job_id if job else ''
+        if job is None:
+            # 竞态兜底：清键与入队之间同 id 任务被他人投递。绝不删除死信条目
+            # （否则任务静默丢失），让调用方稍后重试。
+            raise HTTPException(409, f'任务 {task_id} 刚被重新投递或结果未过期，请稍后重试')
+        new_id = job.job_id
         # 仅入队成功后才移除原死信；入队抛错时 finally 只释放锁，原记录保持不变。
         await safe_lrem(DLQ_KEY, 1, entries_raw[target_idx], context="死信队列")
         logger.info('重试死信任务: %s -> new_id=%s', task_id, new_id)

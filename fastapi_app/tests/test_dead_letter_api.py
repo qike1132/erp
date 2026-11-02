@@ -29,6 +29,7 @@ def _client(*, set_result=True, eval_result=1):
     return SimpleNamespace(
         set=AsyncMock(return_value=set_result),
         eval=AsyncMock(return_value=eval_result),
+        delete=AsyncMock(return_value=2),
     )
 
 
@@ -58,8 +59,26 @@ async def test_retry_parses_payload_removes_after_enqueue_and_releases_lock(
     assert response.status_code == 200, response.text
     assert response.json()["new_task_id"] == "dead-1", "重投必须保留原 job_id（归属前缀锚点）"
     enqueue.assert_awaited_once_with("demo_task", 1, flag=True, _job_id="dead-1")
+    # 评审 [H]#2：入队前必须清掉 arq:job/arq:result 键——否则终态失败结果
+    # 保留 3600s，同 id 重投会被 arq 判重返回 None（任务静默丢失）。
+    redis_client.delete.assert_awaited_once_with('arq:job:dead-1', 'arq:result:dead-1')
     lrem.assert_awaited_once()
     redis_client.eval.assert_awaited_once()
+
+
+async def test_retry_enqueue_returns_none_keeps_entry_and_409(
+    client
+):
+    """评审 [H]#2 负向：enqueue 返回 None（竞态/结果未过期）时不得删死信。"""
+    redis_client = _client()
+    enqueue = AsyncMock(return_value=None)  # arq 判重返回 None
+    patches = _patches(redis_client, [_entry()], enqueue=enqueue)
+    with patches[0], patches[1], patches[2], patches[3] as lrem, patches[4]:
+        response = await client.post(f"{PREFIX}/dead-1/retry")
+
+    assert response.status_code == 409, response.text
+    assert lrem.await_count == 0, "入队未成功绝不能删除原死信（任务会静默丢失）"
+    redis_client.eval.assert_awaited_once()  # 重试锁仍被释放
 
 
 async def test_enqueue_failure_keeps_dead_letter_and_releases_lock(
