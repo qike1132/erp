@@ -378,12 +378,18 @@ def _mint_token(username: str = "admin") -> _MintOutcome:
 
         engine = create_engine(real_database_url())
         with engine.connect() as conn:
+            # 必须一并取 token_version：会话撤销上线后，token 里的 tv 要与库内值
+            # 一致；全量 pytest 里改密/禁用的用例会把 admin 的版本撞高，
+            # 只铸 sub 的 token 会恒判 0 而 401。
             row = conn.execute(
-                text('SELECT id FROM "user" WHERE username = :u'), {"u": username}
+                text('SELECT id, token_version FROM "user" WHERE username = :u'),
+                {"u": username},
             ).fetchone()
         if row is None:
             return _MintOutcome(None, True)
-        return _MintOutcome(create_access_token({"sub": str(row[0])}), True)
+        return _MintOutcome(
+            create_access_token({"sub": str(row[0]), "tv": int(row[1] or 0)}), True,
+        )
     except Exception:  # 连不上库属环境缺失，交由调用方 skip
         return _MintOutcome(None, False)
 

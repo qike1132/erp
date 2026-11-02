@@ -136,12 +136,14 @@ def mint_token() -> str | None:
 
         engine = create_engine(settings.DATABASE_URL)
         with engine.connect() as conn:
+            # tv 必须取自库内 token_version：会话撤销上线后它与 token 里的声明比对，
+            # 只铸 sub 会恒判 0 而 401。
             row = conn.execute(
-                text("SELECT id FROM \"user\" WHERE username='admin'")
+                text('SELECT id, token_version FROM "user" WHERE username=\'admin\'')
             ).fetchone()
         if row is None:
             return None
-        return create_access_token({"sub": str(row[0])})
+        return create_access_token({"sub": str(row[0]), "tv": int(row[1] or 0)})
     except Exception as exc:  # broad-except: 铸 token 失败时应降级为"仅测无鉴权端点"而非崩溃
         print(f"[WARN] 铸 token 失败（{type(exc).__name__}: {exc}），将只比对无需鉴权的端点", file=sys.stderr)
         return None
