@@ -39,6 +39,10 @@ _REL_TARGET_RE = re.compile(r'\bTarget="([^"]+)"')
 #: 但 zip 的压缩比可以极高（zip bomb），故对解压总量再设一道闸门。
 MAX_EXTRACTED_IMAGE_BYTES = 64 * 1024 * 1024
 
+#: 分块读取 zip 成员的块大小（RJ-1，2026-11-02：分块路径下 decompressor
+#: 单次输出上限 = 块大小；全量 zf.read 的上限是 ZipExtFile.MAX_N≈2GiB）。
+_MEMBER_READ_CHUNK = 1 << 20
+
 
 def parse_dispimg_id(cell_value: object) -> str | None:
     """从单元格值中取出 DISPIMG 引用的图片 ID；不是该形式时返回 None。
@@ -124,7 +128,9 @@ def _collect_images(
         if total > MAX_EXTRACTED_IMAGE_BYTES:
             logger.warning('单元格图片解压总量超过 %d 字节，放弃提取', MAX_EXTRACTED_IMAGE_BYTES)
             return {}
-        result[id_match.group(1)] = zf.read(member)
+        # 分块读（见 _read_member_bytes）：低报 file_size 的媒体成员同样会
+        # 在全量 read 时产生 GiB 级中间解压缓冲。
+        result[id_match.group(1)] = _read_member_bytes(zf, member)
     return result
 
 
@@ -146,9 +152,27 @@ def _resolve_member(target: str) -> str:
     return posixpath.normpath(posixpath.join('xl', target))
 
 
+def _read_member_bytes(zf: zipfile.ZipFile, member: str) -> bytes:
+    """分块读取 zip 成员（中间解压缓冲 ≤ 单块，内存上界 = 声明大小 + 单块）。
+
+    不能用 ``zf.read(member)``：全量读取路径下 ZipExtFile 单次解压的输出
+    上限是 ``MAX_N≈2GiB``（CPython zipfile），低报 file_size 的成员会在
+    按声明值截断**之前**把中间缓冲撑到 GiB 级（RJ-1，2026-11-02 实证）；
+    分块路径的 decompress 输出上限即块大小。
+    """
+    out = bytearray()
+    with zf.open(member) as f:
+        while True:
+            chunk = f.read(_MEMBER_READ_CHUNK)
+            if not chunk:
+                break
+            out += chunk
+    return bytes(out)
+
+
 def _read_member(zf: zipfile.ZipFile, member: str) -> str:
     """读取 zip 成员并解码为文本；缺成员时返回空串。"""
     try:
-        return zf.read(member).decode('utf-8', errors='replace')
+        return _read_member_bytes(zf, member).decode('utf-8', errors='replace')
     except KeyError:
         return ''

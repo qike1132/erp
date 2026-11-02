@@ -85,6 +85,84 @@ def test_single_member_budget(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# ZIP 层：物理膨胀试探（RJ-1，2026-11-02 实证修复）
+# ---------------------------------------------------------------------------
+
+def _make_underdeclared_bomb(
+    member: str = 'bomb.bin',
+    nominal_out: int = 32 * 1024 * 1024,
+    declared: int = 64 * 1024,
+) -> bytes:
+    """构造「低报 file_size 的高膨胀」zip 成员——头部三道声明判定全部失明。
+
+    手法与真实攻击一致：物理数据是解压输出 ~nominal_out 的高膨胀 raw deflate
+    流（STORED 写入避免 zipfile 二次压缩），再把 local/central 头 patch 成
+    DEFLATED + 谎报 file_size。声明比值 declared/压缩流大小 ≈ 2:1（远低于
+    100:1 闸门）、单成员 64KiB（远低于 64MiB 闸门）——只有物理试探能拦。
+    """
+    import zlib
+
+    co = zlib.compressobj(9, zlib.DEFLATED, -15)
+    stream = co.compress(b'\x00' * nominal_out) + co.flush()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+        zf.writestr(member, stream)
+    raw = bytearray(buf.getvalue())
+    target = member.encode()
+    # (签名, compress_type 偏移, file_size 偏移, name_len 偏移, name 偏移)
+    for sig, ctoff, fsoff, nloff, noff in (
+        (b'PK\x03\x04', 8, 22, 26, 30),   # local file header
+        (b'PK\x01\x02', 10, 24, 28, 46),  # central directory
+    ):
+        pos = 0
+        while (idx := raw.find(sig, pos)) >= 0:
+            name_len = int.from_bytes(raw[idx + nloff:idx + nloff + 2], 'little')
+            if bytes(raw[idx + noff:idx + noff + name_len]) == target:
+                raw[idx + ctoff:idx + ctoff + 2] = (8).to_bytes(2, 'little')  # DEFLATED
+                raw[idx + fsoff:idx + fsoff + 4] = declared.to_bytes(4, 'little')
+            pos = idx + 4
+    return bytes(raw)
+
+
+def test_underdeclared_member_rejected_by_physical_probe():
+    """低报 file_size 的压缩炸弹必须被物理膨胀试探拦下（声明判定对它失明）。"""
+    bomb = _make_underdeclared_bomb()
+    with pytest.raises(XlsxBudgetError, match='声明不符'):
+        assert_zip_budget(bomb)
+
+
+def test_probe_lets_normal_workbook_through():
+    """试探对正常工作簿零误报（合法压缩比 <10x，远低于 100:1 试探封顶）。"""
+    assert_zip_budget(_make_xlsx(rows=50, cols=8))  # 比既有用例更大，确保试探真跑了
+
+
+def test_read_member_bytes_low_peak_on_bomb():
+    """分块读取低报成员的内存峰值必须远低于物理解压总量。
+
+    变异检查锚点：把 _read_member_bytes 改回 zf.read() 后，峰值会逼近物理
+    输出（64MiB 量级），本断言变红。
+    """
+    import contextlib
+    import tracemalloc
+
+    from fastapi_app.services.xlsx_cell_images import _read_member_bytes
+
+    bomb = _make_underdeclared_bomb(member='xl/media/img1.png', nominal_out=64 * 1024 * 1024)
+    tracemalloc.start()
+    try:
+        with zipfile.ZipFile(io.BytesIO(bomb)) as zf:
+            # 截断输出与声明 CRC 不符 → BadZipFile（既有 400 口径）；峰值断言不受影响
+            with contextlib.suppress(zipfile.BadZipFile):
+                _read_member_bytes(zf, 'xl/media/img1.png')
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 16 * 1024 * 1024, (
+        f'分块读的内存峰值应远低于物理解压总量 64MiB，实测 {peak / 2**20:.1f} MiB'
+    )
+
+
+# ---------------------------------------------------------------------------
 # 工作簿层（openpyxl 链：裁剪 + 显式拒绝）
 # ---------------------------------------------------------------------------
 

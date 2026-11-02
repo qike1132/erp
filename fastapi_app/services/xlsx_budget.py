@@ -29,6 +29,7 @@ import logging
 import os
 import threading
 import zipfile
+import zlib
 from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,16 @@ MAX_MEMBER_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 #: 通常 < 10x；42:1 是 zip 炸弹的典型指纹（重复内容的 deflate 可达 1000x+）。
 MAX_COMPRESSION_RATIO = 100
 
+#: 物理膨胀试探的单成员输入上限（压缩字节）。实测膨胀率只信解压物理行为，
+#: 不信可谎报的头部声明值（RJ-1，2026-11-02 实证：低报 file_size 的成员让
+#: 压缩比闸门失明——低报让「声明比值」变小，而全量读取时 ZipExtFile 的单次
+#: 解压输出上限是 MAX_N≈2GiB，声明值截断发生在解压**之后**）。
+_PROBE_MAX_INPUT = 512 * 1024
+
+#: 试探分块大小：分块读取路径下 decompressor 的单次输出上限 = 块大小，
+#: 中间缓冲受控（这正是与 zf.read() 全量路径的本质区别）。
+_PROBE_CHUNK = 64 * 1024
+
 #: 工作簿行/列上限（防超宽/超长工作簿把内存与 CPU 拖垮）。
 MAX_SHEET_ROWS = 100_000
 MAX_SHEET_COLS = 64
@@ -61,13 +72,53 @@ class XlsxBudgetError(ValueError):
     """工作簿超出统一资源预算（对外表现为普通的「文件无法解析」400/导入失败）。"""
 
 
+def _probe_member_inflation_ok(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bool:
+    """分块试探解压成员，实测物理膨胀率不超过 :data:`MAX_COMPRESSION_RATIO`。
+
+    声明值三道判定（成员数/单成员大小/压缩比）全部读头部，可被低报绕过；
+    本试探只信解压实测，两个拒绝条件：
+
+    1. **实测输出达到** ``min(compress_size, 512KiB) × 100`` ——物理膨胀率
+       超限（budget 是防御纵深，兜住 CRC 不可依赖的形态）；
+    2. **读到 BadZipFile（Bad CRC）**——按声明值截断的输出与声明 CRC 不符，
+       即「头部声明与物理行为不符」的铁证，正是低报谎报的形态。
+
+    探测内存峰值 ≤ 单块 64KiB（分块路径的 decompress 单次输出上限即块
+    大小）；合法成员（压缩比 <10x）试探输出远低于封顶。open 阶段的头部
+    问题和读不动的成员（加密等）不在此处拒绝——交给正式解析的既有口径。
+    """
+    if info.compress_type != zipfile.ZIP_DEFLATED or info.compress_size <= 0:
+        return True  # STORED 无膨胀语义
+    budget = min(info.compress_size, _PROBE_MAX_INPUT) * MAX_COMPRESSION_RATIO
+    produced = 0
+    try:
+        f = zf.open(info)
+    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError):
+        return True  # 头部问题交给正式解析口径
+    try:
+        with f:
+            while produced < budget:
+                data = f.read(_PROBE_CHUNK)
+                if not data:
+                    break
+                produced += len(data)
+    except zipfile.BadZipFile:
+        # Bad CRC：按声明 file_size 截断的输出与声明 CRC 不符 = 谎报铁证
+        return False
+    except (OSError, RuntimeError, ValueError, zlib.error):
+        return True  # 读不动（加密等）交给正式解析口径
+    return produced < budget
+
+
 def assert_zip_budget(source: str | bytes) -> None:
     """对 xlsx（zip 容器）执行前置资源预算，超出抛 :class:`XlsxBudgetError`。
 
-    只读中央目录（infolist），不解压成员本身——声明的 file_size/compress_size
-    足以在毫秒级拦下成员数/压缩比/解压总量三类炸弹；头部谎报的成员会在真实
-    解析时因 CRC 不符炸 BadZipFile（各链路已有该异常口径），配合
-    ``run_parse_with_timeout`` 的超时兜底。
+    只读中央目录（infolist）做声明值判定（成员数/压缩比/解压总量），并对
+    每个 DEFLATED 成员做**物理膨胀试探**（分块解压实测，~64KiB 内存上界）。
+    两者缺一不可：声明值可被谎报（低报 file_size 让压缩比闸门失明），而
+    只信物理试探会漏掉「诚实声明但确实超预算」的包。头部谎报的成员即使
+    侥幸通过试探，也会在真实解析时因 CRC 不符炸 BadZipFile（各链路已有
+    该异常口径），配合 ``run_parse_with_timeout`` 的超时兜底。
     """
     try:
         with zipfile.ZipFile(io.BytesIO(source) if isinstance(source, bytes) else source) as zf:
@@ -86,6 +137,10 @@ def assert_zip_budget(source: str | bytes) -> None:
                     raise XlsxBudgetError(
                         f'文件压缩比异常（{size / info.compress_size:.0f}:1，'
                         f'上限 {MAX_COMPRESSION_RATIO}:1），疑似压缩炸弹')
+                if not _probe_member_inflation_ok(zf, info):
+                    raise XlsxBudgetError(
+                        f'文件成员 {info.filename!r} 实测解压行为与头部声明不符'
+                        '（疑似压缩炸弹），已拒绝解析')
             if total > MAX_TOTAL_UNCOMPRESSED_BYTES:
                 raise XlsxBudgetError(
                     f'文件解压后总量过大（{total} 字节，上限 {MAX_TOTAL_UNCOMPRESSED_BYTES}）')
