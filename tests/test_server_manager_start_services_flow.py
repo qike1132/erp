@@ -93,7 +93,7 @@ class TestStartServicesFlow:
 
         assert hooks == {
             'redis_started': 0, 'start_one': 0, 'logs_started': 0,
-            'release_ports': 0,
+            'dev_stopped': 0, 'release_ports': 0,
         }, f'闸门拒绝后仍有副作用: {hooks}'
         assert any('拒绝启动' in t for t in _texts(app)), _texts(app)
 
@@ -115,15 +115,11 @@ class TestStartServicesFlow:
 
 
 def _wire_flow_app(monkeypatch, *, redis_ok=True, broker_ok=True):
-    """构造一个只跑逻辑的 ServerManagerApp，并记录流程中的关键副作用。
-
-    v5.45 并行改造：生产启动不再停开发模式（端口隔离、两栈并行），
-    ``_ensure_development_stopped`` 已随之删除，故不再接线/计数。
-    """
+    """构造一个只跑逻辑的 ServerManagerApp，并记录流程中的关键副作用。"""
     app = _make_app()
     hooks = {
         'redis_started': 0, 'start_one': 0, 'logs_started': 0,
-        'release_ports': 0,
+        'dev_stopped': 0, 'release_ports': 0,
     }
 
     app._msg_queue = _FakeQueue()
@@ -133,6 +129,8 @@ def _wire_flow_app(monkeypatch, *, redis_ok=True, broker_ok=True):
     app._prod_logs = SimpleNamespace(
         ensure_started=lambda: hooks.__setitem__('logs_started', hooks['logs_started'] + 1))
     app.log_message = lambda *a, **k: None
+    app._ensure_development_stopped = (
+        lambda *a, **k: hooks.__setitem__('dev_stopped', hooks['dev_stopped'] + 1) or True)
     app._release_ports = (
         # 2026-10-26：_release_ports 改为返回 bool（False = 端口没清干净，流程必须中止）。
         # 替身要按新契约返回 True，否则每个用例都会走"中止"分支。

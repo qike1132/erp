@@ -10,7 +10,7 @@ from pathlib import Path
 
 _IS_WINDOWS = sys.platform == 'win32'
 
-_VERSION = 'v5.45'
+_VERSION = 'v5.40'
 _WINDOW_TITLE = f'ERP 服务器管理器 {_VERSION}'
 _REDIS_PORT = 6379
 _REDIS_EXE_PATHS = [Path(r'C:\Redis\redis-server.exe'), Path(r'C:\Program Files\Redis\redis-server.exe')]
@@ -104,16 +104,8 @@ _NSSM_CANDIDATES = [
 ]
 _PROD_STATUS_FILE = Path(r'logs\prod_runner.json')
 
-# 生产模式端口（nginx :3000 → uvicorn 127.0.0.1:5002），同时是 GUI 管理器里
-# 「生产 API / 生产 WEB」药丸的显示值。
 _API_PORT = 5002
 _WEB_PORT = 3000
-# 开发/调试模式端口（2026-11-02 并行改造）：与生产**端口隔离**，开发栈与生产栈
-# 可同时运行。选型：5102 = 5002+100（语义好记），5173 = Vite 生态默认端口。
-#   ★ 受管（NSSM）服务永不监听这两个端口，故开发流程的端口清理不需要受管 PID
-#     排除集（与生产端口清理的语义不同，见 dev_mode._release_dev_ports）。
-_DEV_API_PORT = 5102
-_DEV_WEB_PORT = 5173
 
 # 本机探针必须绕开系统代理：prod_runner 曾因代理转发 127.0.0.1 探测导致间歇失败、
 # 进而误判后端崩溃并重启（见 prod_runner 内 _OPENER_DIRECT 注释）。
