@@ -92,6 +92,7 @@ def _make_underdeclared_bomb(
     member: str = 'bomb.bin',
     nominal_out: int = 32 * 1024 * 1024,
     declared: int = 64 * 1024,
+    crc_consistent: bool = False,
 ) -> bytes:
     """构造「低报 file_size 的高膨胀」zip 成员——头部三道声明判定全部失明。
 
@@ -99,6 +100,10 @@ def _make_underdeclared_bomb(
     流（STORED 写入避免 zipfile 二次压缩），再把 local/central 头 patch 成
     DEFLATED + 谎报 file_size。声明比值 declared/压缩流大小 ≈ 2:1（远低于
     100:1 闸门）、单成员 64KiB（远低于 64MiB 闸门）——只有物理试探能拦。
+
+    crc_consistent=True 时把头部 CRC 改成「按声明值截断的输出前缀」的
+    CRC32——推送前评审 [H]#1 的武器化变体：ZipExtFile 读满声明值即 EOF 且
+    CRC 校验通过，而单次全量解压的中间缓冲仍按物理输出膨胀（实测 ~2GiB）。
     """
     import zlib
 
@@ -109,10 +114,21 @@ def _make_underdeclared_bomb(
         zf.writestr(member, stream)
     raw = bytearray(buf.getvalue())
     target = member.encode()
-    # (签名, compress_type 偏移, file_size 偏移, name_len 偏移, name 偏移)
-    for sig, ctoff, fsoff, nloff, noff in (
-        (b'PK\x03\x04', 8, 22, 26, 30),   # local file header
-        (b'PK\x01\x02', 10, 24, 28, 46),  # central directory
+    # 计算截断前缀的 CRC（武器化变体用）
+    prefix_crc = 0
+    if crc_consistent:
+        dec = zlib.decompressobj(-15)
+        prefix = b''
+        for i in range(0, len(stream), 64 * 1024):
+            prefix += dec.decompress(stream[i:i + 64 * 1024], 64 * 1024)
+            if len(prefix) >= declared:
+                break
+        prefix = prefix[:declared]
+        prefix_crc = zlib.crc32(prefix)
+    # (签名, compress_type 偏移, file_size 偏移, CRC 偏移, name_len 偏移, name 偏移)
+    for sig, ctoff, fsoff, croff, nloff, noff in (
+        (b'PK\x03\x04', 8, 22, 14, 26, 30),   # local file header
+        (b'PK\x01\x02', 10, 24, 16, 28, 46),  # central directory
     ):
         pos = 0
         while (idx := raw.find(sig, pos)) >= 0:
@@ -120,6 +136,8 @@ def _make_underdeclared_bomb(
             if bytes(raw[idx + noff:idx + noff + name_len]) == target:
                 raw[idx + ctoff:idx + ctoff + 2] = (8).to_bytes(2, 'little')  # DEFLATED
                 raw[idx + fsoff:idx + fsoff + 4] = declared.to_bytes(4, 'little')
+                if crc_consistent:
+                    raw[idx + croff:idx + croff + 4] = prefix_crc.to_bytes(4, 'little')
             pos = idx + 4
     return bytes(raw)
 
@@ -127,6 +145,18 @@ def _make_underdeclared_bomb(
 def test_underdeclared_member_rejected_by_physical_probe():
     """低报 file_size 的压缩炸弹必须被物理膨胀试探拦下（声明判定对它失明）。"""
     bomb = _make_underdeclared_bomb()
+    with pytest.raises(XlsxBudgetError, match='声明不符'):
+        assert_zip_budget(bomb)
+
+
+def test_crc_consistent_underdeclared_bomb_still_rejected():
+    """评审 [H]#1 武器化变体：CRC 与截断前缀一致也必须被物理计数拦下。
+
+    旧试探经 ZipExtFile 计数（输出被声明 file_size 截断）对此变体失明；
+    新试探直接解压原始压缩流计数物理输出——produced 是物理解压量而非
+    截断值，与头部 CRC 无关。
+    """
+    bomb = _make_underdeclared_bomb(crc_consistent=True)
     with pytest.raises(XlsxBudgetError, match='声明不符'):
         assert_zip_budget(bomb)
 

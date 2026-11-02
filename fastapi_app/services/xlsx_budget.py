@@ -50,14 +50,9 @@ MAX_MEMBER_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 #: 通常 < 10x；42:1 是 zip 炸弹的典型指纹（重复内容的 deflate 可达 1000x+）。
 MAX_COMPRESSION_RATIO = 100
 
-#: 物理膨胀试探的单成员输入上限（压缩字节）。实测膨胀率只信解压物理行为，
-#: 不信可谎报的头部声明值（RJ-1，2026-11-02 实证：低报 file_size 的成员让
-#: 压缩比闸门失明——低报让「声明比值」变小，而全量读取时 ZipExtFile 的单次
-#: 解压输出上限是 MAX_N≈2GiB，声明值截断发生在解压**之后**）。
-_PROBE_MAX_INPUT = 512 * 1024
-
-#: 试探分块大小：分块读取路径下 decompressor 的单次输出上限 = 块大小，
-#: 中间缓冲受控（这正是与 zf.read() 全量路径的本质区别）。
+#: 试探分块大小：读原始压缩字节与单次解压输出（max_length）都用它，
+#: 内存上界 ~2×块大小。分块路径下 decompressor 的单次输出上限 = 块大小，
+#: 这正是与 zf.read() 全量路径（上限 ZipExtFile.MAX_N≈2GiB）的本质区别。
 _PROBE_CHUNK = 64 * 1024
 
 #: 工作簿行/列上限（防超宽/超长工作簿把内存与 CPU 拖垮）。
@@ -73,52 +68,71 @@ class XlsxBudgetError(ValueError):
 
 
 def _probe_member_inflation_ok(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bool:
-    """分块试探解压成员，实测物理膨胀率不超过 :data:`MAX_COMPRESSION_RATIO`。
+    """流式试探解压成员的**原始压缩流**，实测物理膨胀率。
 
-    声明值三道判定（成员数/单成员大小/压缩比）全部读头部，可被低报绕过；
-    本试探只信解压实测，两个拒绝条件：
+    不能经 ZipExtFile（``zf.open``/``read``）：它的返回值被**声明** file_size
+    硬截断（CPython zipfile ``data = data[:self._left]``），低报攻击下计到的
+    是截断值而非物理输出——推送前评审 [H]#1 实证：声明 64KiB + 物理解压
+    ~512MiB 且头部 CRC 与截断前缀一致的成员可双双绕过声明判定与旧试探。
+    本实现定位 local header 之后的原始压缩字节，用独立
+    ``zlib.decompressobj(-15)`` 分块计数**物理**解压输出，与头部声明无关。
 
-    1. **实测输出达到** ``min(compress_size, 512KiB) × 100`` ——物理膨胀率
-       超限（budget 是防御纵深，兜住 CRC 不可依赖的形态）；
-    2. **读到 BadZipFile（Bad CRC）**——按声明值截断的输出与声明 CRC 不符，
-       即「头部声明与物理行为不符」的铁证，正是低报谎报的形态。
-
-    探测内存峰值 ≤ 单块 64KiB（分块路径的 decompress 单次输出上限即块
-    大小）；合法成员（压缩比 <10x）试探输出远低于封顶。open 阶段的头部
-    问题和读不动的成员（加密等）不在此处拒绝——交给正式解析的既有口径。
+    拒绝条件：物理输出超过 ``min(compress_size × 100, 64MiB)``——与声明
+    闸门同语义（膨胀率 >100:1 或单成员 >64MiB）。合法成员物理输出恒等于
+    真实 file_size（已过声明闸门），零误报。内存上界 ~2×64KiB（分块读 +
+    max_length 限制单次解压输出）。读不动的成员（加密/头部异常）不在此
+    处拒绝——交给正式解析的既有口径。
     """
     if info.compress_type != zipfile.ZIP_DEFLATED or info.compress_size <= 0:
         return True  # STORED 无膨胀语义
-    budget = min(info.compress_size, _PROBE_MAX_INPUT) * MAX_COMPRESSION_RATIO
+    budget = min(info.compress_size * MAX_COMPRESSION_RATIO, MAX_MEMBER_UNCOMPRESSED_BYTES)
+    try:
+        fp = zf.fp
+        if fp is None:  # with 内不应为 None；防御性放行交正式解析口径
+            return True
+        fp.seek(info.header_offset)
+        header = fp.read(30)
+        if len(header) != 30 or header[:4] != b'PK\x03\x04':
+            return True  # local header 异常交给正式解析口径
+        name_len = int.from_bytes(header[26:28], 'little')
+        extra_len = int.from_bytes(header[28:30], 'little')
+        fp.seek(info.header_offset + 30 + name_len + extra_len)
+    except (OSError, ValueError, AttributeError):
+        return True
+    dec = zlib.decompressobj(-15)
     produced = 0
+    remaining = info.compress_size
     try:
-        f = zf.open(info)
-    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError):
-        return True  # 头部问题交给正式解析口径
-    try:
-        with f:
-            while produced < budget:
-                data = f.read(_PROBE_CHUNK)
-                if not data:
-                    break
-                produced += len(data)
-    except zipfile.BadZipFile:
-        # Bad CRC：按声明 file_size 截断的输出与声明 CRC 不符 = 谎报铁证
-        return False
+        while remaining > 0 and not dec.eof and produced <= budget:
+            comp = fp.read(min(_PROBE_CHUNK, remaining))
+            if not comp:
+                break
+            remaining -= len(comp)
+            feed = comp
+            while feed and not dec.eof:
+                out = dec.decompress(feed, _PROBE_CHUNK)
+                produced += len(out)
+                if produced > budget:
+                    return False
+                nxt = dec.unconsumed_tail
+                if not out and nxt == feed:
+                    break  # 无进展（eof 后残留/异常流）——防死循环
+                feed = nxt
+        return produced <= budget
     except (OSError, RuntimeError, ValueError, zlib.error):
-        return True  # 读不动（加密等）交给正式解析口径
-    return produced < budget
+        return True  # 读不动（加密成员的密文流解不开等）交给正式解析口径
 
 
 def assert_zip_budget(source: str | bytes) -> None:
     """对 xlsx（zip 容器）执行前置资源预算，超出抛 :class:`XlsxBudgetError`。
 
     只读中央目录（infolist）做声明值判定（成员数/压缩比/解压总量），并对
-    每个 DEFLATED 成员做**物理膨胀试探**（分块解压实测，~64KiB 内存上界）。
+    每个 DEFLATED 成员做**物理膨胀试探**（流式读原始压缩字节独立解压计数，
+    ~2×64KiB 内存上界——不经 ZipExtFile，其输出会被声明 file_size 截断）。
     两者缺一不可：声明值可被谎报（低报 file_size 让压缩比闸门失明），而
-    只信物理试探会漏掉「诚实声明但确实超预算」的包。头部谎报的成员即使
-    侥幸通过试探，也会在真实解析时因 CRC 不符炸 BadZipFile（各链路已有
-    该异常口径），配合 ``run_parse_with_timeout`` 的超时兜底。
+    物理试探兜住一切「压缩流实际能膨胀出超预算输出」的形态，包括头部 CRC
+    与截断前缀一致的武器化变体（推送前评审 [H]#1 实证）。配合
+    ``run_parse_with_timeout`` 的超时兜底。
     """
     try:
         with zipfile.ZipFile(io.BytesIO(source) if isinstance(source, bytes) else source) as zf:
