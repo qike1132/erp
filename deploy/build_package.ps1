@@ -71,7 +71,8 @@ if($DryRun){
   Write-Warn 'DryRun：跳过 runtime 依赖安装（pip install base/dev/test/ocr 锁）与导入自检'
 } else {
   # 用锁文件（B1）：钉死全部传递依赖，离线包环境可复现
-  & (Join-Path $OutDir 'runtime\python313\python.exe') -m pip install -q -r (Join-Path $ProjectDir 'requirements\base.lock') -r (Join-Path $ProjectDir 'requirements\dev.lock') -r (Join-Path $ProjectDir 'requirements\test.lock') -r (Join-Path $ProjectDir 'requirements\ocr.lock')
+  # --require-hashes：锁内每个包都带 sha256，安装时强制校验
+  & (Join-Path $OutDir 'runtime\python313\python.exe') -m pip install -q --require-hashes -r (Join-Path $ProjectDir 'requirements\base.lock') -r (Join-Path $ProjectDir 'requirements\dev.lock') -r (Join-Path $ProjectDir 'requirements\test.lock') -r (Join-Path $ProjectDir 'requirements\ocr.lock')
   if($LASTEXITCODE -ne 0){ Write-Fail "runtime 依赖安装失败 exit=$LASTEXITCODE"; exit 1 }
   $smoke = & (Join-Path $OutDir 'runtime\python313\python.exe') -c "import fastapi,uvicorn,sqlalchemy,asyncpg,pytest,ruff;print('imports-ok')" 2>&1
   if($smoke -notmatch 'imports-ok'){ Write-Fail "runtime 自检失败: $smoke"; exit 1 }

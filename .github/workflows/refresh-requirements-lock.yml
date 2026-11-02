@@ -47,6 +47,7 @@ jobs:
           for tier in base dev test ocr s3 desktop migration; do
             rm -f "requirements/$tier.lock"
             uv pip compile "requirements/$tier.txt" -o "requirements/$tier.lock" \
+              --generate-hashes \
               --quiet --python-platform windows --python-version 3.13
           done
 
