@@ -304,10 +304,11 @@ def _setup_csrf(app: FastAPI) -> None:
                 return response
 
         is_login_endpoint = request.url.path == "/api/v1/auth/login"
-        is_logout_endpoint = request.url.path == "/api/v1/auth/logout"
         # web vitals 上报使用 sendBeacon，无法携带自定义 header，豁免 CSRF
         is_vitals_endpoint = request.url.path == "/api/v1/monitoring/vitals"
-        is_exempt_endpoint = is_login_endpoint or is_logout_endpoint or is_vitals_endpoint
+        # logout 不再豁免：它无鉴权依赖且会删本地 cookie，跨站 POST 能强制登出。
+        # 前端 request.ts 对所有非 GET 请求自动带 X-CSRF-Token，移除豁免不影响登出。
+        is_exempt_endpoint = is_login_endpoint or is_vitals_endpoint
 
         if not is_exempt_endpoint and request.url.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS"):
             auth_header = request.headers.get("authorization", "")
