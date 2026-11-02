@@ -451,6 +451,33 @@ cron_jobs = [
 ]
 
 
+def _enforce_production_branch_guard(*, is_production: bool | None = None) -> None:
+    """ARQ worker 的分支闸门（与 prod_runner 同口径）。
+
+    NSSM 服务 erp-arq 用 ``python -m arq fastapi_app.core.arq_app.WorkerSettings``
+    独立启动，绕过 prod_runner 的分支闸门；但 worker 同样从工作区源码执行
+    （AGENTS §6.1-6），工作区不在 main 时重启会把分支代码跑进生产。
+
+    只在 production 生效：开发机上跑 arq 通常就在功能分支，不应被打断。
+    闸门自身不可用时 fail-open（与 prod_runner 一致），不得打死 worker。
+    """
+    if is_production is None:
+        is_production = settings.is_production
+    if not is_production:
+        return
+    try:
+        from server_manager.git_guard import check_production_branch, is_warning
+        allowed, message = check_production_branch()
+        if not allowed:
+            raise RuntimeError(f'ARQ worker 启动被分支闸门拒绝：{message}')
+        if is_warning(message):
+            logger.warning(message)
+    except RuntimeError:
+        raise
+    except Exception as e:  # broad-except: 闸门不可用不得打死生产 worker
+        logger.error('ARQ 分支闸门不可用，已放行：%s', e)
+
+
 class WorkerSettings:
     """ARQ Worker 配置（`arq fastapi_app.core.arq_app.WorkerSettings`）。"""
 
@@ -469,6 +496,8 @@ class WorkerSettings:
         真实抬升），故 web/worker 双进程执行安全 —— 不新增锁。失败**不阻断**启动
         （刻意与 lifespan 一致），但记 ERROR 以便失败可见、不静默留窗。
         """
+        _enforce_production_branch_guard()
+
         # 初始化共享 Redis 缓存管理器（与 API lifespan 同源）。2026-10-11 前 worker
         # 从不初始化它 → redis_wrapper 的所有路径静默降级、safe_lpush 写不进死信队列。
         try:
