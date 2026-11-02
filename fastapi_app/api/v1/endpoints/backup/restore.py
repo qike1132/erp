@@ -737,11 +737,14 @@ async def _run_async_file_restore(
                     # fail_progress 内部经 _sanitize_error 清洗（去除路径并截断），可安全写入 str(e)
                     await fail_progress(task_id, str(e))
 
-            # B3（NV-1）：JSON 分支提交成功后统一失效已撤销会话（zip 分支的 revoke
-            # 已在 restore_from_zip 内部完成）。get_async_db_context 在 with 退出时
-            # 提交——失败会走 except 路径（rollback+raise），不会到达这里。
-            if json_restore_succeeded:
-                await revoke_all_sessions_after_restore()
+        # B3（NV-1）：JSON 分支提交成功后统一失效已撤销会话（zip 分支的 revoke
+        # 已在 restore_from_zip 内部完成）。get_async_db_context 在 with 退出时
+        # 提交——失败会走 except 路径（rollback+raise），不会到达这里。
+        # 推送前评审 [L]#4：放在 asyncio.timeout 块**之外**——会话失效是安全
+        # 关键收尾，不应被恢复总超时预算挤占（超时恰落在收尾段时库已提交，
+        # 会话却未失效）。
+        if json_restore_succeeded:
+            await revoke_all_sessions_after_restore()
     except TimeoutError:
         # asyncio.timeout 取消内层任务后在此收口：必须写明「可能已被重建」——
         # 超时点可能落在 DROP 之后，此时库是空壳/部分状态，恢复中断标记仍在。
