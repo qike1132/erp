@@ -106,13 +106,14 @@ def get_oid():
 
 # ============================ HTTP 助手 ============================
 def mint_token():
-    rows = db_exec('SELECT id FROM "user" WHERE username=:u', {'u': 'admin'}, fetch=True)
+    # tv 必须与库内 token_version 一致：会话撤销上线后两者会被比对
+    rows = db_exec('SELECT id, token_version FROM "user" WHERE username=:u', {'u': 'admin'}, fetch=True)
     if not rows:
-        rows = db_exec('SELECT id FROM "user" WHERE is_super IS TRUE ORDER BY id LIMIT 1', fetch=True)
+        rows = db_exec('SELECT id, token_version FROM "user" WHERE is_super IS TRUE ORDER BY id LIMIT 1', fetch=True)
     if not rows:
         raise SystemExit('找不到 admin/超管账号，无法铸 token')
-    uid = rows[0][0]
-    return create_access_token({'sub': str(uid)}), uid
+    uid, tv = rows[0][0], int(rows[0][1] or 0)
+    return create_access_token({'sub': str(uid), 'tv': tv}), uid
 
 
 def pick_origin():

@@ -47,10 +47,12 @@ def one(sql, p=None):
     return r[0][0] if r else 0
 
 
-rows = q('SELECT id FROM "user" WHERE username=:u', {'u': 'admin'}, fetch=True)
-uid = rows[0][0] if rows else q('SELECT id FROM "user" WHERE is_super IS TRUE ORDER BY id LIMIT 1', fetch=True)[0][0]
+rows = q('SELECT id, token_version FROM "user" WHERE username=:u', {'u': 'admin'}, fetch=True)
+if not rows:
+    rows = q('SELECT id, token_version FROM "user" WHERE is_super IS TRUE ORDER BY id LIMIT 1', fetch=True)
+uid, tv = rows[0][0], int(rows[0][1] or 0)
 client = httpx.Client(base_url=BASE, timeout=30, trust_env=False,
-                      headers={'Authorization': f'Bearer {create_access_token({"sub": str(uid)})}',
+                      headers={'Authorization': f'Bearer {create_access_token({"sub": str(uid), "tv": tv})}',
                                'Origin': (settings.BACKEND_CORS_ORIGINS or ['http://localhost'])[0]})
 
 

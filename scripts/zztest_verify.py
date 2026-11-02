@@ -35,9 +35,11 @@ def one(sql, p=None):
     return r[0][0] if r else 0
 
 
-rows = q('SELECT id FROM "user" WHERE username=:u', {'u': 'admin'})
-uid = rows[0][0] if rows else q('SELECT id FROM "user" WHERE is_super IS TRUE ORDER BY id LIMIT 1')[0][0]
-token = create_access_token({'sub': str(uid)})
+rows = q('SELECT id, token_version FROM "user" WHERE username=:u', {'u': 'admin'})
+if not rows:
+    rows = q('SELECT id, token_version FROM "user" WHERE is_super IS TRUE ORDER BY id LIMIT 1')
+uid, tv = rows[0][0], int(rows[0][1] or 0)
+token = create_access_token({'sub': str(uid), 'tv': tv})
 origins = [o for o in (settings.BACKEND_CORS_ORIGINS or []) if isinstance(o, str) and o]
 client = httpx.Client(base_url=BASE, timeout=60, trust_env=False,
                       headers={'Authorization': f'Bearer {token}', 'Origin': origins[0] if origins else 'http://localhost'})

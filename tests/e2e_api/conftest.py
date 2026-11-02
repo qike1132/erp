@@ -360,7 +360,8 @@ def _mint_token(username: str = "admin") -> _MintOutcome:
     """现铸一个指定用户的 access token。
 
     与 ``scripts/contract_snapshot.py::mint_token`` 同源做法：
-    查 user 表拿 id，再 ``create_access_token({'sub': str(uid)})``。
+    查 user 表拿 id 与 token_version，再
+    ``create_access_token({'sub': str(uid), 'tv': token_version})``。
     口令可能被改，但 user 表的主键不会 —— 所以这条路径最稳。
 
     用收集期固化的 ``real_database_url()``（真实库），**不能**读
