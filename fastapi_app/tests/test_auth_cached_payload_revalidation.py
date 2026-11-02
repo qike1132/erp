@@ -61,6 +61,8 @@ async def test_strict_path_still_uses_fail_closed_blacklist(monkeypatch) -> None
     req = _request(None)
     monkeypatch.setattr(deps, '_resolve_user_id', lambda r: 7)
     monkeypatch.setattr(deps, '_resolve_token_jti', lambda r: 'from-header')
+    # 本用例的假 Request 没有 headers/cookies；会话版本不是它的关注点
+    monkeypatch.setattr(deps, '_resolve_token_tv', lambda r: 0)
     revoked = AsyncMock(return_value=False)
     monkeypatch.setattr(deps, 'is_token_revoked', revoked)
     monkeypatch.setattr(deps, '_verify_user_active', AsyncMock(return_value=True))

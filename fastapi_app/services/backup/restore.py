@@ -168,7 +168,12 @@ async def revoke_all_sessions_after_restore() -> None:
                 text('UPDATE "user" SET token_version = COALESCE(token_version, 0) + 1')
             )
     except Exception as e:  # defensive: 收尾失败需人工介入，但不改判恢复结果
-        logger.error('恢复后失效会话失败（需人工要求全员重新登录）: %s', e)
+        logger.error(
+            '恢复后失效会话失败（需人工要求全员重新登录）: %s；'
+            '若日志含 token_version 列不存在，说明还原的是 109 之前的备份，'
+            '需先执行 alembic upgrade head 再重启',
+            e,
+        )
     try:
         from fastapi_app.core.auth.blacklist import _LOCAL_REVOKED_JTIS
         _LOCAL_REVOKED_JTIS.clear()

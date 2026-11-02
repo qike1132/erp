@@ -205,6 +205,24 @@ def _resolve_token_jti(request: Request) -> str | None:
         return None
 _USER_ACTIVE_CACHE = _TTLCache(ttl=10, maxsize=500)
 
+def _resolve_token_tv(request: Request) -> int:
+    """回退路径取 token 的会话版本（request.state 上没有 payload 时）。
+
+    不能沿用 ``payload.get('tv', 0)``：payload 缺失时那样会恒取 0，把
+    token_version>0 的合法 token 误判为过期。解码失败返回 0（此时
+    ``_resolve_user_id`` 早已拒绝该请求，这里只求不误杀）。
+    """
+    auth_header = request.headers.get('authorization', '')
+    bearer_token = auth_header[7:] if auth_header.startswith('Bearer ') else ''
+    token = bearer_token or request.cookies.get('access_token', '')
+    if not token:
+        return 0
+    try:
+        return int(_decode_jwt_token(token, expected_type='access').get('tv', 0) or 0)
+    except (HTTPException, TypeError, ValueError):
+        return 0
+
+
 async def _verify_user_active(
     user_id: int, db: AsyncSession, *, expected_token_version: int | None = None,
 ) -> bool:
@@ -267,15 +285,17 @@ async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_clos
     payload = getattr(request.state, '_jwt_payload', None)
     if payload is not None:
         jti = payload.get('jti')
+        expected_tv = payload.get('tv', 0)
     else:
         # 罕见边界（如 state 被中间件重置）：退回独立解析
         jti = _resolve_token_jti(request)
+        expected_tv = _resolve_token_tv(request)
 
     if await is_token_revoked(jti, fail_closed=fail_closed):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Token已失效')
 
     if not await _verify_user_active(
-        user_id, db, expected_token_version=(payload or {}).get('tv', 0),
+        user_id, db, expected_token_version=expected_tv,
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户不存在或已被禁用')
     return user_id
