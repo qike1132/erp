@@ -145,9 +145,12 @@ class TestBackupSignalComposition:
 
 
 def test_health_route_wires_backup_block() -> None:
-    """结构断言:/api/health 确实把 backup 块塞进 health_data(且在建缓存之前)。"""
+    """结构断言:backup 块必须在建缓存之前算好并进入缓存的 internal_data。"""
     from pathlib import Path
 
     src = (Path(__file__).resolve().parent.parent / "fastapi_app" / "core" / "health.py").read_text(encoding="utf-8")
-    assert 'health_data["backup"] = await _backup_signal()' in src
-    assert src.index('health_data["backup"] = await _backup_signal()') < src.index("_set_cached_health(public_data=dict(health_data)")
+    assert 'backup_signal = await _backup_signal()' in src
+    assert '"backup": backup_signal,' in src
+    assert src.index('backup_signal = await _backup_signal()') < src.index(
+        "internal_data = {"
+    )

@@ -1171,7 +1171,11 @@ async def test_health_degrades_end_to_end(monkeypatch):
 
     data = await health_mod._build_fresh_health(user_id=None, reasons=[])
     assert data['status'] == 'degraded'
-    assert data['audit_retention']['ok'] is False
+    # 匿名响应不携带运维细节（备份/审计/连接池），只有 status/app。
+    assert 'audit_retention' not in data
+
+    authed = await health_mod._build_fresh_health(user_id=42, reasons=[])
+    assert authed['audit_retention']['ok'] is False
 
 
 def test_health_signal_never_raises(monkeypatch):

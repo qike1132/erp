@@ -232,8 +232,12 @@ def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[s
         return cached_public
 
     health_data = dict(cached_public)
+    internal = _health_cache["internal_data"] or {}
+    for _key in ("backup", "audit_retention"):
+        if _key in internal:
+            health_data[_key] = internal[_key]
     health_data["version"] = settings.APP_VERSION
-    health_data["checks"] = dict(_health_cache["internal_data"])
+    health_data["checks"] = dict(internal.get("checks") or {})
     try:
         pool_status = db_health_checker.get_pool_status()
         health_stats = db_health_checker.get_stats()
@@ -253,10 +257,6 @@ def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[s
 
 async def _build_fresh_health(user_id: int | None, reasons: list[str]):
     """无缓存时实时探测 DB/Redis 并构建健康响应。"""
-    health_data: dict[str, Any] = {
-        "status": "healthy",
-        "app": settings.APP_NAME,
-    }
     overall_healthy = await verify_db_connectivity()
 
     redis_ok = True
@@ -277,19 +277,30 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str]):
         "database": {"status": "ok"} if overall_healthy else {"status": "error"},
         "redis": {"status": "ok"} if redis_ok else {"status": "warning"},
     }
-    health_data["backup"] = await _backup_signal()
-    health_data["audit_retention"] = _audit_retention_signal()
-    health_data["status"] = _resolve_status(
-        overall_healthy=overall_healthy,
-        backup_ok=health_data["backup"].get("ok", False),
-        audit_retention_ok=health_data["audit_retention"].get("ok", False),
-    )
-    _set_cached_health(public_data=dict(health_data), internal_data=internal_checks)
+    # 匿名侧只保留「服务是否活着」；备份/审计/连接池属内部运维信号，登录后才可见。
+    backup_signal = await _backup_signal()
+    audit_signal = _audit_retention_signal()
+    public_data = {
+        "status": _resolve_status(
+            overall_healthy=overall_healthy,
+            backup_ok=backup_signal.get("ok", False),
+            audit_retention_ok=audit_signal.get("ok", False),
+        ),
+        "app": settings.APP_NAME,
+    }
+    internal_data = {
+        "backup": backup_signal,
+        "audit_retention": audit_signal,
+        "checks": internal_checks,
+    }
+    _set_cached_health(public_data=public_data, internal_data=internal_data)
 
     # P0-10：降级标记只加在响应上（缓存里存的是 DB/Redis 健康快照）
-    health_data = _with_security_degraded(health_data, reasons)
+    health_data = _with_security_degraded(dict(public_data), reasons)
 
     if user_id is not None:
+        health_data["backup"] = backup_signal
+        health_data["audit_retention"] = audit_signal
         health_data["version"] = settings.APP_VERSION
         health_data["checks"] = dict(internal_checks)
         try:
