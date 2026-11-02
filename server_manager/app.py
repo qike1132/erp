@@ -1,6 +1,8 @@
 """
-ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.40）
+ERP 服务器管理器 GUI（版本号唯一真源见 server_manager.constants 的 _VERSION，当前 v5.45）
 功能:
+  - 开发 / 生产并行（v5.45）：开发栈独占 5102/5173 端口，与生产 5002/3000 隔离，
+    两栈可同时运行；Redis 为共享基础设施，生产在跑时停止开发/退出不收 Redis
   - 一键启动前后端：同时启动 FastAPI 后端 + Vue/Vite 前端 + Redis服务
   - 一键重启：停止所有进程和端口，然后重新启动服务
   - 全部停止：停止所有前后端进程、Redis服务，清理所有Python相关残留进程
@@ -32,6 +34,8 @@ from server_manager import git_guard, log_ops, windows_ops
 from server_manager.action_gate import _EMERGENCY_JOIN_SEC, ActionGate
 from server_manager.constants import (
     _API_PORT,
+    _DEV_API_PORT,
+    _DEV_WEB_PORT,
     _IS_WINDOWS,
     _REDIS_PORT,
     _SVC_API,
@@ -243,11 +247,9 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                               read_stdout=self._read_stdout)
         # 开发模式层(T5 包化)：双进程(uvicorn + vite)的启停/重启 + 状态自持。
         # svc/redis 直接注入实例(兄弟 ops，不再包回调)；python_exe/frontend_dir 取
-        # app 模块级值，release_ports 注入 app 的端口清理(它同时被不搬的生产路径
-        # _start_services_flow 调用，故实现保留在 app)。
+        # app 模块级值。v5.45 并行改造：开发栈走独立端口，无需注入生产端口清理。
         self.dev = DevModeOps(self._msg_queue, self._gate, _PROJECT_DIR, self.svc, self.redis,
-                              python_exe=_PYTHON_EXE, frontend_dir=_FRONTEND_DIR,
-                              release_ports=self._release_ports)
+                              python_exe=_PYTHON_EXE, frontend_dir=_FRONTEND_DIR)
         self._action_buttons = []
         self.setup_logging()
         self._build_ui()
@@ -366,7 +368,13 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self._gate.cancel('退出')
         self._gate.wait_idle(_EMERGENCY_JOIN_SEC)
         self._terminate_dev_processes('退出')
-        self._stop_redis()
+        # Redis 是开发/生产共享设施（v5.45）：生产在跑（或状态不可知）时退出
+        # 不收 Redis，避免把在跑的生产缓存层一起拔掉；生产确定没在跑时维持
+        # 原行为（顺带收掉本管理器直接拉起的回退实例）。
+        if not self.dev._production_may_run():
+            self._stop_redis()
+        else:
+            self.log_message('生产模式在运行（或状态不可知），退出时保留共享 Redis')
         self._mode = 'none'
         # 退出前收掉日志轮询线程：它是守护线程，但显式停能保证 join 后再销毁 Tk，
         # 不会出现「窗口没了、线程还在往已关闭的队列投消息」。
@@ -641,7 +649,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
                 # ★ 每个端口的返回值都必须消费：'managed_unknown' = 已放弃清理、端口仍被占用，
                 #   必须告警而不是假装清干净了。
                 unresolved = []          # 未能确认清理干净的端口
-                for port in (_API_PORT, _WEB_PORT, _REDIS_PORT):
+                for port in (_API_PORT, _WEB_PORT, _DEV_API_PORT, _DEV_WEB_PORT, _REDIS_PORT):
                     try:
                         state = self._kill_port_sync(port, exclude=managed_pids,
                                                      managed_pids_fn=self._managed_service_pids)
@@ -762,12 +770,12 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
     # app(碰 messagebox / status_bar_label / _update_all_ui,不得进无 Tk 的 ops 模块)。
 
     def _start_dual_server(self, label):
-        # 互斥守卫：开发模式正在启动/重启中则不操作
+        # 互斥守卫：开发模式正在启动/重启中则不操作（防止双启动竞态）
         if self._mode in ('starting', 'restarting'):
             self.log_message("开发模式正在启动/重启中，请稍候", 'WARNING')
             return
         if self._mode != 'none':
-            self.log_message("已有服务在运行，请先停止后再启动", 'WARNING')
+            self.log_message("开发模式已在运行，请先停止开发模式后再启动", 'WARNING')
             return
         if not _PYTHON_EXE:
             self.log_message("无法启动: 未找到 Python 解释器，请安装 Python 并确保在 PATH 中", 'ERROR')
@@ -814,9 +822,11 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self._update_all_ui()
         self.status_bar_label.config(text=f"{label}运行中")
         self.log_message(f"{label}启动成功")
-        self.log_message(f"  → 后端: http://localhost:{_API_PORT}")
+        self.log_message(f"  → 后端: http://localhost:{_DEV_API_PORT}")
         if frontend_alive:
-            self.log_message(f"  → 前端: http://localhost:{_WEB_PORT}")
+            self.log_message(f"  → 前端: http://localhost:{_DEV_WEB_PORT}")
+        if getattr(self, '_prod_running', False):
+            self.log_message("生产模式仍在运行（开发 / 生产并行中，端口互相隔离）")
 
     def _on_dual_failed(self, label, reason):
         self.log_message(f"{label}启动失败: {reason}", 'ERROR')
@@ -919,13 +929,18 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         brand = tk.Frame(hdr, bg=self._PALETTE['bg_header'])
         brand.pack(side=tk.LEFT, padx=(11, 0), pady=(11, 0))
         tk.Label(brand, text='ERP 服务器管理器', font=('Microsoft YaHei UI', 14, 'bold'), fg=self._PALETTE['text_primary'], bg=self._PALETTE['bg_header']).pack(anchor='w')
-        tk.Label(brand, text='开发 / 生产一键切换 · 互斥托管', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_header']).pack(anchor='w')
+        tk.Label(brand, text='开发 / 生产可同时运行 · 端口隔离', font=('Microsoft YaHei UI', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_header']).pack(anchor='w')
         ver_frame = tk.Frame(hdr, bg=self._PALETTE['bg_input'], highlightbackground=self._PALETTE['border'], highlightthickness=1)
         ver_frame.pack(side=tk.LEFT, padx=(12, 0), pady=(22, 0))
         tk.Label(ver_frame, text=_VERSION, font=('Consolas', 8), fg=self._PALETTE['text_dim'], bg=self._PALETTE['bg_input']).pack(padx=8, pady=1)
         ports = tk.Frame(hdr, bg=self._PALETTE['bg_header'])
         ports.pack(side=tk.RIGHT, pady=(18, 0))
-        for label, port, tint, fg_c in [('API', _API_PORT, self._PALETTE['accent_tint'], self._PALETTE['accent']), ('WEB', _WEB_PORT, self._PALETTE['success_tint'], self._PALETTE['success'])]:
+        for label, port, tint, fg_c in [
+            ('API', _API_PORT, self._PALETTE['accent_tint'], self._PALETTE['accent']),
+            ('WEB', _WEB_PORT, self._PALETTE['success_tint'], self._PALETTE['success']),
+            ('DEV API', _DEV_API_PORT, self._PALETTE['warning_tint'], self._PALETTE['warning']),
+            ('DEV WEB', _DEV_WEB_PORT, self._PALETTE['warning_tint'], self._PALETTE['warning']),
+        ]:
             pill = tk.Frame(ports, bg=tint)
             pill.pack(side=tk.LEFT, padx=(6, 0))
             tk.Label(pill, text=f'{label} {port}', font=('Consolas', 9, 'bold'), fg=fg_c, bg=tint).pack(padx=10, pady=3)
@@ -938,7 +953,7 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         content.columnconfigure(1, weight=1, uniform='mode_cards')
         content.rowconfigure(0, weight=0)
         content.rowconfigure(1, weight=1)
-        self._build_server_card(content, 0, 0, '开发模式', 'FastAPI + Vue3 / Vite · 热重载 · 自动切换', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev)
+        self._build_server_card(content, 0, 0, '开发模式', 'FastAPI + Vue3 / Vite · 热重载 · 独立端口 · 可与生产并行', 'dual_dev', self.start_dual_dev, self.stop_dual_dev, self.restart_dual_dev)
         self._build_prod_card(content, 0, 1)
         self._build_log_section(content)
 
@@ -1015,9 +1030,6 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
 
     def _ensure_production_stopped(self):
         return self.svc.ensure_production_stopped()
-
-    def _ensure_development_stopped(self):
-        return self.dev.ensure_development_stopped()
 
     def _release_ports(self) -> bool:
         """清理 5002 与 3000 端口占用（复用 _kill_port_sync，其内部对多 PID 有 3 轮重试）。
@@ -1380,9 +1392,11 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self._gate.start(f'服务{verb}', self._service_cmd_sync, verb)
 
     def _start_services(self):
-        # 互斥守卫：开发模式正在启动/重启中则拒绝（防 TOCTOU 双后端抢 5002）
+        # 过渡态守卫：开发模式正在启动/重启中时，闸门必然被它占着，给出比
+        # 「已有操作进行中」更具体的提示。v5.45 起两栈端口隔离，生产启动
+        # 本身已不受开发模式运行态限制（可并行）。
         if self._mode in ('starting', 'restarting'):
-            self.log_message('开发模式正在启动中，请稍候', 'WARNING')
+            self.log_message('开发模式正在启动/重启中，请稍候再启动生产服务', 'WARNING')
             return
         self._gate.start('启动生产服务', self._start_services_flow)
 
@@ -1395,15 +1409,14 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
             return
         if guard_msg.startswith('警告') or '覆盖' in guard_msg:
             self._msg_queue.put(('log', {'text': guard_msg, 'level': 'WARNING'}))
-        # 互斥切换：停开发模式 + 清端口（含进程树终止等阻塞操作，在动作线程内完成）
+        # v5.45 并行改造：生产启动**不再停开发模式**——开发栈独占 5102/5173，
+        # 与生产 5002/3000 端口隔离，两栈可同时运行。此处只清生产端口。
         # ★ 日志对齐开发模式：原实现只有两行「erp-prod start 已执行」——NSSM start
         #   立即返回，不等待 RUNNING、不回灌服务日志，界面上一片安静像没反应。
         self._msg_queue.put(('log', {'text': '正在启动生产模式 (Windows 服务 NSSM)...'}))
         # 记下启动时刻：此后直到 prod_runner 写下第一份快照前，状态文件都还是上一轮的
         # 旧快照，界面必须按「启动中」对待，不能报「prod_runner 可能已退出」。
         self._prod_start_ts = time.time()
-        if self._ensure_development_stopped():
-            self._msg_queue.put(('log', {'text': '已自动停止开发模式', 'level': 'INFO'}))
         self._gate.checkpoint()
         self._msg_queue.put(('log', {'text': '正在清理端口...'}))
         if not self._release_ports():
@@ -1514,16 +1527,20 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         self.stop_all_btn.pack(side=tk.RIGHT, padx=(10, 0))
 
     def _update_mode_badge(self):
-        """更新运行模式徽章：未运行 / 开发模式 / 生产模式（含过渡态）。"""
+        """更新运行模式徽章：未运行 / 开发模式 / 生产模式 / 并行（含过渡态）。"""
         try:
             mode = self._mode
+            prod_running = getattr(self, '_prod_running', False)
             if mode == 'starting':
                 self._mode_badge.set_state('deploying', f'开发模式 · {self._mode_label()}')
             elif mode in ('restarting', 'stopping'):
                 self._mode_badge.set_state('restarting', f'开发模式 · {self._mode_label()}')
+            elif mode == 'dual_dev' and prod_running:
+                # 并行态（v5.45）：两栈同时运行，徽章必须如实显示，避免误判只跑了一栈
+                self._mode_badge.set_state('running', '开发 + 生产 · 并行')
             elif mode == 'dual_dev':
                 self._mode_badge.set_state('running', '开发模式')
-            elif getattr(self, '_prod_running', False):
+            elif prod_running:
                 # 生产模式用品牌蓝，与开发模式(绿)区分，体现环境语义
                 self._mode_badge.set_state('running', '生产模式', color_key='accent', tint_key='accent_tint')
             elif getattr(self, '_prod_unknown', False):

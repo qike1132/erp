@@ -9,12 +9,13 @@ app 模块(那会循环导入)。
   ``startup_current_step``)归本类所有(原 app 的 ``self._mode`` 等)。app 侧为其中
   6 个名字(``startup_steps`` 除外,它仅本模块内部使用)提供**读写双向**属性桥,
   使既有 ~50 处读写点不必改写。
-★ 兄弟 ops 直接注入**实例**: ``svc``(ServiceOps,供 ensure_production_stopped /
-  managed_service_pids)与 ``redis``(RedisOps,供 start_redis / stop_redis)——
-  不为兄弟对象再包一层回调。
+★ 兄弟 ops 直接注入**实例**: ``svc``(ServiceOps,供生产运行态判定)与 ``redis``
+  (RedisOps,供 start_redis / stop_redis)——不为兄弟对象再包一层回调。
 ★ app 侧能力按先例注入: ``msg_queue`` / ``gate`` / ``project_dir`` / ``python_exe`` /
-  ``frontend_dir`` / ``release_ports``(app 的端口清理,同时被**不搬的**生产路径
-  ``_start_services_flow`` 调用,故保留在 app)。
+  ``frontend_dir``。
+★ 2026-11-02 并行改造(v5.45): 开发栈迁独立端口(_DEV_API_PORT/_DEV_WEB_PORT),
+  不再抢生产的 5002/3000,启动前也**不再停生产**——开发/生产两栈可同时运行。
+  Redis 是共享基础设施: 生产在跑(或状态不可知)时,停止/重启开发模式**保留** Redis。
 ★ UI 胶水(`_start_dual_server` 的校验与 messagebox、``_on_dual_started`` /
   ``_on_dual_failed`` 的 status_bar_label / _update_all_ui)刻意留在 app —— 它们碰
   Tk,搬进来会违反本模块的红线(评审批准方案 A)。
@@ -26,7 +27,7 @@ import threading
 import time
 
 from server_manager import windows_ops
-from server_manager.constants import _API_PORT, _HTTP_DIRECT, _IS_WINDOWS, _WEB_PORT
+from server_manager.constants import _DEV_API_PORT, _DEV_WEB_PORT, _HTTP_DIRECT, _IS_WINDOWS, _SVC_API
 
 
 class DevModeOps:
@@ -38,9 +39,9 @@ class DevModeOps:
     """
 
     def __init__(self, msg_queue, gate, project_dir, svc, redis, *,
-                 python_exe, frontend_dir, release_ports):
-        """``msg_queue``/``gate``/``project_dir``/``python_exe``/``frontend_dir``/
-        ``release_ports`` 由 app 注入;``svc``/``redis`` 为兄弟 ops 实例。"""
+                 python_exe, frontend_dir):
+        """``msg_queue``/``gate``/``project_dir``/``python_exe``/``frontend_dir``
+        由 app 注入;``svc``/``redis`` 为兄弟 ops 实例。"""
         self._msg_queue = msg_queue
         self._gate = gate
         self._project_dir = project_dir
@@ -48,7 +49,6 @@ class DevModeOps:
         self._redis = redis
         self._python_exe = python_exe
         self._frontend_dir = frontend_dir
-        self._release_ports = release_ports
         # ── 本模块自持的开发模式状态(原 app 的 self._mode / self._process / ...) ──
         self.mode = 'none'
         self.process = None
@@ -59,28 +59,26 @@ class DevModeOps:
         self.startup_current_step = ''
 
     # ── 启动 ────────────────────────────────────────────────────────────────
+    # ★ 并行改造(v5.45): 开发模式不再与生产互斥——独占 5102/5173 两个端口,
+    #   启动前只清这两个**开发专用**端口,绝不动生产的 5002/3000(也就不会
+    #   taskkill 在跑的受管进程)。生产是否在跑与开发栈无关,可同时运行。
     def start_dual_flow(self, label):
         self.mode = 'starting'
         self.current_mode_key = 'dual_dev'
-        self.startup_progress, self.startup_steps, self.startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
+        self.startup_progress, self.startup_steps, self.startup_current_step = 0, ['检查开发端口', '确保Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
         self._msg_queue.put(('log', {'text': f"正在启动{label}..."}))
         self._msg_queue.put(('status', {'text': f"正在启动{label}..."}))
         self._msg_queue.put(('ui_update', {}))
         self.start_dual_worker(label)
 
     def start_dual_worker(self, label):
-        """后台执行互斥切换（停生产 + 清端口），随后复用现有启动流程"""
+        """后台执行端口清理（仅开发端口），随后复用现有启动流程。"""
         try:
             self._gate.checkpoint()
             self._msg_queue.put(('startup_progress', {'step': self.startup_steps[0], 'progress': 1, 'total': len(self.startup_steps)}))
-            ok, reason, stopped_any = self._svc.ensure_production_stopped()
-            if not ok:
-                self._msg_queue.put(('log', {'text': f"切换失败: {reason}", 'level': 'ERROR'}))
-                self._msg_queue.put(('dual_failed', {'label': label, 'reason': reason}))
+            if not self._release_dev_ports():
+                self._msg_queue.put(('dual_failed', {'label': label, 'reason': '开发端口清理失败'}))
                 return
-            if stopped_any:
-                self._msg_queue.put(('log', {'text': '已自动停止生产模式', 'level': 'INFO'}))
-            self._release_ports()
             self.start_dual_thread(label)
         except Exception as e:
             # 后台线程无 try/except 会静默终止，导致启动流程卡在 'starting' 且无任何日志；
@@ -88,14 +86,38 @@ class DevModeOps:
             self._msg_queue.put(('log', {'text': f"启动流程异常: {e!s}", 'level': 'ERROR'}))
             self._msg_queue.put(('dual_failed', {'label': label, 'reason': str(e)}))
 
+    def _release_dev_ports(self) -> bool:
+        """清理开发专用端口(5102/5173)，返回是否确认清干净。
+
+        与生产端口清理(app._release_ports)的语义差异：NSSM 受管服务**永不**
+        监听开发端口，故无需受管 PID 排除集；但仍必须消费 kill_port_sync 的
+        返回值——'still_occupied' 时若继续启动，新进程绑不上端口（或绑上却
+        收不到流量），启动假成功。
+        """
+        ok = True
+        for port in (_DEV_API_PORT, _DEV_WEB_PORT):
+            state = windows_ops.kill_port_sync(port)
+            if state == 'still_occupied':
+                pids = windows_ops.find_port_pids(port)
+                self._msg_queue.put(('log', {
+                    'text': f'开发端口 {port} 清理失败：仍被 PID {pids or "?"} 占用'
+                            f'（可能是提权进程，taskkill 被拒绝）。'
+                            f'请用管理员终端执行 taskkill /F /T /PID <PID> 后重试。',
+                    'level': 'ERROR',
+                }))
+                ok = False
+        if ok:
+            self._msg_queue.put(('log', {'text': f'开发端口已就绪 (API {_DEV_API_PORT} / WEB {_DEV_WEB_PORT})，不影响生产模式'}))
+        return ok
+
     def start_dual_thread(self, label):
         try:
             creationflags = subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0
             self._gate.checkpoint()
 
-            self._msg_queue.put(('log', {'text': '正在清理端口...'}))
-            windows_ops.kill_port_sync(_API_PORT)
-            windows_ops.kill_port_sync(_WEB_PORT)
+            # 仅清开发端口（worker 已清过一轮，此处兜底重启直入本函数的路径）
+            windows_ops.kill_port_sync(_DEV_API_PORT)
+            windows_ops.kill_port_sync(_DEV_WEB_PORT)
 
             self.startup_current_step, self.startup_progress = self.startup_steps[1], 2
             self._msg_queue.put(('startup_progress', {'step': self.startup_current_step, 'progress': self.startup_progress, 'total': len(self.startup_steps)}))
@@ -109,8 +131,8 @@ class DevModeOps:
             self._gate.checkpoint()
             # 必须绑回环（AGENTS.md 红线 #3）：绑 0.0.0.0 会**绕过 nginx** 并把
             # /api/docs、/metrics 暴露给同网段（历史观察到的「:5002 绑 0.0.0.0 = GUI 开发栈」即此）。
-            # 前端 vite dev 走同机反代（BACKEND_INTERNAL_URL=http://127.0.0.1:5002），回环已足够。
-            backend_cmd = [self._python_exe, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '127.0.0.1', '--port', str(_API_PORT), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app']
+            # 开发栈也只绑回环：前端 vite dev 走同机反代，回环已足够。
+            backend_cmd = [self._python_exe, '-u', '-m', 'uvicorn', 'fastapi_app.main:app', '--host', '127.0.0.1', '--port', str(_DEV_API_PORT), '--log-level', 'info', '--reload', '--reload-dir', 'fastapi_app']
             self.process = subprocess.Popen(backend_cmd, cwd=str(self._project_dir), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
             self._msg_queue.put(('log', {'text': f"后端进程已启动 (PID: {self.process.pid})"}))
             threading.Thread(target=self.read_stdout, args=(self.process,), daemon=True).start()
@@ -125,7 +147,7 @@ class DevModeOps:
                     #     AttributeError，被外层 except 吞掉 → 30 次探测全失败
                     #     → 杀掉已 startup complete 的健康后端）。hosting_view
                     #     用的正是 .open，此处对齐。
-                    _HTTP_DIRECT.open(f'http://127.0.0.1:{_API_PORT}/api/health', timeout=2)
+                    _HTTP_DIRECT.open(f'http://127.0.0.1:{_DEV_API_PORT}/api/health', timeout=2)
                     backend_ready = True
                     break
                 except Exception:
@@ -143,9 +165,11 @@ class DevModeOps:
             self.startup_current_step, self.startup_progress = self.startup_steps[3], 4
             self._msg_queue.put(('startup_progress', {'step': self.startup_current_step, 'progress': self.startup_progress, 'total': len(self.startup_steps)}))
             npm_cmd = 'npm.cmd' if _IS_WINDOWS else 'npm'
-            # 启动 Vite dev server
+            # 启动 Vite dev server。BACKEND_INTERNAL_URL 指向**开发后端**端口：
+            # vite.config.ts 的 /api、/static、/ws 代理按该变量转发——手工
+            # `npm run dev` 不带该变量时回落生产后端 5002（既有行为不变）。
             self._gate.checkpoint()
-            self.frontend_process = subprocess.Popen([npm_cmd, 'run', 'dev', '--', '--port', str(_WEB_PORT)], cwd=str(self._frontend_dir), env={**os.environ, 'BACKEND_INTERNAL_URL': f'http://127.0.0.1:{_API_PORT}'}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
+            self.frontend_process = subprocess.Popen([npm_cmd, 'run', 'dev', '--', '--port', str(_DEV_WEB_PORT)], cwd=str(self._frontend_dir), env={**os.environ, 'BACKEND_INTERNAL_URL': f'http://127.0.0.1:{_DEV_API_PORT}'}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=creationflags, text=False)
             self._msg_queue.put(('log', {'text': f"前端进程已启动 (PID: {self.frontend_process.pid})"}))
             threading.Thread(target=self.read_frontend_stdout, args=(self.frontend_process,), daemon=True).start()
             frontend_ready = False
@@ -153,7 +177,7 @@ class DevModeOps:
                 self._gate.checkpoint()
                 try:
                     # 同后端探测：直连 opener + .open（见上注释）
-                    _HTTP_DIRECT.open(f'http://127.0.0.1:{_WEB_PORT}/', timeout=2)
+                    _HTTP_DIRECT.open(f'http://127.0.0.1:{_DEV_WEB_PORT}/', timeout=2)
                     frontend_ready = True
                     break
                 except Exception:
@@ -171,6 +195,15 @@ class DevModeOps:
             self._msg_queue.put(('dual_failed', {'label': label, 'reason': f'异常: {e!s}'}))
 
     # ── 停止 / 重启 ─────────────────────────────────────────────────────────
+    def _production_may_run(self) -> bool:
+        """生产模式是否在跑（或状态不可知）——决定停止开发时能否顺带停 Redis。
+
+        Redis(6379) 是开发/生产**共享**的基础设施：生产在跑时停掉它会让
+        erp-prod 的缓存层大面积降级。「未知」按可能在跑处理（查不出来 ≠ 已停止）。
+        """
+        state = self._svc.svc_state(_SVC_API)
+        return 'RUNNING' in state.upper() or state == '未知'
+
     def stop_dual_mode_async(self, label):
         self._gate.start(f'停止{label}', self.stop_dual_flow, label)
 
@@ -194,23 +227,30 @@ class DevModeOps:
                         with contextlib.suppress(Exception):
                             proc.kill()
                 self._msg_queue.put(('log', {'text': f'{name}进程已终止 (PID: {proc.pid})'}))
-        self._redis.stop_redis()
-        windows_ops.kill_port_sync(_API_PORT)
-        windows_ops.kill_port_sync(_WEB_PORT)
+        # Redis 是共享基础设施：生产在跑（或状态不可知）时保留，避免把在跑的
+        # 生产缓存层一起拔掉；生产确定没在跑时维持原行为（顺带收掉回退拉起的实例）。
+        if self._production_may_run():
+            self._msg_queue.put(('log', {'text': '生产模式在运行（或状态不可知），共享 Redis 已保留', 'level': 'INFO'}))
+        else:
+            self._redis.stop_redis()
+        windows_ops.kill_port_sync(_DEV_API_PORT)
+        windows_ops.kill_port_sync(_DEV_WEB_PORT)
         self.mode = 'none'
         self.current_mode_key = ""
         self._msg_queue.put(('ui_update', {}))
-        self._msg_queue.put(('log', {'text': f"{label}已停止，端口已释放"}))
+        self._msg_queue.put(('log', {'text': f"{label}已停止，开发端口已释放（不影响生产模式）"}))
 
     def restart_dual_thread(self):
         self.mode, self.current_mode_key = 'restarting', 'dual_dev'
-        self.startup_progress, self.startup_steps, self.startup_current_step = 0, ['停止生产模式', '检查Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
+        self.startup_progress, self.startup_steps, self.startup_current_step = 0, ['检查开发端口', '确保Redis服务', '启动后端服务', '启动前端服务', '完成'], ''
         self._msg_queue.put(('ui_update', {}))
         label = '开发模式'
         self.terminate_dev_processes('（重启）')
-        self._redis.stop_redis()
-        windows_ops.kill_port_sync(_API_PORT)
-        windows_ops.kill_port_sync(_WEB_PORT)
+        # 与 stop_dual_flow 同款判断：生产在跑时 Redis 是共享设施，重启开发不动它。
+        if not self._production_may_run():
+            self._redis.stop_redis()
+        windows_ops.kill_port_sync(_DEV_API_PORT)
+        windows_ops.kill_port_sync(_DEV_WEB_PORT)
         time.sleep(0.5)
         self._gate.checkpoint()
         self.start_dual_thread(label)
@@ -240,20 +280,6 @@ class DevModeOps:
         self.frontend_process = None
         self.process = None
         return terminated
-
-    def ensure_development_stopped(self) -> bool:
-        """切换前停止开发模式：只停开发子进程，不动 Redis，重置 GUI 状态。
-
-        与 stop_dual_mode_async 的区别：不调用 RedisOps.stop_redis()，保留共享基础设施。
-        """
-        stopped_any = self.terminate_dev_processes('开发')
-        self.mode = 'none'
-        self.current_mode_key = ""
-        self._msg_queue.put(('ui_update', {}))
-        self._msg_queue.put(('hosting_refresh', {}))
-        if stopped_any:
-            self._msg_queue.put(('log', {'text': '开发模式已停止'}))
-        return stopped_any
 
     # ── 子进程输出读取 ──────────────────────────────────────────────────────
     def read_stdout(self, proc):

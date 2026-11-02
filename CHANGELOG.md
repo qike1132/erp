@@ -1,5 +1,26 @@
 # 变更日志 (Changelog)
 
+## [2026-11-02] 服务器管理器 v5.45：开发/生产并行（端口隔离）
+
+用户需求：开发模式与生产模式原为「二选一」互斥，改为**可同时开启**，调试（开发）模式换独立端口。
+
+### 🎯 行为变更
+- **开发栈迁独立端口**：后端 `127.0.0.1:5102`（原 5002）、前端 `5173`（原 3000）。新增 `constants._DEV_API_PORT/_DEV_WEB_PORT`；标题栏端口药丸增列两个 DEV 端口。
+- **双向解除互斥**：
+  - 启动开发不再先停生产（`start_dual_worker` 删 `ensure_production_stopped`，改清开发专用端口 `_release_dev_ports`，`still_occupied` 时中止防假成功）；
+  - 启动生产不再先停开发（`_start_services_flow` 删 `ensure_development_stopped`；该原语与 app 死转发随之删除——零调用点死代码）。
+- **Redis 共享**：生产在跑（或 sc 状态「未知」，fail-safe）时，停止/重启开发模式、管理器退出均**保留** Redis（`DevModeOps._production_may_run` 三态判定）；生产确定未跑时维持原「顺带收掉回退实例」行为。
+- **vite 代理注入**：`vite.config.ts` 的 dev 代理（/api、/static、/ws）改读 `BACKEND_INTERNAL_URL`（管理器注入 5102；缺省回落 5002，手工 `npm run dev` 行为不变）；`preview` 恒指 5002。dev CSP 头补 `127.0.0.1:5102`。`vite.config.js` 经 `vue-tsc -b` 再生成（设计产物，非手改）。
+- **紧急停止**不变（仍全停），端口清扫清单补入 5102/5173；模式徽章新增「开发 + 生产 · 并行」态。
+
+### ✅ 验证
+- 新增 `tests/test_sm_parallel_ports.py`（15 条：端口隔离常量、双向不互斥 AST 锁、`_production_may_run` 三态行为级、vite 两配置文件同源）。
+- server_manager 全家 + 新锁 **211 passed**（提权 `logs/run_full_tests.sh`）；`quality_gate.py` PASS（server_manager ruff 棘轮 16 → 2，B007/F541 新增违规已当场清零）；`ruff check fastapi_app tests fastapi_app/tests utils` 全绿；`vue-tsc -b` 通过并再生成 vite.config.js；D6 vite 配置一致性 5 passed。
+
+### 🏗️ 打包
+- 版本号 `v5.40 → v5.45`（`constants._VERSION` + `server_manager.spec` + `docs/PROJECT_MANUAL.md` 现行版本表述）。
+- `.venv` 装 `pyinstaller 6.22.3` + `pystray==0.19.0`（`requirements/desktop.txt` 即管理器打包依赖层），产物 `dist/ERP服务器管理器_v5.45.exe`（19,608,723 B）。
+
 ## [2026-10-16] 服务器管理器 v5.40：退出进程孤儿 / 紧急停止窗口 / 跨线程 Tk 等审计修复
 
 两轮修复合并发版（2026-10-15 审计修复 `4169aa03` + 2026-10-16 结构评审修复 `1dd4de90`）。

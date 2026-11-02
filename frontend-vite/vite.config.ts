@@ -25,6 +25,13 @@ export default defineConfig(({ mode }) => {
   // 从未使用，且第三参 '' 是「加载全部 env 含非 VITE_ 前缀」的宽口径）。
   const isCapacitor = mode === 'capacitor'
 
+  // 开发/调试与生产并行（2026-11-02）：服务器管理器(v5.45)启动 vite 时注入
+  // BACKEND_INTERNAL_URL 指向调试后端 http://127.0.0.1:5102；手工 `npm run dev`
+  // 不带该变量时回落生产后端 5002（既有行为不变）。preview 面向生产构建，
+  // 恒定指向 5002，不读该变量。
+  const backendInternal = process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:5002'
+  const backendWs = backendInternal.replace(/^http/, 'ws')
+
   return {
     base: '/',
     define: {
@@ -234,9 +241,9 @@ export default defineConfig(({ mode }) => {
           "default-src 'self'",
           "script-src 'self' 'unsafe-inline'",
           "style-src 'self' 'unsafe-inline'",
-          "img-src 'self' data: blob: http://127.0.0.1:5002 http://192.168.0.95:3000 http://192.168.0.95:5002",
+          "img-src 'self' data: blob: http://127.0.0.1:5002 http://127.0.0.1:5102 http://192.168.0.95:3000 http://192.168.0.95:5002",
           "font-src 'self'",
-          "connect-src 'self' ws: wss: http://127.0.0.1:5002 https:",
+          "connect-src 'self' ws: wss: http://127.0.0.1:5002 http://127.0.0.1:5102 https:",
           "frame-ancestors 'none'",
           "base-uri 'self'",
           "form-action 'self'",
@@ -244,17 +251,17 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:5002',
+          target: backendInternal,
           changeOrigin: true,
           timeout: 120000,
           proxyTimeout: 120000,
         },
         '/static': {
-          target: 'http://127.0.0.1:5002',
+          target: backendInternal,
           changeOrigin: true,
         },
         '/ws': {
-          target: 'ws://127.0.0.1:5002',
+          target: backendWs,
           ws: true,
         },
       },

@@ -1,8 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""ERP 服务器管理器 v5.40 PyInstaller 打包配置。
+"""ERP 服务器管理器 v5.45 PyInstaller 打包配置。
 
 用法: pyinstaller server_manager.spec
-产出: dist/ERP服务器管理器_v5.40.exe
+产出: dist/ERP服务器管理器_v5.45.exe
+
+v5.45（2026-11-02）: 开发/生产并行改造——开发栈独立端口 5102/5173，
+启动开发不再停生产、启动生产不再停开发；Redis 共享（生产在跑时保留）。
 
 说明:
   - spec 中 __file__ 不可用，项目根经 SPECPATH 解析；
@@ -66,7 +69,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ERP服务器管理器_v5.40',
+    name='ERP服务器管理器_v5.45',
     debug=False,
     bootloader_ignore_signals=False,
     strip=True,
