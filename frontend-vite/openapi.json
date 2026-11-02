@@ -13230,7 +13230,7 @@
           "OCR识别导入"
         ],
         "summary": "批量上传出货单识别导入",
-        "description": "批量上传出货单（PDF/图片），通过离线 OCR 识别后导入暂存区。\n\n- 支持同时上传多个 PDF 或图片文件\n- 支持格式: PDF, PNG, JPG, JPEG, BMP, TIFF, WEBP\n- 使用 RapidOCR 离线识别，不依赖在线 API\n- 识别结果自动写入暂存出货表（staging_stock_out）\n- 返回 task_id 用于查询进度",
+        "description": "批量上传出货单（PDF/图片），通过离线 OCR 识别后导入暂存区。\n\n- 支持同时上传多个 PDF 或图片文件\n- 支持格式: PDF, PNG, JPG, JPEG, BMP, TIFF, WEBP\n- 使用 RapidOCR 离线识别，不依赖在线 API\n- 识别结果自动写入暂存出货表（staging_stock_out）\n- 返回 task_id 用于查询进度\n\nsession_id 与 staging_stockout 家族同口径：写入前加 `u{uid}:` 归属前缀\n（max_length 收紧到 50，与 staging 端点一致——前缀 + 64 会超\nstaging_stock_out.session_id 的 String(64) 列宽）。",
         "operationId": "upload_shipping_docs_api_v1_ocr_import_upload_post",
         "parameters": [
           {
@@ -13239,7 +13239,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "maxLength": 64,
+              "maxLength": 50,
               "description": "会话ID",
               "title": "Session Id"
             },
