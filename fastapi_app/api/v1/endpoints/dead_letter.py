@@ -157,7 +157,12 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_sup
         kwargs = _parse_dead_letter_kwargs(target_entry.get('kwargs', {}))
         from fastapi_app.core.arq_app import get_arq_pool
         pool = await get_arq_pool()
-        job = await pool.enqueue_job(task_name, *args, **kwargs)
+        # Hardening#2（2026-11-02 审计）：重投必须保留原 job_id——导出任务的
+        # `exp-u{uid}-` 前缀是 tasks.py 归属校验的锚点，让 ARQ 重新生成 uuid4
+        # 会使 DLQ 重试后的导出任务失去归属（任何持权限者可凭 task_id 查询/
+        # 下载）。原任务已失败出队，同 id 重投无冲突；若同 id 任务仍在跑
+        # （enqueue 返回 None），由下方 new_id='' 口径兜底。
+        job = await pool.enqueue_job(task_name, *args, _job_id=task_id, **kwargs)
         new_id = job.job_id if job else ''
         # 仅入队成功后才移除原死信；入队抛错时 finally 只释放锁，原记录保持不变。
         await safe_lrem(DLQ_KEY, 1, entries_raw[target_idx], context="死信队列")

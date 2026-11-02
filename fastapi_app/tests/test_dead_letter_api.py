@@ -48,14 +48,16 @@ async def test_retry_parses_payload_removes_after_enqueue_and_releases_lock(
 ):
     raw = _entry()
     redis_client = _client()
-    enqueue = AsyncMock(return_value=SimpleNamespace(job_id="new-1"))
+    # Hardening#2：重投用原 job_id（保留 exp-u{uid}- 归属前缀），ARQ 返回的
+    # job.job_id 即原 id——mock 返回值按此真实行为设定。
+    enqueue = AsyncMock(return_value=SimpleNamespace(job_id="dead-1"))
     patches = _patches(redis_client, [raw], enqueue=enqueue)
     with patches[0], patches[1], patches[2], patches[3] as lrem, patches[4]:
         response = await client.post(f"{PREFIX}/dead-1/retry")
 
     assert response.status_code == 200, response.text
-    assert response.json()["new_task_id"] == "new-1"
-    enqueue.assert_awaited_once_with("demo_task", 1, flag=True)
+    assert response.json()["new_task_id"] == "dead-1", "重投必须保留原 job_id（归属前缀锚点）"
+    enqueue.assert_awaited_once_with("demo_task", 1, flag=True, _job_id="dead-1")
     lrem.assert_awaited_once()
     redis_client.eval.assert_awaited_once()
 
