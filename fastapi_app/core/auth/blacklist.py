@@ -42,6 +42,10 @@ class _LRUSet:
                 return True
             return False
 
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
 
 _LOCAL_REVOKED_JTIS = _LRUSet(maxsize=1000)
 

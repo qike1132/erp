@@ -19,6 +19,7 @@ import time
 import zipfile
 from typing import Any, ClassVar
 
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -144,6 +145,42 @@ class _KernelProgressReporter:
             logger.warning(f'内核进度上报失败: {e}')
 
 
+async def revoke_all_sessions_after_restore() -> None:
+    """整库恢复后强制全员重登（B3）。
+
+    备份时点之后的登出/撤销记录会随 DB 与 Redis RDB 一起回滚——备份后登出的
+    token 会重新有效，已禁用/已撤权的账号也会复活。因此恢复成功后必须：
+    1. 所有用户 token_version +1（旧 token 下一次请求即失效）；
+    2. 清空进程内权限/认证缓存。
+
+    Redis 黑名单/轮换表**不必**逐个删：token_version 全员 +1 已让所有既有 token
+    失效，残留的黑名单条目只会多撤销、不会放行；而清空它们需要 SCAN 裸客户端，
+    与「缓存读写必须走 wrapper」的约定冲突，收益却是零。
+
+    用独立 engine 事务而不是调用方 session：恢复内核已提交过，这里需要立即
+    生效的独立提交；任何一步失败都只记日志，不把恢复结果改判为失败。
+    """
+    try:
+        from fastapi_app.core.database import require_async_engine
+        engine = require_async_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text('UPDATE "user" SET token_version = COALESCE(token_version, 0) + 1')
+            )
+    except Exception as e:  # defensive: 收尾失败需人工介入，但不改判恢复结果
+        logger.error('恢复后失效会话失败（需人工要求全员重新登录）: %s', e)
+    try:
+        from fastapi_app.core.auth.blacklist import _LOCAL_REVOKED_JTIS
+        _LOCAL_REVOKED_JTIS.clear()
+    except Exception as e:  # defensive: 缓存清理失败不影响恢复结果，记日志即可
+        logger.warning('清理本地撤销缓存失败: %s', e)
+    try:
+        from fastapi_app.core.deps import invalidate_user_permission_cache
+        await invalidate_user_permission_cache(None)
+    except Exception as e:  # defensive: 缓存清理失败不影响恢复结果，记日志即可
+        logger.warning('清理权限缓存失败: %s', e)
+
+
 async def restore_from_zip(
     zip_bytes: bytes,
     db: AsyncSession,
@@ -221,6 +258,9 @@ async def restore_from_zip(
         raise RestoreError(f"数据库恢复失败: {outcome.database.message or outcome.message}")
     if outcome.status.value == 'error':
         raise RestoreError(outcome.message or '恢复过程中出错')
+
+    # B3：恢复会回滚 DB 与 Redis 里的撤销状态，必须强制全员重新登录。
+    await revoke_all_sessions_after_restore()
 
     manifest_dict = outcome.manifest or {}
     raw_db = outcome.database.details.get('raw') or {
