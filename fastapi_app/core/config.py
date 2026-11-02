@@ -124,6 +124,52 @@ def filter_cors_origins(raw: str, *, is_production: bool) -> list[str]:
     ]
 
 
+def validate_redis_auth(urls: dict[str, str], *, require_auth: bool) -> list[str]:
+    """检查 Redis 连接串是否带认证凭据（D2）。
+
+    仓内的 ``config/redis-broker.conf`` 没有 requirepass，认证靠注册表/环境变量
+    注入；灾备重建漏注入时 6379/6380 会匿名可读写。代码侧至少要在启动时发现
+    「连接串里根本没有凭据」。
+
+    默认只告警：无法从仓库确认线上是否已配置，直接 fail-closed 会让下一次重启
+    起不来。``require_auth=True``（REQUIRE_REDIS_AUTH=true）才拒绝启动。
+    """
+    issues: list[str] = []
+    for name, url in urls.items():
+        if not url:
+            continue
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            issues.append(f"{name} 不是合法 URL，无法判断是否带认证")
+            continue
+        if not parsed.password:
+            issues.append(
+                f"{name} 未包含认证凭据（形如 redis://:password@host:port/db）；"
+                "同网段进程可直接读写缓存与任务队列"
+            )
+    if issues and require_auth:
+        raise RuntimeError(
+            "生产环境要求 Redis 认证（REQUIRE_REDIS_AUTH=true）：" + "；".join(issues)
+        )
+    return issues
+
+
+def _redis_auth_warnings(settings_obj) -> list[str]:
+    """D2 的调用封装：测试进程内跳过，避免全量测试被本机无口令配置刷屏。"""
+    if "pytest" in sys.modules:
+        return []
+    return validate_redis_auth(
+        {
+            "REDIS_URL": settings_obj.REDIS_URL,
+            "REDIS_CACHE_URL": settings_obj.REDIS_CACHE_URL,
+            "REDIS_BROKER_URL": settings_obj.REDIS_BROKER_URL,
+            "REDIS_RESULT_URL": settings_obj.REDIS_RESULT_URL,
+        },
+        require_auth=settings_obj.REQUIRE_REDIS_AUTH,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 生产环境备份/监控配置校验（S3，2026-09-30）
 #
@@ -333,6 +379,11 @@ class Settings(BaseSettings):
     REDIS_PORT: int = int(os.getenv("REDIS_PORT") or "6379")
     REDIS_DB: int = int(os.getenv("REDIS_DB") or "0")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
+    # D2：为 true 时，生产环境 Redis 连接串不带凭据直接拒绝启动；
+    # 默认 false 只告警（无法从仓库确认线上凭据，fail-closed 会打断下一次重启）。
+    REQUIRE_REDIS_AUTH: bool = os.getenv("REQUIRE_REDIS_AUTH", "false").lower() in (
+        "true", "1", "yes",
+    )
     # Redis Sentinel 高可用配置（可选，生产环境使用）
     # 格式: "host1:port1,host2:port2,host3:port3"
     # 为空时使用单机模式（REDIS_HOST/REDIS_PORT）；非空时通过 Sentinel 发现 master
@@ -479,7 +530,7 @@ class Settings(BaseSettings):
             # ⚠️ 必须放在上面所有既有闸门之后：tests/test_config.py:31 与
             #    fastapi_app/tests/test_security_and_batch.py:124/180 依赖
             #    「长度不足」「禁止」两条报错先触发。
-            _warnings = _validate_production_backup_config()
+            _warnings = _redis_auth_warnings(self) + _validate_production_backup_config()
             _production_config_warnings.clear()
             _production_config_warnings.extend(_warnings)
             for _message in _warnings:
@@ -492,7 +543,7 @@ class Settings(BaseSettings):
             # 因此在「非 production 判定」下同样执行备份/监控校验：函数内部已有
             # _is_test_process() 与 STRICT_CONFIG_CHECK 两道豁免，测试进程与显式关闭
             # 严格校验的机器不受影响。生产分支保持原顺序（既有测试依赖该报错次序）。
-            _warnings = _validate_production_backup_config()
+            _warnings = _redis_auth_warnings(self) + _validate_production_backup_config()
             _production_config_warnings.clear()
             _production_config_warnings.extend(_warnings)
             for _message in _warnings:
