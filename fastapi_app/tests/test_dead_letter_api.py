@@ -59,9 +59,11 @@ async def test_retry_parses_payload_removes_after_enqueue_and_releases_lock(
     assert response.status_code == 200, response.text
     assert response.json()["new_task_id"] == "dead-1", "重投必须保留原 job_id（归属前缀锚点）"
     enqueue.assert_awaited_once_with("demo_task", 1, flag=True, _job_id="dead-1")
-    # 评审 [H]#2：入队前必须清掉 arq:job/arq:result 键——否则终态失败结果
-    # 保留 3600s，同 id 重投会被 arq 判重返回 None（任务静默丢失）。
-    redis_client.delete.assert_awaited_once_with('arq:job:dead-1', 'arq:result:dead-1')
+    # 评审 [H]#2：入队前必须清掉 arq:result 键——否则终态失败结果保留
+    # 3600s，同 id 重投会被 arq 判重返回 None（任务静默丢失）。只清 result
+    # 键（评审 [L]）：job 键存在 = 任务在排队/运行，删它会造成并发双跑，
+    # 该场景由 enqueue-None → 409 兜底。
+    redis_client.delete.assert_awaited_once_with('arq:result:dead-1')
     lrem.assert_awaited_once()
     redis_client.eval.assert_awaited_once()
 

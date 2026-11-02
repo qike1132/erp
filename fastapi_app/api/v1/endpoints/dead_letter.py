@@ -11,6 +11,7 @@ import contextlib
 import json
 from uuid import uuid4
 
+from arq.constants import result_key_prefix
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
@@ -157,13 +158,15 @@ async def retry_dead_letter_task(task_id: str, _user: User = Depends(require_sup
         kwargs = _parse_dead_letter_kwargs(target_entry.get('kwargs', {}))
         from fastapi_app.core.arq_app import get_arq_pool
         pool = await get_arq_pool()
-        # Hardening#2（2026-11-02 审计）+ 推送前评审 [H]#2：重投必须保留原
+        # Hardening#2（2026-11-02 审计）+ 推送前评审 [H]#2/[L]：重投必须保留原
         # job_id——导出任务的 `exp-u{uid}-` 前缀是 tasks.py 归属校验的锚点。
         # 但 arq 在 `arq:job:{id}` 或 `arq:result:{id}` 存在时 enqueue_job 返回
         # None（connections.py:158），终态失败结果默认保留 3600s（WorkerSettings
-        # 未覆盖 keep_result）——失败后 1h 内重试必撞结果键。故先显式清理两个
-        # 键再入队（DLQ 条目本身保存完整失败档案，清 result 键不丢历史）。
-        await client.delete(f'arq:job:{task_id}', f'arq:result:{task_id}')
+        # 未覆盖 keep_result）——失败后 1h 内重试必撞结果键。故入队前清 result
+        # 键（DLQ 条目本身保存完整失败档案，清它不丢历史）。
+        # **只清 result 键、不清 job 键**：job 键存在 = 任务仍在排队/运行，
+        # 删它会造成同 id 并发双跑；该场景交给下面的 enqueue-None → 409 兜底。
+        await client.delete(f'{result_key_prefix}{task_id}')
         job = await pool.enqueue_job(task_name, *args, _job_id=task_id, **kwargs)
         if job is None:
             # 竞态兜底：清键与入队之间同 id 任务被他人投递。绝不删除死信条目
