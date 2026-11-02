@@ -64,10 +64,10 @@ jobs:
       COVERAGE_MIN: "40"
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
     - name: Set up Node.js for full-stack browser E2E
-      uses: actions/setup-node@v5
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
       with:
         node-version: '22'
         cache: npm
@@ -99,12 +99,12 @@ jobs:
         pg_dump --version
 
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:
         python-version: '3.13'
 
     - name: Cache dependencies
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements/**/*.txt') }}
@@ -287,7 +287,7 @@ jobs:
     #   coverage.xml 仍由下方 artifact 归档，覆盖率门槛由后面的
     #   "Check coverage threshold" 步骤就地判定，信号没有丢失。
     - name: Upload test report
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: test-report
         path: |
@@ -327,7 +327,7 @@ jobs:
         python scripts/quality_gate.py --only pip_audit --audit-report dependency-audit.json --verbose
     
     - name: Upload security reports
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: security-reports
         path: |
@@ -342,14 +342,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       with:
         # fetch-depth: 0：file_size_gate 需对比 PR 基线（origin/<base_ref>...HEAD）。
         # 默认浅检出(depth 1)取不到基线 ref → 门禁回落「无扫描文件」空转。
         fetch-depth: 0
     
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:
         python-version: '3.13'
 
@@ -445,10 +445,10 @@ jobs:
         working-directory: frontend-vite
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
     - name: Set up Node.js
-      uses: actions/setup-node@v5
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
       with:
         # Node 22：与本地开发环境一致，且满足 @capacitor/cli@8 (>=22) 与 vite@7 (^20.19 || >=22.12) 的要求
         node-version: '22'
@@ -514,7 +514,7 @@ jobs:
     # if-no-files-found 默认 warn 会让它静默空转。
     - name: Upload frontend test artifacts
       if: always()
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: frontend-test-artifacts
         if-no-files-found: error
@@ -527,10 +527,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
     
     - name: Set up Python
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:
         python-version: '3.13'
     
