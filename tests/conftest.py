@@ -55,6 +55,10 @@ sys.path.insert(0, _project_root)
 # 必须在 import config/main 之前设置：config.py 的 load_dotenv(override=False)
 # 不会覆盖已存在的环境变量。
 os.environ["APP_ENV"] = "test"
+# 同 fastapi_app/tests/conftest.py：测试环境显式开启文档端点，保证
+# tests/test_docs_url_runtime.py 里 app 装配断言可验证；默认关闭契约由
+# fastapi_app/tests/test_docs_endpoint_exposure.py 覆盖。
+os.environ["API_DOCS_ENABLED"] = "true"
 
 
 # ============================================================

@@ -18,6 +18,10 @@ from httpx import ASGITransport, AsyncClient
 # 必须在 import config/main 之前设置：config.py 的 load_dotenv(override=False)
 # 不会覆盖已存在的环境变量。
 os.environ["APP_ENV"] = "test"
+# 测试环境显式开启 API 文档端点：生产默认关闭（main.resolve_docs_urls），
+# 但 test_integration_smoke / test_pages 需要验证文档路由与 OpenAPI 生成仍然可用。
+# 「默认关闭」这条契约由 fastapi_app/tests/test_docs_endpoint_exposure.py 直接覆盖。
+os.environ["API_DOCS_ENABLED"] = "true"
 
 
 # 测试 Redis 隔离（P0.5，2026-10-01）：限流器在 import 期读 REDIS_CACHE_URL，

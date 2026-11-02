@@ -350,8 +350,15 @@ async def lifespan(application: FastAPI):
 
 
 def resolve_docs_urls(is_production: bool):
-    """DOCS/OpenAPI URL 的唯一求值入口（在 app 创建期调用）。"""
+    """DOCS/OpenAPI URL 的唯一求值入口（在 app 创建期调用）。
+
+    文档端点必须显式开启：原先「非生产即开启」在 APP_ENV 漏设或写错时
+    （NSSM 参数变更、临时手工启动）会把接口结构经 nginx 的 /api/ 反代公开。
+    现在默认关闭，只有 API_DOCS_ENABLED 显式为真且非生产时才挂载。
+    """
     if is_production:
+        return None, None, None
+    if os.getenv('API_DOCS_ENABLED', '').lower() not in ('true', '1', 'yes'):
         return None, None, None
     return '/api/docs', '/api/redoc', '/api/openapi.json'
 
