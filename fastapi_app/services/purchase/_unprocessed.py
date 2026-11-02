@@ -178,7 +178,7 @@ def _build_unprocessed_union(sku_available: bool = True):
         CustomerOrder.order_date.label('sort_date'),
     ).where(
         CustomerOrder.status == ORDER_STATUS_PENDING_STOCK,
-        CustomerOrder.is_deleted == False,  # noqa: E712
+        CustomerOrder.is_deleted.isnot(True),
         _build_not_processed_filter(CustomerOrder.id, 'order', sku_available),
     )
 
