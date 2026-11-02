@@ -12,6 +12,7 @@ import contextlib
 import logging
 import time
 from collections import OrderedDict
+from typing import cast
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -238,7 +239,7 @@ async def _verify_user_active(
         )).first()
         cached = (False, 0) if row is None else (bool(row.status), int(row.token_version or 0))
         await _USER_ACTIVE_CACHE.set(user_id, cached)
-    is_active, current_version = cached  # type: ignore[misc]
+    is_active, current_version = cast(tuple[bool, int], cached)
     if not is_active:
         return False
     if expected_token_version is None:

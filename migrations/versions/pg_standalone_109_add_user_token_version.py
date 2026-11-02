@@ -41,6 +41,9 @@ def upgrade():
         'ALTER TABLE "user" ADD COLUMN IF NOT EXISTS token_version '
         'INTEGER NOT NULL DEFAULT 0'
     )
+    # ORM 声明了 comment，迁移必须同步——否则 alembic check 会报 modify_comment。
+    # 对已被 001 建出该列的库，COMMENT 是幂等重设。
+    op.execute('COMMENT ON COLUMN "user".token_version IS \'会话版本\'')
 
 
 def downgrade():
