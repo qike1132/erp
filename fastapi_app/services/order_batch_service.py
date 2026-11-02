@@ -23,6 +23,7 @@ from fastapi_app.core.exception_handler import safe_publish_event as _safe_publi
 from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.serializers.order_serializer import OrderSerializer
+from fastapi_app.shared.factory_scope import assert_orders_factory_scoped
 from fastapi_app.shared.time_format import format_local_time
 from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockIn, StockOut, User
 from fastapi_app.shared_models.order import ORDER_STATUS_BATCH_COMPLETED, ORDER_STATUS_SHIPPED
@@ -445,6 +446,8 @@ async def update_batch_no(
     if should_sync and order.batch_no != old_batch_no:
         raise ConflictError('订单批次信息已被并发修改，请刷新后重试')
 
+    await assert_orders_factory_scoped(db, [order_id], user)
+
     updated_ids = [order_id]
     order.batch_no = batch_no
 
@@ -516,6 +519,8 @@ async def batch_assign(
     if len(orders) != len(order_ids):
         raise ValueError("部分订单不存在")
 
+    await assert_orders_factory_scoped(db, order_ids, user)
+
     non_whitelisted = [o.customer for o in orders if o.customer not in whitelist]
     if non_whitelisted:
         raise ValueError(f"以下客户不在白名单中: {', '.join(set(non_whitelisted))}")
@@ -560,6 +565,8 @@ async def complete_batch(
 
     if not orders and not stockins:
         raise ValueError(f"批次 {batch_no} 没有可完成的记录")
+
+    await assert_orders_factory_scoped(db, [o.id for o in orders], user)
 
     now = datetime.now(UTC).replace(tzinfo=None)
     completed = []

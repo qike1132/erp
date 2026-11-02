@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.shared_models import Product, User
+from fastapi_app.shared_models import OrderItem, Product, User
 
 
 def factory_scope_of(user: User) -> str:
@@ -49,3 +49,24 @@ async def assert_product_factory_scoped(
     if row_factory and row_factory != scoped_factory:
         raise HTTPException(
             status_code=404, detail=f'{what}不存在')
+
+
+async def assert_orders_factory_scoped(
+    db: AsyncSession, order_ids: list[int], user: User, *, what: str = '订单',
+) -> None:
+    """订单集合的工厂隔离闸门（批次端点用）。
+
+    与 order.py::_assert_order_factory_scoped 同口径（全部 SKU 必须属本厂，
+    NULL 工厂的历史 SKU 忽略），只是把 N 次单条查询合并成一次
+    `OrderItem -> Product` 查询，避免批量分配/整批归档按订单数放大查询。
+    """
+    scoped_factory = factory_scope_of(user)
+    if not scoped_factory or not order_ids:
+        return
+    rows = (await db.execute(
+        select(OrderItem.order_id, Product.factory)
+        .join(Product, Product.id == OrderItem.product_id)
+        .where(OrderItem.order_id.in_(order_ids), Product.factory.isnot(None))
+    )).all()
+    if any(factory is not None and factory != scoped_factory for _, factory in rows):
+        raise HTTPException(status_code=404, detail=f'{what}不存在')
