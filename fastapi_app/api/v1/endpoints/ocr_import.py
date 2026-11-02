@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.api.v1.endpoints.staging_stockout import _build_scoped_session
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission
@@ -49,7 +50,7 @@ async def create_ocr_task(current_user: User=Depends(require_any_permission('bat
     return {'task_id': task_id}
 
 @router.post('/upload', response_model=OcrPdfImportResult, summary='批量上传出货单识别导入')
-async def upload_shipping_docs(files: list[UploadFile]=File(..., description='一个或多个 PDF/图片文件'), session_id: str=Query(..., max_length=64, description='会话ID'), task_id: str=Query('', max_length=64, description='进度追踪ID（由 /create-task 返回）'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
+async def upload_shipping_docs(files: list[UploadFile]=File(..., description='一个或多个 PDF/图片文件'), session_id: str=Query(..., max_length=50, description='会话ID'), task_id: str=Query('', max_length=64, description='进度追踪ID（由 /create-task 返回）'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'stockout_manage'))):
     """
     批量上传出货单（PDF/图片），通过离线 OCR 识别后导入暂存区。
 
@@ -58,6 +59,10 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
     - 使用 RapidOCR 离线识别，不依赖在线 API
     - 识别结果自动写入暂存出货表（staging_stock_out）
     - 返回 task_id 用于查询进度
+
+    session_id 与 staging_stockout 家族同口径：写入前加 `u{uid}:` 归属前缀
+    （max_length 收紧到 50，与 staging 端点一致——前缀 + 64 会超
+    staging_stock_out.session_id 的 String(64) 列宽）。
     """
     # 2026-10-17 审计 P2-23：批量上传必须有数量上限（此前任意多文件全量读入），
     # 且识别写入改为逐文件事务——单文件失败不再回滚整批已成功的结果。
@@ -96,7 +101,14 @@ async def upload_shipping_docs(files: list[UploadFile]=File(..., description='�
             await svc._update_progress(task_id, message=f'正在处理第 {i + 1}/{len(files)} 个文件: {filename}')
         try:
             async with db_transaction(db):
-                imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, session_id, filename=filename, task_id=task_id)
+                # Hardening#7（2026-11-02 审计）：session_id 加 u{uid}: 归属前缀
+                # ——此前裸透传客户端值，写入的暂存行对 staging_stockout 的全部
+                # scoped 读端点不可见（孤儿行：无法列出/确认/清除），且攻击者可
+                # 传 u<受害者uid>:x 把行定向注入受害者命名空间（受害者确认后即成
+                # 真实出货单）。与 staging 家族共用 _build_scoped_session 单一
+                # 事实源；恶意前缀叠加（u456:u123:x）不会落入他人命名空间。
+                scoped_session = _build_scoped_session(current_user.id, session_id)
+                imported, message, errors = await svc.import_staging_stockouts_from_file(db, content, scoped_session, filename=filename, task_id=task_id)
         except OcrDependencyError as e:
             # 逐文件如实报出修复指引，别让整批 500（缺依赖时每个文件都会走到这里）
             all_errors.append(f'{filename}: {e!s}')
