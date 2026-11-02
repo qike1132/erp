@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# 最小权限：本工作流只读仓库，不发布、不推送镜像、不写 PR。
+# 显式声明可避免继承仓库默认 token 权限（fork PR 尤其敏感）。
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
