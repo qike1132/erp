@@ -474,8 +474,15 @@ async def api_refresh_token(
     user_row = await user_service.get_user_auth_row_by_id(db, int(user_id))
     if not user_row or not user_row.status:
         raise HTTPException(status_code=401, detail="用户不存在或已被禁用")
+    # 会话版本不一致 = 改密/禁用/权限变更后旧 refresh token 不得再续签
+    if int(payload.get("tv", 0) or 0) != int(getattr(user_row, "token_version", 0) or 0):
+        raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
 
-    token_data = {"sub": str(user_id), "username": user_row.username}
+    token_data = {
+        "sub": str(user_id),
+        "username": user_row.username,
+        "tv": int(getattr(user_row, "token_version", 0) or 0),
+    }
     token_max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     access_token = create_access_token(
         token_data,

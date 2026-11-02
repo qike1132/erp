@@ -66,6 +66,21 @@ async def create_user(
     return new_user
 
 
+async def bump_token_version(db: AsyncSession, user: User) -> None:
+    """让该用户已签发的全部 token 失效。
+
+    改密 / 改超管标记 / 改工厂 / 禁用时调用。token 里带 ``tv`` 声明，
+    请求时与库里的 ``token_version`` 比对；同时失效认证缓存，避免 10s TTL 窗口。
+    """
+    user.token_version = int(user.token_version or 0) + 1
+    await db.flush()
+    try:
+        from fastapi_app.core.deps import invalidate_user_active_cache
+        await invalidate_user_active_cache(user.id)
+    except Exception as e:  # defensive: 缓存失效失败不应阻断业务写入
+        logging.getLogger(__name__).warning('失效认证缓存失败: %s', e)
+
+
 async def update_user(
     db: AsyncSession,
     user_id: int,
@@ -92,12 +107,16 @@ async def update_user(
             raise ValueError(error_msg)
         from fastapi_app.core.security import hash_password
         user.password = hash_password(password)
+        # 改密必须让已签发的 token 失效，否则被劫持的会话可以一直续签
+        await bump_token_version(db, user)
 
-    if is_super is not None:
+    if is_super is not None and is_super != user.is_super:
         user.is_super = is_super
+        await bump_token_version(db, user)
 
-    if factory is not None:
+    if factory is not None and (factory or None) != user.factory:
         user.factory = factory or None
+        await bump_token_version(db, user)
 
     if department is not None:
         user.department = department or None
@@ -118,6 +137,7 @@ async def toggle_user_status(db: AsyncSession, user_id: int) -> User:
         raise ValueError("超级用户不能禁用")
 
     user.status = not user.status
+    await bump_token_version(db, user)
     await db.flush()
     await db.refresh(user)
     return user
@@ -278,8 +298,10 @@ async def get_user_with_permissions_by_username(db: AsyncSession, username: str)
 
 
 async def get_user_auth_row_by_id(db: AsyncSession, user_id: int):
-    """按 ID 获取用户认证状态行（id/status/username，用于令牌刷新校验）"""
-    result = await db.execute(select(User.id, User.status, User.username).where(User.id == user_id))
+    """按 ID 获取用户认证状态行（id/status/username/token_version，用于令牌刷新校验）"""
+    result = await db.execute(
+        select(User.id, User.status, User.username, User.token_version).where(User.id == user_id)
+    )
     return result.first()
 
 

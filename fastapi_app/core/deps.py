@@ -205,16 +205,32 @@ def _resolve_token_jti(request: Request) -> str | None:
         return None
 _USER_ACTIVE_CACHE = _TTLCache(ttl=10, maxsize=500)
 
-async def _verify_user_active(user_id: int, db: AsyncSession) -> bool:
-    """验证用户仍存在且处于启用状态（带 L1 缓存，TTL 10s）"""
+async def _verify_user_active(
+    user_id: int, db: AsyncSession, *, expected_token_version: int | None = None,
+) -> bool:
+    """验证用户仍存在、处于启用状态，且 token 的会话版本与当前一致。
+
+    缓存里同时存 (启用状态, token_version)，改密/禁用后由 bump_token_version
+    主动失效缓存，因此不需要每请求多查一次库。
+    """
     cached = await _USER_ACTIVE_CACHE.get(user_id)
-    if cached is not None:
-        return cached  # type: ignore[return-value]
-    result = await db.execute(select(User.id, User.status).where(User.id == user_id))
-    user = result.first()
-    is_active = user is not None and bool(user.status)
-    await _USER_ACTIVE_CACHE.set(user_id, is_active)
-    return is_active
+    if cached is None:
+        row = (await db.execute(
+            select(User.id, User.status, User.token_version).where(User.id == user_id)
+        )).first()
+        cached = (False, 0) if row is None else (bool(row.status), int(row.token_version or 0))
+        await _USER_ACTIVE_CACHE.set(user_id, cached)
+    is_active, current_version = cached  # type: ignore[misc]
+    if not is_active:
+        return False
+    if expected_token_version is None:
+        return True
+    return int(expected_token_version or 0) == int(current_version or 0)
+
+
+async def invalidate_user_active_cache(user_id: int) -> None:
+    """丢弃某用户的启用状态/会话版本缓存（bump token_version 后必须调用）。"""
+    await _USER_ACTIVE_CACHE.pop(user_id)
 
 async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_closed: bool = False) -> int:
     """认证并返回当前用户ID，get_current_user_id / get_current_user_id_strict 的内部实现
@@ -236,7 +252,9 @@ async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_clos
             # 与用户禁用校验，已登出/已禁用用户仍可访问全部非 strict 端点。
             if await is_token_revoked(cached_payload.get('jti'), fail_closed=False):
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Token已失效')
-            if not await _verify_user_active(uid, db):
+            if not await _verify_user_active(
+                uid, db, expected_token_version=cached_payload.get('tv', 0),
+            ):
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户不存在或已被禁用')
             return uid
 
@@ -256,7 +274,9 @@ async def _authenticate_user_id(request: Request, db: AsyncSession, *, fail_clos
     if await is_token_revoked(jti, fail_closed=fail_closed):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Token已失效')
 
-    if not await _verify_user_active(user_id, db):
+    if not await _verify_user_active(
+        user_id, db, expected_token_version=(payload or {}).get('tv', 0),
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='用户不存在或已被禁用')
     return user_id
 

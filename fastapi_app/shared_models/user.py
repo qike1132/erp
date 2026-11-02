@@ -35,6 +35,11 @@ class User(Base):
     password: Mapped[str] = mapped_column(String(200), nullable=False, comment='密码')
     is_super: Mapped[bool] = mapped_column(Boolean, default=False, comment='是否超级用户')
     status: Mapped[bool] = mapped_column(Boolean, default=True, comment='是否启用')
+    # 会话版本：+1 即让该用户已签发的全部 token 失效（改密/改权限/禁用时调用）。
+    # 旧 token 不带 tv 声明时按 0 处理，因此加列本身不会把在线用户踢下线。
+    token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default='0', comment='会话版本',
+    )
     factory: Mapped[str | None] = mapped_column(String(20), nullable=True, comment='所属工厂：东莞/湖北/NULL')
     department: Mapped[str | None] = mapped_column(String(20), nullable=True, comment='所属部门：生产部/仓库/业务部/采购部/NULL')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')

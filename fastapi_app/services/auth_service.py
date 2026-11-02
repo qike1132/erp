@@ -79,6 +79,8 @@ async def authenticate_login(
     token_data = {
         "sub": str(user.id),
         "username": user.username,
+        # 会话版本：改密/禁用后自增，使旧 token 在下一次请求即失效
+        "tv": int(getattr(user, "token_version", 0) or 0),
     }
 
     # Cookie/JWT 有效期：记住我24小时，否则1小时
