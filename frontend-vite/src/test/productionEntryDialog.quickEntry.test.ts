@@ -200,6 +200,16 @@ describe('ProductionEntryDialog 布局与合计', () => {
     expect(w.find('[data-test="qe-row"]').text()).toContain('白兔公仔 60cm')
   })
 
+  it('单价还没回来时不允许提交（否则 unit_price=0 会静默入库）', async () => {
+    productInfoMock.mockReturnValue(new Promise(() => {}))
+    const w = mountDialog()
+    await pickCustomerForSubmit(w)
+    await selectProductAt(w, 0)
+    await qtyAt(w, 0).setValue('10')
+
+    expect(submitDisabled(w)).toBe(true)
+  })
+
   it('单价自动带出且不再行内显示（随行上报，货值照算）', async () => {
     const w = mountDialog()
     await selectProductAt(w, 0)

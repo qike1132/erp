@@ -41,7 +41,7 @@
       <button class="csd-btn csd-btn-cancel" aria-label="取消" @click="$emit('update:open', false)">
         取消
       </button>
-      <button class="csd-btn csd-btn-submit" :disabled="submitting" :aria-label="submitting ? '保存中…' : '确认创建'" @click="handleSubmit">
+      <button class="csd-btn csd-btn-submit" :disabled="submitting || !hasDetail" :aria-label="submitting ? '保存中…' : '确认创建'" @click="handleSubmit">
         <FontAwesomeIcon v-if="submitting" icon="spinner" spin />
         <FontAwesomeIcon v-else icon="check" />
         {{ submitting ? '保存中…' : '确认创建' }}
@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { toRef } from 'vue'
+import { computed, toRef } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import ManualPlanForm from './ManualPlanForm.vue'
 import ImportPanel from './ImportPanel.vue'
@@ -69,6 +69,11 @@ const emit = defineEmits<{
 }>()
 
 // 表单状态 / 产品建议 / 校验 / 提交逻辑抽至 composables/useCreateShipmentPlan.ts
+/** 明细区一行都没填时禁用「确认创建」：导入成功后按钮常显，空表单点它会报「第 1 行…」 */
+const hasDetail = computed(() =>
+  form.details.some((d) => d.customer_id != null || d.product_name.trim() !== ''),
+)
+
 const {
   form, productSuggestions, submitting, errorMsg, customerOptions,
   addDetail, removeDetail, onProductInput, onProductFocus, onProductBlur, selectProduct, handleSubmit,

@@ -154,11 +154,14 @@ export function useProductionEntry(
     const value = rows.value.reduce((s, r) => s + (Number(r.quantity) || 0) * (Number(r.unit_price) || 0), 0)
     return { sku: rows.value.length, qty, value }
   })
+  /** 还在取单价的请求数：取价没回来就提交，unit_price 会以 0 入库（产值静默失真） */
+  const pendingPrice = ref(0)
   const canSubmit = computed(
     () =>
       customerId.value != null // 客户必填：没选客户就不给提交
       && rows.value.length > 0
       && rows.value.every((r) => Number(r.quantity) > 0)
+      && pendingPrice.value === 0
       && !isSubmitting.value,
   )
 
@@ -379,13 +382,16 @@ export function useProductionEntry(
       focusRowQty(liveRow.key)
     }
     // 单价按行取：只写回这一行，行被删或用户已手填就不再覆盖
+    pendingPrice.value += 1
     try {
       const infoRes = await dailyProductionApi.productInfo(product.id)
       if (infoRes?.data?.price && rows.value.includes(liveRow) && !liveRow.unit_price) {
         liveRow.unit_price = infoRes.data.price
       }
     } catch {
-      // 获取单价失败不阻断（保持 0，行内可手填）
+      // 获取单价失败不阻断（保持 0）
+    } finally {
+      pendingPrice.value -= 1
     }
   }
 

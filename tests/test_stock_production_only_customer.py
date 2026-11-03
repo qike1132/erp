@@ -73,8 +73,12 @@ async def production_only_product(db):
 
 @pytest.mark.asyncio
 async def test_production_only_row_keeps_customer(db, production_only_product):
-    """只有生产记录的产品，库存行必须显示客户（不能是空白）。"""
-    result = await get_inventory_paginated(db, search_product=PRODUCT_NAME)
+    """只有生产记录的产品，库存行必须显示客户（不能是空白）。
+
+    走 __wrapped__ 绕开 @cache_result：同进程里别的用例/接口可能已经缓存过
+    同一查询键，不绕开就会命中旧缓存（假通过）或旧数据（假失败）。
+    """
+    result = await get_inventory_paginated.__wrapped__(db, search_product=PRODUCT_NAME)
 
     rows = [r for r in result['inventory_data'] if r['product_name'] == PRODUCT_NAME]
     assert rows, '生产记录应该在库存页成行'
@@ -87,7 +91,7 @@ async def test_production_only_row_keeps_customer(db, production_only_product):
 @pytest.mark.asyncio
 async def test_production_only_row_survives_customer_filter(db, production_only_product):
     """按该客户筛选时，这一行仍然出现（此前会被 :sc_is_empty 条件整行滤掉）。"""
-    result = await get_inventory_paginated(db, search_customer=PROD_CUSTOMER)
+    result = await get_inventory_paginated.__wrapped__(db, search_customer=PROD_CUSTOMER)
 
     names = [r['product_name'] for r in result['inventory_data']]
     assert PRODUCT_NAME in names
@@ -96,5 +100,5 @@ async def test_production_only_row_survives_customer_filter(db, production_only_
 @pytest.mark.asyncio
 async def test_customer_bar_contains_production_customer(db, production_only_product):
     """客户快捷栏要包含「只在生产记录里出现」的客户，否则看得见却筛不了。"""
-    customers = await _get_all_customers(db, None)
+    customers = await _get_all_customers.__wrapped__(db, None)
     assert PROD_CUSTOMER in customers

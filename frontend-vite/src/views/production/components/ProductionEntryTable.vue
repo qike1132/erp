@@ -52,7 +52,6 @@
                 v-model="row.batch_no"
                 type="text"
                 class="pr-input c-batch-input"
-                :class="{ 'is-bad': !!row.error }"
                 placeholder="如 0464628801"
                 maxlength="100"
                 autocomplete="off"
@@ -160,7 +159,6 @@ function onCountryInput(row: EntryRow) {
 .pr-input { width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--color-border); border-radius: 7px; background: #fff; font-size: 13px; color: var(--color-text); outline: none; font-family: inherit; box-sizing: border-box; }
 .pr-input::placeholder { color: var(--color-text-placeholder); }
 .pr-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.13); }
-.pr-input.is-bad { border-color: var(--color-danger-500); background: #fffafa; }
 .c-batch-input { font-family: 'SF Mono', Consolas, monospace; letter-spacing: 0.02em; }
 .pr-row.has-error td { background: #fffafa; }
 .pr-row-error td { padding: 5px 12px 8px; font-size: 12.5px; font-weight: 600; color: var(--color-danger-600); background: #fffafa; border-bottom: 1px solid var(--color-border-light); }

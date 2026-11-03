@@ -673,10 +673,11 @@ merged AS (
     FULL OUTER JOIN order_agg od
         ON COALESCE(si.product_id, so.product_id) = od.product_id
         AND COALESCE(si.customer, so.customer) = od.customer
+    -- 只按（产品, 客户）精确关联：不加 IS NULL 分支，否则「客户为空的出库行」
+    -- 会和该产品每个生产客户各匹配一次，出库数量被复制成 N 行（评审 M1）
     FULL OUTER JOIN packaging_production_customers ppc
         ON COALESCE(si.product_id, so.product_id, od.product_id) = ppc.product_id
-        AND (COALESCE(si.customer, so.customer, od.customer) IS NULL
-             OR COALESCE(si.customer, so.customer, od.customer) = ppc.customer)
+        AND COALESCE(si.customer, so.customer, od.customer) = ppc.customer
     FULL OUTER JOIN packaging_production_products pp
         ON COALESCE(si.product_id, so.product_id, od.product_id, ppc.product_id) = pp.product_id
 ),
