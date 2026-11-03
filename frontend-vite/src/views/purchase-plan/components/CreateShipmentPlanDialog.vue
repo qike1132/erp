@@ -1,31 +1,26 @@
 <template>
   <UiDialog
     :open="open"
-    title=""
+    title="新建出货计划"
     max-width-class="max-w-[1200px]"
     @update:open="$emit('update:open', $event)"
   >
-    <template #title>
-      <div class="csd-header-tabs" role="tablist">
-        <span
-          role="tab"
-          :aria-selected="mode === 'manual'"
-          :class="['csd-htab', { 'csd-htab-active': mode === 'manual' }]"
-          @click="mode = 'manual'"
-        >填写数据</span>
-        <span
-          role="tab"
-          :aria-selected="mode === 'import'"
-          :class="['csd-htab', { 'csd-htab-active': mode === 'import' }]"
-          @click="mode = 'import'"
-        >批量导入</span>
-      </div>
-    </template>
-
     <div class="csd-form">
-      <!-- 填写数据 -->
+      <!-- 批量导入：不再单独占一个页签，直接并进填写界面——
+           要整批录就走导入，要逐行核对就往下填，同一屏里选，不用来回切。 -->
+      <section class="csd-import-block">
+        <div class="csd-import-head">
+          <span class="csd-import-title">
+            <FontAwesomeIcon icon="file-excel" aria-hidden="true" /> 批量导入 Excel
+          </span>
+          <span class="csd-import-hint">选文件后点「导入」直接落库；没有表格也可以跳过，直接在下面逐行填写</span>
+        </div>
+        <ImportPanel :open="open" @imported="$emit('imported', $event)" />
+      </section>
+
+      <div class="csd-divider" role="separator"><span>或手工填写</span></div>
+
       <ManualPlanForm
-        v-if="mode === 'manual'"
         :details="form.details"
         :customer-options="customerOptions"
         :product-suggestions="productSuggestions"
@@ -36,24 +31,17 @@
         @product-blur="onProductBlur"
         @select-product="selectProduct"
       />
-
-      <!-- 批量导入（v-show 保持切换 Tab 时文件选中状态不丢失，与原单文件状态一致） -->
-      <ImportPanel
-        v-show="mode === 'import'"
-        :open="open"
-        @imported="$emit('imported', $event)"
-      />
     </div>
 
     <template #footer>
-      <button v-if="mode === 'manual'" class="csd-btn csd-btn-add" aria-label="添加明细" @click="addDetail">
+      <button class="csd-btn csd-btn-add" aria-label="添加明细" @click="addDetail">
         <FontAwesomeIcon icon="plus" aria-hidden="true" /> 添加明细
       </button>
       <span style="flex:1" />
       <button class="csd-btn csd-btn-cancel" aria-label="取消" @click="$emit('update:open', false)">
         取消
       </button>
-      <button v-if="mode === 'manual'" class="csd-btn csd-btn-submit" :disabled="submitting" :aria-label="submitting ? '保存中…' : '确认创建'" @click="handleSubmit">
+      <button class="csd-btn csd-btn-submit" :disabled="submitting" :aria-label="submitting ? '保存中…' : '确认创建'" @click="handleSubmit">
         <FontAwesomeIcon v-if="submitting" icon="spinner" spin />
         <FontAwesomeIcon v-else icon="check" />
         {{ submitting ? '保存中…' : '确认创建' }}
@@ -63,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, toRef } from 'vue'
+import { toRef } from 'vue'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import ManualPlanForm from './ManualPlanForm.vue'
 import ImportPanel from './ImportPanel.vue'
@@ -80,8 +68,6 @@ const emit = defineEmits<{
   imported: [month?: string]
 }>()
 
-const mode = ref<'manual' | 'import'>('manual')
-
 // 表单状态 / 产品建议 / 校验 / 提交逻辑抽至 composables/useCreateShipmentPlan.ts
 const {
   form, productSuggestions, submitting, errorMsg, customerOptions,
@@ -91,12 +77,6 @@ const {
   onSucceeded: () => emit('succeeded'),
 })
 
-// 打开对话框时切回「填写数据」页签（表单重置在 composable 内、文件清空在 ImportPanel 内完成）
-watch(() => props.open, (val) => {
-  if (val) {
-    mode.value = 'manual'
-  }
-})
 </script>
 
 <style scoped>
@@ -107,45 +87,51 @@ watch(() => props.open, (val) => {
   min-height: 70vh;
 }
 
-.csd-header-tabs {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
+.csd-import-block {
+  border: 1px solid var(--color-border, #e2e8f0);
   border-radius: 12px;
-  background: white;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
-  margin: 0 auto;
+  padding: 12px 14px;
+  background: #fbfcfe;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.csd-htab {
+.csd-import-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.csd-import-title {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  padding: 8px 14px;
-  border-radius: 9px;
   font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  user-select: none;
-  white-space: nowrap;
+  font-weight: 700;
+  color: var(--color-text);
 }
 
-.csd-htab:hover {
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-1px);
+.csd-import-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
-.csd-htab-active {
-  background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
-  color: var(--color-primary-700);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 8px rgba(91,141,239,0.2);
-  transform: translateY(-1px);
+.csd-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--color-text-placeholder);
+}
+
+.csd-divider::before,
+.csd-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-light, #e2e8f0);
 }
 
 .csd-btn {

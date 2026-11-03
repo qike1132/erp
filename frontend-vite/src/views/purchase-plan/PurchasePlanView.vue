@@ -15,7 +15,6 @@
           :kpi="kpi"
           @prev="prevMonth"
           @next="nextMonth"
-          @reset="resetMonth"
           @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
           @create="showCreate = true"
         />
@@ -228,11 +227,6 @@ function exportSkuCSV() {
 
 function prevMonth() { m.value = m.value === 1 ? 12 : m.value - 1; if (m.value === 12) y.value--; }
 function nextMonth() { m.value = m.value === 12 ? 1 : m.value + 1; if (m.value === 1) y.value++; }
-function resetMonth() {
-  const now = new Date();
-  y.value = now.getFullYear();
-  m.value = now.getMonth() + 1;
-}
 function onCreated() { showCreate.value = false; refreshPlans(); }
 /** 部分成功：只刷新列表，不关闭对话框（H6：失败草稿要留在表单里可重试）。 */
 function refreshPlans() { qc.invalidateQueries({ queryKey: ['pp-agg'] }); }

@@ -76,15 +76,10 @@ describe('PurchasePlanMonthNav', () => {
     expect(w.find('.sp-nav-lbl').text()).toBe('2026年09月')
   })
 
-  it('在本月时不显示「回到本月」（省一个常年无用的按钮）', () => {
-    const w = mount(PurchasePlanMonthNav, { props: { y: 2026, m: 9 }, global: { stubs: { FontAwesomeIcon: { template: '<i />' } } } })
-    expect(w.find('.sp-nav-reset').exists()).toBe(false)
-  })
-
-  it('不在本月时给出「回到本月」，点击上抛 reset', async () => {
+  it('不再提供「回到本月」按钮（2026-11-01 按需求移除，只保留前后翻页）', () => {
     const w = mount(PurchasePlanMonthNav, { props: { y: 2026, m: 8 }, global: { stubs: { FontAwesomeIcon: { template: '<i />' } } } })
-    await w.find('.sp-nav-reset').trigger('click')
-    expect(w.emitted('reset')).toHaveLength(1)
+    expect(w.find('.sp-nav-reset').exists()).toBe(false)
+    expect(w.text()).not.toContain('回到本月')
   })
 
   it('前后翻页各自上抛', async () => {

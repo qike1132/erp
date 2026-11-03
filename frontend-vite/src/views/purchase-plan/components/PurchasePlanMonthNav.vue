@@ -7,17 +7,14 @@
     <button class="sp-nav-btn" aria-label="下一月" @click="emit('next')">
       <FontAwesomeIcon icon="chevron-right" aria-hidden="true" />
     </button>
-    <!-- 已经在本月时不显示：省一个常年无用的按钮，也让「看的是哪个月」更明确 -->
-    <button v-if="!atCurrentMonth" class="sp-nav-reset" @click="emit('reset')">回到本月</button>
   </div>
 </template>
 
 <script setup lang="ts">
 // 月份导航 —— 从 PurchasePlanToolbar 抽出，与搜索/导出/新建分开成两行：
 // 切换月份作用于整个页面（KPI 与两个 Tab 都跟着变），属于「上下文」而非「操作」。
-import { computed } from 'vue'
 
-const props = defineProps<{
+defineProps<{
   y: number
   m: number
 }>()
@@ -25,13 +22,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   prev: []
   next: []
-  reset: []
 }>()
-
-const now = new Date()
-const atCurrentMonth = computed(
-  () => props.y === now.getFullYear() && props.m === now.getMonth() + 1,
-)
 </script>
 
 <style scoped lang="scss">
@@ -77,22 +68,5 @@ const atCurrentMonth = computed(
   font-variant-numeric: tabular-nums;
 }
 
-.sp-nav-reset {
-  padding: 4px 10px;
-  border: none;
-  border-radius: 9px;
-  background: var(--color-primary-50);
-  color: var(--color-primary-600);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.2s ease, color 0.2s ease;
-}
 
-.sp-nav-reset:hover {
-  background: var(--color-primary-100);
-  color: var(--color-primary-700);
-}
 </style>
