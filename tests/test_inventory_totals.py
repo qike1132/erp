@@ -6,6 +6,8 @@ def _empty_clauses() -> dict:
         'si_pid': '', 'si_cust': '', 'so_pid': '', 'so_cust': '',
         'oi_or_o_pid': '', 'o_cust': '', 'o_not_deleted': '',
         'prod_pid': '', 'pso_pid': '', 'sub_pid': '',
+        # 2026-11-01：库存 CTE 新增「包装部生产客户」过滤片段，辅助字典要同步
+        'ppc_cust': '',
     }
 
 

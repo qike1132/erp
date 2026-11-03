@@ -62,6 +62,8 @@ _CUST_CLAUSE = ' AND customer = :sc'
 _SI_CUST = ' AND si.customer = :sc'
 _SO_CUST = ' AND so.customer = :sc'
 _O_CUST = ' AND o.customer = :sc'
+# 生产记录的客户是冗余列 customer_name（无 customer 表关联），过滤单独一条
+_PPC_CUST = ' AND customer_name = :sc'
 # 产品ID筛选条件（值通过 :pids 绑定，pids 为元组）
 _PID_CLAUSE = ' AND product_id = ANY(:pids)'
 _SI_PID = ' AND si.product_id = ANY(:pids)'
@@ -549,13 +551,14 @@ def _build_inventory_filter_params(search_product: str, search_customer: str,
         params['pids'] = pids_param
         pid_clause = _SI_PID
 
-    si_cust = so_cust = o_cust = cust_clause = ''
+    si_cust = so_cust = o_cust = cust_clause = ppc_cust = ''
     if search_customer:
         params['sc'] = search_customer
         si_cust = _SI_CUST
         so_cust = _SO_CUST
         o_cust = _O_CUST
         cust_clause = _CUST_CLAUSE
+        ppc_cust = _PPC_CUST
 
     # 各表的产品过滤条件（无搜索时为空字符串，避免 ANY(:pids) 全表扫描）
     si_pid = _SI_PID if search_product else ''
@@ -573,6 +576,7 @@ def _build_inventory_filter_params(search_product: str, search_customer: str,
         'oi_or_o_pid': oi_or_o_pid,
         'sub_pid': sub_pid, 'prod_pid': prod_pid, 'pso_pid': pso_pid,
         'o_not_deleted': _O_NOT_DELETED, 'prod_factory': prod_factory,
+        'ppc_cust': ppc_cust,
     }
     return params, clauses, pids_param
 
@@ -636,6 +640,17 @@ packaging_production_products AS (
     FROM production_agg
     WHERE packaging_qty > 0
 ),
+-- 包装部生产记录上的客户（冗余列 customer_name）。
+-- 2026-11-01 报障：只录了生产、没有订单/备货的产品，库存行客户为空——因为
+-- 生产分支只带 product_id。这里补出 (product_id, customer) 维度，让生产行也有客户。
+packaging_production_customers AS (
+    SELECT DISTINCT product_id, customer_name AS customer
+    FROM daily_production_record
+    WHERE department = 'packaging'
+      AND product_id IS NOT NULL
+      AND customer_name IS NOT NULL
+      AND customer_name <> ''{c['prod_pid']}{c['ppc_cust']}
+),
 product_stockout_total AS (
     SELECT product_id, SUM(quantity - returned_quantity) AS total_stockout_qty
     FROM stock_out
@@ -644,8 +659,8 @@ product_stockout_total AS (
 ),
 merged AS (
     SELECT
-        COALESCE(si.product_id, so.product_id, od.product_id, pp.product_id) AS product_id,
-        COALESCE(si.customer, so.customer, od.customer, '') AS customer,
+        COALESCE(si.product_id, so.product_id, od.product_id, ppc.product_id, pp.product_id) AS product_id,
+        COALESCE(si.customer, so.customer, od.customer, ppc.customer, '') AS customer,
         COALESCE(si.stockin_qty, 0) AS stockin_qty,
         CASE WHEN si.product_id IS NOT NULL THEN true ELSE false END AS has_stockin,
         COALESCE(so.direct_stockout_qty, 0) AS direct_stockout_qty,
@@ -658,8 +673,12 @@ merged AS (
     FULL OUTER JOIN order_agg od
         ON COALESCE(si.product_id, so.product_id) = od.product_id
         AND COALESCE(si.customer, so.customer) = od.customer
+    FULL OUTER JOIN packaging_production_customers ppc
+        ON COALESCE(si.product_id, so.product_id, od.product_id) = ppc.product_id
+        AND (COALESCE(si.customer, so.customer, od.customer) IS NULL
+             OR COALESCE(si.customer, so.customer, od.customer) = ppc.customer)
     FULL OUTER JOIN packaging_production_products pp
-        ON COALESCE(si.product_id, so.product_id, od.product_id) = pp.product_id
+        ON COALESCE(si.product_id, so.product_id, od.product_id, ppc.product_id) = pp.product_id
 ),
 inventory_calc AS (
     SELECT m.*,
@@ -691,9 +710,11 @@ filtered AS (
               AND product_id IS NOT NULL
         GROUP BY product_id
     ) ship ON ship.product_id = ic.product_id
-    WHERE (ic.has_stockin OR ic.has_order OR (ic.has_packaging_production AND :sc_is_empty))
+    WHERE (ic.has_stockin OR ic.has_order
+           OR (ic.has_packaging_production AND (:sc_is_empty OR ic.customer <> '')))
       AND (ic.total_qty > 0
-           OR (ic.has_packaging_production AND NOT ic.has_stockin AND NOT ic.has_order AND :sc_is_empty))
+           OR (ic.has_packaging_production AND NOT ic.has_stockin AND NOT ic.has_order
+               AND (:sc_is_empty OR ic.customer <> '')))
 )
 SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
     f.stockin_qty, f.direct_stockout_qty, f.order_stockout_qty,
@@ -811,6 +832,16 @@ async def _get_all_customers(db: AsyncSession, pids: tuple | None, factory: str 
             FROM stock_in
             WHERE customer IS NOT NULL{pid_clause}{factory_clause}
             GROUP BY customer
+            UNION ALL
+            -- 包装部生产记录里的客户：只录生产、没有订单/备货时，表格里会出现这些客户，
+            -- 切换栏漏掉就会「看得见、筛不了」（与 2026-09-30 备货客户同类问题）
+            SELECT customer_name AS customer,
+                   MAX(production_date)::timestamp AS last_activity,
+                   COUNT(*) AS activity_cnt
+            FROM daily_production_record
+            WHERE department = 'packaging'
+              AND customer_name IS NOT NULL AND customer_name <> ''{pid_clause}{factory_clause}
+            GROUP BY customer_name
         )
         SELECT customer, MAX(last_activity) AS last_activity,
                SUM(activity_cnt) AS activity_cnt
