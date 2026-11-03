@@ -23,6 +23,7 @@
 """
 import asyncio
 import fnmatch
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -110,11 +111,41 @@ def real_fallback_cache(monkeypatch):
     redis_cache._fallback_timestamps.clear()
 
 
-def _redis_available() -> bool:
-    try:
-        return redis_cache.redis_client is not None
-    except Exception:  # 环境探测
-        return False
+def _redis_test_url() -> str | None:
+    """构造指向**测试专用 db** 的 Redis URL；凭据取自 settings。
+
+    为什么强制换 db：本用例会 ``DELETE erp:product:list:*``，若连的是生产缓存
+    db（默认 0），会清空线上商品列表缓存。db 号默认 15（与 CI 的
+    ``REDIS_CACHE_URL=redis://localhost:6379/15`` 一致），可用
+    ``ERP_TEST_REDIS_DB`` 覆盖。
+    """
+    from urllib.parse import quote, urlsplit, urlunsplit
+
+    from fastapi_app.core.config import settings
+
+    raw = (settings.REDIS_CACHE_URL or settings.REDIS_URL or '').strip()
+    if not raw:
+        return None
+    parts = urlsplit(raw)
+    if parts.scheme not in ('redis', 'rediss'):
+        return None
+    password = parts.password or settings.REDIS_PASSWORD or ''
+    host = parts.hostname or '127.0.0.1'
+    port = parts.port or 6379
+    userinfo = f':{quote(password, safe="")}@' if password else ''
+    test_db = os.getenv('ERP_TEST_REDIS_DB', '15')
+    return urlunsplit((parts.scheme, f'{userinfo}{host}:{port}', f'/{test_db}', '', ''))
+
+
+def _mask_redis_url(url: str) -> str:
+    """失败信息里隐去口令（REDIS_URL 可能内嵌密码）。"""
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    netloc = parts.hostname or ''
+    if parts.port:
+        netloc = f'{netloc}:{parts.port}'
+    return urlunsplit((parts.scheme, netloc, parts.path, '', ''))
 
 
 # ---------------------------------------------------------------------------
@@ -198,16 +229,33 @@ class TestPhysicalKeyPatternMatch:
         assert 'erp:product:detail:1' in fake.keys
         assert 'erp:products:all' in fake.keys
 
-    @pytest.mark.skipif(not _redis_available(), reason=(
-        '本机 Redis 需密码，redis_cache 降级为内存缓存；未验证真实 Redis 的 SCAN+UNLINK 端到端'
-    ))
     async def test_real_redis_end_to_end(self):
-        """真实 Redis 端到端（Redis 可用时才执行）。"""
-        key = build_cache_key(CacheNamespace.PRODUCT_LIST, 20)
-        await safe_set(key, {'items': [], 'total': 0}, timeout=60)
-        assert await safe_get(key) is not None
-        await safe_delete_pattern(PRODUCT_LIST_CACHE_PATTERN)
-        assert await safe_get(key) is None
+        """真实 Redis 端到端（SCAN + UNLINK），连**测试专用 db**。
+
+        2026-11-03（全量 skip 明细复核）：原写法靠 ``skipif(not _redis_available())``，
+        而全局 ``redis_cache.redis_client`` 只在 app 启动时 init，pytest 进程里恒为
+        None → 该用例**在任何环境都不会执行**，包括 CI。它伪装成「本机 Redis 需密码」，
+        实际是覆盖缺口。改为用例内自行 init 到测试 db（默认 15），连不上才 skip
+        并给出脱敏后的目标地址。
+        """
+        url = _redis_test_url()
+        if not url:
+            pytest.skip('未配置 REDIS_CACHE_URL / REDIS_URL，无法定位真实 Redis')
+
+        from utils.redis_cache import redis_cache as _rc
+
+        await _rc.init_app(redis_url=url)
+        if _rc.redis_client is None:
+            pytest.skip(f'无法连接测试专用 Redis（{_mask_redis_url(url)}）')
+
+        try:
+            key = build_cache_key(CacheNamespace.PRODUCT_LIST, 20)
+            await safe_set(key, {'items': [], 'total': 0}, timeout=60)
+            assert await safe_get(key) is not None
+            await safe_delete_pattern(PRODUCT_LIST_CACHE_PATTERN)
+            assert await safe_get(key) is None
+        finally:
+            await _rc.close()
 
 
 # ---------------------------------------------------------------------------

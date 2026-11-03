@@ -20,7 +20,7 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from urllib.parse import unquote, urlparse, urlunparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import pytest
 
@@ -120,6 +120,22 @@ async def _create_scratch(admin_url: str, name: str) -> None:
         await engine.dispose()
 
 
+async def _admin_exec(admin_url: str, sql: str) -> None:
+    """以 admin 身份执行一条 DDL（autocommit）。
+
+    只用于用例内的角色/授权管理。调用方必须保证 SQL 里的标识符与口令由本用例
+    生成（``secrets.token_hex``），不含引号等可注入字符。
+    """
+    from sqlalchemy import text
+
+    engine = _engine(admin_url, autocommit=True)
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text(sql))
+    finally:
+        await engine.dispose()
+
+
 async def test_restore_roundtrip_and_verify(restore_env, _require_pg_tools):
     """真跑 灌数→pg_dump→组ZIP→restore→探针数据往返（scratch 库，跑完即弃）。"""
     from sqlalchemy import text
@@ -194,41 +210,89 @@ async def test_restore_roundtrip_and_verify(restore_env, _require_pg_tools):
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-async def test_restore_refuses_without_createdb(restore_env, _require_pg_tools):
+async def test_restore_refuses_without_createdb(restore_env, _require_pg_tools, monkeypatch):
     """无 CREATEDB/超级用户时 restore 必须在建库权预检处干净拒绝（不先删库）。
 
-    已知覆盖缺口（OCR 评审 Low-5）：本机 DB_USER 历史手工角色碰巧有 CREATEDB，
-    本测试在本机恒 skip——「拒绝路径已测」不能计入覆盖结论。伪造无权限场景
-    （如 PG_SUPER_USER 指向不存在角色）会让预检前的连接检查先失败，错误文案
-    不同，无法等价替代；真验证需一个无 CREATEDB 的专用角色，留待 CI 环境补。
+    2026-11-03（全量 skip 明细复核）：原写法是「PG_SUPER_PASSWORD 已配置 → skip」，
+    理由是本机 DB_USER 历史角色碰巧有 CREATEDB，拒绝路径无法触发。但这让本用例
+    **在任何配置了超管的机器上恒 skip**（包括 CI）——它伪装成「本机环境特殊」，
+    实际是覆盖缺口。
+
+    现改为**用例内自建 NOCREATEDB 角色**：用超管建一个 LOGIN NOCREATEDB
+    NOSUPERUSER 的临时角色，再清掉 PG_SUPER_PASSWORD 让 restore 回落到应用角色
+    路径，拒绝分支即可真跑；角色与 scratch 库都在 finally 里清理。
+
+    分工说明：核心逻辑（预检失败后一条 DROP/CREATE 都不执行）已由
+    ``tests/test_restore_permission_precheck.py`` 用 ``run_proc.await_count == 0``
+    锁死；本用例补的是驱动层——真实 psql 以无建库权角色连接时确实回报 false。
     """
-    if os.environ.get('PG_SUPER_PASSWORD'):
-        pytest.skip('PG_SUPER_PASSWORD 已配置，走超级用户路径')
+    import secrets
 
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.orm import sessionmaker
 
     from fastapi_app.services.backup.dump import restore_database_via_psql
 
-    # 造一个最小合法 ZIP（含 dump 成员）；scratch 库不存在，restore 的建库权预检
-    # 应在 DROP 之前拒绝（本机有权限时会 skip）。
-    tmpdir = Path(tempfile.mkdtemp(prefix='restore_probe_refuse_'))
+    if not os.environ.get('PG_SUPER_PASSWORD'):
+        pytest.skip('未配置 PG_SUPER_PASSWORD，无法创建无 CREATEDB 的临时角色')
+
+    admin_url = restore_env['admin_url']
+    scratch_db = restore_env['scratch_db']
+    role = f'erp_nocreate_{secrets.token_hex(4)}'
+    role_pwd = secrets.token_hex(16)
+    created_role = False
+    result: dict = {}
+
+    # 建角色需要 CREATEROLE，应用角色通常没有；用超管连接做这一步。
+    # 注意必须在 delenv('PG_SUPER_PASSWORD') 之前算出来。
+    super_user = os.environ.get('PG_SUPER_USER') or 'postgres'
+    _parsed_admin = urlparse(admin_url)
+    _super_netloc = (
+        f'{quote(super_user, safe="")}:{quote(os.environ["PG_SUPER_PASSWORD"], safe="")}'
+        f'@{_parsed_admin.hostname}:{_parsed_admin.port or 5432}'
+    )
+    super_url = urlunparse(_parsed_admin._replace(netloc=_super_netloc))
+
+    # restore 会 DROP/CREATE 目标库，先保证它存在（空库），失败时才能分辨卡在哪一步。
+    await _drop_scratch(super_url, scratch_db)
+    await _create_scratch(super_url, scratch_db)
     try:
-        zip_path = tmpdir / 'probe.zip'
-        with zipfile.ZipFile(zip_path, 'w') as zf:
-            zf.writestr('database/dump.sql.gz', gzip.compress(b'SELECT 1;'))
+        await _admin_exec(
+            super_url,
+            f'CREATE ROLE "{role}" LOGIN NOCREATEDB NOSUPERUSER PASSWORD \'{role_pwd}\'',
+        )
+        created_role = True
+        await _admin_exec(super_url, f'GRANT CONNECT ON DATABASE "{scratch_db}" TO "{role}"')
 
-        engine = _engine(restore_env['scratch_url'])
-        ProbeSession = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-        async with ProbeSession() as db:
-            with zipfile.ZipFile(zip_path) as zf:
-                result = await restore_database_via_psql(zf, db)
-        await engine.dispose()
+        # 让 restore 走应用角色路径：清掉超管凭据，DB_USER 换成无建库权的角色。
+        monkeypatch.setenv('DB_USER', role)
+        monkeypatch.setenv('DB_PASSWORD', role_pwd)
+        monkeypatch.delenv('PG_SUPER_PASSWORD', raising=False)
+
+        tmpdir = Path(tempfile.mkdtemp(prefix='restore_probe_refuse_'))
+        try:
+            zip_path = tmpdir / 'probe.zip'
+            with zipfile.ZipFile(zip_path, 'w') as zf:
+                zf.writestr('database/dump.sql.gz', gzip.compress(b'SELECT 1;'))
+
+            engine = _engine(restore_env['scratch_url'])
+            ProbeSession = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+            async with ProbeSession() as db:
+                with zipfile.ZipFile(zip_path) as zf:
+                    result = await restore_database_via_psql(zf, db)
+            await engine.dispose()
+        finally:
+            # 与上一条用例同因：本机 %TEMP% 不可用时 mkdtemp 回落到 CWD，
+            # 不删就会在仓库根留下 restore_probe_refuse_*/（2026-10-13 实测）
+            shutil.rmtree(tmpdir, ignore_errors=True)
     finally:
-        # 与上一条用例同因：本机 %TEMP% 不可用时 mkdtemp 回落到 CWD，
-        # 不删就会在仓库根留下 restore_probe_refuse_*/（2026-10-13 实测）
-        shutil.rmtree(tmpdir, ignore_errors=True)
+        if created_role:
+            try:
+                await _admin_exec(super_url, f'DROP ROLE IF EXISTS "{role}"')
+            except Exception as exc:  # 清理失败不应掩盖主断言，但要留下可见痕迹
+                print(f'[cleanup] DROP ROLE {role} 失败: {exc}')
+        await _drop_scratch(super_url, scratch_db)
 
-    if result.get('status') == 'ok':
-        pytest.skip('DB_USER 实际具备建库权（本机环境特殊），拒绝路径无法触发')
-    assert '建库权限' in (result.get('error') or '') or 'CREATEDB' in (result.get('error') or ''), result
+    assert result.get('status') == 'error', f'无建库权时 restore 必须失败，实际返回: {result}'
+    err = result.get('error') or ''
+    assert '建库权限' in err or 'CREATEDB' in err, err

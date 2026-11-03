@@ -13,29 +13,48 @@ import pytest
 import fastapi_app.core.database as db
 
 
-def test_read_engine_pool_config_is_half_of_primary():
-    """副本池必须是主池减半（向上给最小值），不能整体复用主池配置。"""
+def test_read_engine_pool_config_is_half_of_primary(monkeypatch):
+    """副本池必须是主池减半（向上给最小值），不能整体复用主池配置。
+
+    2026-11-03（全量 skip 明细复核）：本机没有只读副本实例，原写法在
+    ``_init_read_engine()`` 因 URL 为空直接 return 后 ``pytest.skip``，于是
+    「副本池预算」这条 P0-3 回归**从未在任何环境执行过**——它伪装成环境缺失，
+    实际是覆盖缺口。
+
+    本用例验证的是**池参数派生**，不是副本连通性。``create_async_engine`` 是
+    惰性建池（不 ping、不建连），所以注入一个副本 URL 就能让 ``_init_read_engine``
+    走完整建池分支并断言池参数，无需真实副本实例。
+    """
     primary = dict(db._pool_config)
+
+    monkeypatch.setattr(
+        db.settings,
+        'ASYNC_DATABASE_REPLICA_URL',
+        'postgresql+asyncpg://replica_probe:probe@127.0.0.1:5432/erp_system_test',
+    )
 
     db._read_engine = None
     db._ReadSessionLocal = None
     try:
         db._init_read_engine()
+
+        assert db._read_engine is not None, (
+            '已注入 ASYNC_DATABASE_REPLICA_URL，副本引擎必须被建出来；'
+            '若为 None 说明建池分支被短路，本用例会静默退化成 skip'
+        )
+
+        from sqlalchemy.pool import AsyncAdaptedQueuePool
+
+        pool = db._read_engine.pool
+        assert isinstance(pool, AsyncAdaptedQueuePool)
+        assert pool.size() <= max(2, primary["pool_size"] // 2), (
+            f"副本池 size={pool.size()} 超过主池减半预算 {max(2, primary['pool_size'] // 2)}"
+        )
+        assert pool._max_overflow <= max(1, primary["max_overflow"] // 2)
     finally:
-        pass
-
-    # 未配置副本 URL 时函数直接返回（回退主库），跳过断言
-    if db._read_engine is None:
-        pytest.skip("未配置 ASYNC_DATABASE_REPLICA_URL，副本引擎未初始化")
-
-    from sqlalchemy.pool import AsyncAdaptedQueuePool
-
-    pool = db._read_engine.pool
-    assert isinstance(pool, AsyncAdaptedQueuePool)
-    assert pool.size() <= max(2, primary["pool_size"] // 2), (
-        f"副本池 size={pool.size()} 超过主池减半预算 {max(2, primary['pool_size'] // 2)}"
-    )
-    assert pool._max_overflow <= max(1, primary["max_overflow"] // 2)
+        # 惰性引擎没建过连接，置空即可；但必须清掉，否则污染同进程后续用例。
+        db._read_engine = None
+        db._ReadSessionLocal = None
 
 
 def test_read_pool_config_derivation_is_pure():
