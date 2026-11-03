@@ -29,6 +29,7 @@ vi.mock('@/api', () => ({
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
 import ProductionEntryPanel from '@/views/production/components/ProductionEntryPanel.vue'
+import CustomerSelect from '@/views/production/components/CustomerSelect.vue'
 
 const PRODUCTS = [
   { id: 1, name: '白兔公仔 40cm', barcode: '6901234', specification: '40cm' },
@@ -46,6 +47,13 @@ const stubs = {
 
 let wrapper: VueWrapper | null = null
 
+/** 客户是必填项：提交前统一选一个客户 */
+async function pickCustomerForSubmit(w: VueWrapper) {
+  await flushPromises()
+  w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+  await nextTick()
+}
+
 function mountDialog() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   wrapper = mount(ProductionEntryPanel, {
@@ -59,6 +67,8 @@ function mountDialog() {
 /** 输入关键词并等过 300ms 防抖，让下拉里真的有结果 */
 async function typeSearch(w: VueWrapper, text: string) {
   searchMock.mockResolvedValue({ products: PRODUCTS })
+  // 选了客户后搜索走 /products/list，两个入口都要给数据
+  productListMock.mockResolvedValue({ items: PRODUCTS, total: PRODUCTS.length })
   const input = w.find('[data-test="qe-search"]')
   await input.setValue(text)
   await new Promise((resolve) => setTimeout(resolve, 320))
@@ -175,7 +185,6 @@ describe('ProductionEntryDialog 键盘流', () => {
     await selectFirstProduct(w)
 
     expect(w.findAll('[data-test="qe-row"]').length).toBe(2)
-    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('2')
   })
 
   it('数量输入 ↑/↓ 让数量 ∓1', async () => {
@@ -200,10 +209,10 @@ describe('ProductionEntryDialog 键盘流', () => {
     expect((qty.element as HTMLInputElement).value).toBe('10')
 
     await qty.trigger('keydown', { key: 'ArrowDown', shiftKey: true })
-    expect((qty.element as HTMLInputElement).value).toBe('0')
+    expect((qty.element as HTMLInputElement).value).toBe('')
 
     await qty.trigger('keydown', { key: 'ArrowDown', shiftKey: true })
-    expect((qty.element as HTMLInputElement).value).toBe('0')
+    expect((qty.element as HTMLInputElement).value).toBe('')
   })
 
   it('数量框按 ⏎ 回到搜索框，继续加下一条', async () => {
@@ -221,6 +230,7 @@ describe('ProductionEntryDialog 键盘流', () => {
 
   it('Ctrl+⏎ 在弹窗内任意位置批量提交', async () => {
     const w = mountDialog()
+    await pickCustomerForSubmit(w)
     await selectFirstProduct(w)
     await w.find('[data-test="qe-qty"]').setValue('620')
 

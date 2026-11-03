@@ -1,22 +1,24 @@
 <template>
   <div class="pr-rows">
     <table class="pr-rows-table">
+      <!-- table-layout:fixed + 百分比列宽：剩余空间按比例摊给所有列，
+           而不是全灌进「产品」列（现场反馈产品列右侧空白过大）。
+           产品列不给宽度 = 吃掉剩余部分，数据列按百分比保底。 -->
+      <colgroup>
+        <col class="col-idx" />
+        <col class="col-prod" />
+        <col class="col-qty" />
+        <col v-if="batchColumnOn" class="col-batch" />
+        <col v-if="isPackaging" class="col-custom" />
+        <col class="col-act" />
+      </colgroup>
       <thead>
         <tr>
           <th class="c-idx">#</th>
           <th>产品</th>
           <th class="c-qty">数量</th>
-          <th v-if="batchColumnOn" class="c-batch">
-            <div class="c-batch-head">
-              <span>批次号<span v-if="batchRequired" class="c-req">必填</span><span v-else class="c-opt">选填</span></span>
-              <button type="button" class="pr-rows-fill" data-test="qe-fill-batch" title="把第一行的批次号铺到所有空行" @click="emit('fill-batch')">
-                本列同批次
-              </button>
-            </div>
-          </th>
-          <th v-if="isPackaging" class="c-custom">定制</th>
-          <th class="c-remark">备注</th>
-          <th class="c-sum">小计</th>
+          <th v-if="batchColumnOn" class="c-batch">批次号</th>
+          <th v-if="isPackaging" class="c-custom">定制国家</th>
           <th class="c-act"><span class="sr-only">操作</span></th>
         </tr>
       </thead>
@@ -26,53 +28,31 @@
             <td class="c-idx">{{ i + 1 }}</td>
             <td class="c-prod">
               <div class="c-prod-name" :title="row.product_name">{{ row.product_name }}</div>
-              <div class="c-prod-meta">
-                <span v-if="row.barcode" class="c-code">{{ row.barcode }}</span>
-                <label class="c-price" title="单价（自动带出，可改）">
-                  <span>¥</span>
-                  <input
-                    v-model.number="row.unit_price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    class="c-price-input"
-                    data-test="qe-price"
-                    aria-label="单价"
-                    :disabled="disabled"
-                  />
-                </label>
-                <span v-if="row.duplicate_qty > 0" class="c-dup" data-test="qe-dup" title="今日同部门同产品已录数量，仅提示不阻断">
-                  今日已录 {{ row.duplicate_qty }}
-                </span>
-              </div>
             </td>
             <td class="c-qty">
-              <div class="c-step">
-                <button type="button" aria-label="减1" :disabled="disabled" @click="emit('adjust', row, -1)">−</button>
-                <input
-                  v-model.number="row.quantity"
-                  type="number"
-                  min="0"
-                  inputmode="numeric"
-                  placeholder="0"
-                  aria-label="生产数量"
-                  data-test="qe-qty"
-                  :data-qty-key="row.key"
-                  :disabled="disabled"
-                  @input="row.error = ''"
-                  @keydown.up.prevent="emit('qty-arrow', row, 1, $event)"
-                  @keydown.down.prevent="emit('qty-arrow', row, -1, $event)"
-                  @keydown.enter.prevent="emit('qty-enter')"
-                />
-                <button type="button" aria-label="加1" :disabled="disabled" @click="emit('adjust', row, 1)">＋</button>
-              </div>
+              <input
+                :value="row.quantity === 0 ? '' : row.quantity"
+                type="number"
+                min="0"
+                inputmode="numeric"
+                placeholder=""
+                aria-label="生产数量"
+                data-test="qe-qty"
+                :data-qty-key="row.key"
+                class="pr-input c-qty-input"
+                :disabled="disabled"
+                @input="onQtyInput(row, $event)"
+                @keydown.up.prevent="emit('qty-arrow', row, 1, $event)"
+                @keydown.down.prevent="emit('qty-arrow', row, -1, $event)"
+                @keydown.enter.prevent="emit('qty-enter')"
+              />
             </td>
             <td v-if="batchColumnOn" class="c-batch">
               <input
                 v-model="row.batch_no"
                 type="text"
                 class="pr-input c-batch-input"
-                :class="{ 'is-bad': batchRequired && !row.batch_no.trim() && !!row.error }"
+                :class="{ 'is-bad': !!row.error }"
                 placeholder="如 0464628801"
                 maxlength="100"
                 autocomplete="off"
@@ -82,34 +62,18 @@
               />
             </td>
             <td v-if="isPackaging" class="c-custom">
-              <label class="c-check">
-                <input v-model="row.is_custom" type="checkbox" data-test="qe-custom" :disabled="disabled" />
-                <span>定制</span>
-              </label>
               <input
-                v-if="row.is_custom"
                 v-model="row.custom_country"
                 type="text"
                 class="pr-input c-country"
-                placeholder="定制国家"
+                placeholder="定制国家，填了即定制"
                 maxlength="100"
+                aria-label="定制国家（填写后自动按定制处理）"
                 data-test="qe-country"
                 :disabled="disabled"
-                @input="row.error = ''"
+                @input="onCountryInput(row)"
               />
             </td>
-            <td class="c-remark">
-              <input
-                v-model="row.remark"
-                type="text"
-                class="pr-input"
-                placeholder="选填"
-                maxlength="500"
-                data-test="qe-remark"
-                :disabled="disabled"
-              />
-            </td>
-            <td class="c-sum">{{ formatCurrency((row.quantity || 0) * (row.unit_price || 0)) }}</td>
             <td class="c-act">
               <button type="button" class="c-del" aria-label="删除此行" data-test="qe-remove" :disabled="disabled" @click="emit('remove', row)">
                 <FontAwesomeIcon icon="times" aria-hidden="true" />
@@ -139,66 +103,61 @@
  * 数量步进/删除/铺满批次这类带副作用的动作仍然交回 composable。
  */
 import { computed } from 'vue'
-import { formatCurrency } from '@/utils/format'
 import type { EntryRow } from '../composables/useProductionEntry'
 
 const props = defineProps<{
   rows: EntryRow[]
   batchColumnOn: boolean
-  batchRequired: boolean
   isPackaging: boolean
   disabled: boolean
 }>()
 
 const emit = defineEmits<{
   remove: [row: EntryRow]
-  adjust: [row: EntryRow, delta: number]
   'qty-arrow': [row: EntryRow, direction: number, event: KeyboardEvent]
   'qty-enter': []
-  'fill-batch': []
 }>()
 
-const colspan = computed(() => 6 + (props.batchColumnOn ? 1 : 0) + (props.isPackaging ? 1 : 0))
+const colspan = computed(() => 4 + (props.batchColumnOn ? 1 : 0) + (props.isPackaging ? 1 : 0))
+
+/** 数量输入：空串按 0 存，0 在界面上显示为空（默认不是 0） */
+function onQtyInput(row: EntryRow, event: Event) {
+  const raw = (event.target as HTMLInputElement).value
+  row.quantity = raw === '' ? 0 : Number(raw)
+  row.error = ''
+}
+
+/** 定制国家输入框即开关：填了国家 = 该行按定制处理，清空 = 非定制 */
+function onCountryInput(row: EntryRow) {
+  row.is_custom = row.custom_country.trim().length > 0
+  row.error = ''
+}
 </script>
 
 <style scoped>
-.pr-rows { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--color-border); border-radius: 12px; background: #fff; }
-.pr-rows-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14.5px; min-width: 940px; }
-.pr-rows-table th { position: sticky; top: 0; z-index: 2; background: var(--color-surface); border-bottom: 1px solid var(--color-border); padding: 9px 10px; font-size: 12.5px; font-weight: 700; color: var(--color-text-secondary); text-align: left; white-space: nowrap; }
+.pr-rows { flex: 1; min-height: 0; overflow: auto; background: #fff; }
+.pr-rows-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 14.5px; min-width: 940px; }
+.pr-rows-table th.c-qty, .pr-rows-table th.c-batch, .pr-rows-table th.c-custom { text-align: center; }
+.pr-rows-table td.c-qty, .pr-rows-table td.c-batch, .pr-rows-table td.c-custom { text-align: center; }
+.c-batch .pr-input, .c-custom .pr-input { text-align: center; }
+.col-idx { width: 3.5%; }
+.col-qty { width: 12%; }
+.col-batch { width: 17%; }
+.col-custom { width: 11.5%; }
+.col-act { width: 4%; }
+.pr-rows-table th { position: sticky; top: 0; z-index: 2; background: #fff; border-bottom: 1px solid var(--color-border); padding: 9px 10px; font-size: 12.5px; font-weight: 700; color: var(--color-text-secondary); text-align: left; white-space: nowrap; }
 .pr-rows-table td { border-bottom: 1px solid var(--color-border-light); padding: 9px 10px; vertical-align: middle; }
 .pr-row:hover td { background: #fbfcfe; }
-.c-idx { width: 30px; text-align: center; color: var(--color-text-placeholder); font-size: 12px; padding-right: 0 !important; }
-.c-prod { min-width: 200px; }
-.c-prod-name { font-size: 14.5px; font-weight: 700; color: var(--color-text); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.c-prod-meta { display: flex; align-items: center; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
-.c-code { font-size: 11.5px; color: var(--color-text-placeholder); font-family: 'SF Mono', Consolas, monospace; }
-.c-price { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--color-text-muted); }
-.c-price-input { width: 64px; border: none; border-bottom: 1px dashed var(--color-border-strong); background: transparent; font-size: 12px; font-weight: 700; color: var(--color-text-secondary); padding: 0 3px; outline: none; font-family: inherit; -moz-appearance: textfield; }
-.c-price-input::-webkit-outer-spin-button, .c-price-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.c-price-input:focus { border-bottom-color: var(--color-primary-500); color: var(--color-primary-700); }
-.c-dup { font-size: 11.5px; font-weight: 700; color: var(--color-warning-600); background: var(--color-warning-50); border: 1px solid var(--color-warning-200); border-radius: 5px; padding: 0 5px; }
-.c-qty { width: 124px; }
-.c-step { display: inline-flex; align-items: stretch; height: 40px; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: #fff; }
-.c-step:focus-within { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.14); }
-.c-step button { width: 28px; border: none; background: var(--color-surface); color: var(--color-text-secondary); font-size: 15px; font-weight: 700; cursor: pointer; padding: 0; }
-.c-step button:hover:not(:disabled) { background: var(--color-primary-700); color: #fff; }
-.c-step input { width: 100%; min-width: 0; border: none; outline: none; text-align: center; font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--color-text); background: transparent; -moz-appearance: textfield; }
-.c-step input::-webkit-outer-spin-button, .c-step input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.c-batch { width: 176px; }
-.c-batch-head { display: flex; align-items: center; gap: 8px; }
+.c-idx { text-align: center; color: var(--color-text-placeholder); font-size: 12px; padding-right: 0 !important; }
+.c-prod-name { font-size: 14px; font-weight: 700; color: var(--color-text); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.c-qty-input { text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
+.c-qty-input::-webkit-outer-spin-button, .c-qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .c-req { margin-left: 6px; font-size: 12px; font-weight: 800; color: var(--color-warning-700); background: var(--color-warning-50); border: 1px solid var(--color-warning-200); border-radius: 4px; padding: 0 4px; }
-.c-opt { margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--color-text-placeholder); }
-.pr-rows-fill { border: 1px dashed var(--color-border-strong); background: #fff; color: var(--color-text-muted); font-size: 13px; font-weight: 600; border-radius: 7px; padding: 3px 9px; cursor: pointer; font-family: inherit; white-space: nowrap; }
-.pr-rows-fill:hover { border-color: var(--color-primary-400); color: var(--color-primary-700); background: var(--color-primary-50); }
-.c-custom { width: 124px; }
-.c-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; }
-.c-country { margin-top: 6px; }
-.c-remark { width: 130px; }
-.c-sum { width: 100px; text-align: right; font-size: 14.5px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--color-text-secondary); white-space: nowrap; }
-.c-act { width: 36px; padding-left: 0 !important; }
+.c-country { width: 100%; }
+.c-act { padding-left: 0 !important; }
 .c-del { width: 26px; height: 26px; border: none; border-radius: 7px; background: transparent; color: var(--color-text-placeholder); display: grid; place-items: center; cursor: pointer; }
 .c-del:hover:not(:disabled) { background: var(--color-danger-50); color: var(--color-danger-600); }
-.pr-input { width: 100%; height: 40px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; font-size: 13.5px; color: var(--color-text); outline: none; font-family: inherit; box-sizing: border-box; }
+.pr-input { width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--color-border); border-radius: 7px; background: #fff; font-size: 13px; color: var(--color-text); outline: none; font-family: inherit; box-sizing: border-box; }
 .pr-input::placeholder { color: var(--color-text-placeholder); }
 .pr-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.13); }
 .pr-input.is-bad { border-color: var(--color-danger-500); background: #fffafa; }
@@ -209,6 +168,5 @@ const colspan = computed(() => 6 + (props.batchColumnOn ? 1 : 0) + (props.isPack
 .pr-rows-end { padding: 12px; text-align: center; font-size: 12.5px; color: var(--color-text-placeholder); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 @media (max-width: 1100px) {
-  .c-remark { display: none; }
 }
 </style>

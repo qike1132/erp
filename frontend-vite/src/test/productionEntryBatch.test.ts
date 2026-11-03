@@ -7,7 +7,6 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { nextTick } from 'vue'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 const recordsMock = vi.fn()
@@ -53,6 +52,13 @@ const stubs = {
 }
 
 let wrapper: VueWrapper | null = null
+
+/** 客户是必填项：提交前统一选一个客户 */
+async function pickCustomerForSubmit(w: VueWrapper) {
+  await flushPromises()
+  w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+  await nextTick()
+}
 
 function mountDialog() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -115,16 +121,17 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('批次号列', () => {
-  it('包装部自动出现批次列，但仍是选填（不填也能提交）', async () => {
+describe('批次号列（只跟部门走：包装部显示，充棉/手工不显示）', () => {
+  it('包装部显示批次列（选填），不填也能提交，payload 不带 batch_no', async () => {
     const w = mountDialog()
     await w.find('[data-dept="packaging"]').trigger('click')
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('10')
 
     expect(w.find('[data-test="qe-batch"]').exists()).toBe(true)
-    expect(w.find('[data-test="qe-banner"]').exists()).toBe(true)
+    expect(w.find('[data-test="qe-banner"]').text()).toContain('批次 0/1')
 
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
@@ -132,56 +139,25 @@ describe('批次号列', () => {
     expect(createMock.mock.calls[0]?.[0]).toMatchObject({ department: 'packaging', batch_no: null })
   })
 
-  it('充棉部默认没有批次列；给客户打开「需批次号」后出现并要求必填，空批次会被拦下', async () => {
+  it('充棉部 / 手工部不显示批次列；切到包装部出现、切回消失', async () => {
     const w = mountDialog()
-    await flushPromises()
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('10')
     expect(w.find('[data-test="qe-batch"]').exists()).toBe(false)
 
-    await w.find('[data-test="qe-batch-switch"]').setValue(true)
+    await w.find('[data-dept="handcraft"]').trigger('click')
+    expect(w.find('[data-test="qe-batch"]').exists()).toBe(false)
+
+    await w.find('[data-dept="packaging"]').trigger('click')
     expect(w.find('[data-test="qe-batch"]').exists()).toBe(true)
 
-    await w.find('[data-test="qe-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(createMock).not.toHaveBeenCalled()
-    expect(w.find('[data-test="qe-row-error"]').text()).toContain('批次号')
-
-    await batchAt(w, 0).setValue('B20261101')
-    await w.find('[data-test="qe-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(createMock).toHaveBeenCalledTimes(1)
-    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ batch_no: 'B20261101' })
+    await w.find('[data-dept="filling"]').trigger('click')
+    expect(w.find('[data-test="qe-batch"]').exists()).toBe(false)
   })
 
-  it('「本列同批次」把第一行的批次号铺到其它空行', async () => {
+  it('批次状态是行内小标签：填满即消失', async () => {
     const w = mountDialog()
-    await flushPromises()
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
-    await w.find('[data-test="qe-batch-switch"]').setValue(true)
-    await selectProductAt(w, 0)
-    await selectProductAt(w, 1)
-    await batchAt(w, 0).setValue('B001')
-
-    await w.find('[data-test="qe-fill-batch"]').trigger('click')
-
-    expect((batchAt(w, 0).element as HTMLInputElement).value).toBe('B001')
-    expect((batchAt(w, 1).element as HTMLInputElement).value).toBe('B001')
-    // 填满后状态标签自己消失，不再白占一行
-    expect(w.find('[data-test="qe-banner"]').exists()).toBe(false)
-  })
-
-  it('批次状态是行内小标签：填满即消失，也不再单独占一行放「铺满空行」', async () => {
-    const w = mountDialog()
-    await flushPromises()
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
-    await w.find('[data-test="qe-batch-switch"]').setValue(true)
+    await w.find('[data-dept="packaging"]').trigger('click')
     await selectProductAt(w, 0)
     await selectProductAt(w, 1)
 
@@ -195,66 +171,25 @@ describe('批次号列', () => {
     expect(w.find('[data-test="qe-banner"]').exists()).toBe(false)
   })
 
-  it('没选客户时「该客户需批次号」开关禁用，选了客户才可设置', async () => {
-    const w = mountDialog()
-    await flushPromises()
-
-    const sw = w.find('[data-test="qe-batch-switch"]')
-    expect((sw.element as HTMLInputElement).disabled).toBe(true)
-    expect(w.find('[data-test="qe-banner"]').exists()).toBe(false)
-
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
-    expect((w.find('[data-test="qe-batch-switch"]').element as HTMLInputElement).disabled).toBe(false)
-  })
-
-  it('批次开关按客户记住：客户A 打开后，换到客户B 不带上，回来自动恢复', async () => {
-    const w = mountDialog()
-    await flushPromises()
-
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
-    await w.find('[data-test="qe-batch-switch"]').setValue(true)
-    expect(localStorage.getItem('production.batchCustomers')).toContain('"5":true')
-
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 6)
-    await nextTick()
-    expect((w.find('[data-test="qe-batch-switch"]').element as HTMLInputElement).checked).toBe(false)
-
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
-    expect((w.find('[data-test="qe-batch-switch"]').element as HTMLInputElement).checked).toBe(true)
-  })
-
-  it('重新打开弹窗后，该客户的批次要求仍然生效', async () => {
-    localStorage.setItem('production.batchCustomers', JSON.stringify({ 5: true }))
-    const w = mountDialog()
-    await flushPromises()
-
-    w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
-    await nextTick()
-    await selectProductAt(w, 0)
-
-    expect(w.find('[data-test="qe-batch"]').exists()).toBe(true)
-    expect(w.find('[data-test="qe-banner"]').text()).toContain('必填')
-  })
-
-  it('包装部标了定制就必须填定制国家（与后端同口径）', async () => {
+  it('定制改为直接填国家：填了自动按定制处理，不填不算', async () => {
     const w = mountDialog()
     await w.find('[data-dept="packaging"]').trigger('click')
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('10')
-    await w.find('[data-test="qe-custom"]').setValue(true)
+    await selectProductAt(w, 1)
+    await qtyAt(w, 1).setValue('5')
 
+    // 第一条不填国家 = 非定制；第二条填「美国」 = 自动定制，无需勾选
+    await w.findAll('[data-test="qe-country"]')[1]!.setValue('美国')
+    await batchAt(w, 1).setValue('B001')
+
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
-    expect(createMock).not.toHaveBeenCalled()
-    expect(w.find('[data-test="qe-row-error"]').text()).toContain('定制国家')
 
-    await w.find('[data-test="qe-country"]').setValue('美国')
-    await w.find('[data-test="qe-submit"]').trigger('click')
-    await flushPromises()
-    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ is_custom: true, custom_country: '美国' })
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ is_custom: false, custom_country: null })
+    expect(createMock.mock.calls[1]?.[0]).toMatchObject({ is_custom: true, custom_country: '美国', batch_no: 'B001' })
   })
 })
 
@@ -312,6 +247,7 @@ describe('草稿', () => {
     await qtyAt(w, 0).setValue('10')
     await w.find('[data-test="qe-draft"]').trigger('click')
 
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 

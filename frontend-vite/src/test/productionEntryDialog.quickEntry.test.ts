@@ -58,6 +58,13 @@ const stubs = {
 
 let wrapper: VueWrapper | null = null
 
+/** 客户是必填项：提交前统一选一个客户 */
+async function pickCustomerForSubmit(w: VueWrapper) {
+  await flushPromises()
+  w.findComponent(CustomerSelect).vm.$emit('update:modelValue', 5)
+  await nextTick()
+}
+
 function mountDialog() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   wrapper = mount(ProductionEntryPanel, {
@@ -155,30 +162,32 @@ describe('ProductionEntryDialog 布局与合计', () => {
     expect(w.find('[data-test="qe-submit"]').exists()).toBe(true)
     expect(w.find('[data-test="qe-empty"]').exists()).toBe(true)
     expect(w.find('[data-test="qe-batch"]').exists()).toBe(false)
-    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('0')
   })
 
-  it('底栏显示「今日 N 条」（按选中日期取记录总数）', async () => {
-    const w = mountDialog()
+  it('打开时按选中日期取当日记录总数', async () => {
+    mountDialog()
     await flushPromises()
 
-    expect(w.find('[data-test="qe-total-day"]').text()).toBe('3')
     expect(recordsMock).toHaveBeenCalledWith(expect.objectContaining({ production_date: '2026-09-30' }))
   })
 
-  it('两行数量与单价汇总成合计件数与货值', async () => {
+  it('多行的件数与货值按行汇总进提交 payload', async () => {
     const w = mountDialog()
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('10')
     await selectProductAt(w, 1)
     await qtyAt(w, 1).setValue('20')
 
-    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('2')
-    expect(w.find('[data-test="qe-total-qty"]').text()).toBe('30')
-    expect(w.find('[data-test="qe-total-value"]').text()).toBe('¥210.00')
+    await pickCustomerForSubmit(w)
+    await w.find('[data-test="qe-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(createMock).toHaveBeenCalledTimes(2)
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ quantity: 10, production_value: 70 })
+    expect(createMock.mock.calls[1]?.[0]).toMatchObject({ quantity: 20, production_value: 140 })
   })
 
-  it('删行后合计同步减少', async () => {
+  it('删行后清单同步减少', async () => {
     const w = mountDialog()
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('10')
@@ -187,16 +196,23 @@ describe('ProductionEntryDialog 布局与合计', () => {
 
     await w.findAll('[data-test="qe-remove"]')[0]!.trigger('click')
 
-    expect(w.find('[data-test="qe-total-sku"]').text()).toBe('1')
-    expect(w.find('[data-test="qe-total-qty"]').text()).toBe('20')
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(1)
+    expect(w.find('[data-test="qe-row"]').text()).toContain('白兔公仔 60cm')
   })
 
-  it('选品后单价自动带出到行内（可改）', async () => {
+  it('单价自动带出且不再行内显示（随行上报，货值照算）', async () => {
     const w = mountDialog()
     await selectProductAt(w, 0)
 
-    const price = w.find('[data-test="qe-price"]').element as HTMLInputElement
-    expect(price.value).toBe('7')
+    expect(w.find('[data-test="qe-price"]').exists()).toBe(false)
+
+    await qtyAt(w, 0).setValue('10')
+    await pickCustomerForSubmit(w)
+    await w.find('[data-test="qe-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(createMock).toHaveBeenCalledTimes(1)
+    expect(createMock.mock.calls[0]?.[0]).toMatchObject({ unit_price: 7, quantity: 10 })
   })
 
   it('改日期会 emit update:selectedDate（对外契约不变）', async () => {
@@ -220,6 +236,7 @@ describe('ProductionEntryDialog 布局与合计', () => {
 describe('ProductionEntryDialog 提交护栏', () => {
   it('空表或有行数量为 0 时批量提交禁用', async () => {
     const w = mountDialog()
+    await pickCustomerForSubmit(w)
     expect(submitDisabled(w)).toBe(true)
 
     await selectProductAt(w, 0)
@@ -234,6 +251,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
 
   it('连按两次 Ctrl+⏎ 只提交一批，提交中按钮禁用', async () => {
     const w = mountDialog()
+    await pickCustomerForSubmit(w)
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('10')
 
@@ -252,22 +270,6 @@ describe('ProductionEntryDialog 提交护栏', () => {
     await flushPromises()
   })
 
-  it('选中产品后查询今日同部门同产品已录数量，命中则在行内提示——只提示，不阻断', async () => {
-    const w = mountDialog()
-    await selectProductAt(w, 0)
-    await flushPromises()
-
-    expect(recordsMock).toHaveBeenCalledWith(expect.objectContaining({
-      production_date: '2026-09-30',
-      department: 'filling',
-      keyword: '白兔公仔 40cm',
-    }))
-    expect(w.find('[data-test="qe-dup"]').text()).toContain('今日已录 400')
-
-    await qtyAt(w, 0).setValue('10')
-    expect(submitDisabled(w)).toBe(false)
-  })
-
   it('两行一起提交：逐条创建、带上 customer_id，成功后进入完成态', async () => {
     const w = mountDialog()
     await flushPromises()
@@ -279,6 +281,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
     await selectProductAt(w, 1)
     await qtyAt(w, 1).setValue('20')
 
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
@@ -302,6 +305,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
       .mockResolvedValueOnce({ success: true, message: 'ok', id: 42 })
       .mockRejectedValueOnce({ response: { data: { detail: '数量超出当班上限' } } })
 
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
@@ -318,6 +322,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
     await qtyAt(w, 0).setValue('620')
     createMock.mockResolvedValueOnce({ success: true, message: 'ok', id: 42 })
 
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
     expect(w.find('[data-test="qe-done"]').exists()).toBe(true)
@@ -342,6 +347,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
     const w = mountDialogRealConfirm()
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('620')
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
@@ -358,6 +364,7 @@ describe('ProductionEntryDialog 提交护栏', () => {
     const w = mountDialog()
     await selectProductAt(w, 0)
     await qtyAt(w, 0).setValue('620')
+    await pickCustomerForSubmit(w)
     await w.find('[data-test="qe-submit"]').trigger('click')
     await flushPromises()
 
@@ -522,5 +529,41 @@ describe('右侧「最近客户添加」', () => {
     await rail.find('.browse').trigger('click')
     await flushPromises()
     expect(w.findAll('.pr-entry-dropdown-item').length).toBe(2)
+  })
+})
+
+describe('下拉连续添加', () => {
+  it('点下拉条目加一行后下拉不收起，可以接着点第二个', async () => {
+    const w = mountDialog()
+    await typeSearch(w, '白兔')
+    await flushPromises()
+
+    expect(w.findAll('.pr-entry-dropdown-item').length).toBe(2)
+
+    await w.findAll('.pr-entry-dropdown-item')[0]!.trigger('mousedown')
+    await flushPromises()
+
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(1)
+    // 关键：下拉与结果都还在，焦点回到搜索框
+    expect(w.find('.pr-entry-dropdown').exists()).toBe(true)
+    expect(w.findAll('.pr-entry-dropdown-item').length).toBe(2)
+
+    await w.findAll('.pr-entry-dropdown-item')[1]!.trigger('mousedown')
+    await flushPromises()
+
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(2)
+  })
+
+  it('回车加行仍走原逻辑：清空搜索并收起下拉', async () => {
+    const w = mountDialog()
+    await typeSearch(w, '白兔')
+    await flushPromises()
+
+    await w.find('[data-test="qe-search"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(w.findAll('[data-test="qe-row"]').length).toBe(1)
+    expect(w.find('.pr-entry-dropdown').exists()).toBe(false)
+    expect((w.find('[data-test="qe-search"]').element as HTMLInputElement).value).toBe('')
   })
 })

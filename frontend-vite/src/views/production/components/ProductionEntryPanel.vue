@@ -24,7 +24,7 @@
           data-test="qe-customer"
           :model-value="customerId"
           :options="customerOptions"
-          placeholder="客户（选填）"
+          placeholder="客户（必选）"
           @update:model-value="selectCustomer"
         />
         <label class="pr-qe-date">
@@ -36,21 +36,10 @@
           v-if="batchColumnOn && rows.length && batchFilledCount < rows.length"
           class="pr-qe-batchstat"
           data-test="qe-banner"
-          :title="batchRequired ? '该客户要求每条都填批次号' : '包装部成品库存批次，可按需填写'"
+          title="包装部成品库存批次，选填；留空按未分批次入库"
         >
           批次 {{ batchFilledCount }}/{{ rows.length }}
-          <b v-if="batchRequired">必填</b>
         </span>
-        <label class="pr-qe-switch" :title="customerId == null ? '先选客户，再按客户设置是否需要批次号' : '按客户记住（存本机）；开启后批次号必填'">
-          <input
-            type="checkbox"
-            :checked="batchRequired"
-            :disabled="customerId == null"
-            data-test="qe-batch-switch"
-            @change="onBatchSwitch"
-          />
-          <i /><span>该客户需批次号</span>
-        </label>
         <button class="pr-qe-back" data-test="qe-close" title="返回生产日报（Esc）" @click="closeEntryDrawer">
           <FontAwesomeIcon icon="arrow-left" aria-hidden="true" /> 返回生产日报
         </button>
@@ -85,9 +74,30 @@
                 :search-results="searchResults"
                 :search-active-index="searchActiveIndex"
                 :hint="searchHint"
-                @select="selectProduct"
+                @select="onPickFromDropdown"
               />
             </div>
+            <div class="pr-qe-actions" role="group" aria-label="草稿操作">
+              <button type="button" class="pr-qe-icon-btn" data-test="qe-draft" title="存草稿" :disabled="!rows.length" @click="saveDraft()">
+                <FontAwesomeIcon icon="floppy-disk" aria-hidden="true" />
+              </button>
+              <span class="pr-qe-actions-div" aria-hidden="true" />
+              <button type="button" class="pr-qe-icon-btn" data-test="qe-clear" title="清空" :disabled="!rows.length || isSubmitting" @click="clearRows">
+                <FontAwesomeIcon icon="eraser" aria-hidden="true" />
+              </button>
+            </div>
+            <button
+              type="button"
+              data-test="qe-submit"
+              class="pr-qe-submit"
+              aria-label="批量提交 Ctrl+Enter"
+              :disabled="!canSubmit"
+              @click="submitBatch"
+            >
+              <UiLoadingIcon :loading="isSubmitting" icon="check" />
+              <span>批量提交</span>
+              <span class="pr-qe-submit-hint">Ctrl ⏎</span>
+            </button>
             <button type="button" class="pr-qe-paste" data-test="qe-paste-open" @click="pasteOpen = true">
               <FontAwesomeIcon icon="paste" aria-hidden="true" /> 粘贴 Excel
             </button>
@@ -96,14 +106,11 @@
           <ProductionEntryTable
             :rows="rows"
             :batch-column-on="batchColumnOn"
-            :batch-required="batchRequired"
             :is-packaging="isPackaging"
             :disabled="isSubmitting"
             @remove="removeRow"
-            @adjust="adjustRowQty"
             @qty-arrow="onRowQtyArrow"
             @qty-enter="onRowQtyEnter"
-            @fill-batch="fillBatchColumn"
           />
         </div>
 
@@ -118,28 +125,6 @@
         />
       </div>
 
-      <footer class="pr-qe-foot">
-        <div class="pr-qe-totals">
-          <span>共 <b data-test="qe-total-sku">{{ totals.sku }}</b> 个 SKU</span>
-          <span>合计 <b data-test="qe-total-qty">{{ totals.qty }}</b> 件</span>
-          <span>货值 <b class="val" data-test="qe-total-value">{{ formatCurrency(totals.value) }}</b></span>
-          <span class="day">今日 <b data-test="qe-total-day">{{ todayCount }}</b> 条</span>
-        </div>
-        <button type="button" class="pr-qe-btn" data-test="qe-draft" :disabled="!rows.length" @click="saveDraft()">存草稿</button>
-        <button type="button" class="pr-qe-btn" data-test="qe-clear" :disabled="!rows.length || isSubmitting" @click="clearRows">清空</button>
-        <button
-          type="button"
-          data-test="qe-submit"
-          class="pr-qe-submit"
-          aria-label="批量提交 Ctrl+Enter"
-          :disabled="!canSubmit"
-          @click="submitBatch"
-        >
-          <UiLoadingIcon :loading="isSubmitting" icon="check" />
-          <span>批量提交</span>
-          <span class="pr-qe-submit-hint">Ctrl ⏎</span>
-        </button>
-      </footer>
     </template>
 
     <ProductionEntryDone
@@ -169,7 +154,6 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { formatCurrency } from '@/utils/format'
 import ProductSearchDropdown from './ProductSearchDropdown.vue'
 import CustomerSelect from './CustomerSelect.vue'
 import ProductionEntryTable from './ProductionEntryTable.vue'
@@ -177,6 +161,7 @@ import ProductionEntryPaste from './ProductionEntryPaste.vue'
 import ProductionEntryDone from './ProductionEntryDone.vue'
 import ProductionEntryRecent from './ProductionEntryRecent.vue'
 import { useProductionEntry } from '@/views/production/composables/useProductionEntry'
+import type { Product } from '@/types'
 
 const props = defineProps<{
   open: boolean
@@ -200,17 +185,18 @@ const selectedDateModel = computed({
 const {
   departments, formDept, currentDept, isPackaging, isSubmitting, submitState, createdBatch,
   undoConfirmOpen, undoText, pasteOpen, customerRecent, recentLoading, addRecentSku, browseProducts,
-  rows, totals, canSubmit,
-  customerId, customerName, customerOptions, selectCustomer, batchColumnOn, batchRequired, batchFilledCount,
-  toggleBatchColumn, fillBatchColumn, adjustRowQty, onRowQtyArrow, onRowQtyEnter,
+  rows, canSubmit,
+  customerId, customerName, customerOptions, selectCustomer, batchColumnOn, batchFilledCount,
+  onRowQtyArrow, onRowQtyEnter,
   selectProduct, removeRow, clearRows, searchQuery, searchResults, showDropdown, searchLoading,
   searchError, searchActiveIndex, searchHint, productSearchRef, onSearchInput, onSearchClick, onSearchFocus, onSearchBlur,
   moveSearchIndex, confirmSearchSelection, submitBatch, requestUndo, confirmUndo, saveDraft,
-  importPaste, startNewBatch, todayCount, closeEntryDrawer, pickDept, onModalKeydown,
+  importPaste, startNewBatch, closeEntryDrawer, pickDept, onModalKeydown,
 } = useProductionEntry(openModel, selectedDateModel)
 
-function onBatchSwitch(event: Event) {
-  toggleBatchColumn((event.target as HTMLInputElement).checked)
+/** 点下拉条目：加一行但**不收起下拉**，支持连续点多个 SKU */
+function onPickFromDropdown(product: Product) {
+  void selectProduct(product, true)
 }
 
 defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
@@ -252,18 +238,18 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.13); }
 .pr-qe-search-input { padding-left: 42px !important; }
 .pr-qe-search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--color-text-placeholder); font-size: 16px; pointer-events: none; }
-.pr-qe-paste { display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; color: var(--color-text-secondary); font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
-.pr-qe-paste:hover { border-color: var(--color-primary-400); color: var(--color-primary-700); background: var(--color-primary-50); }
+.pr-qe-paste { display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0 18px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; color: var(--color-text-secondary); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.pr-qe-paste:hover:not(:disabled) { border-color: var(--color-primary-400); color: var(--color-primary-700); background: var(--color-primary-50); }
 
-.pr-qe-foot { display: flex; align-items: center; gap: 10px; padding: 12px 24px; border-top: 1px solid var(--color-border-light); flex-shrink: 0; margin-top: 12px; }
-.pr-qe-totals { flex: 1; min-width: 0; display: flex; align-items: center; gap: 16px; font-size: 13px; color: var(--color-text-muted); }
-.pr-qe-totals b { font-size: 16px; color: var(--color-text); font-variant-numeric: tabular-nums; }
-.pr-qe-totals .day b { color: var(--color-text-secondary); }
-.pr-qe-totals b.val { color: var(--color-primary-700); }
-.pr-qe-btn { height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 13.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.pr-qe-actions { display: inline-flex; align-items: stretch; height: 48px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; overflow: hidden; flex: 0 0 auto; }
+.pr-qe-icon-btn { width: 48px; border: none; background: transparent; color: var(--color-text-secondary); font-size: 15px; cursor: pointer; display: grid; place-items: center; }
+.pr-qe-icon-btn:hover:not(:disabled) { background: var(--color-primary-50); color: var(--color-primary-700); }
+.pr-qe-icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pr-qe-actions-div { width: 1px; background: var(--color-border-light); }
 .pr-qe-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.pr-qe-submit { display: inline-flex; align-items: center; gap: 9px; height: 46px; padding: 0 24px; border: none; border-radius: 10px; background: linear-gradient(135deg, var(--color-primary-500) 0%, var(--color-primary-700) 100%); color: white; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; box-shadow: 0 4px 12px rgba(30, 64, 175, 0.25); white-space: nowrap; }
-.pr-qe-submit:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+.pr-qe-submit { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 1px solid transparent; border-radius: 10px; background: var(--color-primary-600); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.pr-qe-submit:hover:not(:disabled) { background: var(--color-primary-700); }
+.pr-qe-submit:disabled { opacity: 0.55; cursor: not-allowed; }
 .pr-qe-submit-hint { padding: 2px 6px; background: rgba(255, 255, 255, 0.22); border-radius: 4px; font-size: 11px; font-weight: 700; font-family: 'SF Mono', Consolas, monospace; }
 
 @media (max-width: 1100px) {
