@@ -1,4 +1,22 @@
-"""手动执行未应用的 schema 变更（stamp 前确保 DB 状态正确）"""
+"""手动执行未应用的 schema 变更（stamp 前确保 DB 状态正确）
+
+⚠️ 归档脚本，**模块级即连接数据库并逐条 commit DDL**。为避免「import 即写生产」
+在测试收集、工具链导入或误跑时触发，必须先显式传 ``--allow-deprecated-script``；
+无该参数时在建立任何连接之前直接退出（2026-11-03 审查 S12 / 历史 High ⑤ 残留）。
+
+正常迁移请用 ``python -m alembic -c migrations/alembic.ini upgrade head``，
+本脚本仅用于「stamp 前补齐 DB 已有但迁移未记录的索引」这一历史场景。
+"""
+import sys
+
+if '--allow-deprecated-script' not in sys.argv:
+    sys.exit(
+        '拒绝执行：scripts/archive/apply_missing_ddl.py 会在 import 时直接对 '
+        'DATABASE_URL 指向的库执行 CREATE INDEX / CREATE FUNCTION。\n'
+        '这是归档脚本，正常迁移请用：python -m alembic -c migrations/alembic.ini upgrade head\n'
+        '确认要在当前 DATABASE_URL 上执行时，请显式追加 --allow-deprecated-script。'
+    )
+
 from sqlalchemy import text
 
 from fastapi_app.core.database import get_sync_engine

@@ -205,6 +205,17 @@ def _cleanup(product_ids: list[int], order_ids: list[int]) -> None:
                 )
 
             if product_ids:
+                # 2026-11-03 审查 M8（白樾 P5 = 柯砚 P5 = 闻朔 P9 三源印证）：
+                # _create_product(pack_in=True) 经 POST /api/v1/daily-production/records
+                # 写入生产日报，该表参与库存结余计算（见 _create_product 注释），
+                # 旧清理清单漏了它——持久 *_test 库上会累积孤儿行，干扰后续复跑的结余断言。
+                # 必须删在 product 之前（外键自底向上）。
+                conn.execute(
+                    text(
+                        "DELETE FROM daily_production_record WHERE product_id = ANY(:p)"
+                    ),
+                    {"p": product_ids},
+                )
                 conn.execute(
                     text(
                         "DELETE FROM stock_return "

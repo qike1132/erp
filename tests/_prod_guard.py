@@ -25,3 +25,39 @@ def require_non_production(base_url: str, *, env_var: str = "STRESS_TEST_ALLOW_P
             f"拒绝运行：base_url={base_url} 指向本机（生产）。"
             f" 确认要对该环境执行写操作时，请显式设置 {env_var}=1。"
         )
+
+
+def mask_dsn(dsn: str) -> str:
+    """隐去 DSN 中的口令，用于异常/日志输出（不得把生产密码打进 CI 日志）。"""
+    try:
+        parsed = urlparse(dsn)
+    except ValueError:
+        return "<unparsable-dsn>"
+    if not parsed.password:
+        return dsn
+    return dsn.replace(f":{parsed.password}@", ":***@")
+
+
+def require_non_production_database(
+    database_url: str, *, env_var: str = "PERF_TEST_ALLOW_PROD_DB",
+) -> None:
+    """DATABASE_URL 不指向 ``*_test`` 库且未显式允许时，终止进程（fail-closed）。
+
+    2026-11-03 审查 S4：``tests/qa/performance_benchmark.py`` 与 ``_bench.py`` 在
+    **import 时**就 ``create_engine(settings.DATABASE_URL)``，而本机 DATABASE_URL
+    指向生产库——一条 ``python tests/qa/performance_benchmark.py`` 就是对生产库发查询，
+    绕过了 ``tests/stress`` 自 2026-10-17 起建立的 require_non_production 纪律。
+
+    与 ``tests/e2e_api/conftest.py`` 的库名口径一致：**任何** ``*_test`` 库都放行，
+    其余一律拒绝（不写死 erp_system_test，避免把 erp_system_e2e_test 误判成生产）。
+    """
+    try:
+        database = (urlparse(database_url).path or "").lstrip("/").rstrip("/")
+    except ValueError:
+        database = ""
+    if not database.endswith("_test") and os.getenv(env_var) != "1":
+        raise SystemExit(
+            f"拒绝运行：DATABASE_URL 指向的库 {database!r} 不是 *_test 库"
+            f"（{mask_dsn(database_url)}）。"
+            f" 确认要对非测试库执行只读基准时，请显式设置 {env_var}=1。"
+        )

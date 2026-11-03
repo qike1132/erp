@@ -107,6 +107,39 @@ def test_snapshots_contain_no_raw_response_body() -> None:
     assert not violations, "快照含白名单外的键（可能夹带了业务数据）：\n" + "\n".join(violations)
 
 
+def test_no_orphan_snapshots() -> None:
+    """守卫：快照集合必须与 endpoints.yaml 的端点集合一致（2026-11-03 审查 S11）。
+
+    ``contract_snapshot.py --check`` 只遍历配置里的端点（run_check 按 config 迭代），
+    因此把某端点从 endpoints.yaml 删掉后，它的快照仍在、CI 依然全绿——该端点从此
+    静默退出契约保护。这是「改不动接口就把它从契约里删掉」的低成本旁路。
+    """
+    from scripts.contract_snapshot import load_config
+
+    config = load_config(CONTRACT_DIR / "endpoints.yaml")
+    configured = {ep.name for ep in config.endpoints}
+    assert configured, "endpoints.yaml 未配置任何端点，契约门禁形同虚设"
+
+    orphans: list[str] = []
+    renamed: list[str] = []
+    for path in sorted(SNAPSHOT_DIR.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        name = str(data.get("name") or "")
+        if not name:
+            orphans.append(f"{path.name}: 缺少 name 字段")
+        elif name != path.stem:
+            renamed.append(f"{path.name}: 文件名与 name={name!r} 不一致")
+        if path.stem not in configured:
+            orphans.append(f"{path.name}: 端点 {path.stem!r} 不在 endpoints.yaml 中")
+
+    assert not renamed, "快照文件名与内部 name 不一致：\n" + "\n".join(renamed)
+    assert not orphans, (
+        "存在孤儿快照（端点已从 endpoints.yaml 移除，但快照未清理）：\n"
+        + "\n".join(orphans)
+        + "\n如为有意下线该端点，请同步删除对应快照文件。"
+    )
+
+
 @needs_backend
 def test_contract_snapshots_match() -> None:
     """核心断言：当前后端响应结构必须与基线快照一致。"""

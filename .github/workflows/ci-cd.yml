@@ -133,18 +133,30 @@ jobs:
       #   避免绿色假覆盖。仍在收集的 Flask 路由兼容用例会按具体 reason skip，
       #   skip 计数保留在 CI 日志与 junit xml 中。tests/e2e 只含 fail-closed 目标
       #   守卫（无 Selenium、无默认生产地址），因此不再整目录忽略。
+      # 2026-11-03 审查 S6：tests/qa 仍整目录忽略——该目录混入 import 即连库的造数/基准
+      #   脚本（data_generator*、_bench*），不能在收集期放进主套件。但其中的 19 板块路由
+      #   冒烟（test_smoke.py）不能跟着一起游离出 CI，已由下方独立步骤定向执行。
+      # 2026-11-03 审查 M16：tests/performance 空目录（仅剩 9 个已删文件的陈旧 pyc）已删除，
+      #   因此不再需要 --ignore=tests/performance；性能改由 latency_budget 用例把守。
       run: |
         pytest \
           tests fastapi_app/tests \
           --ignore=tests/qa \
           --ignore=tests/stress \
-          --ignore=tests/performance \
           --cov=fastapi_app \
           --cov=utils \
           --cov-report=xml \
           --cov-report=html \
           --html=test-report.html \
           --junitxml=test-results.xml
+
+    - name: Run 19-section route smoke
+      # 2026-11-03 审查 S6（白樾 P6 = 闻朔 P2）：本文件自建 admin、幂等、不依赖 tests/qa 里
+      #   任何造数脚本，可独立进程执行。它的语义是「36 个路由组里这 19 个板块的只读端点
+      #   能通且鉴权活着」——路由误删/权限码错配在这一层当场红，不再只靠浏览器冒烟兜。
+      # KNOWN_ENV_401（数据备份）是已知环境性豁免；CI 有 Redis service，若该豁免将来失效，
+      # 用例会如实变红，不要用放宽白名单的方式消音。
+      run: pytest tests/qa/test_smoke.py -v
 
     - name: Run isolated API E2E and live contract checks
       # 真实进程 + 真实 PostgreSQL/Redis：不得把默认环境中的 E2E skip 当成业务写路径已验证。
@@ -187,6 +199,9 @@ jobs:
         #      通过；实测有数据与空库两种环境均 22/22 一致、0 漂移。
         pytest --confcutdir=tests/e2e_api tests/e2e_api -v
         pytest --confcutdir=tests/contract tests/contract -v
+        # 性能延迟预算门禁（2026-11-03 审查 S3）：5 条主链路 × 20 采样，阈值见 docs/slo.md。
+        # 复用本步骤已就绪的 5502 隔离后端与 *_test 库，不需要新基础设施。
+        pytest --confcutdir=tests/e2e_api tests/e2e_api/test_latency_budget.py -v
 
     - name: Build frontend for real full-stack browser E2E
       working-directory: frontend-vite
@@ -267,7 +282,9 @@ jobs:
     # 是否与本后端规范一致，快照过期即判红——堵住前端类型生成器只读快照引入的假绿灯。
     # 放在本 job（而非 lint job）：这里装了 requirements.txt，import fastapi_app 才可行。
     - name: Check frontend endpoints against backend OpenAPI
-      run: python scripts/check_openapi_frontend_alignment.py --verbose --snapshot frontend-vite/openapi.json
+      # --strict-allowlist（2026-11-03 审查 M7）：KNOWN_ABSENT 里「后端已补齐」的僵尸
+      # 豁免必须判红，否则豁免表能只增不减地烂掉。当前清单为空，开启零成本。
+      run: python scripts/check_openapi_frontend_alignment.py --verbose --snapshot frontend-vite/openapi.json --strict-allowlist
 
     - name: Run prod_audit self-test suite
       # 与上面的「gated test suite」分开**独立进程**运行，原因有二：

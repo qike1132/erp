@@ -109,7 +109,51 @@ after(async () => {
   if (server) await new Promise((resolveClose) => server.close(resolveClose))
 })
 
-test('真实后端：登录后创建订单并在业务页面渲染', { skip }, async () => {
+/**
+ * 清理本轮造数（best-effort）。2026-11-03 审查 M11：
+ * 旧实现创建产品+订单后不清理，与 tests/e2e_api 的「运行时造数 + 用例内自清理」口径不一致——
+ * CI 每轮新库无感，但本地/自建隔离环境复跑会累积。这里按唯一 tag 反查再删，
+ * 任何失败只告警、绝不影响用例结论（清理不是断言）。
+ */
+async function cleanupRunArtifacts(context, uiBase, headers, customer, productId) {
+  const warn = (msg) => console.warn(`[fullstack-e2e cleanup] ${msg}`)
+  try {
+    const listed = await context.request.get(
+      `${uiBase}/api/v1/orders/list?per_page=50&customer=${encodeURIComponent(customer)}`,
+    )
+    if (!listed.ok()) {
+      warn(`查询订单失败 HTTP ${listed.status()}，跳过订单清理`)
+    } else {
+      const body = await listed.json()
+      const rows = Array.isArray(body?.data) ? body.data : []
+      for (const row of rows) {
+        if (row?.customer !== customer || !row?.id) continue
+        const deleted = await context.request.delete(
+          `${uiBase}/api/v1/orders/delete/${row.id}`, { headers },
+        )
+        if (!deleted.ok()) {
+          warn(`删除订单 ${row.id} 失败 HTTP ${deleted.status()}（可忽略）`)
+        }
+      }
+    }
+  } catch (error) {
+    warn(`订单清理异常：${error.message}`)
+  }
+  if (!productId) return
+  try {
+    const deleted = await context.request.delete(
+      `${uiBase}/api/v1/products/delete/${productId}`, { headers },
+    )
+    if (!deleted.ok()) {
+      // 后端在产品仍有关联单据时按设计返回 400，属预期分支
+      warn(`删除产品 ${productId} 失败 HTTP ${deleted.status()}（有关联单据时属预期）`)
+    }
+  } catch (error) {
+    warn(`产品清理异常：${error.message}`)
+  }
+}
+
+test('真实后端：登录后创建订单并在业务页面渲染', { skip }, async (t) => {
   const uiBase = `http://127.0.0.1:${UI_PORT}`
   const context = await browser.newContext({ serviceWorkers: 'block' })
   const page = await context.newPage()
@@ -118,6 +162,13 @@ test('真实后端：登录后创建订单并在业务页面渲染', { skip }, a
   const tag = `${Date.now()}`
   const productName = `全栈E2E产品-${tag}`
   const customer = `全栈E2E客户-${tag}`
+  // 清理钩子要在任何断言之前注册：用例中途失败时同样要清掉已造的订单/产品
+  let productId = null
+  let headers = {}
+  t.after(async () => {
+    await cleanupRunArtifacts(context, uiBase, headers, customer, productId)
+    await context.close()
+  })
 
   await page.goto(`${uiBase}/login`, { waitUntil: 'domcontentloaded' })
   await page.locator('input[name="username"]').fill(USERNAME)
@@ -134,7 +185,7 @@ test('真实后端：登录后创建订单并在业务页面渲染', { skip }, a
 
   const csrf = (await context.cookies()).find((cookie) => cookie.name === 'fastapi_csrf_token')?.value
   assert.ok(csrf, '登录后必须存在 CSRF cookie')
-  const headers = { 'X-CSRF-Token': csrf, Origin: uiBase }
+  headers = { 'X-CSRF-Token': csrf, Origin: uiBase }
   const createdProduct = await context.request.post(`${uiBase}/api/v1/products/create`, {
     headers,
     data: { name: productName, barcode: `FSE2E${tag}`, initial_stock: 20, factory: '东莞' },
@@ -145,7 +196,7 @@ test('真实后端：登录后创建订单并在业务页面渲染', { skip }, a
   )
   const products = await searched.json()
   assert.ok(products.length > 0, `创建后搜不到产品：${productName}`)
-  const productId = Number(products[0].id)
+  productId = Number(products[0].id)
 
   const createdOrder = await context.request.post(`${uiBase}/api/v1/orders/create`, {
     headers,
@@ -158,5 +209,4 @@ test('真实后端：登录后创建订单并在业务页面渲染', { skip }, a
   await page.goto(`${uiBase}/report`, { waitUntil: 'domcontentloaded' })
   await page.getByText(customer, { exact: false }).first().waitFor({ timeout: 20_000 })
   assert.deepEqual(pageErrors, [], `页面发生未捕获异常：${pageErrors.join(' | ')}`)
-  await context.close()
 })

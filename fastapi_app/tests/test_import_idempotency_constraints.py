@@ -295,11 +295,25 @@ def _real_pg_engine():
 
     url = os.getenv('TEST_DATABASE_URL')
     if not url:
+        # 不能用 str.replace 派生：settings.DATABASE_URL 已被 tests/conftest.py 的
+        # app_on_test_db 重定向到 *_test 库，再 replace 一次会得到
+        # erp_system_test_test（不存在）→ 本证明被静默 skip。
+        # 2026-11-03 实测：该 skip 掩盖了「真实 PG 幂等约束证明从未执行」，
+        # 全量 62 条 skip 里它伪装成「环境缺失」。故改为按 SQLAlchemy 解析出的
+        # 库名判断后缀，已带 _test 就直接用，避免二次派生。
+        from sqlalchemy.engine import make_url
+
         main = settings.DATABASE_URL  # 同步 URL（psycopg）
-        derived = main.replace('/erp_system', '/erp_system_test')
-        if derived == main:
+        parsed = make_url(main)
+        db_name = (parsed.database or '').rstrip('/')
+        if not db_name:
             pytest.skip('无法从配置推导测试库名，跳过真实 PG 证明')
-        url = derived
+        if db_name.endswith('_test'):
+            url = main
+        else:
+            url = parsed._replace(
+                database=f'{db_name}_test',
+            ).render_as_string(hide_password=False)
     # TEST_DATABASE_URL 在 CI 是 asyncpg 驱动；同步 create_engine 需 psycopg，
     # 否则 connect 抛 MissingGreenlet 被静默吞成 skip（本测试就白跑了）。
     url = _ensure_sync_driver(url)

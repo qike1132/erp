@@ -1,4 +1,9 @@
-"""性能基准测试 - 对比优化前后关键API响应时间"""
+"""性能基准测试 - 对比优化前后关键API响应时间
+
+⚠️ 本脚本在 **import 时**就建立数据库连接，因此必须在 create_engine 之前过生产库守卫
+（2026-11-03 审查 S4）。指向 *_test 库直接跑；确需对非测试库做只读基准时显式设
+PERF_TEST_ALLOW_PROD_DB=1。
+"""
 import os
 import sys
 import time
@@ -7,6 +12,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from sqlalchemy import create_engine, text
 
 from fastapi_app.core.config import settings
+from tests._prod_guard import require_non_production_database
+
+require_non_production_database(settings.DATABASE_URL)
 
 engine = create_engine(settings.DATABASE_URL, pool_size=5, max_overflow=10)
 

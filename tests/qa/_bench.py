@@ -6,6 +6,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from sqlalchemy import create_engine, text
 
 from fastapi_app.core.config import settings
+from tests._prod_guard import require_non_production_database
+
+# 2026-11-03 审查 S4：import 即连库，必须先过生产库守卫（同 performance_benchmark.py）
+require_non_production_database(settings.DATABASE_URL)
 
 e = create_engine(settings.DATABASE_URL, pool_size=5, max_overflow=10)
 c = e.connect()
