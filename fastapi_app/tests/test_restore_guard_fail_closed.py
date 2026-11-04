@@ -130,7 +130,10 @@ def test_finished_reports_false_when_marker_already_gone(marker_dir):
 # ---------------------------------------------------------------------------
 # 消费端：启动告警 + readiness 失败
 # ---------------------------------------------------------------------------
-def test_check_interrupted_reports_recovery_required(marker_dir):
+def test_check_interrupted_reports_recovery_required(marker_dir, monkeypatch):
+    # 不能依赖测试库名：CI 当前库是 erp_test，本地是 erp_system。
+    # 本用例验证的是「标记目标 == 当前库」分支，显式固定当前库即可。
+    monkeypatch.setattr(guard, 'current_db_name', lambda: 'erp_system')
     guard.mark_restore_started('erp_system', None)
 
     result = guard.check_interrupted_restore()
