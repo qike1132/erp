@@ -253,3 +253,33 @@ RC=0
 - 下一步顺序：**维护窗口重启 erp-arq/erp-prod → 生成新加密备份 → 新备份恢复演练 → 业务验收 → 更新风险登记册**。
 
 重启前必须确认：生产库已在迁移 head（本次已核实为 109，与源码单 head 一致，无待执行迁移）；工作区只剩他人 2 个未跟踪目录，重启会加载当前工作区源码，需 owner 确认这些目录不影响运行（它们是纯交付文档，不参与 import，但仍应记录在发布单上）。
+
+## 8. 环境修复：本机 SSH 推送恢复（2026-11-04 19:00）
+
+**现象**：`git push erp main` 报 `git@github.com: Permission denied (publickey)`；`ssh-add -l` 无可用 agent。
+
+**根因**：本机 `~/.ssh/id_ed25519`（`SHA256:RjM3rn6Z…`）在 GitHub 上处于“已被占用但不被接受”的状态——尝试登记为部署密钥返回 `key is already in use`，而 SSH 认证却返回 `USERAUTH_FAILURE`。该公钥应挂在其他账号或其他仓库下，本机无权认领。`gh` token 仅有 `gist/read:org/repo`，无 `admin:public_key`，无法查看或新增账号级 key。
+
+**处置**（选择仓库级部署密钥，权限面最小）：
+
+| 项 | 值 |
+|---|---|
+| 新私钥 | `~/.ssh/id_ed25519_erp`（无口令；ACL 仅 SYSTEM / Administrators / Administrator） |
+| 公钥指纹 | `SHA256:L8U/3RypvdHb2z34FOlOxWmI6GKzJ3zjGhfV+q+HH9Q` |
+| GitHub 登记 | 仓库部署密钥 id `168729137`，`read_only=false`（写权限）、`verified=true` |
+| 仓库级配置 | `core.sshCommand = ssh -i /c/Users/Administrator/.ssh/id_ed25519_erp -o IdentitiesOnly=yes`（仅本 clone，不入库、不改全局、不改 remote URL） |
+
+**验证**：
+
+```text
+ssh -T git@github.com        → Hi qike1132/erp! You've successfully authenticated...
+git ls-remote erp main       → 98a688447e26c8079d5f6c111671753db5e65d31
+git push erp <临时 tag>       → * [new tag]（写权限确认）
+git push erp :<临时 tag>      → - [deleted]（清理，远端 404）
+```
+
+**已知抖动（重要）**：同一 IP、同一把 key，GitHub 有时回 `SSH2_MSG_USERAUTH_PK_OK`（type 60）、有时回 `USERAUTH_FAILURE`（type 51）。密集重试几十次后几乎全部失败，冷却约 4 分钟后单次必然成功。**排障时不要用循环狂刷**，失败就等几分钟再试一次；自动化脚本应允许一次重试而不是无限重试。已排除中间人（`ssh-keyscan` 的 ED25519 指纹与 GitHub 官方 `SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU` 一致）与端口因素（22 与 `ssh.github.com:443` 成功率相同）。
+
+**回滚**：删除仓库部署密钥 id `168729137`，并 `git config --unset core.sshCommand`；原 `~/.ssh/id_ed25519` 未被修改。
+
+**遗留**：原 `id_ed25519` 究竟挂在哪个账号/仓库仍未知，若后续要恢复“一把 key 通吃所有仓库”，需在 GitHub 账号设置里找到并删除旧登记，再把它加为账号级 key（需要 `admin:public_key` 授权）。
