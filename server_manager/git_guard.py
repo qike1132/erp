@@ -31,10 +31,17 @@ def is_warning(message: str) -> bool:
 
 
 def _git(args: list[str], cwd: Path) -> tuple[int, str, str]:
-    """执行只读 git 命令，返回 (exitcode, stdout, stderr)；异常不外抛。"""
+    """执行只读 git 命令，返回 (exitcode, stdout, stderr)；异常不外抛。
+
+    2026-11-04：显式带 ``-c safe.directory=<repo>``。NSSM 服务以 LocalSystem 运行，
+    而仓库属主是 Administrator，git 会以 ``detected dubious ownership in repository``
+    拒绝**任何**命令；这种情况原先落到「无法确定 git 分支，已放行」，于是分支闸门
+    与脏工作区检查**长期静默失效**——`logs/erp-arq.log` 自 2026-11-02 起每次启动
+    都是这条警告，`logs/erp-prod.log` 同样（2026-11-04 18:45 重启仍复现）。
+    """
     try:
         proc = subprocess.run(
-            ['git', *args],
+            ['git', '-c', f'safe.directory={Path(cwd).resolve()}', *args],
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -59,6 +66,18 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
 
     code, branch, err = _git(['rev-parse', '--abbrev-ref', 'HEAD'], base)
     if code != 0:
+        if (base / '.git').exists():
+            # 有 .git 却读不出分支 = 闸门无法生效。静默放行等于没有闸门
+            # （2026-11-02~11-04 的真实状态），因此这里改为 fail-closed，
+            # 并保留显式 override 作为应急出口。
+            if os.environ.get(OVERRIDE_ENV) == '1':
+                return True, f'分支闸门已被 {OVERRIDE_ENV}=1 覆盖（git 不可用：{err or "未知"}）'
+            msg = (
+                f'拒绝：仓库存在但无法读取 git 分支（{err or "git 不可用"}），'
+                f'分支闸门无法生效。请修复 git 环境；确需继续请设置 {OVERRIDE_ENV}=1。'
+            )
+            logger.error(msg)
+            return False, msg
         # 非 git 检出（打包部署）不应被闸门打死；但必须留痕
         msg = f'警告：无法确定 git 分支（{err or "git 不可用"}），已放行'
         logger.warning(msg)

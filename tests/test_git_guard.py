@@ -92,3 +92,67 @@ def test_non_git_directory_does_not_block(tmp_path, monkeypatch):
 
     assert ok is True
     assert '无法确定' in msg
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-04：闸门因 git "dubious ownership" 长期静默失效
+#
+# NSSM 服务以 LocalSystem 运行、仓库属主是 Administrator，git 拒绝任何命令 →
+# 原实现落到「无法确定分支，已放行」，分支闸门与脏工作区检查**同时失效**。
+# 生产日志自 2026-11-02 起每次启动都复现该警告（erp-arq.log / erp-prod.log）。
+# ---------------------------------------------------------------------------
+
+
+def test_git_invocation_pins_safe_directory(tmp_path, monkeypatch):
+    """每条 git 调用都必须带 -c safe.directory，否则跨账号运行时闸门直接失效。"""
+    captured: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = 'main'
+        stderr = ''
+
+    def _fake_run(argv, **kwargs):
+        captured.append(argv)
+        return _Proc()
+
+    monkeypatch.setattr(git_guard.subprocess, 'run', _fake_run)
+
+    git_guard._git(['rev-parse', '--abbrev-ref', 'HEAD'], tmp_path)
+
+    assert captured, 'git 未被调用'
+    argv = captured[0]
+    assert argv[0] == 'git'
+    assert '-c' in argv
+    safe_arg = next(a for a in argv if a.startswith('safe.directory='))
+    assert safe_arg == f'safe.directory={tmp_path.resolve()}'
+
+
+def test_git_repo_but_unreadable_branch_blocks(tmp_path, monkeypatch):
+    """有 .git 却读不出分支 = 闸门无法生效，必须拒绝而不是静默放行。"""
+    monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    (tmp_path / '.git').mkdir()
+    monkeypatch.setattr(
+        git_guard,
+        '_git',
+        lambda args, cwd: (128, '', 'fatal: detected dubious ownership in repository'),
+    )
+
+    ok, msg = git_guard.check_production_branch(tmp_path)
+
+    assert ok is False
+    assert '无法读取 git 分支' in msg
+    assert git_guard.OVERRIDE_ENV in msg
+
+
+def test_git_repo_unreadable_branch_allows_with_override(tmp_path, monkeypatch):
+    monkeypatch.setenv(git_guard.OVERRIDE_ENV, '1')
+    (tmp_path / '.git').mkdir()
+    monkeypatch.setattr(
+        git_guard, '_git', lambda args, cwd: (128, '', 'fatal: dubious ownership')
+    )
+
+    ok, msg = git_guard.check_production_branch(tmp_path)
+
+    assert ok is True
+    assert '覆盖' in msg
