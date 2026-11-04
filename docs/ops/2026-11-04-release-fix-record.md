@@ -2,23 +2,28 @@
 
 > 范围：2026-11-04 上线验收发现的问题逐项修复
 >
-> 证据截止：2026-11-04 17:25（北京时间）
+> 证据截止：2026-11-04 18:30（北京时间）
 >
-> 代码基线：`main@d030db24`（修复提交 `74acd748` / `28440211` / `d030db24`）
+> 代码基线：`main@200364fb`（修复提交 `74acd748` / `28440211` / `d030db24` / `200364fb`）
 >
-> CI：run `41805537090` 四 job 全绿；CodeQL run `41805536420` success
+> CI：`d030db24` 的 run `41805537090`、`200364fb` 的 run `41813809003` 均四 job 全绿；CodeQL 同步 success
 >
-> 生产操作边界：归档一个测试残留的恢复标记；通过提权验证并更新 `.env` 的备份加密开关；**未重启服务、未恢复数据库**
+> 生产操作边界：归档一个测试残留的恢复标记；通过提权更新 `.env` 的备份加密开关与看门狗新鲜度阈值；**未重启服务、未恢复数据库**
 
 ## 1. 结论摘要
 
 | 状态 | 数量 | 说明 |
 |---|---|---|
-| 已修复并有测试证据 | 7 | 恢复标记作用域、测试污染、FK 元数据查询、事务污染、行数口径、watchdog 冷却、readiness 契约 |
-| 已执行且可复核的生产处置 | 2 | 恢复标记可逆归档；`.env` 已置加密开关并通过生产环境自检（未重启） |
+| 已修复并有测试证据 | 9 | 恢复标记作用域、测试污染、FK 元数据查询、事务污染、行数口径、watchdog 冷却、readiness 契约、备份新鲜度阈值、演练调度状态 |
+| 已执行且可复核的生产处置 | 3 | 恢复标记可逆归档；`.env` 加密开关；`.env` 新鲜度阈值 540→1500（均已留快照） |
 | 仍需授权/外部信息 | 3 | 告警通道、新备份上的恢复演练、生产重启部署 |
 
-当前 `readiness` 已恢复，但**仍不能据此宣布上线就绪**：最新备份仍为明文（加密开关要重启后才生效），告警仍无实际投递通道，最近一次成功恢复演练尚未产生；代码已通过 CI，但尚未部署到生产进程。
+当前 `readiness` 已恢复、看门狗 7 项全绿，但**仍不能据此宣布上线就绪**：最新备份仍为明文（加密开关要重启后才生效），告警仍无实际投递通道，最近一次成功恢复演练尚未产生；代码已通过 CI，但尚未部署到生产进程。
+
+补充的只读结论（2026-11-04 18:16 提权查询生产库）：
+
+- **生产库迁移版本 = `pg_standalone_109_add_user_token_version`，与源码单 head 一致（149 revisions / 1 head）** —— 此前“生产落后 109/110”的猜测不成立，重启不涉及待执行迁移；
+- 生产 `backup_schedule` 只有每日全量 + 每日清理/完整性检查 + **每月 1 日 03:30 的灾备演练**，没有小时级增量；演练“停摆”实为月频正常间隔，但失败状态被记成 success（见 2.7）。
 
 ## 2. 已修复问题
 
@@ -112,6 +117,49 @@ audit_log=261872（与 dump COPY 区一致）
 - 新增 `record_alerts_sent()`，仅在实际成功通道非空时推进冷却；
 - 未投递时累加 `undelivered_attempts` / `undelivered_since`，日志与 stderr 显式输出“告警未投递，下一轮重试”。
 
+### 2.6 备份新鲜度阈值与真实调度不匹配（恒红 15–22 小时/天）
+
+**根因**：`WATCHDOG_BACKUP_MAX_AGE_MINUTES` 默认 90 分钟，生产 `.env` 实际配的是 540（9 小时），但生产 `backup_schedule` 只有**每日一次全量**：
+
+```text
+id=32 full             42 8 * * *    last_run 2026-11-04 08:45  success
+id=33 cleanup           0 4 * * *
+id=35 integrity_check   0 3 * * *
+id=36 disaster_recovery_test  30 3 1 * *   last_run 2026-11-01 04:10  success
+```
+
+没有任何小时级增量产物。于是 `backup_freshness` 每天 17:45（配 540 时）或 10:12（配 90 时）起必然 fail，直到次日 08:45。恒红信号与真正的备份停摆长得一模一样，值班人只能选择忽略。
+
+**修复**：
+
+- `scripts/ops/watchdog.py` 新增 `DEFAULT_BACKUP_MAX_AGE_MINUTES = 1500.0`（25h），与 `fastapi_app/services/backup/freshness.py` 的 `BACKUP_STALE_HOURS=25.0` 同口径；
+- 显式 `.env` 配置仍优先（将来启用小时级增量可调回 90 量级）；
+- fail 的 detail 改为同时给出“真实年龄 + 阈值”，并统一按小时展示，便于区分“漏跑”与“阈值配错”；
+- `.env.example` 与 `docs/runbooks/watchdog.md` 同步到 1500 并写明理由；
+- `freshness.py` 模块 docstring 里“增量 06-22 每小时”的表述与实际调度不符，已按实测校正。
+
+**生产处置**：`.env` 的 `WATCHDOG_BACKUP_MAX_AGE_MINUTES` 由 540 改为 1500（改前快照 `_ops/credentials/env_snapshots/.env.20261104_181646.bak`）。看门狗每轮新起进程，**不需要重启服务**。
+
+**复验**（提权跑 `watchdog.py --no-alert --verbose`）：
+
+```text
+RC=0
+[OK] backend_health / backend_ready / arq_worker / web_entry
+[OK] backup_freshness: 最新 erp_auto_daily_20261104_084509196.zip（9.5 小时前，共 17 个归档）
+[OK] disk_free: C: 59.2GB; D: 472.8GB
+[OK] services: 五个 NSSM 服务 RUNNING
+```
+
+### 2.7 灾备演练失败在调度表里被记成“成功”
+
+**根因**：`disaster_recovery_test_task` 在 `overall_success=false` 时只发告警然后 `return result`；而 `_tracked_job` 判定失败的依据只有“抛异常”或“返回 dict 且 `status=='error'`”。演练服务返回的是 `{'overall_success': False, ...}`，不带 `status`，于是 `on_job_end` 走成功分支，把 `backup_schedule.last_status` 写成 `success`。
+
+**证据**：`backup_schedule` id=36 的 `last_status=success`，而 `backups/server/recovery_tests/recovery_test_20261101_041001_fbf72c.json` 的 `overall_success=false`。也就是说“灾备到底能不能用”这个最关键信号，在调度表里被完全掩盖——与 2.5、2.6 属同一类“监控说谎”缺陷。
+
+**修复**：演练失败时把返回值补上 `status='error'` 与失败原因（保留 `overall_success`/`test_id` 等原始字段），复用既有的 `_tracked_job` 约定，使调度终态如实记为 `failed`，同时进入死信与 critical 告警链路。
+
+**副作用说明**：失败演练现在会同时产生“业务级 error 告警”和“ARQ critical 告警”两条，属有意为之（月度演练失败值得两条），但需在告警通道启用后观察是否过噪。
+
 ## 3. 验证证据
 
 | 检查 | 结果 |
@@ -123,9 +171,14 @@ audit_log=261872（与 dump COPY 区一致）
 | 修复聚焦四文件（恢复/守卫/演练/watchdog） | 61 passed |
 | 备份/恢复/健康/看门狗相关回归（`fastapi_app/tests` + `tests`） | 850 passed, 4662 deselected |
 | 真实备份行数解析 | 71 表全映射，`audit_log=261872`，`total_rows=321615` |
+| 新增回归：`test_watchdog_backup_freshness.py` + `test_backup_drill_status.py` | 9 passed |
+| 变异验证（移除演练 status 修复） | 2 failed（`status` 缺失、`_job_outcome=success`）→ 证明测试能抓错 |
+| 提权跑 `watchdog.py --no-alert --verbose` | RC=0，7 项全 ok，`backup_freshness` 显示“9.5 小时前”判 OK |
+| 生产库只读查询 | `alembic_version=pg_standalone_109_add_user_token_version`；`backup_schedule` 4 行均为日/月频 |
 | `/api/health/ready` | 200，`restore_pending=false` |
 | `watchdog.log` 最新轮次 | 7 项全 ok，`backend_ready=ok` |
 | `quality_gate.py --report` | 与基线一致；无新增违规 |
+| CI（`200364fb`） | run `41813809003`：test / lint / frontend / build 四 job 全绿 |
 
 ## 4. 修改文件
 
@@ -135,11 +188,16 @@ audit_log=261872（与 dump COPY 区一致）
 | `fastapi_app/core/health.py` | readiness 字段契约、标记可见性 |
 | `fastapi_app/services/backup/orchestration/drill_validator.py` | FK/UNIQUE 元数据查询、事务隔离、超时、异常收敛 |
 | `fastapi_app/services/backup/orchestration/core.py` | dump 行数解析、manifest `rows_source` |
-| `scripts/ops/watchdog.py` | 告警冷却只在成功投递后记账 |
+| `scripts/ops/watchdog.py` | 告警冷却只在成功投递后记账；备份新鲜度默认阈值 90→1500 分钟，detail 改为“小时/分钟”自适应 |
+| `fastapi_app/tasks/backup_tasks.py` | 演练失败时返回 `status='error'`，让调度终态如实记 failed |
+| `fastapi_app/services/backup/freshness.py` | 校正“增量 06-22 每小时”的失效表述，写明 25h 的调度依据 |
+| `.env.example` / `docs/runbooks/watchdog.md` | 备份新鲜度阈值与真实调度对齐，写明何时该调回 90 |
 | `fastapi_app/tests/test_restore_guard_fail_closed.py` | 异库/同库/未知标记契约 |
 | `fastapi_app/tests/test_restore_real_roundtrip.py` | 标记目录隔离 |
 | `fastapi_app/tests/test_recovery_validation_fixes.py` | 24 个恢复校验回归用例 |
 | `fastapi_app/tests/test_watchdog_alert_cooldown.py` | 10 个冷却/投递回归用例 |
+| `fastapi_app/tests/test_watchdog_backup_freshness.py` | 6 个新鲜度阈值/归档白名单用例 |
+| `fastapi_app/tests/test_backup_drill_status.py` | 3 个演练失败状态用例（含 `_tracked_job` 联通性） |
 
 ## 5. 仍需授权或外部信息
 
@@ -181,14 +239,17 @@ audit_log=261872（与 dump COPY 区一致）
 |---|---|
 | 恢复标记归档 | 将 `backups/server/restore_marker_archive/20261103T143523Z_erp_system_restore_test.json` 移回 `backups/server/.restore_in_progress.json` |
 | `.env` 加密开关 | 用 `_ops/credentials/env_snapshots/.env.20261104_171530.bak` 覆盖 `.env`（保留原 ACL），再按需重启 |
-| 代码修复（已提交未部署） | `git revert 74acd748 28440211 d030db24` 或按提交回退 |
+| `.env` 看门狗阈值 540→1500 | 用 `_ops/credentials/env_snapshots/.env.20261104_181646.bak` 覆盖 `.env`；看门狗每轮新进程，无需重启 |
+| 代码修复（已提交未部署） | `git revert 200364fb d030db24 28440211 74acd748` 或按提交回退 |
 | watchdog 源码修复 | 已由计划任务按新进程生效；回滚为 `git checkout -- scripts/ops/watchdog.py` |
 
 ## 7. 当前上线判定
 
 **仍为 No-Go，但阻断范围已收窄：**
 
-- 已关闭：readiness 503、测试污染、FK SQL 错误、事务污染、行数估算误判、watchdog 冷却误记账、目标 SHA CI；
+- 已关闭：readiness 503、测试污染、FK SQL 错误、事务污染、行数估算误判、watchdog 冷却误记账、备份新鲜度恒红、演练状态掩盖、目标 SHA CI；
 - 配置已就绪但未生效：备份加密（重启后生效）；
 - 未关闭：告警投递（按用户决定暂不配置）、新备份恢复演练、生产重启部署、他人未跟踪目录处置；
 - 下一步顺序：**维护窗口重启 erp-arq/erp-prod → 生成新加密备份 → 新备份恢复演练 → 业务验收 → 更新风险登记册**。
+
+重启前必须确认：生产库已在迁移 head（本次已核实为 109，与源码单 head 一致，无待执行迁移）；工作区只剩他人 2 个未跟踪目录，重启会加载当前工作区源码，需 owner 确认这些目录不影响运行（它们是纯交付文档，不参与 import，但仍应记录在发布单上）。

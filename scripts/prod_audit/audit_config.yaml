@@ -40,10 +40,20 @@ issue_penalty:                  # 各严重度问题对层得分的扣分值（�
 # ---------------------------------------------------------------------------
 # 压测阈值
 # ---------------------------------------------------------------------------
+# ⚠️ DEPRECATED（2026-11-04 架构裁决）——**不要拿本段作为上线放行判据**。
+#
+# 唯一的 API 延迟口径在 `docs/slo.md`（2026-11-03）：
+#   常规 p50≤300ms / p95≤1500ms；聚合 p50≤800ms / p95≤3000ms；5xx=0。
+# 本段的 `core_list_p95_ms: 300` / `aggregate_p95_ms: 500` / `min_rps: 500`
+# 是更早的审核器常量，既无生产等价负载校准，也没有 500 RPS 的容量依据；
+# 与 slo.md 并存只会让同一套代码时而"极严"、时而"极松"。
+#
+# 现状：保留仅供历史对照与回归观察，不参与 Go/No-Go。清理方案（收敛为单一
+# 配置源 + CI 阈值一致性检查）见 docs/ops/2026-11-04-release-test-acceptance-risk-plan.md。
 perf_thresholds:
-  core_list_p95_ms: 300         # 核心列表 P95 ≤ 300ms
-  aggregate_p95_ms: 500         # 聚合查询 P95 ≤ 500ms
-  min_rps: 500                  # 并发吞吐量 ≥ 500 RPS
+  core_list_p95_ms: 300         # [legacy] 见上方 DEPRECATED；放行判据以 docs/slo.md 为准
+  aggregate_p95_ms: 500         # [legacy] 同上
+  min_rps: 500                  # [legacy] 无容量依据，不参与放行
   max_error_rate: 0.001         # 错误率 ≤ 0.1%
   cold_start_s: 10              # 冷启动 ≤ 10s
   max_memory_mb: 1024           # 内存 ≤ 1GB

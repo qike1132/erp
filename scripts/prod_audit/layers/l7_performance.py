@@ -50,6 +50,11 @@ _LHCI_TIMEOUT: int = 600
 _COLD_START_TIMEOUT: int = 60
 
 # 性能阈值
+#
+# ⚠️ DEPRECATED（2026-11-04 架构裁决）：本组 p95/吞吐常量**不是**上线放行判据。
+# 唯一口径在 `docs/slo.md`：常规 p50≤300ms / p95≤1500ms；聚合 p50≤800ms /
+# p95≤3000ms；5xx=0。这里的 300/500ms 与 500 RPS 既无生产等价负载校准，也没有
+# 容量依据，保留仅供历史对照；与 `audit_config.yaml` 的同名段一并待收敛。
 _P95_LIST_MS: int = 300
 _P95_AGG_MS: int = 500
 _MIN_RPS: int = 500

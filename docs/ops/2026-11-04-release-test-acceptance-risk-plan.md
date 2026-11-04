@@ -68,15 +68,15 @@
 | 代码分支/提交 | 待冻结 | `main@4049ab1e19` | 不是最终发布 SHA，不能据此签字 |
 | 工作区洁净 | **FAIL** | `git status --porcelain` 有两个未跟踪 `deliverables/` 目录及本轮修复改动 | 后端直接运行工作区源码，发布前必须由 owner 处置并冻结 |
 | 迁移图单 head | PASS（脚本侧） | `check_alembic_heads.py`：149 revisions / 1 head / 4 bases | 只证明迁移脚本图正常 |
-| 生产库实际迁移版本 | **PENDING** | 本轮未独立连接生产库复核 | 禁止用“脚本单 head”替代生产库版本证明 |
+| 生产库实际迁移版本 | PASS（2026-11-04 18:16 提权只读） | `alembic_version = pg_standalone_109_add_user_token_version`，与源码单 head 一致 | 重启不涉及待执行迁移；此前“落后 109/110”的猜测已排除 |
 | 目标 SHA 的 CI 四 job | **PENDING** | 本轮未核对目标提交的 CI run | 必须 test/lint/frontend/build 全绿 |
 | 后端应用健康 `/api/health` | PASS（观测） | `prod_runner.json`；watchdog 16:22 `backend_health=ok` | 只证明进程/基础依赖活着 |
 | 业务 readiness `/api/health/ready` | **PASS** | 16:22 返回 200，`restore_pending=false` | 标记已可逆归档；代码侧作用域修复已测试，尚未重启部署 |
 | 恢复中断标记 | **PASS（已归档）** | 原标记移至 `backups/server/restore_marker_archive/20261103T143523Z_erp_system_restore_test.json` | 未删除、可复原；根因是测试用例写全局标记 |
-| 最近恢复演练 | **FAIL（待重跑）** | 2026-11-01 两份报告 `overall_success=false` | 代码已修，但尚无新备份上的成功演练证据 |
+| 最近恢复演练 | **FAIL（待重跑）** | 2026-11-01 报告 `overall_success=false`；`backup_schedule` 实测演练为**每月 1 日 03:30**，故“11-01 后无新报告”属正常月频间隔而非停摆 | 代码已修，但尚无新备份上的成功演练证据；演练失败曾被调度表记成 success，已修 |
 | 最新备份覆盖完整 | PASS（元数据） | 11-04 08:45 全量，71 张表，`coverage.complete=true`，`failed_tables=[]` | 旧包行数为估算口径；新备份才带 dump 精确行数 |
-| 最新备份加密 | **FAIL** | 同 meta：`encrypted=false`，`format_version=2.0` | 与生产加密基线不符；需 owner 授权整改或书面风险接受 |
-| 备份新鲜度 | PASS（观测） | watchdog 16:22 `backup_freshness=ok` | 只证明有产物，不证明可恢复 |
+| 最新备份加密 | **FAIL** | 同 meta：`encrypted=false`，`format_version=2.0` | 加密开关已置 true 但需重启 `erp-arq`/`erp-prod` 才生效 |
+| 备份新鲜度 | PASS（观测） | 18:16 提权跑看门狗：`backup_freshness=ok`（9.5 小时前） | 阈值已从 540 修正为 1500，消除每日恒红；仍只证明有产物，不证明可恢复 |
 | 告警投递 | **FAIL** | `watchdog.log` 仍“通道 无”；冷却记账代码已修 | 仍无实际通道，需 owner 提供 webhook/SMTP |
 | ARQ 基础状态 | PASS（观测） | watchdog 16:22 `arq_worker=ok` | 未验证故障恢复、积压与死信闭环 |
 | 五服务基础状态 | PASS（观测） | watchdog 16:22 `services=ok` | 未替代 NSSM 参数、依赖、PID 的完整核对 |
