@@ -20,6 +20,20 @@ B2（2026-10-26 上线前检查）三处 fail-open 收口：
 * 读取原先 I/O 失败返回 None，把「未知」折叠成「无中断」—— 现在三态
   （absent / present / unknown），unknown 与 present 一样让 readiness 失败，
   但**不阻断进程启动**，以保留 `/api/v1/backup/restore*` 这条受控恢复通道。
+
+2026-11-04（目标库隔离，修复生产误报 503）
+------------------------------------------
+标记文件是**全局单文件**（BACKUP_DIR/.restore_in_progress.json，不区分目标库）。
+恢复演练在 scratch 库（`<主库>_restore_test`）上真跑 `restore_database_via_psql`
+时同样会写它 —— 于是「测试库上的一次演练」把**生产库**的 readiness 打成 503，
+而生产库其实毫发无损（演练标记还停留在生产备份目录里，等人工清）。
+
+现在：readiness/启动判定都先比较标记里的 `db_name` 与当前运行库（
+`current_db_name()`，按 ASYNC_DATABASE_URL → DB_NAME 解析）。
+* 目标库 != 当前库 → 不阻断 readiness，但信息原样保留（`applies_to_current_db=False`
+  + `warning`），启动日志降为 WARNING；
+* 目标库缺失/不可解析/标记不可读 → 仍 fail-closed（无法证明与本库无关）。
+演练一侧则另用隔离的标记/备份目录（见 tests/test_restore_real_roundtrip.py）。
 """
 from __future__ import annotations
 
@@ -65,6 +79,35 @@ class RestoreMarkerError(RuntimeError):
 def marker_path() -> Path:
     """标记文件路径（放在备份根目录，与 pre_restore/ 同级，便于运维一眼看到）。"""
     return Path(BACKUP_DIR) / MARKER_NAME
+
+
+def current_db_name() -> str:
+    """当前进程实际连接的库名（用于判定标记是否与本库相关）。
+
+    解析顺序与部署现实对齐：``ASYNC_DATABASE_URL``（部署里有人只用 URL 不设
+    DB_NAME）优先，退回 ``DB_NAME``，再退回空串。解析失败不抛异常——调用方按
+    「目标未知」处理（fail-closed：无法证明与本库无关就不放行）。
+
+    懒导入 config：本模块被 startup/readiness 在导入期极早调用，避免与
+    config→_constants 的导入顺序耦合。
+    """
+    url = ''
+    try:
+        from fastapi_app.core.config import settings
+        url = str(getattr(settings, 'ASYNC_DATABASE_URL', '') or '')
+    except Exception:  # broad-except: 配置不可用/未初始化时退回环境变量
+        url = ''
+    if not url:
+        url = os.getenv('ASYNC_DATABASE_URL', '') or ''
+    if url:
+        try:
+            from sqlalchemy.engine import make_url
+            name = make_url(url).database
+            if name:
+                return str(name).strip()
+        except Exception as e:  # broad-except: URL 形态异常时退回 DB_NAME
+            logger.debug('解析 ASYNC_DATABASE_URL 取库名失败，回退 DB_NAME: %s', e)
+    return (os.getenv('DB_NAME') or '').strip()
 
 
 def _latest_pre_restore() -> str | None:
@@ -200,6 +243,10 @@ def check_interrupted_restore() -> dict[str, Any]:
 
     刻意不在这里 ``raise`` 阻断启动：进程起不来就再也没有受控恢复入口。业务流量
     的拦截交给 readiness（见 ``restore_readiness``），恢复端点保持可用。
+
+    2026-11-04：标记目标库 != 当前运行库时降级为 WARNING、``recovery_required``
+    为 False —— 恢复演练在 scratch 库上留下的标记不是生产事故，不该用 CRITICAL
+    淹没真正的告警（同时仍把库名/阶段完整打出来，可见性不降低）。
     """
     state, data = read_marker_state()
     if state == MARKER_ABSENT:
@@ -213,31 +260,96 @@ def check_interrupted_restore() -> dict[str, Any]:
         )
         return {'state': state, 'recovery_required': True, 'reason': 'marker_unreadable'}
 
+    current = current_db_name()
+    applies, target = _marker_targets_current_db(data or {}, current)
+    if not applies:
+        logger.warning(
+            '存在未完成的数据库还原标记（%s），但目标库=%s 与当前运行库=%s 不同：'
+            '不视为本库事故（readiness 不受影响）。请到目标库核对，或确认演练已结束后清除标记。',
+            marker_path(), target, current or '<未知>',
+        )
+        return {
+            'state': state,
+            'recovery_required': False,
+            'applies_to_current_db': False,
+            'db_name': target,
+            'current_db_name': current or None,
+            'marker': data,
+        }
+
     logger.critical(
         '检测到未完成的数据库还原（%s）：库名=%s 开始于=%s 失败阶段=%s 回滚点=%s。'
         '数据库可能停在「已建空壳」，请立即核对业务表行数并按 %s 回滚。',
         marker_path(), data.get('db_name'), data.get('started_at'),
         data.get('failed_stage'), data.get('latest_pre_restore'), data.get('hint'),
     )
-    return {'state': state, 'recovery_required': True, 'marker': data}
+    return {
+        'state': state,
+        'recovery_required': True,
+        'applies_to_current_db': True,
+        'marker': data,
+    }
 
 
-def restore_readiness() -> dict[str, Any]:
+def _marker_targets_current_db(data: dict[str, Any], current: str) -> tuple[bool, str]:
+    """标记的目标库是否就是当前运行库。返回 (是否命中本库, 目标库名)。
+
+    fail-closed 规则：只有「标记里的 db_name 与当前库名都非空且不相等」才能判定
+    「与本库无关」。任一为空/不可解析一律按「命中本库」处理——证明不了无关就不放行。
+
+    背景（2026-11-04 误报事故）：标记文件是**全局单文件**，恢复演练在 scratch 库
+    （``<主库>_restore_test``）上真跑 ``restore_database_via_psql`` 时也会写它。
+    readiness 原先不看目标库，只要标记在就 503 —— 一个跑在测试库上的演练标记
+    把生产业务就绪判死，与「生产库可能空壳」完全不是一回事。
+    """
+    target = str(data.get('db_name') or '').strip()
+    if not target or not current:
+        return True, target
+    return target == current, target
+
+
+def restore_readiness(current_db_name_override: str | None = None) -> dict[str, Any]:
     """正常业务 readiness 判据：残留或不可读标记都必须让 readiness 失败。
 
     只影响 readiness，不影响进程存活与恢复端点 —— 「数据库可能是空壳」时继续给
     业务流量开门，比暂时不可用更危险；而锁死恢复入口则会让运维无从清除标记。
+
+    2026-11-04（目标库隔离）：只有标记**指向当前运行库**时才阻断 readiness。
+    恢复演练（scratch 库）或跨库恢复留下的标记不再把生产就绪打成 503，但信息
+    仍完整保留在返回体里（``applies_to_current_db=False`` + ``warning``），
+    巡检/健康响应照样能看见「某库有一次未确认的还原」。
+
+    仍 fail-closed 的两种情况：标记不可读（``unknown``，无法判断目标库）、
+    标记存在但 db_name 缺失/无法与当前库名比较 —— 无法证明与本库无关。
     """
     state, data = read_marker_state()
     if state == MARKER_ABSENT:
         return {'ok': True, 'state': state}
     data = data or {}
-    return {
-        'ok': False,
+    current = (current_db_name_override if current_db_name_override is not None
+               else current_db_name()).strip()
+    applies, target = _marker_targets_current_db(data, current)
+    detail: dict[str, Any] = {
+        'ok': not applies,
         'state': state,
-        'db_name': data.get('db_name'),
+        'applies_to_current_db': applies,
+        'db_name': target or None,
+        'current_db_name': current or None,
         'started_at': data.get('started_at'),
         'failed_stage': data.get('failed_stage'),
         'latest_pre_restore': data.get('latest_pre_restore'),
         'hint': data.get('hint'),
     }
+    if state == MARKER_UNKNOWN:
+        # 连标记都读不出来：既不知道目标库也不知道阶段，必须按「本库有中断」处理
+        detail['ok'] = False
+        detail['applies_to_current_db'] = True
+        detail['reason'] = 'marker_unreadable'
+        return detail
+    if not applies:
+        detail['warning'] = (
+            f'存在未完成的数据库还原标记，但其目标库为 {target!r}，与当前运行库 '
+            f'{current!r} 不同：不阻断本库 readiness，请到目标库核对并按标记指引处理，'
+            f'或确认该演练已结束后清除标记。'
+        )
+    return detail

@@ -23,7 +23,9 @@ docker-compose —— 即这些配置**没有任何运行体**，7 条告警规�
 2. **不写数据库**：不复用 BackupAlertService.send_alert —— 其 _log_alert_to_db 会按
    `filename LIKE %task_name%` 把命中的备份记录改成 failed，看门狗不该有这个副作用。
 3. **冷却去重**：同一检查项在 WATCHDOG_ALERT_COOLDOWN_MINUTES 内只告警一次，
-   状态落在 logs/watchdog_state.json（logs/ 已 gitignore）。
+   状态落在 logs/watchdog_state.json（logs/ 已 gitignore）。冷却**只在成功投递后**
+   才推进：无可用通道或全部通道发送失败时不记账（并在 state 里留 undelivered 痕迹），
+   下一轮继续尝试——否则「没人听见的告警」会被记成已告警并静默 30 分钟。
 4. **不误判**：`erp-arq` 的 probe_unknown（探测自身失败）与 not_running（worker 确实不在线）
    必须区分，否则会把运维引向重启一个正常的 worker。
 
@@ -298,7 +300,17 @@ def save_state(path: Path, state: dict) -> None:
 
 
 def select_alerts(results: list[CheckResult], state: dict, cooldown_minutes: float) -> list[CheckResult]:
-    """挑出需要通知的检查项：状态非 ok 且已过冷却期；恢复正常则清掉冷却记录。"""
+    """挑出需要通知的检查项：状态非 ok 且已过冷却期；恢复正常则清掉冷却记录。
+
+    本函数**只读冷却状态，不记账**（2026-11-04 修复）。原实现在这里就把
+    ``last_sent = now`` 写回 state，而真正投递发生在之后调用的 notify()——
+    于是「没有任何可用告警通道」（webhook 未启用 + SMTP 未配置，新机默认状态）
+    或「所有通道发送失败」时，告警被静默吞掉：state 里显示已告警，后续
+    WATCHDOG_ALERT_COOLDOWN_MINUTES（默认 30 分钟）内不再尝试，而实际一条
+    通知都没发出去，退出码仍只反映检查项状态。
+
+    记账下沉到「投递成功后」执行（见 ``record_alerts_sent``）。
+    """
     now = time.time()
     alerts = state.setdefault("alerts", {})
     selected: list[CheckResult] = []
@@ -306,11 +318,38 @@ def select_alerts(results: list[CheckResult], state: dict, cooldown_minutes: flo
         if result.status == OK:
             alerts.pop(result.key, None)
             continue
-        last_sent = float(alerts.get(result.key, {}).get("last_sent", 0))
+        last_sent = float(alerts.get(result.key, {}).get("last_sent", 0) or 0)
         if now - last_sent >= cooldown_minutes * 60:
             selected.append(result)
-            alerts[result.key] = {"last_sent": now, "status": result.status, "detail": result.detail}
     return selected
+
+
+def record_alerts_sent(state: dict, alerts: list[CheckResult], channels: list[str],
+                       sent_at: float | None = None) -> None:
+    """仅当告警**真正投递成功**后才推进冷却窗口。
+
+    channels 为空（无可用通道 / 所有通道发送失败）时不写 ``last_sent``：
+    下一轮会立刻重试，不会出现「30 分钟内一声不响」。同时在 state 里留
+    ``undelivered_attempts`` / ``undelivered_since``，让「有告警但没送出去」
+    这件事可被人工与巡检发现（而不是看起来像已经通知过了）。
+    """
+    if not alerts:
+        return
+    sent_at = time.time() if sent_at is None else sent_at
+    alerts_state = state.setdefault("alerts", {})
+    for result in alerts:
+        entry = dict(alerts_state.get(result.key) or {})
+        entry['status'] = result.status
+        entry['detail'] = result.detail
+        if channels:
+            entry['last_sent'] = sent_at
+            entry['channels'] = list(channels)
+            entry.pop('undelivered_attempts', None)
+            entry.pop('undelivered_since', None)
+        else:
+            entry['undelivered_attempts'] = int(entry.get('undelivered_attempts', 0) or 0) + 1
+            entry.setdefault('undelivered_since', time.strftime('%Y-%m-%dT%H:%M:%S'))
+        alerts_state[result.key] = entry
 
 
 def _alert_payload(alerts: list[CheckResult], results: list[CheckResult]) -> dict:
@@ -436,10 +475,19 @@ def main(argv: list[str] | None = None) -> int:
     state["last_run"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     alerts = [] if options.no_alert else select_alerts(results, state, options.cooldown_minutes)
     channels = notify(alerts, results, options.timeout) if alerts else []
+    # 冷却只在投递成功后推进：无通道/全通道失败时下一轮立即重试（不静默吞告警）
+    record_alerts_sent(state, alerts, channels)
     save_state(options.state_file, state)
 
     summary = f"检查 {len(results)} 项，异常 {len(failed)} 项，告警 {len(alerts)} 项，通道 {channels or '无'}"
     log_line(options.log_file, summary + " | " + "; ".join(f"{r.key}={r.status}" for r in results))
+    if alerts and not channels:
+        undelivered = (
+            f"告警未投递：{len(alerts)} 项异常未送达任何通道"
+            f"（webhook/邮件均未成功），不写入冷却状态，下一轮将重试"
+        )
+        log_line(options.log_file, undelivered)
+        print(f"[watchdog] {undelivered}", file=sys.stderr)
 
     if options.json:
         print(json.dumps({"summary": summary, "results": [asdict(r) for r in results]}, ensure_ascii=False, indent=2))

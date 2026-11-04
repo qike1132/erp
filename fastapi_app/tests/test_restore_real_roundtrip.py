@@ -40,13 +40,29 @@ def _pg_tools_available() -> bool:
 
 
 @pytest.fixture()
-def restore_env(monkeypatch):
+def restore_env(monkeypatch, tmp_path):
     """把 restore 依赖的 env 钉到专用 scratch 库；teardown 交由 monkeypatch。
 
     服务器/凭据来自 TEST_DATABASE_URL（CI 权威）或 settings（本机派生）；
     scratch 库名 = 测试库名去掉尾部 `_test` 再拼 `_restore_test`，
     保证与共享测试库不同且仍以 `_test` 结尾。
+
+    标记目录隔离（2026-11-04）：``restore_database_via_psql`` 在 DROP 之前会写
+    **全局**恢复中断标记 ``BACKUP_DIR/.restore_in_progress.json``。真跑演练若用
+    生产备份目录，则（a）一次成功演练也会在生产安装目录里瞬时出现「中断还原」
+    标记，（b）演练异常退出时标记残留，导致生产 ``/api/health/ready`` 恒 503。
+    这里把标记与 pre_restore 目录都改到用例的 tmp_path，演练不再触碰生产目录。
     """
+    from fastapi_app.services.backup import restore_guard
+
+    isolated_backups = tmp_path / 'backups'
+    isolated_pre_restore = isolated_backups / 'pre_restore'
+    isolated_pre_restore.mkdir(parents=True)
+    monkeypatch.setattr(restore_guard, 'BACKUP_DIR', isolated_backups)
+    monkeypatch.setattr(restore_guard, 'PRE_RESTORE_DIR', isolated_pre_restore)
+    # 日志节流闸门复位，避免上一条用例的时间戳吞掉本条的标记告警
+    monkeypatch.setattr(restore_guard, '_last_state_warn_at', 0.0, raising=False)
+
     env_test_url = os.environ.get('TEST_DATABASE_URL', '').strip()
     base_url = env_test_url or settings.ASYNC_DATABASE_URL
     parsed = urlparse(base_url)
@@ -79,7 +95,8 @@ def restore_env(monkeypatch):
     monkeypatch.setenv('DB_PASSWORD', db_password)
     monkeypatch.setenv('TEST_DATABASE_URL', scratch_url)
     yield {'scratch_db': scratch_db, 'scratch_url': scratch_url,
-           'admin_url': admin_url, 'base_db': base_db}
+           'admin_url': admin_url, 'base_db': base_db,
+           'marker_dir': isolated_backups}
 
 
 @pytest.fixture()
@@ -188,6 +205,13 @@ async def test_restore_roundtrip_and_verify(restore_env, _require_pg_tools):
         await probe_engine.dispose()
 
         assert result.get('status') == 'ok', f"restore 应完全成功，得到: {result}"
+
+        # 标记必须落在隔离目录（不污染生产 BACKUP_DIR），且成功还原后已清除
+        from fastapi_app.services.backup import restore_guard
+        assert restore_guard.marker_path().parent == restore_env['marker_dir']
+        assert not restore_guard.marker_path().exists(), (
+            '还原成功必须清除中断标记，否则生产/演练目录里会留下「可能空壳」的假信号'
+        )
 
         # 探针数据必须回来
         engine = _engine(restore_env['scratch_url'])

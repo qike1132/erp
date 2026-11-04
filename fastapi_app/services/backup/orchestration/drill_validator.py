@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 _IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
+#: 单条验证语句的服务端超时（毫秒）。验证库上的 COUNT/JOIN 卡死时，宁可让该族
+#: 明确失败（错误里写着 statement timeout），也不要把整轮演练拖到外层任务超时。
+_VALIDATION_STATEMENT_TIMEOUT_MS = 30_000
+
 
 def _safe_sql_ident(name: str) -> str:
     """校验标识符格式并返回双引号包裹形式，防止 SQL 注入。"""
@@ -38,101 +42,164 @@ def _safe_sql_idents(names: list[str]) -> list[str]:
     return [_safe_sql_ident(name) for name in names]
 
 
-async def _load_fk_groups(conn) -> dict[str, dict[str, Any]]:
-    """按约束名聚合外键定义（支持复合外键）。
+def _qualified_ident(schema: str | None, name: str) -> str:
+    """schema 限定标识符（两段都过白名单）。
 
-    子表列与引用表列分别聚合后再按 ordinal_position 对齐，避免直接 JOIN
-    information_schema.constraint_column_usage 产生笛卡尔积导致列错位。
+    为什么不依赖 search_path：验证连接上没有任何 ``SET search_path``，同名表若
+    同时存在于多个 schema，未限定的 ``"orders"`` 会解析到 search_path 里的第一个
+    命中项——即可能校验了另一张表。显式限定后结果与连接状态无关。
+    """
+    ident = _safe_sql_ident(name)
+    if schema:
+        return f'{_safe_sql_ident(schema)}.{ident}'
+    return ident
+
+
+async def _load_fk_groups(conn) -> dict[str, dict[str, Any]]:
+    """按 (schema, 表, 约束名) 聚合外键定义（支持复合外键，按列位置正确配对）。
+
+    2026-11-04 三次迭代后的最终形态，逐条记录踩过的坑：
+
+    1. **引用不存在的列**：原实现取 ``information_schema.constraint_column_usage
+       .ordinal_position``——该视图没有这一列，于是约束验证每次都以
+       ``UndefinedColumnError`` 判失败（真实报告
+       backups/server/recovery_tests/recovery_test_20261101_041001_fbf72c.json）。
+    2. **复合外键配对语义错误**：``key_column_usage``（子表列集合）与
+       ``constraint_column_usage``（被引用表列集合）之间没有跨视图的位置对应关系。
+       改用 ``pg_constraint.conkey/confkey``（按约束定义顺序排列，同下标即同列对），
+       下标由 ``generate_subscripts`` 生成，列名由 ``pg_attribute`` 还原。
+    3. **聚合键不够唯一**（QA 复核 High-1）：PostgreSQL 只要求约束名在**同一张表**
+       范围内唯一，``public.a.fk_x`` 与 ``public.b.fk_x`` 完全合法。原先按
+       ``schema.constraint_name`` 聚合，会把这两条不同表的外键合并成一条跨表假复合
+       外键（列与引用表混在一起）。现在聚合键改为 ``schema.table.constraint_name``，
+       并把 ``con.oid`` 一并带出——它是约束的**唯一身份**，跨表同名与重建同名都可区分。
+
+    schema 处理：系统表全限定 ``pg_catalog``，schema 走 ``pg_namespace`` 显式关联
+    （不依赖 search_path）；分组后由 ``_check_fk_violations`` 用
+    ``_qualified_ident`` 生成 schema 限定的表名去查询。
     """
     result = await conn.execute(text("""
-        WITH fk_base AS (
-            SELECT
-                tc.constraint_name,
-                tc.table_name,
-                kcu.column_name,
-                kcu.ordinal_position
-            FROM
-                information_schema.table_constraints AS tc
-                JOIN information_schema.key_column_usage AS kcu
-                  ON tc.constraint_name = kcu.constraint_name
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-        ),
-        fk_ref AS (
-            SELECT
-                tc.constraint_name,
-                ccu.table_name AS foreign_table_name,
-                ccu.column_name AS foreign_column_name,
-                ccu.ordinal_position
-            FROM
-                information_schema.table_constraints AS tc
-                JOIN information_schema.constraint_column_usage AS ccu
-                  ON ccu.constraint_name = tc.constraint_name
-            WHERE tc.constraint_type = 'FOREIGN KEY'
-        )
         SELECT
-            b.constraint_name,
-            b.table_name,
-            b.column_name,
-            r.foreign_table_name,
-            r.foreign_column_name,
-            b.ordinal_position
-        FROM fk_base b
-        JOIN fk_ref r
-          ON b.constraint_name = r.constraint_name
-         AND b.ordinal_position = r.ordinal_position
-        ORDER BY b.constraint_name, b.ordinal_position
+            src_ns.nspname  AS schema_name,
+            src.relname     AS table_name,
+            con.conname     AS constraint_name,
+            con.oid::text   AS constraint_oid,
+            src_att.attname AS column_name,
+            tgt_ns.nspname  AS foreign_schema_name,
+            tgt.relname     AS foreign_table_name,
+            tgt_att.attname AS foreign_column_name,
+            k.i             AS ordinal_position
+        FROM pg_catalog.pg_constraint AS con
+        JOIN pg_catalog.pg_class AS src
+          ON src.oid = con.conrelid
+        JOIN pg_catalog.pg_namespace AS src_ns
+          ON src_ns.oid = src.relnamespace
+        JOIN pg_catalog.pg_class AS tgt
+          ON tgt.oid = con.confrelid
+        JOIN pg_catalog.pg_namespace AS tgt_ns
+          ON tgt_ns.oid = tgt.relnamespace
+        JOIN LATERAL pg_catalog.generate_subscripts(con.conkey, 1) AS k(i)
+          ON TRUE
+        JOIN pg_catalog.pg_attribute AS src_att
+          ON src_att.attrelid = con.conrelid
+         AND src_att.attnum = con.conkey[k.i]
+        JOIN pg_catalog.pg_attribute AS tgt_att
+          ON tgt_att.attrelid = con.confrelid
+         AND tgt_att.attnum = con.confkey[k.i]
+        WHERE con.contype = 'f'
+          AND array_length(con.conkey, 1) = array_length(con.confkey, 1)
+          AND src_ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          AND tgt_ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+        ORDER BY con.oid, k.i
     """))
     fk_groups: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {'table': '', 'columns': [], 'foreign_table': '', 'foreign_columns': []}
+        lambda: {
+            'schema': '', 'table': '', 'columns': [],
+            'foreign_schema': '', 'foreign_table': '', 'foreign_columns': [],
+        }
     )
     for row in result.fetchall():
-        constraint_name = row[0]
-        group = fk_groups[constraint_name]
+        schema, table, constraint_name, constraint_oid = row[0], row[1], row[2], row[3]
+        # 键含表名：不同表上的同名约束是两条独立外键（见 docstring 第 3 点）
+        group = fk_groups[f'{schema}.{table}.{constraint_name}']
         group['constraint_name'] = constraint_name
-        group['table'] = row[1]
-        group['columns'].append(row[2])
-        group['foreign_table'] = row[3]
-        group['foreign_columns'].append(row[4])
+        group['constraint_oid'] = constraint_oid
+        group['schema'] = schema
+        group['table'] = table
+        group['columns'].append(row[4])
+        group['foreign_schema'] = row[5]
+        group['foreign_table'] = row[6]
+        group['foreign_columns'].append(row[7])
     return fk_groups
 
 
 async def _load_unique_groups(conn) -> dict[str, dict[str, Any]]:
-    """按约束名聚合唯一约束定义（支持复合唯一索引）。"""
+    """按 (schema, 表, 约束名) 聚合唯一约束定义（支持复合唯一约束）。
+
+    2026-11-04（QA 复核 High-1）重写：原实现走 ``information_schema``，且 JOIN 条件
+    只有 ``constraint_name``——既没有 schema 也没有表名，于是
+    (a) 跨 schema 的同名约束会被串到一起，把列集合拼成不存在的复合键；
+    (b) 同一 schema 内不同表的同名唯一约束同样会混合（PG 只要求约束名在表内唯一）。
+
+    现在与 ``_load_fk_groups`` 同源：``pg_constraint``(contype='u') + ``conkey`` 下标
+    + ``pg_attribute`` 列名，聚合键 ``schema.table.constraint_name``，并带出
+    ``con.oid`` 作为唯一身份。
+    """
     result = await conn.execute(text("""
         SELECT
-            tc.constraint_name,
-            tc.table_name,
-            kcu.column_name,
-            kcu.ordinal_position
-        FROM
-            information_schema.table_constraints AS tc
-            JOIN information_schema.key_column_usage AS kcu
-              ON tc.constraint_name = kcu.constraint_name
-        WHERE tc.constraint_type = 'UNIQUE'
-        ORDER BY tc.constraint_name, kcu.ordinal_position
+            ns.nspname      AS schema_name,
+            cls.relname     AS table_name,
+            con.conname     AS constraint_name,
+            con.oid::text   AS constraint_oid,
+            att.attname     AS column_name,
+            k.i             AS ordinal_position
+        FROM pg_catalog.pg_constraint AS con
+        JOIN pg_catalog.pg_class AS cls
+          ON cls.oid = con.conrelid
+        JOIN pg_catalog.pg_namespace AS ns
+          ON ns.oid = cls.relnamespace
+        JOIN LATERAL pg_catalog.generate_subscripts(con.conkey, 1) AS k(i)
+          ON TRUE
+        JOIN pg_catalog.pg_attribute AS att
+          ON att.attrelid = con.conrelid
+         AND att.attnum = con.conkey[k.i]
+        WHERE con.contype = 'u'
+          AND array_length(con.conkey, 1) >= 1
+          AND ns.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+        ORDER BY con.oid, k.i
     """))
     unique_groups: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {'table': '', 'columns': []}
+        lambda: {'schema': '', 'table': '', 'columns': []}
     )
     for row in result.fetchall():
-        constraint_name = row[0]
-        group = unique_groups[constraint_name]
+        schema, table, constraint_name, constraint_oid = row[0], row[1], row[2], row[3]
+        group = unique_groups[f'{schema}.{table}.{constraint_name}']
         group['constraint_name'] = constraint_name
-        group['table'] = row[1]
-        group['columns'].append(row[2])
+        group['constraint_oid'] = constraint_oid
+        group['schema'] = schema
+        group['table'] = table
+        group['columns'].append(row[4])
     return unique_groups
 
 
 async def _check_fk_violations(conn, fk_groups: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """对每个 FK 执行 orphan row 检查（外键列非空但引用行缺失）。"""
+    """对每个 FK 执行 orphan row 检查（外键列非空但引用行缺失）。
+
+    子表/引用表都用 ``_load_fk_groups`` 带回的 schema 全限定，与连接上的
+    search_path 无关（见 ``_qualified_ident``）。
+
+    列数不一致属于「元数据自相矛盾」，必须显式报错（``zip(strict=True)`` 抛
+    ValueError），不能靠 ``strict=False`` 静默截断——截断后的 JOIN 会漏掉列，
+    让真实的 orphan 行数被低估成 0，等于把违规检查变成「永远通过」。
+    """
     fk_violations = []
     for group in fk_groups.values():
-        table = _safe_sql_ident(group['table'])
+        table = _qualified_ident(group.get('schema'), group['table'])
         columns = _safe_sql_idents(group['columns'])
-        foreign_table = _safe_sql_ident(group['foreign_table'])
+        foreign_table = _qualified_ident(group.get('foreign_schema'), group['foreign_table'])
         foreign_columns = _safe_sql_idents(group['foreign_columns'])
         join_clause = ' AND '.join(
-            f't.{c} = f.{fc}' for c, fc in zip(columns, foreign_columns, strict=False)
+            f't.{c} = f.{fc}' for c, fc in zip(columns, foreign_columns, strict=True)
         )
         not_null_clause = ' AND '.join(f't.{c} IS NOT NULL' for c in columns)
         orphan_sql = text(f"""
@@ -144,6 +211,7 @@ async def _check_fk_violations(conn, fk_groups: dict[str, dict[str, Any]]) -> li
         if orphan_count > 0:
             fk_violations.append({
                 'constraint_name': group['constraint_name'],
+                'schema': group.get('schema', ''),
                 'table': group['table'],
                 'columns': group['columns'],
                 'foreign_table': group['foreign_table'],
@@ -154,10 +222,10 @@ async def _check_fk_violations(conn, fk_groups: dict[str, dict[str, Any]]) -> li
 
 
 async def _check_unique_violations(conn, unique_groups: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """对每个 UNIQUE 约束执行重复值检查。"""
+    """对每个 UNIQUE 约束执行重复值检查（表名 schema 限定）。"""
     unique_violations = []
     for group in unique_groups.values():
-        table = _safe_sql_ident(group['table'])
+        table = _qualified_ident(group.get('schema'), group['table'])
         columns = _safe_sql_idents(group['columns'])
         col_list = ', '.join(columns)
         dup_sql = text(f"""
@@ -171,6 +239,7 @@ async def _check_unique_violations(conn, unique_groups: dict[str, dict[str, Any]
         if dup_groups > 0:
             unique_violations.append({
                 'constraint_name': group['constraint_name'],
+                'schema': group.get('schema', ''),
                 'table': group['table'],
                 'columns': group['columns'],
                 'duplicate_groups': dup_groups,
@@ -188,11 +257,36 @@ class DrillValidator:
     def __init__(self, test_config: dict[str, Any]):
         self.test_config = test_config
 
+    async def _run_family(self, family: str, func, *args) -> dict[str, Any]:
+        """执行单个验证族并逐族兜底，保证「一族的意外」不吞掉其余族的结果。
+
+        四个族的子方法各自已捕获 SQLAlchemyError/ValueError，但调用点仍可能抛出
+        其它类型（例如 future 改动里漏网的 TypeError）。此前这类异常只能由
+        ``validate_recovery`` 最外层的 except 接住，整份报告退化为
+        ``{'error': ...}``，其余三族已算出的结果全部丢弃——对灾备体检这种
+        「证据优先」的场景，比单族失败伤害大得多。
+        """
+        try:
+            return await func(*args)
+        except Exception as e:  # broad-except: 单族异常必须隔离，不得吞掉其余验证族结果
+            logger.error(f"验证族 {family} 执行失败: {e}")
+            return {
+                'passed': False,
+                'error': str(e),
+                'details': {}
+            }
+
     async def validate_recovery(self,
                                test_id: str,
                                test_env: dict[str, Any],
                                backup_info: dict[str, Any]) -> dict[str, Any]:
-        """验证恢复结果"""
+        """验证恢复结果。
+
+        失败语义（2026-11-04 收敛）：任何阶段异常都返回**结构化失败结果**
+        （``success=False`` + ``error`` + 完整 ``results`` 骨架），不再让异常逃逸
+        到调用方。原因：连接阶段抛出的 asyncpg ``PostgresError`` 不一定被包成
+        ``SQLAlchemyError``，逃逸后调用方只能记一条日志，报告与告警都拿不到信息。
+        """
         validation_start_time = datetime.now()
 
         try:
@@ -203,7 +297,27 @@ class DrillValidator:
                 f"{test_env['test_db_port']}/{test_env['test_db_name']}"
             )
 
-            test_engine = create_async_engine(test_db_url, poolclass=NullPool)
+            # 2026-11-04：验证连接改用 AUTOCOMMIT（单语句自动提交）。
+            # 根因：四族验证此前共用一个 AsyncConnection 的**隐式事务**。任一族里
+            # 单条 SQL 失败（如 constraint 族的 UndefinedColumnError）后，PostgreSQL
+            # 会把这个事务标记为 aborted，后续每一条 SQL 都只返回
+            # InFailedSQLTransactionError —— 一个查询写错被放大成「除首族外整份
+            # 体检报告全灭」（真实报告 recovery_test_20261101_041001_fbf72c.json：
+            # performance 三项全部 InFailedSQLTransactionError）。
+            # 为什么安全：验证族只做**只读**的元数据查询与 COUNT(*)（不含 INSERT/
+            # UPDATE/DELETE/DDL），没有跨语句原子性要求；自动提交下每条语句自成
+            # 事务，失败只影响它自己，不会留下 aborted 事务污染后续验证。
+            # statement_timeout：验证库上一条卡死的 COUNT/JOIN 会把整轮演练拖到
+            # 外层任务超时（调用方看到的是「演练超时」，看不到是哪条 SQL）。给每条
+            # 语句一个明确上限，失败就是可读的 statement timeout 错误。
+            test_engine = create_async_engine(
+                test_db_url,
+                poolclass=NullPool,
+                isolation_level='AUTOCOMMIT',
+                connect_args={'server_settings': {
+                    'statement_timeout': str(_VALIDATION_STATEMENT_TIMEOUT_MS),
+                }},
+            )
 
             validation_results = {
                 'schema_validation': {'passed': False, 'details': {}},
@@ -212,27 +326,34 @@ class DrillValidator:
                 'performance_validation': {'passed': False, 'details': {}}
             }
 
-            async with test_engine.connect() as conn:
-                # 1. 验证模式
-                if self.test_config['validate_schema']:
-                    schema_result = await self._validate_schema(conn, backup_info)
-                    validation_results['schema_validation'] = schema_result
+            try:
+                async with test_engine.connect() as conn:
+                    # 1. 验证模式
+                    if self.test_config['validate_schema']:
+                        validation_results['schema_validation'] = await self._run_family(
+                            'schema', self._validate_schema, conn, backup_info,
+                        )
 
-                # 2. 验证数据完整性
-                if self.test_config['validate_data_integrity']:
-                    data_result = await self._validate_data_integrity(conn, backup_info)
-                    validation_results['data_validation'] = data_result
+                    # 2. 验证数据完整性
+                    if self.test_config['validate_data_integrity']:
+                        validation_results['data_validation'] = await self._run_family(
+                            'data_integrity', self._validate_data_integrity, conn, backup_info,
+                        )
 
-                # 3. 验证约束
-                if self.test_config['validate_constraints']:
-                    constraint_result = await self._validate_constraints(conn)
-                    validation_results['constraint_validation'] = constraint_result
+                    # 3. 验证约束
+                    if self.test_config['validate_constraints']:
+                        validation_results['constraint_validation'] = await self._run_family(
+                            'constraints', self._validate_constraints, conn,
+                        )
 
-                # 4. 验证性能
-                performance_result = await self._validate_performance(conn)
-                validation_results['performance_validation'] = performance_result
-
-            await test_engine.dispose()
+                    # 4. 验证性能
+                    validation_results['performance_validation'] = await self._run_family(
+                        'performance', self._validate_performance, conn,
+                    )
+            finally:
+                # 连接/驱动异常也要释放引擎（NullPool 下泄漏的是 asyncpg 连接与
+                # 其事件循环回调，后续轮次会报 "Event loop is closed"）
+                await test_engine.dispose()
 
             # 计算总体验证结果
             all_passed = all(
@@ -256,12 +377,20 @@ class DrillValidator:
             logger.info(f"恢复验证完成: {test_id}, 结果: {'通过' if all_passed else '失败'}")
             return result
 
-        except SQLAlchemyError as e:
-            logger.error(f"恢复验证失败 {test_id}: {e}")
+        except Exception as e:  # broad-except: 连接阶段异常形态不受控（见 docstring）
+            # 2026-11-04：连接/驱动层的异常不一定被包成 SQLAlchemyError —— asyncpg 的
+            # PostgresError（如 3D000 invalid_catalog_name、28P01 认证失败）在
+            # ``engine.connect()`` 阶段可能原样抛出；只捕 SQLAlchemyError 会让整轮
+            # 验证以未处理异常结束，调用方拿不到结构化失败结果，也无法进报告/告警
+            # （只留一行日志 = 演练「静默失败」）。这里统一收敛成可归档的失败 dict。
+            logger.error(f"恢复验证失败 {test_id}: {type(e).__name__}: {e}")
             return {
                 'success': False,
                 'test_id': test_id,
-                'error': str(e),
+                'all_passed': False,
+                'error': f'{type(e).__name__}: {e}',
+                'results': {},
+                'start_time': validation_start_time.isoformat(),
                 'validation_duration_seconds': round((datetime.now() - validation_start_time).total_seconds(), 2)
             }
 

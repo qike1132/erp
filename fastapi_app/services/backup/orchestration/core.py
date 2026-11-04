@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import logging
 import os
+import re
 import tempfile
 import zipfile
+import zlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -246,12 +249,168 @@ async def _export_database(db, user, remark, tmpdir_path: Path, snapshot_id,
 
 _LARGE_TABLE_ESTIMATE_THRESHOLD = 100_000
 
+#: manifest['rows_source'] 的取值：行数来自备份产物本身 / 回退精确 COUNT。
+ROWS_SOURCE_DUMP = 'dump'
+ROWS_SOURCE_EXACT_COUNT_FALLBACK = 'exact_count_fallback'
+
+#: pg_dump 纯文本格式的数据区表头：`COPY public."order" (id, no) FROM stdin;`
+_COPY_HEADER_RE = re.compile(
+    r'^COPY\s+(?P<target>[^()]+?)\s*\((?P<columns>.*)\)\s+FROM\s+stdin;\s*$'
+)
+
+
+def _split_copy_target(target: str) -> tuple[str, str]:
+    """把 COPY 目标拆成 (schema, table)，正确处理 ``public."order"`` 这种引号形式。"""
+    parts: list[str] = []
+    buf = ''
+    quoted = False
+    for ch in target:
+        if ch == '"':
+            quoted = not quoted
+            buf += ch
+        elif ch == '.' and not quoted:
+            parts.append(buf)
+            buf = ''
+        else:
+            buf += ch
+    parts.append(buf)
+    cleaned = [
+        p[1:-1] if len(p) >= 2 and p.startswith('"') and p.endswith('"') else p
+        for p in parts
+    ]
+    if len(cleaned) == 1:
+        return 'public', cleaned[0]
+    return cleaned[-2], cleaned[-1]
+
+
+def count_rows_in_sql_dump(path: Path) -> dict[tuple[str, str], int]:
+    """流式解析 pg_dump 纯文本 SQL 的 COPY 区，返回 {(schema, table): 行数}。
+
+    为什么从 dump 里数行数，而不是导出后对库发 ``COUNT(*)``（2026-11-04，QA 复核
+    High-2）：``COUNT`` 发生在 pg_dump **之后**的另一个 READ COMMITTED 快照上，
+    导出与统计不是同一时点。审计表这类持续写入的表在两者之间继续插入，manifest
+    的 rows 就会大于 dump 实际包含的行数——恢复完好、校验却依旧
+    expected != actual。**COPY 区行数才是「这个备份文件里到底有多少行」**，
+    也是恢复后应当精确等价的那个数字。
+
+    实现要点：
+    * 逐行流式（gzip 分块解压），不把整库 SQL 读进内存；
+    * 数据行到单独一行 ``\\.`` 为止（COPY text 格式把值内的换行转义成 ``\\n``，
+      因此一行恰是一行记录，行数可直接累加）；
+    * 表头按 ``public."table"`` 解析出 schema，支持引号与多点名；
+    * 空表也会有 ``COPY ... FROM stdin;`` + ``\\.``（计 0），与「dump 里没有这张表」
+      （返回缺键）区分开——后者才记 -1。
+    """
+    counts: dict[tuple[str, str], int] = {}
+    current: tuple[str, str] | None = None
+    with gzip.open(path, 'rt', encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            if current is not None:
+                if line.rstrip('\r\n') == '\\.':
+                    current = None
+                else:
+                    counts[current] = counts.get(current, 0) + 1
+                continue
+            if not line.startswith('COPY '):
+                continue
+            match = _COPY_HEADER_RE.match(line.rstrip('\r\n'))
+            if match:
+                current = _split_copy_target(match.group('target').strip())
+                # 空表只有表头 + `\.`（没有数据行）：先置 0，才能把「存在但 0 行」
+                # 与「产物里根本没有这张表」区分开（后者由调用方记 -1）。
+                counts.setdefault(current, 0)
+    return counts
+
+
+def count_rows_in_json_dump(path: Path) -> dict[tuple[str, str], int]:
+    """从 JSON 降级备份里取各表行数（``count``，兼容旧格式的 ``rows`` 列表）。
+
+    带 ``error`` 的表**不**计数（返回缺键 → 上游记 -1）：那张表的数据确实没进
+    备份，用 0 或任何猜测填都会让覆盖度自检失真。
+    """
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    tables = payload.get('tables') or {}
+    counts: dict[tuple[str, str], int] = {}
+    for name, data in tables.items():
+        if not isinstance(data, dict) or data.get('error'):
+            continue
+        raw = data.get('count')
+        if raw is None:
+            rows = data.get('rows')
+            raw = len(rows) if isinstance(rows, list) else None
+        if raw is None:
+            continue
+        counts[('public', str(name))] = int(raw)
+    return counts
+
+
+async def _collect_table_row_counts(
+    db: AsyncSession,
+    dump_file: Path,
+    sql_dump: bool,
+    table_names: list[str],
+    existing_tables: set[str],
+) -> tuple[dict[str, int], str]:
+    """以备份产物为口径统计各表行数，返回 ``(table_stats, rows_source)``。
+
+    ``rows_source`` 决定 manifest 里 rows 的可信度，两种取值：
+    * ``dump``                 —— 行数直接来自产物（SQL 的 COPY 区 / JSON 的 count），
+                                  与恢复校验做全等比较时是同一份数据；
+    * ``exact_count_fallback`` —— 产物不可解析，回退精确 ``COUNT(*)``。它与导出
+                                  不是同一快照，可能漂移，必须在 manifest 里显式标记。
+
+    缺失表记 -1（不猜、不填 0），由 ``_build_coverage`` 归入 count_failed_tables，
+    使「产物缺表」暴露为 complete=False 而不是静默通过。
+    """
+    try:
+        if sql_dump:
+            counts = await asyncio.to_thread(count_rows_in_sql_dump, dump_file)
+        else:
+            counts = await asyncio.to_thread(count_rows_in_json_dump, dump_file)
+    except (OSError, EOFError, ValueError, UnicodeDecodeError, zlib.error) as e:
+        # json.JSONDecodeError 是 ValueError 子类；gzip/zlib 解压错误覆盖在 OSError/zlib.error
+        logger.error(
+            '解析备份产物行数失败，回退精确 COUNT(*)（口径与导出非同一快照，manifest 已标记）: %s', e,
+        )
+        return await _count_tables(db, table_names, existing_tables, exact=True), \
+            ROWS_SOURCE_EXACT_COUNT_FALLBACK
+
+    stats: dict[str, int] = {}
+    for name in table_names:
+        if name not in existing_tables:
+            stats[name] = -1
+            continue
+        rows = counts.get(('public', name))
+        stats[name] = -1 if rows is None else int(rows)
+    missing = sorted(n for n, v in stats.items() if v < 0)
+    if missing:
+        logger.warning(
+            '备份产物中缺失 %d 张表的行数（记 -1，覆盖度判不完整）: %s',
+            len(missing), ', '.join(missing[:10]),
+        )
+    return stats, ROWS_SOURCE_DUMP
+
 
 async def _count_tables(db: AsyncSession, table_names: list[str],
-                        existing_tables: set[str]) -> dict[str, int]:
-    """大表用 pg_class.reltuples 估算，小表精确 COUNT；失败记 -1。库中无表直接 -1。"""
+                        existing_tables: set[str], exact: bool = False) -> dict[str, int]:
+    """统计表行数；失败记 -1，库中无表直接 -1。
+
+    默认（``exact=False``）大表用 pg_class.reltuples 估算、小表精确 COUNT，
+    估算路径保留给「只做覆盖度展示、对长事务 COUNT 敏感」的调用方。
+
+    ``exact=True`` 时**一律**发精确 ``COUNT(*)``，不读 reltuples。用途是**回退路径**
+    （产物不可解析时，见 ``_collect_table_row_counts``）：``manifest['tables'][*]['rows']``
+    会被 ``DrillValidator._validate_data_integrity`` 当作精确期望行数做全等比较，
+    而 reltuples 是统计信息估算值（可能滞后、通常偏低）。生产实证：manifest 里
+    ``audit_log.rows=256824``（reltuples），演练报告 recovered 库为 260880 行
+    （recovery_test_20261101_041001_fbf72c.json）→ 大表恢复正确也必然判失败。
+
+    注意精确 COUNT 仍不是**最佳**口径：它在导出之后另起快照，高写入表可能与 dump
+    内容漂移，因此正常路径改为直接数 dump 的 COPY 区（``count_rows_in_sql_dump``），
+    本函数只在产物无法解析时兜底，且 manifest 会标记 ``rows_source``。
+    """
     estimates: dict[str, int] = {}
-    if table_names:
+    if table_names and not exact:
         try:
             rows = await db.execute(
                 text(
@@ -269,8 +428,9 @@ async def _count_tables(db: AsyncSession, table_names: list[str],
     async def _count_table(tname: str) -> tuple[str, int]:
         if tname not in existing_tables:
             return tname, -1
-        # reltuples 是统计信息估算值（可能滞后），只用于大表避免长事务 COUNT
-        if estimates.get(tname, 0) >= _LARGE_TABLE_ESTIMATE_THRESHOLD:
+        # reltuples 是统计信息估算值（可能滞后），只用于大表避免长事务 COUNT；
+        # exact=True 时跳过估算、逐表精确计数（manifest 行数口径见 docstring）。
+        if not exact and estimates.get(tname, 0) >= _LARGE_TABLE_ESTIMATE_THRESHOLD:
             return tname, estimates[tname]
         nested = await db.begin_nested()
         try:
@@ -378,7 +538,8 @@ def _build_manifest(user, remark: str, partial: bool, include_set, exclude_set,
                     dump_info: dict, baseline_at: str, table_stats: dict[str, int],
                     count_failed_tables: list[str], coverage: dict,
                     checksums: dict, fingerprints: dict,
-                    snapshot_schema: dict[str, list[dict]]) -> dict:
+                    snapshot_schema: dict[str, list[dict]],
+                    rows_source: str = ROWS_SOURCE_DUMP) -> dict:
     """组装 manifest.json（自述 + 覆盖度 + 校验和 + 指纹 + schema 快照）。"""
     manifest = {
         'version': BACKUP_FORMAT_VERSION, 'type': 'partial' if partial else 'full', 'app_version': '2.0',
@@ -399,6 +560,10 @@ def _build_manifest(user, remark: str, partial: bool, include_set, exclude_set,
         # AUD-03：产物自述 dump 格式。JSON 降级包不含 schema、无法空库恢复，
         # evaluate_backup_completeness 据此判 partial（而非静默 success）。
         'dump_format': dump_info.get('format', 'sql'),
+        # 行数口径自述（2026-11-04）：'dump' = 行数取自产物自身（COPY 区 / JSON count，
+        # 与恢复校验同一份数据）；'exact_count_fallback' = 产物不可解析后回退的
+        # 精确 COUNT(*)（与导出非同一快照，可能漂移）。演练/审计据此判断可信度。
+        'rows_source': rows_source,
         'total_rows': sum(v for v in table_stats.values() if v >= 0),
         'dump_size': dump_info.get('dump_size', 0),
         'dump_duration_seconds': dump_info.get('duration_seconds', 0),
@@ -609,13 +774,18 @@ async def _do_create_full_backup(
         )
         existing_tables = {r[0] for r in existing_result.fetchall()}
 
-        table_stats = await _count_tables(db, table_names, existing_tables)
+        db_dump_name = 'database/dump.sql.gz' if pg_dump_available else 'database/dump.json'
+        db_dump_file = dump_path if pg_dump_available else tmpdir_path / 'database' / 'dump.json'
+
+        # 行数口径 = 产物自身（COPY 区 / JSON count），而不是导出后再 COUNT：
+        # 见 _collect_table_row_counts 的 docstring（导出与统计必须同一时点）。
+        table_stats, rows_source = await _collect_table_row_counts(
+            db, db_dump_file, pg_dump_available, table_names, existing_tables,
+        )
         coverage = _build_coverage(existing_tables, table_names, table_stats, pg_dump_available, partial)
         count_failed_tables = coverage['count_failed_tables']
 
         checksums = {}
-        db_dump_name = 'database/dump.sql.gz' if pg_dump_available else 'database/dump.json'
-        db_dump_file = dump_path if pg_dump_available else tmpdir_path / 'database' / 'dump.json'
         if db_dump_file.is_file():
             checksums[db_dump_name] = await asyncio.to_thread(sha256_file, db_dump_file)  # REV-14
 
@@ -624,6 +794,7 @@ async def _do_create_full_backup(
         manifest = _build_manifest(
             user, remark, partial, include_set, exclude_set, dump_info, baseline_at,
             table_stats, count_failed_tables, coverage, checksums, fingerprints, snapshot_schema,
+            rows_source=rows_source,
         )
 
         zip_path = tmpdir_path / 'backup.zip'

@@ -388,6 +388,12 @@ async def readiness_probe():
     B2（2026-10-26）：额外要求「没有悬而未决的数据库还原」——恢复中断标记存在
     或不可读时，数据库可能是空壳，正常业务流量必须被挡住；进程与恢复端点保持
     可用，运维才有受控通道回滚并清除标记。
+
+    2026-11-04（目标库隔离）：判定改由 ``restore_readiness`` 做「标记目标库 vs
+    当前运行库」比较 —— 恢复演练写在 scratch 库上的标记不得把生产就绪打成 503。
+    响应里两个字段分工明确：``restore_pending`` 保持旧契约（是否**阻断本库**
+    readiness，等价于是否需要摘流量），``restore_marker_present`` 才是「磁盘上
+    有没有标记」（含演练/跨库标记），另附 ``restore`` 明细，保证误报与真故障都可见。
     """
     db_ok = await verify_db_connectivity()
     redis_ok = True
@@ -410,11 +416,18 @@ async def readiness_probe():
         restore = {'ok': False, 'state': 'unknown', 'reason': 'check_failed'}
 
     ready = db_ok and redis_ok and restore['ok']
+    # 字段契约分开表达两件事，避免调用方误读：
+    # * restore_pending        —— 旧契约：还原是否**阻断本库** readiness（= not ok）
+    # * restore_marker_present —— 磁盘上是否**存在**标记（含演练/跨库标记，只告警）
+    # * restore_blocks_readiness —— 与 restore_pending 同义，显式命名便于新调用方
+    restore_pending = not restore['ok']
     result = {
         "status": "ready" if ready else "not_ready",
         "database": db_ok,
         "redis": redis_ok,
-        "restore_pending": not restore['ok'],
+        "restore_pending": restore_pending,
+        "restore_marker_present": restore.get('state', 'absent') != 'absent',
+        "restore_blocks_readiness": restore_pending,
         "restore": restore,
     }
     if not ready:
