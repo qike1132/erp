@@ -777,6 +777,16 @@ async def disaster_recovery_test_task(ctx):
             error_msg = f'灾难恢复测试失败: {result.get("error", "未知错误")}'
             logger.error(error_msg)
 
+            # 让调度终态如实记 failed（2026-11-04 修复）：
+            # `_tracked_job` 只把「返回 dict 且 status=='error'」或抛异常视为失败，
+            # 演练服务返回的是 {'overall_success': False, ...} —— 直接 return 会被
+            # on_job_end 记成 success，于是 backup_schedule.last_status 显示"成功"
+            # 而演练实际失败（2026-11-01 生产实测：last_status=success，
+            # recovery_test_*.json 里 overall_success=false）。这会让"灾备是否可用"
+            # 这个最关键信号在调度表里被彻底掩盖。
+            if isinstance(result, dict):
+                result = {**result, 'status': 'error', 'error': error_msg}
+
             # 发送错误告警
             await _send_backup_alert(
                 task_name='disaster_recovery_test',

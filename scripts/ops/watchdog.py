@@ -69,6 +69,20 @@ DEFAULT_SERVICES = "erp-web,erp-prod,erp-arq,erp-redis,erp-redis-broker"
 # *.meta 之类的伴随文件，若一并计入，新鲜度检查会被最近写出的指标文件永远刷绿。
 ARCHIVE_SUFFIXES = (".zip.enc", ".zip", ".tar.gz", ".tgz", ".sql.gz", ".gz", ".sql", ".dump", ".7z", ".enc")
 
+# 备份新鲜度默认阈值（分钟）。
+#
+# 生产实际调度只有**每日一次全量**（`backup_schedule` 实测：full=`42 8 * * *`、
+# cleanup=`0 4 * * *`、integrity_check=`0 3 * * *`、drill=`30 3 1 * *`），
+# 没有小时级增量产物。若把阈值留在 90 分钟，则每天 10:12 起、直到次日 08:45
+# 之间**必然 fail**（约 22 小时/天）—— 恒红的信号等于没有信号，还会淹没真正
+# 的备份停摆告警。25h 与 `fastapi_app/services/backup/freshness.py` 的
+# `BACKUP_STALE_HOURS=25.0` 同口径：正常日备不会被误判，而一旦漏跑，次日
+# 09:45（应跑 08:42 + 约 1 小时宽限）即告警。
+#
+# 若将来真的启用小时级增量，必须在 `.env` 把 `WATCHDOG_BACKUP_MAX_AGE_MINUTES`
+# 显式调回 90 量级，否则停摆的增量要等 25 小时才被发现。
+DEFAULT_BACKUP_MAX_AGE_MINUTES = 1500.0
+
 
 @dataclass
 class CheckResult:
@@ -206,9 +220,13 @@ def check_backup_freshness(backup_dir: Path, max_age_minutes: float) -> CheckRes
     if not newest_name:
         return CheckResult(key, title, FAIL, f"备份目录为空: {backup_dir}")
     age_minutes = (time.time() - newest_mtime) / 60.0
-    detail = f"最新 {newest_name}（{age_minutes:.0f} 分钟前，共 {count} 个归档）"
+    age_text = f"{age_minutes / 60:.1f} 小时" if age_minutes >= 120 else f"{age_minutes:.0f} 分钟"
+    detail = f"最新 {newest_name}（{age_text}前，共 {count} 个归档）"
     if age_minutes > max_age_minutes:
-        return CheckResult(key, title, FAIL, f"{detail}；超过阈值 {max_age_minutes:.0f} 分钟")
+        limit_text = (
+            f"{max_age_minutes / 60:.1f} 小时" if max_age_minutes >= 120 else f"{max_age_minutes:.0f} 分钟"
+        )
+        return CheckResult(key, title, FAIL, f"{detail}；超过阈值 {limit_text}")
     return CheckResult(key, title, OK, detail)
 
 
@@ -454,7 +472,9 @@ def build_options(argv: list[str] | None = None) -> argparse.Namespace:
     options = build_parser().parse_args(argv)
     backup_dir = env_str("WATCHDOG_BACKUP_DIR") or env_str("BACKUP_DIR", "backups/server")
     options.backup_dir = (ROOT / backup_dir) if not Path(backup_dir).is_absolute() else Path(backup_dir)
-    options.backup_max_age_minutes = env_float("WATCHDOG_BACKUP_MAX_AGE_MINUTES", 90.0)
+    options.backup_max_age_minutes = env_float(
+        "WATCHDOG_BACKUP_MAX_AGE_MINUTES", DEFAULT_BACKUP_MAX_AGE_MINUTES
+    )
     min_free = env_float("WATCHDOG_MIN_FREE_SPACE_GB", 0.0)
     options.min_free_gb = max(min_free, env_float("BACKUP_MIN_FREE_SPACE_GB", 10.0), 20.0)
     options.services = [s.strip() for s in env_str("WATCHDOG_SERVICES", DEFAULT_SERVICES).split(",") if s.strip()]

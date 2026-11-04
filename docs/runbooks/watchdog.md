@@ -13,7 +13,7 @@
 | `backend_ready` | `GET {WATCHDOG_BACKEND_URL}/api/health/ready` | 非 200 = fail |
 | `arq_worker` | `GET {WATCHDOG_BACKEND_URL}/api/health/arq` | 200=running；503 `not_running` = fail；`probe_unknown` = warn |
 | `web_entry` | `GET {WATCHDOG_WEB_URL}`（nginx / vite） | 非 200 = fail |
-| `backup_freshness` | `BACKUP_DIR` 下最新**归档**文件（按 `ARCHIVE_SUFFIXES` 白名单，不把 `backup_metrics_*.json` 当备份） | 超过 `WATCHDOG_BACKUP_MAX_AGE_MINUTES`（默认 90）= fail |
+| `backup_freshness` | `BACKUP_DIR` 下最新**归档**文件（按 `ARCHIVE_SUFFIXES` 白名单，不把 `backup_metrics_*.json` 当备份） | 超过 `WATCHDOG_BACKUP_MAX_AGE_MINUTES`（默认 1500 = 25h，与每日全量调度匹配）= fail |
 | `disk_free` | C: / D: 剩余空间 | 低于 `max(WATCHDOG_MIN_FREE_SPACE_GB, BACKUP_MIN_FREE_SPACE_GB, 20)` = fail |
 | `services` | `sc.exe query` 查 NSSM 服务状态 | 仅当 `WATCHDOG_EXPECT_SERVICES=true` 时才检查（dev 形态请保持 false） |
 
@@ -89,7 +89,7 @@ python D:\erp_system\_qa_tmp\s2_webhook_probe.py
 | `WATCHDOG_BACKEND_URL` | `http://127.0.0.1:5002` | 后端地址 |
 | `WATCHDOG_WEB_URL` | `http://127.0.0.1:3000` | Web 入口（nginx 或 vite） |
 | `WATCHDOG_BACKUP_DIR` | `BACKUP_DIR` | 备份目录 |
-| `WATCHDOG_BACKUP_MAX_AGE_MINUTES` | `90` | 备份新鲜度阈值 |
+| `WATCHDOG_BACKUP_MAX_AGE_MINUTES` | `1500` | 备份新鲜度阈值（25h）。**必须与真实调度匹配**：当前只有每日全量（`42 8 * * *`），配 90 会每天恒红 22 小时；若启用小时级增量，再调回 90 量级 |
 | `WATCHDOG_MIN_FREE_SPACE_GB` | `20` | 磁盘水位（与 `BACKUP_MIN_FREE_SPACE_GB` 取大） |
 | `WATCHDOG_ALERT_COOLDOWN_MINUTES` | `30` | 同类告警冷却 |
 | `WATCHDOG_TIMEOUT_SECONDS` | `10` | 单次 HTTP 超时 |
