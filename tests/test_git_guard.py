@@ -156,3 +156,54 @@ def test_git_repo_unreadable_branch_allows_with_override(tmp_path, monkeypatch):
 
     assert ok is True
     assert '覆盖' in msg
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-05：未跟踪的纯文档目录不得阻断生产
+#
+# 事故：他人留下的 deliverables/*.html 未跟踪 → 脏工作区检查 fail-closed →
+# erp-prod 反复被拒、NSSM 进 PAUSED，五个服务全停（2026-11-05 08:10）。
+# 未跟踪的非 Python 文件不会被 import；真正危险的是已跟踪改动与未跟踪 .py。
+# ---------------------------------------------------------------------------
+
+
+def test_untracked_doc_directory_allowed(repo, monkeypatch):
+    monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    monkeypatch.delenv(git_guard.DIRTY_OVERRIDE_ENV, raising=False)
+    _git(repo, 'checkout', '-q', '-b', 'main')
+    doc = repo / 'deliverables' / 'review'
+    doc.mkdir(parents=True)
+    (doc / 'index.html').write_text('<html></html>', encoding='utf-8')
+
+    ok, msg = git_guard.check_production_branch(repo)
+
+    assert ok is True, '未跟踪的纯文档目录不应阻断生产启动'
+    assert '未跟踪' in msg
+
+
+def test_untracked_python_file_blocks(repo, monkeypatch):
+    """未跟踪的 .py 可能被 import，必须继续阻断（2026-10-22 事故形态）。"""
+    monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    monkeypatch.delenv(git_guard.DIRTY_OVERRIDE_ENV, raising=False)
+    _git(repo, 'checkout', '-q', '-b', 'main')
+    (repo / 'new_module.py').write_text('x = 1', encoding='utf-8')
+
+    ok, msg = git_guard.check_production_branch(repo)
+
+    assert ok is False
+    assert 'new_module.py' in msg
+
+
+def test_untracked_directory_containing_python_blocks(repo, monkeypatch):
+    """目录形式也要展开检查：目录里藏着 .py 同样阻断。"""
+    monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    monkeypatch.delenv(git_guard.DIRTY_OVERRIDE_ENV, raising=False)
+    _git(repo, 'checkout', '-q', '-b', 'main')
+    pkg = repo / 'newpkg'
+    pkg.mkdir()
+    (pkg / 'mod.py').write_text('x = 1', encoding='utf-8')
+
+    ok, msg = git_guard.check_production_branch(repo)
+
+    assert ok is False
+    assert 'newpkg' in msg

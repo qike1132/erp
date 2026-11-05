@@ -30,6 +30,23 @@ def is_warning(message: str) -> bool:
     return message.startswith(WARNING_PREFIX) or '覆盖' in message
 
 
+# 未跟踪文件里唯一可能改变生产运行行为的一类：Python 源码（会被 import）。
+_RISKY_UNTRACKED_SUFFIXES = ('.py', '.pyi')
+
+
+def _is_harmless_untracked(line: str) -> bool:
+    """该 porcelain 行是否属于「可以放行的未跟踪文件」。
+
+    只有 ``?? <path>`` 且不是 Python 源码才算无害：文档、图片、导出文件不会
+    被 import，也不会改变已在运行的模块。已跟踪文件的任何改动（`` M``/`` D``/
+    ``R`` 等）一律不算无害——那才是 2026-10-22 事故的形态。
+    """
+    if not line.startswith('?? '):
+        return False
+    path = line[3:].strip().strip('"').lower()
+    return not path.endswith(_RISKY_UNTRACKED_SUFFIXES)
+
+
 def _git(args: list[str], cwd: Path) -> tuple[int, str, str]:
     """执行只读 git 命令，返回 (exitcode, stdout, stderr)；异常不外抛。
 
@@ -122,7 +139,13 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
     # 生产直接吃工作区源码，2026-10-22 事故即「一个文件改了 import 而提供者未提交」，
     # 撤销链路 ImportError 连崩 8 次、采购单静默未撤销。AGENTS §6.1-9 要求
     # `git status --porcelain` 为空；本闸门此前只把「分支必须 main」机器化。
-    code, status, status_err = _git(['status', '--porcelain'], base)
+    #
+    # 2026-11-05 修正（生产事故）：把「任何未跟踪文件」也当阻断项，导致他人留下的
+    # 纯文档目录（deliverables/*.html）直接把生产打死——08:10 重启后 erp-prod 反复
+    # 被拒、NSSM 进 PAUSED，五个服务全停。未跟踪的**非 Python** 文件不会被 import，
+    # 不会改变运行行为；真正危险的是「已跟踪文件被改动」和「未跟踪的 .py」。
+    # 因此用 `-uall` 展开未跟踪目录，逐条判定，只对前两类阻断。
+    code, status, status_err = _git(['status', '--porcelain', '-uall'], base)
     if code != 0:
         # 查不出来按不可放行处理（并发提交的 index.lock 窗口也会走到这里）
         return False, (
@@ -132,10 +155,18 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
     if status:
         if os.environ.get(DIRTY_OVERRIDE_ENV) == '1':
             return True, f'警告：工作区有未提交改动，已被 {DIRTY_OVERRIDE_ENV}=1 放行'
-        changed = [ln for ln in status.splitlines() if ln.strip()][:5]
-        return False, (
-            '工作区有未提交改动，生产将加载半改代码（AGENTS §6.1-9）。'
-            f'请先提交或 stash；确需继续请设置 {DIRTY_OVERRIDE_ENV}=1。改动示例：{changed}'
+        entries = [ln for ln in status.splitlines() if ln.strip()]
+        blocking = [ln for ln in entries if not _is_harmless_untracked(ln)]
+        if blocking:
+            changed = blocking[:5]
+            return False, (
+                '工作区有未提交改动，生产将加载半改代码（AGENTS §6.1-9）。'
+                f'请先提交或 stash；确需继续请设置 {DIRTY_OVERRIDE_ENV}=1。改动示例：{changed}'
+            )
+        sample = entries[:5]
+        return True, (
+            f'警告：工作区有 {len(entries)} 个未跟踪的非 Python 文件（不参与 import），'
+            f'已放行：{sample}'
         )
 
     return True, f'分支校验通过（{branch}）'
