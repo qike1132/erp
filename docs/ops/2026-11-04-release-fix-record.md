@@ -306,3 +306,34 @@ git push erp :<临时 tag>      → - [deleted]（清理，远端 404）
 **验证**：`tests/test_git_guard.py` 由 6 条扩到 9 条全过，新增覆盖"每条 git 调用必须带 safe.directory""有 .git 读不出分支必须拒绝""override 可放行"；CI run `41827087253` 四 job 全绿。
 
 **真实生效信号**：下一次重启日志应出现 `分支校验通过（main）`，而不是 `无法确定 git 分支…已放行`。
+
+## 10. 2026-11-05 08:10 生产启动事故与规则修正
+
+**现象**：服务器管理器重启后 `erp-prod` 持续 `SERVICE_PAUSED`，NSSM 反复拉起失败，最终五个服务全部 Stopped。
+
+**根因**（第 9 节修复的副作用）：`safe.directory` 生效后闸门能读到分支了，但脏工作区检查随即把**他人未跟踪的 `deliverables/*.html` 目录**判为"半改代码"并 fail-closed 拒绝启动：
+
+```text
+[prod_runner] 生产启动被分支闸门拒绝：工作区有未提交改动，生产将加载半改代码（AGENTS §6.1-9）。
+改动示例：['?? deliverables/2026-11-04-pattern-room-redesign/', '?? deliverables/ui-system-review-2026-11-04/']
+```
+
+**判断失误**：把 fail-open 改成 fail-closed 时没有枚举"哪些脏状态是安全的"。未跟踪的文档/图片不会被 import，把它与生产可用性绑定，等于让一个无关目录能停掉全站。
+
+**处置**：
+
+1. 用 `.git/info/exclude` 临时豁免两个目录（可逆、不移动他人文件），恢复启动；验证后已移除该豁免；
+2. `erp-prod` 处于 PAUSED 时 `sc start` 返回 1056，须先 `sc stop` 再 `sc start`；
+3. 规则修正（`e8fbd624`）：只阻断「已跟踪文件的改动」与「未跟踪的 `.py/.pyi`」，其余未跟踪文件放行并告警；用 `git status --porcelain -uall` 展开目录，避免目录里藏 `.py` 被漏检。
+
+**验证**：
+
+```text
+五服务 RUNNING；/api/health 200（commit=07c1a8ae）；/api/health/ready 200；ARQ running
+日志：[prod_runner] 分支校验通过（main）        ← 第 9 节修复的真实生效信号
+真实仓库跑 check_production_branch()：allowed=True
+  警告：工作区有 2 个未跟踪的非 Python 文件（不参与 import），已放行：[...index.html]
+tests/test_git_guard.py：12 passed（9→12）
+```
+
+**遗留**：`e8fbd624` 需重启 `erp-prod`/`erp-arq` 才生效；生效前若服务因故障自动重启，仍会按旧规则拒绝。
