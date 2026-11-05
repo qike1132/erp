@@ -2,10 +2,10 @@
 
 ## 状态
 
-Wave 1–4 已完成：Red 判别力、Green、真库、两次定点变异、独立评审（2 High + 4 Medium 已全部修复）。待推送与 CI。
+已交付：`fc5bda7b`（初版）+ `9cba5831`（评审修复），已推送 `erp/main`；CI run **41969414917 success 12m16s**，4 job（test / frontend / lint / build）全绿。
 
-- `agent_proposed_status`: 实现与评审问题修复完成，全量回归复跑通过。
-- `verifier_status`: 独立窄域评审已产出并闭环；全量 diff 评审代理超时未收口，属工具侧问题，不影响结论。
+- `agent_proposed_status`: 实现、评审问题修复、全量回归、CI 全部通过。
+- `verifier_status`: 独立窄域评审已闭环（2 High + 4 Medium 全修）；全量 diff 评审代理的 B0 为变异测试窗口内的误报，已用 `grep` 与全量回归证伪。
 
 ## 不卡死计数
 
