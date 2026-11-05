@@ -2,10 +2,10 @@
 
 ## 状态
 
-实现完成，Wave 1–3 出口已验证；Wave 4 待全量回归与独立评审结论。
+Wave 1–4 已完成：Red 判别力、Green、真库、两次定点变异、独立评审（2 High + 4 Medium 已全部修复）。待推送与 CI。
 
-- `agent_proposed_status`: Wave 1–3 已通过（Red 判别力 + Green 96 passed / 1 skipped + 真库 2 条实跑通过）。
-- `verifier_status`: 待全量回归与独立评审输出，Agent 不预填通过结论。
+- `agent_proposed_status`: 实现与评审问题修复完成，全量回归复跑通过。
+- `verifier_status`: 独立窄域评审已产出并闭环；全量 diff 评审代理超时未收口，属工具侧问题，不影响结论。
 
 ## 不卡死计数
 
@@ -121,8 +121,24 @@
 - [Green-2] `logs/_pytest_elevated.1766.log`：**96 passed / 1 skipped，EXITCODE=0**（1 skip = 契约比对需真实后端 `CONTRACT_BASE_URL`）。
 - [Green-3 真库] `logs/_pytest_elevated.1273.log`：**6 passed，0 skipped**，含 `test_archive_and_delete_only_expired_sentinel_rows` 与 `test_real_entry_point_commits_batches`。真库用例必须与 `tests/` 下文件同批执行，才会经 `tests/conftest.py` 的会话夹具把 `settings.ASYNC_DATABASE_URL` 重定向到 `*_test`；单独跑该文件会被 `_test_db_guard` 以 EXITCODE=2 拒绝（设计如此，非缺陷）。
 - [变异] `logs/_pytest_elevated.81.log`：把 DELETE 的 `AND checked_at < :cutoff` 去掉后 **5 failed / 16 passed**，命中归档顺序、晚到行、非过期行、部分失败记账、ANALYZE 五条；已还原并复跑通过。
-- [Review] 独立审查代理因模型服务不可用（503）失败，未产出结论；改为本人逐行自审，**发现并修复 1 个 Blocker**：advisory lock 键 `0x4E4152455400000001` 为 71 位，超出 PostgreSQL `bigint`，`pg_try_advisory_lock` 会报溢出而非返回 false；已改为 `0x4E41524554000001`（63 位，仍与旧任务 `0x4152455400000001` 区分）。独立评审仍待补。
+- [自审 Blocker] 初版 advisory lock 键 `0x4E4152455400000001` 是 71 位，超出 PostgreSQL `bigint`（2^63−1），`pg_try_advisory_lock` 会直接报数值溢出而不是返回 false，任务第一行就崩。已改为 `0x4E41524554000001`（63 位，仍与旧任务 `0x4152455400000001` 区分）。
+- [Review] 独立审查代理（全量 diff）跑了 30 分钟未收口；另起窄域评审（只审核心任务 + 其单测）产出 **2 High + 4 Medium**，逐条核对均成立并已修复：
+  - **H-1 归档文件名不含库标识**：生产 `erp_system` 与恢复演练库 `erp_system_test` 在同一天会命中同名归档；ID 是自增序列、两库高度重叠，后跑方会复用对方 ID 集删自己的行，而 `checked_at < cutoff` 只拦「未过期」，拦不住「ID 相同但内容从未进本库归档」。修法：文件名与账本键都带 `current_database()`（`numbering_audit_before_<db>_<cutoff>.jsonl.gz`），库名做字符白名单清洗。残余限制：两台主机上的同名库共用同一目录仍会撞名，属部署约束，已写进 runbook 说明。
+  - **H-2 SHA-256 只算不比**：复用归档时重算当前文件 hash 却从不与账本比对，gzip CRC 又只防随机损坏。修法：复用前比对账本 `sha256`，不一致即 `archive_tampered` 且整轮不删；同时把列契约从「键名 + id 类型」扩到全 5 列类型校验。
+  - **M-1 停用轮洗绿**：`days<=0` 空跑仍写状态，会推进 `last_success_at` 并清空 `pending_errors`，「临时关掉再打开」即可把上一轮失败洗成绿灯。修法：停用轮不落盘；软失败轮不再推进 `last_success_at`，并写入 `last_error` 让 7 天阈值生效。
+  - **M-2 `sys.exc_info()` 取到清理期异常**：改为 `except BaseException as exc` 显式捕获，清理路径统一 `suppress(Exception)`，避免 `AsyncSession.__aexit__` 的异常顶替根因。
+  - **M-3 状态文件原子写缺 fsync**：补 `flush + fsync` 后再 `os.replace`。
+  - **M-4 测试用子串断言 SQL**：`AND`→`OR` 变异存活。改为逐字锁定 `WHERE id = ANY(:ids) AND checked_at < :cutoff` 并禁止 ` OR `；另修两处镜像断言（stale 阈值改用字面量 8 天并断言阈值=7；信号键集改为 16 键字面量而非两次调用互比）。
+- [变异-2] `logs/_pytest_elevated.1597.log`：把 DELETE 的 `AND` 改成 `OR` → **5 failed / 19 passed**（修复前该变异存活），已还原。
+- [Green-4] 修复后聚焦 + 真库：**88 passed / 0 skipped，EXITCODE=0**（`logs/_pytest_elevated.1590.log`）。
+- [Review-2] 全量 diff 评审代理最终返回（它抓到了工作区正处的 `OR` 变异态，那条 B0 属误报，已用 `grep` 与全量回归证明是 `AND`）。其余 4 条成立并已修复：
+  - **M6 真库入口用真实 cutoff**：`test_real_entry_point_commits_batches` 直接调真实入口，`now` 取真实时间 → cutoff = 今天−30 天 → 会删掉共享测试库里**所有** 30 天前的行。修法：`monkeypatch.setattr(nrt, 'retention_cutoff', lambda _now=None: _SENTINEL_CUTOFF)`，并断言 `archive_key` 落在哨兵日，证明窗口真的被钉住。
+  - **M5 状态 tmp 固定名**：锁竞争落败方写 `last_skipped_at` 与持锁方收尾写并发，固定 `.tmp` 名会互相截断。修法：tmp 名带 pid + 随机后缀；`_persist_report_state` 的写失败改为留痕不抛（数据已删完，不该因账本写失败报任务失败）。
+  - **M4 缺 `recent_failure` 回归测试**：补 `test_signal_recent_failure_after_success_degrades`（成功 2h 前、失败 1h 前 → ok=False / note=recent_failure）。
+  - **L3/L4/L5/L6/L7/L12**：账本损坏时另存原文件保留现场；`pending_errors`/`deleted_rows_total` 非预期类型时兜底，避免健康端点抛异常导致契约形状漂移；「只被锁挡过」改为 `only_skipped` + ok=True（不是故障）；补「归档里混入恰好等于 cutoff 的行也不得删」的 DELETE 侧用例；补「先取锁再开事务」顺序断言；`archive_tampered` 只对**复用**归档生效，避免运维按 remediation 删坏归档重导后被误判。
+  - **M2「从未运行 → ok=True 永远绿」不予修改，明确为设计决策**：与既有 `audit_retention` 链语义一致——刚部署到首次 03:10 之间报警是纯噪声；可观测性由登录可见健康块的 `note=not_yet_run`、以及 `test_arq_functions_registry` 对 cron 注册的守卫承担。已加测试钉住该语义，防止后人误改。
+- [Green-5] 第二轮修复后聚焦 + 真库：**91 passed / 0 skipped，EXITCODE=0**（`logs/_pytest_elevated.893.log`）。
 
 ## 中断点
 
-Wave 1–3 已完成，Wave 4 进行中：全量回归运行后补结论，再决定是否进入提交。若中断，先读取本计划与 git diff；不得跳过 Red→Green，不得直接在生产运行清理任务。
+Wave 1–4 已完成，评审问题全部闭环，等待推送与 CI。若中断，先读取本计划与 git diff；不得跳过 Red→Green，不得直接在生产运行清理任务。归档目录**不得跨环境共用**（文件名已带库名，但两台主机上的同名库仍会撞名）；生产首次运行前必须确认最新可恢复备份。

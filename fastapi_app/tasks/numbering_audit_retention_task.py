@@ -10,11 +10,12 @@ import hashlib
 import json
 import logging
 import os
-import sys
+import re
 import zlib
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -38,6 +39,8 @@ _EXPORT_SELECT = (
     'SELECT id, scope, counter_behind, detail, checked_at FROM numbering_audit '
     'WHERE checked_at < :cutoff AND id > :cursor ORDER BY id LIMIT :batch'
 )
+#: 归档文件名只允许这些字符，避免库名里的路径分隔符/通配符改写落盘位置。
+_SAFE_NAME = re.compile(r'[^A-Za-z0-9_.-]')
 
 
 def _as_utc(value: datetime | None) -> datetime:
@@ -57,8 +60,23 @@ def archive_dir_path(raw: str | None = None) -> Path:
     return path if path.is_absolute() else _PROJECT_ROOT / path
 
 
-def _archive_path(archive_dir: Path, cutoff: datetime) -> Path:
-    return archive_dir / f'numbering_audit_before_{cutoff:%Y%m%d}.jsonl.gz'
+def _archive_path(archive_dir: Path, cutoff: datetime, db_name: str) -> Path:
+    """归档文件名必须带库标识。
+
+    只按日期命名时，两个库（生产 `erp_system` 与恢复演练用的 `erp_system_test`，
+    或任何共用归档目录的环境）在同一天会命中**同名归档**：后跑的一方复用对方的
+    ID 集去删自己的行。ID 是自增序列、两库高度重叠，而 `checked_at < cutoff`
+    只拦「未过期」，拦不住「ID 相同但内容从未进本库归档」——那部分是真实的数据
+    丢失且无任何 error 上报。库名进文件名后，不同库天然不共享归档。
+    """
+    safe = _SAFE_NAME.sub('_', db_name or 'unknown') or 'unknown'
+    return archive_dir / f'numbering_audit_before_{safe}_{cutoff:%Y%m%d}.jsonl.gz'
+
+
+async def _current_database(db: AsyncSession) -> str:
+    """取当前连接的库名（以数据库为准，而不是配置里可能被改写的 URL）。"""
+    value = (await db.execute(text('SELECT current_database()'))).scalar()
+    return str(value or 'unknown')
 
 
 def _sha256_of(path: Path) -> str:
@@ -78,7 +96,7 @@ def _read_archive(path: Path) -> dict:
                 if not line.strip():
                     continue
                 row = json.loads(line)
-                if tuple(row) != _COLUMNS or type(row.get('id')) is not int:
+                if not _row_matches_contract(row):
                     raise OSError(f'归档列契约不符: {path}')
                 ids.append(row['id'])
     except (zlib.error, EOFError, UnicodeError, json.JSONDecodeError) as exc:
@@ -88,22 +106,42 @@ def _read_archive(path: Path) -> dict:
     return {'path': str(path), 'rows': len(ids), 'ids': ids, 'sha256': _sha256_of(path)}
 
 
+def _row_matches_contract(row) -> bool:
+    """键序 + 全列类型都要对得上。
+
+    只校验键名与 id 会让「本地改一个 id」变成合法删除依据；四列类型一起校验后，
+    伪造/半截归档会在删除前就被挡下（方向是 fail-closed，不是静默放行）。
+    """
+    if not isinstance(row, dict) or tuple(row) != _COLUMNS:
+        return False
+    return (
+        type(row['id']) is int
+        and isinstance(row['scope'], str)
+        and type(row['counter_behind']) is int
+        and isinstance(row['detail'], str)
+        and isinstance(row['checked_at'], str)
+    )
+
+
 async def _expired_count(db: AsyncSession, cutoff: datetime) -> int:
     return int((await db.execute(text(
         'SELECT count(*) FROM numbering_audit WHERE checked_at < :cutoff'
     ), {'cutoff': cutoff})).scalar() or 0)
 
 
-async def _export_expired_jsonl(db: AsyncSession, cutoff: datetime, archive_dir: Path) -> dict:
+async def _export_expired_jsonl(
+    db: AsyncSession, cutoff: datetime, archive_dir: Path, db_name: str,
+) -> dict:
     archive_dir.mkdir(parents=True, exist_ok=True)
-    path = _archive_path(archive_dir, cutoff)
+    path = _archive_path(archive_dir, cutoff, db_name)
     if path.exists():
         return {**_read_archive(path), 'existed': True}
 
     planned = await _expired_count(db, cutoff)
     ids: list[int] = []
     cursor = -1
-    tmp = path.parent / (path.name + '.tmp')
+    # 归档只在持锁的入口内写，但直接调用（测试/运维脚本）仍可能并发；tmp 名带随机后缀。
+    tmp = path.parent / f'{path.name}.{os.getpid()}.{uuid4().hex[:8]}.tmp'
     with open(tmp, 'wb') as raw:
         with gzip.GzipFile(fileobj=raw, mode='wb') as gz:
             while True:
@@ -153,9 +191,20 @@ def read_retention_state(state_path: Path | None = None) -> dict | None:
 
 
 def _write_state(state: dict, state_path: Path) -> None:
+    """原子写状态账本：tmp → fsync → replace。
+
+    rename 只保证「读者看不到半个文件」，不保证内容已落盘；断电后可能读到空文件
+    （会走 state_unreadable 降级，方向安全，但 `deleted_rows_total` 账本会回退）。
+    归档侧本来就做了 fsync，状态侧对齐。
+    """
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = state_path.parent / (state_path.name + '.tmp')
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding='utf-8')
+    # tmp 名带 pid + 随机后缀：锁竞争时落败方会写 last_skipped_at，与持锁方的
+    # 收尾写并发；固定 tmp 名会让两者互相覆盖/截断。
+    tmp = state_path.parent / f'{state_path.name}.{os.getpid()}.{uuid4().hex[:8]}.tmp'
+    with open(tmp, 'w', encoding='utf-8') as handle:
+        handle.write(json.dumps(state, ensure_ascii=False, indent=1))
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(tmp, state_path)
 
 
@@ -230,6 +279,12 @@ def _persist_report_state(report: dict, state_path: Path, now: datetime) -> None
     corrupt_ledger = previous.get('deleted_rows_total_corrupt')
     if previous_total is not None and type(previous_total) is not int:
         corrupt_ledger = {'value': str(previous_total)[:40], 'detected_at': now.isoformat()}
+        # 另存原文件：直接覆盖会把「账本是怎么坏的」这段现场一起抹掉。
+        with suppress(OSError):
+            os.replace(
+                state_path,
+                state_path.parent / f'{state_path.name}.corrupt-{now:%Y%m%d%H%M%S}',
+            )
         report['errors'].append({
             'error': 'ledger_corrupt', 'value': corrupt_ledger['value'],
             'remediation': '按归档与备份人工回填 deleted_rows_total',
@@ -241,18 +296,33 @@ def _persist_report_state(report: dict, state_path: Path, now: datetime) -> None
             'path': str(Path(archive['path']).resolve()),
             'rows': archive['rows'], 'sha256': archive['sha256'],
         }
+    errors = report['errors']
     state = {
-        'last_success_at': now.isoformat(),
+        # 只有「干净跑完」才推进 last_success_at：软失败（archive_failed 等）若也
+        # 刷新它，7 天停摆阈值会被每轮失败不断续命，永远不触发。
+        'last_success_at': (
+            now.isoformat() if not errors else previous.get('last_success_at')
+        ),
         'last_attempt_at': now.isoformat(),
+        'last_error': errors[0]['error'] if errors else None,
         'last_skipped_at': previous.get('last_skipped_at'),
         'skip_reason': previous.get('skip_reason'),
         'retention_days': report['retention_days'],
         'deleted_rows_total': _as_int(previous_total) + report['deleted_total'],
         'deleted_rows_total_corrupt': corrupt_ledger,
         'archive_files': archives,
-        'pending_errors': report['errors'],
+        'pending_errors': errors,
     }
-    _write_state(state, state_path)
+    try:
+        _write_state(state, state_path)
+    except OSError as exc:
+        # Windows 下另一进程正在读账本时 os.replace 可能 PermissionError；
+        # 写失败不应让整轮任务失败（数据已经删完），但要留痕。
+        logger.exception('numbering_audit 保留治理: 状态写入失败（%s）', state_path)
+        report['errors'].append({
+            'error': 'state_write_failed', 'detail': f'{type(exc).__name__}: {exc}',
+            'remediation': '检查 logs 目录权限与是否有其他进程长期占用账本文件',
+        })
 
 
 async def _maybe_analyze(db: AsyncSession, report: dict) -> None:
@@ -286,12 +356,14 @@ async def run_retention_once(
     }
     if days > 0:
         cutoff = retention_cutoff(now)
-        report['archive_key'] = cutoff.date().isoformat()
+        db_name = await _current_database(db)
+        # 账本键与归档文件名都带库标识：跨库共用归档目录时不会互相复用 ID 集。
+        report['archive_key'] = f'{db_name}:{cutoff.date().isoformat()}'
         planned = await _expired_count(db, cutoff)
         if planned:
             archive = None
             try:
-                archive = await _export_expired_jsonl(db, cutoff, archive_dir)
+                archive = await _export_expired_jsonl(db, cutoff, archive_dir, db_name)
                 report['archive'] = {k: v for k, v in archive.items() if k != 'ids'}
             except (OSError, SQLAlchemyError) as exc:
                 with suppress(SQLAlchemyError):
@@ -301,7 +373,21 @@ async def run_retention_once(
                     'remediation': '检查归档目录权限、磁盘空间和数据库锁；坏归档改名后重导',
                 })
             if archive is not None:
-                if not archive['existed'] and archive['rows'] != planned:
+                recorded = (
+                    (read_retention_state(state_path) or {}).get('archive_files') or {}
+                ).get(report['archive_key']) or {}
+                if (archive['existed'] and recorded.get('sha256')
+                        and recorded['sha256'] != archive['sha256']):
+                    # 只对**复用**的归档比对：本轮新导出的文件 hash 天然与旧账本不同，
+                    # 若也比对，运维按 remediation 删掉坏归档重导会被误判成篡改。
+                    # gzip CRC 只防随机损坏，防不住同长度改写，所以要比对账本 hash。
+                    report['errors'].append({
+                        'error': 'archive_tampered',
+                        'recorded_sha256': recorded['sha256'],
+                        'actual_sha256': archive['sha256'],
+                        'remediation': '归档与账本不一致，本轮不删除；核对归档来源或按备份恢复',
+                    })
+                elif not archive['existed'] and archive['rows'] != planned:
                     report['errors'].append({
                         'error': 'archive_row_mismatch',
                         'planned_rows': planned, 'archived_rows': archive['rows'],
@@ -335,7 +421,9 @@ async def run_retention_once(
                             'remediation': '归档已保留；修复锁/连接问题后下一轮续删',
                         })
         await _maybe_analyze(db, report)
-    _persist_report_state(report, state_path, now)
+        # 停用（days<=0）时**不写状态**：否则一轮空跑会推进 last_success_at 并清空
+        # pending_errors，"临时关掉再打开"就能把上一轮失败洗成绿灯。
+        _persist_report_state(report, state_path, now)
     return report
 
 
@@ -355,8 +443,15 @@ async def numbering_audit_retention_task(ctx) -> dict:
                 await conn.rollback()
             async with AsyncSession(bind=conn, join_transaction_mode='control_fully') as db:
                 report = await run_retention_once(db)
+        except BaseException as exc:
+            # 显式捕获原始异常。放在 finally 里用 sys.exc_info() 的话，
+            # AsyncSession.__aexit__ 抛出的清理期异常会顶替真实根因写进 last_error。
+            with suppress(Exception):
+                write_failure_state(exc)
+            raise
         finally:
-            with suppress(SQLAlchemyError):
+            # 清理路径一律 suppress(Exception)：任何清理期异常都不该顶替原始根因。
+            with suppress(Exception):
                 await conn.rollback()
             try:
                 released = (await conn.execute(
@@ -365,10 +460,8 @@ async def numbering_audit_retention_task(ctx) -> dict:
                     logger.error('numbering_audit 保留治理: advisory lock 未能释放')
             except SQLAlchemyError:
                 logger.exception('numbering_audit 保留治理: advisory lock 释放失败')
-                with suppress(SQLAlchemyError):
+                with suppress(Exception):
                     await conn.invalidate()
-            if report is None:
-                write_failure_state(sys.exc_info()[1])
     logger.info(
         'numbering_audit 保留治理完成: deleted=%d errors=%d',
         report['deleted_total'], len(report['errors']),
@@ -397,10 +490,17 @@ def numbering_audit_retention_signal() -> dict:
     state = read_retention_state()
     if state is None or not state.get('last_success_at'):
         if not STATE_PATH.exists():
+            # 从未运行：中性（ok=True）。与既有 audit_retention 链一致——刚部署
+            # 到首次 03:10 之间不该报警；运维在登录可见的健康块里能看到
+            # note=not_yet_run，cron 注册另有单测守着。
             return _signal(note='not_yet_run', retention_days=days)
         attempted = bool((state or {}).get('last_attempt_at'))
+        skipped_only = bool((state or {}).get('last_skipped_at')) and not attempted
         return _signal(
-            ok=False, note='never_succeeded' if attempted else 'state_unreadable',
+            # 只被锁挡过（从未真正跑过）不是故障：持锁方正在跑同一件事。
+            ok=skipped_only,
+            note=('only_skipped' if skipped_only
+                  else 'never_succeeded' if attempted else 'state_unreadable'),
             retention_days=days,
             last_attempt_at=(state or {}).get('last_attempt_at'),
             last_error=(state or {}).get('last_error'),
@@ -412,11 +512,15 @@ def numbering_audit_retention_signal() -> dict:
         return _signal(ok=False, note='state_unreadable', retention_days=days,
                        state_path=str(STATE_PATH))
     age_days = (datetime.now(UTC) - last) / timedelta(days=1)
-    pending = state.get('pending_errors') or []
+    pending = state.get('pending_errors')
+    if not isinstance(pending, list):
+        # 账本被手工改坏时不得抛异常：健康端点会 fallback 成 2 键形状并造成契约漂移。
+        pending = [{'error': 'pending_errors_corrupt'}]
     attempt = _parse_ts(state.get('last_attempt_at'))
     recent_failure = bool(
         state.get('last_error') and attempt is not None and attempt > last,
     )
+    total = state.get('deleted_rows_total')
     return _signal(
         ok=age_days <= STALE_DAYS and not pending and not recent_failure,
         note='recent_failure' if recent_failure else None,
@@ -426,7 +530,8 @@ def numbering_audit_retention_signal() -> dict:
         skip_reason=state.get('skip_reason'),
         last_error=state.get('last_error'),
         age_days=round(age_days, 1), retention_days=state.get('retention_days', days),
-        deleted_rows_total=state.get('deleted_rows_total'),
+        # 非 int（被改坏）时归零而不是把 object 塞进响应，否则契约形状会漂。
+        deleted_rows_total=total if type(total) is int else None,
         ledger_corrupt=state.get('deleted_rows_total_corrupt') or None,
         pending_errors=pending[:5], pending_error_count=len(pending),
     )

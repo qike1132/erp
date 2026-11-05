@@ -22,6 +22,9 @@ _ID_LO, _ID_HI = 900_000, 900_999
 _OLD = datetime(1000, 1, 1, 3, 0, tzinfo=UTC)
 _FUTURE = datetime(2099, 1, 1, 3, 0, tzinfo=UTC)
 _NOW = datetime(1000, 2, 15, 12, 0, tzinfo=UTC)
+#: 真实入口用真实 now 会算出「今天−30天」，把共享测试库里所有 30 天前的行一起删掉。
+#: 入口用例必须把 cutoff 钉在这个哨兵日：只覆盖 _OLD、不碰 _FUTURE 与其它数据。
+_SENTINEL_CUTOFF = datetime(1000, 2, 1, tzinfo=UTC)
 
 
 def _test_db_url() -> str:
@@ -123,6 +126,11 @@ async def test_archive_and_delete_only_expired_sentinel_rows(pg_engine, tmp_path
     assert report['deleted_total'] == len(old_ids)
     archives = list(tmp_path.glob('numbering_audit_before_*.jsonl.gz'))
     assert len(archives) == 1
+    async with pg_engine.connect() as conn:
+        db_name = (await conn.execute(text('SELECT current_database()'))).scalar()
+    assert archives[0].name == f'numbering_audit_before_{db_name}_10000116.jsonl.gz', (
+        '归档文件名必须带真实库名，否则生产库与恢复演练库会互相复用 ID 集'
+    )
     with gzip.open(archives[0], 'rt', encoding='utf-8') as gz:
         archived = [json.loads(line)['id'] for line in gz.read().splitlines()]
     assert sorted(archived) == old_ids
@@ -153,8 +161,11 @@ async def test_real_entry_point_commits_batches(pg_engine, tmp_path, monkeypatch
     monkeypatch.setattr(nrt, 'require_async_engine', lambda: pg_engine)
     monkeypatch.setattr(nrt, 'archive_dir_path', lambda _raw=None: tmp_path)
     monkeypatch.setattr(nrt, 'STATE_PATH', tmp_path / 'state.json')
+    # 钉住 cutoff：否则真实入口按「今天−30天」清掉共享测试库里所有历史行。
+    monkeypatch.setattr(nrt, 'retention_cutoff', lambda _now=None: _SENTINEL_CUTOFF)
 
     report = await nrt.numbering_audit_retention_task({})
+    assert report['archive_key'].endswith('1000-02-01'), '窗口未按哨兵 cutoff 计算'
     assert report['deleted_total'] == len(ids)
     async with pg_engine.connect() as conn:
         left = (await conn.execute(text(
