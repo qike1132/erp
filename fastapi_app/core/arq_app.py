@@ -244,6 +244,7 @@ from fastapi_app.tasks.maintenance_tasks import (
     maintain_logs_task,
     refresh_dashboard_mv_task,
 )
+from fastapi_app.tasks.numbering_audit_retention_task import numbering_audit_retention_task
 from fastapi_app.tasks.numbering_audit_task import numbering_audit_task
 from fastapi_app.tasks.plan_tasks import (
     batch_import_plans_task,
@@ -261,7 +262,10 @@ from fastapi_app.tasks.report_tasks import export_report_task
 # 注意它只是上限——任务体必须抛 ``Retry`` 才会真正重放（ARQ 0.28 语义）。
 
 # 日级 cron：worker 停机跨越触发点会永久漏跑，由 catch_up_daily_crons 补跑
-_DAILY_CRON_NAMES = {"sync-shipment-daily", "log-maintenance", "deadletter-patrol", "audit-retention"}
+_DAILY_CRON_NAMES = {
+    "sync-shipment-daily", "log-maintenance", "deadletter-patrol", "audit-retention",
+    "numbering-audit-retention",
+}
 _CRON_LAST_OK_PREFIX = "cron_last_ok:"
 
 
@@ -352,6 +356,15 @@ cron_schedules: list[dict[str, Any]] = [
         'func': audit_retention_task,
         'cron': {'hour': 3, 'minute': 0},
         'schedule': '3:00',
+        'timeout': 600,
+    },
+    {
+        # numbering_audit 保留治理：03:10 与 03:00 audit_log 清理错峰。
+        # 归档先行 + 独立 advisory lock；日级补跑和手工触发共用同一入口。
+        'name': 'numbering-audit-retention',
+        'func': numbering_audit_retention_task,
+        'cron': {'hour': 3, 'minute': 10},
+        'schedule': '3:10',
         'timeout': 600,
     },
     {
@@ -554,6 +567,7 @@ class WorkerSettings:
             # audit-retention 亦为日级 cron + catchup 按名入队（P1-R2），必须注册，
             # 否则停机跨触发点后的补跑会 KeyError 且静默失败
             audit_retention_task,
+            numbering_audit_retention_task,
         )
     ]
     cron_jobs = cron_jobs

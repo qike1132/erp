@@ -159,14 +159,32 @@ def _audit_retention_signal() -> dict:
         return {"ok": True, "note": "signal_error"}
 
 
-def _resolve_status(overall_healthy: bool, backup_ok: bool, audit_retention_ok: bool) -> str:
+def _numbering_audit_retention_signal() -> dict:
+    """numbering_audit 保留治理信号；健康端点不得因读取异常而 500。"""
+    try:
+        from fastapi_app.tasks.numbering_audit_retention_task import (
+            numbering_audit_retention_signal,
+        )
+
+        return numbering_audit_retention_signal()
+    except Exception as exc:  # defensive: 与既有保留链相同的中性降级语义
+        logger.warning("numbering_audit 保留策略信号读取异常: %s", exc)
+        return {"ok": True, "note": "signal_error"}
+
+
+def _resolve_status(
+    overall_healthy: bool,
+    backup_ok: bool,
+    audit_retention_ok: bool,
+    numbering_audit_retention_ok: bool,
+) -> str:
     """健康状态判定（纯函数，便于回归：状态语义不能只活在 if 分支里）。
 
     - DB 不通 → unhealthy（HTTP 503）；
     - DB 通但**任一数据保护链**不 ok → degraded（仍 200，不触发监督器重启，
       但 GUI/巡检可据 status 区分）。
 
-    两条链：
+    三条链：
     - ``backup``：2026-10-17 审计 F-BE-CORE-05——备份产物过期/ARQ 停摆原先只
       写进 backup 字段，状态码仍 200 healthy，监督器与外部探活全绿，数据保护链
       静默失效无人可见（2026-09-16 那类事故的观察缺口）。
@@ -175,10 +193,12 @@ def _resolve_status(overall_healthy: bool, backup_ok: bool, audit_retention_ok: 
       自证是策略性滚动清理。ARQ 整体停摆时两条链会同时不 ok（_backup_signal 含
       arq_ok），根因仍只体现在 backup 字段，此处不重复报警，只为让「ARQ 在跑
       但保留任务持续失败」这种更隐蔽的形态可见。
+    - ``numbering_audit_retention``：编号巡检持续写入，保留任务失败会让表
+      无限增长；pending error、最近整体失败或超过 7 天未成功均只降级、不摘流量。
     """
     if not overall_healthy:
         return "unhealthy"
-    if not backup_ok or not audit_retention_ok:
+    if not backup_ok or not audit_retention_ok or not numbering_audit_retention_ok:
         return "degraded"
     return "healthy"
 
@@ -233,7 +253,7 @@ def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[s
 
     health_data = dict(cached_public)
     internal = _health_cache["internal_data"] or {}
-    for _key in ("backup", "audit_retention"):
+    for _key in ("backup", "audit_retention", "numbering_audit_retention"):
         if _key in internal:
             health_data[_key] = internal[_key]
     health_data["version"] = settings.APP_VERSION
@@ -280,17 +300,20 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str]):
     # 匿名侧只保留「服务是否活着」；备份/审计/连接池属内部运维信号，登录后才可见。
     backup_signal = await _backup_signal()
     audit_signal = _audit_retention_signal()
+    numbering_retention_signal = _numbering_audit_retention_signal()
     public_data = {
         "status": _resolve_status(
             overall_healthy=overall_healthy,
             backup_ok=backup_signal.get("ok", False),
             audit_retention_ok=audit_signal.get("ok", False),
+            numbering_audit_retention_ok=numbering_retention_signal.get("ok", False),
         ),
         "app": settings.APP_NAME,
     }
     internal_data = {
         "backup": backup_signal,
         "audit_retention": audit_signal,
+        "numbering_audit_retention": numbering_retention_signal,
         "checks": internal_checks,
     }
     _set_cached_health(public_data=public_data, internal_data=internal_data)
@@ -301,6 +324,7 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str]):
     if user_id is not None:
         health_data["backup"] = backup_signal
         health_data["audit_retention"] = audit_signal
+        health_data["numbering_audit_retention"] = numbering_retention_signal
         health_data["version"] = settings.APP_VERSION
         health_data["checks"] = dict(internal_checks)
         try:

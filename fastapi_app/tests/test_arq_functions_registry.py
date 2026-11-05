@@ -57,3 +57,12 @@ def test_trigger_endpoint_backed_functions_are_registered():
         assert fn_name in registered, (
             f'{fn_name} 不在 WorkerSettings.functions：按名入队必永久失败（AUD-06）'
         )
+
+
+def test_numbering_audit_retention_is_daily_and_registered():
+    registered = _registered_names()
+    entry = next(s for s in arq_app.cron_schedules if s['name'] == 'numbering-audit-retention')
+    assert entry['cron'] == {'hour': 3, 'minute': 10}
+    assert entry['func'].__name__ == 'numbering_audit_retention_task'
+    assert entry['func'].__name__ in registered
+    assert 'numbering-audit-retention' in arq_app._DAILY_CRON_NAMES

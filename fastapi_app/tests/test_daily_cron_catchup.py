@@ -51,6 +51,12 @@ async def test_missed_daily_cron_enqueued_once(monkeypatch):
     assert first, "漏跑的日级 cron 必须被入队"
     assert fake_pool.enqueued == first, "重复采样不得重复入队"
     assert len({job_id for _, job_id in first}) == len(first)
+    from fastapi_app.core.business_time import business_today
+    expected_job = (
+        'numbering_audit_retention_task',
+        f'catchup:numbering-audit-retention:{business_today().isoformat()}',
+    )
+    assert expected_job in first
     # 入队 ≠ 成功：scanner 不得预写 cron_last_ok（否则失败重试后当天不再补跑）
     assert not any(k.startswith("cron_last_ok:") for k in fake_redis.store)
 
@@ -67,8 +73,9 @@ async def test_success_callback_marks_day(monkeypatch):
     monkeypatch.setattr("fastapi_app.core.redis_wrapper.safe_set", _safe_set)
 
     from fastapi_app.core.arq_callbacks import _mark_daily_cron_success
-    from fastapi_app.tasks.plan_tasks import sync_shipment_records_task
+    from fastapi_app.core.business_time import business_today
+    from fastapi_app.tasks.numbering_audit_retention_task import numbering_audit_retention_task
 
-    await _mark_daily_cron_success({"_job_function": sync_shipment_records_task})
+    await _mark_daily_cron_success({"_job_function": numbering_audit_retention_task})
 
-    assert any(k.startswith("cron_last_ok:") for k in stored), stored
+    assert stored["cron_last_ok:numbering-audit-retention"] == business_today().isoformat()

@@ -27,12 +27,16 @@ def _healthy_dependencies(monkeypatch: pytest.MonkeyPatch):
     def _audit() -> dict:
         return {'ok': True, 'status': 'healthy', 'archive_dir': '/secret/audit'}
 
+    def _numbering_retention() -> dict:
+        return {'ok': True, 'status': 'healthy', 'archive_dir': '/secret/numbering'}
+
     async def _redis():
         return _PingableRedis()
 
     monkeypatch.setattr(health, 'verify_db_connectivity', _db_ok)
     monkeypatch.setattr(health, '_backup_signal', _backup)
     monkeypatch.setattr(health, '_audit_retention_signal', _audit)
+    monkeypatch.setattr(health, '_numbering_audit_retention_signal', _numbering_retention)
     monkeypatch.setattr(
         'fastapi_app.core.redis_client.get_async_redis_client', _redis,
     )
@@ -48,6 +52,7 @@ async def test_anonymous_health_hides_operational_detail(
     body = await health._build_fresh_health(None, [])
     assert 'backup' not in body
     assert 'audit_retention' not in body
+    assert 'numbering_audit_retention' not in body
     assert 'checks' not in body
     assert body['status'] == 'healthy'
 
@@ -59,4 +64,24 @@ async def test_authenticated_health_keeps_operational_detail(
     body = await health._build_fresh_health(42, [])
     assert 'backup' in body
     assert 'audit_retention' in body
+    assert body['numbering_audit_retention']['archive_dir'] == '/secret/numbering'
     assert 'checks' in body
+
+
+def test_numbering_retention_failure_degrades_health() -> None:
+    assert health._resolve_status(
+        True, True, True, numbering_audit_retention_ok=False,
+    ) == 'degraded'
+
+
+def test_cached_health_keeps_numbering_retention_for_authenticated_user() -> None:
+    saved = dict(health._health_cache)
+    health._health_cache['internal_data'] = {
+        'numbering_audit_retention': {'ok': True, 'archive_dir': '/secret/numbering'},
+    }
+    try:
+        body = health._health_from_cache({'status': 'healthy', 'app': 'erp'}, 42, [])
+        assert body['numbering_audit_retention']['archive_dir'] == '/secret/numbering'
+    finally:
+        # 缓存是模块级全局；不还原会污染同会话后续用例的 fresh-health 断言。
+        health._health_cache.update(saved)

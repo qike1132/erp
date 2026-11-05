@@ -1142,11 +1142,12 @@ def test_status_resolution_maps_retention_to_degraded():
     """状态判定是对外可观测承诺，必须能被单测直接打（评审 M7）。"""
     from fastapi_app.core.health import _resolve_status
 
-    assert _resolve_status(True, True, True) == 'healthy'
-    assert _resolve_status(True, True, False) == 'degraded'
-    assert _resolve_status(True, False, True) == 'degraded'
-    assert _resolve_status(True, False, False) == 'degraded'
-    assert _resolve_status(False, True, True) == 'unhealthy'
+    assert _resolve_status(True, True, True, True) == 'healthy'
+    assert _resolve_status(True, True, False, True) == 'degraded'
+    assert _resolve_status(True, False, True, True) == 'degraded'
+    assert _resolve_status(True, False, False, True) == 'degraded'
+    assert _resolve_status(False, True, True, True) == 'unhealthy'
+    assert _resolve_status(True, True, True, False) == 'degraded'
 
 
 async def test_health_degrades_end_to_end(monkeypatch):
@@ -1166,6 +1167,8 @@ async def test_health_degrades_end_to_end(monkeypatch):
     monkeypatch.setattr(health_mod, '_backup_signal', _backup_ok)
     monkeypatch.setattr(health_mod, '_audit_retention_signal',
                         lambda: {'ok': False, 'pending_error_count': 1})
+    monkeypatch.setattr(health_mod, '_numbering_audit_retention_signal',
+                        lambda: {'ok': True, 'note': 'not_yet_run'})
     monkeypatch.setattr(health_mod, '_set_cached_health', lambda **kw: None)
     monkeypatch.setattr('fastapi_app.core.redis_client.get_async_redis_client', _no_redis)
 

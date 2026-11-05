@@ -405,6 +405,15 @@ class Settings(BaseSettings):
     AUDIT_RETENTION_MONTHS: int = int(os.getenv("AUDIT_RETENTION_MONTHS") or "12")
     AUDIT_ARCHIVE_DIR: str = os.getenv("AUDIT_ARCHIVE_DIR", "backups/audit_archive")
 
+    # numbering_audit 运行诊断记录保留：默认 30 个完整 UTC 日（实际 30–31 天）。
+    # 每日 03:10 先归档再按 ID 分批删除；0 或负数 = 明确停用自动清理。
+    NUMBERING_AUDIT_RETENTION_DAYS: int = int(
+        os.getenv("NUMBERING_AUDIT_RETENTION_DAYS") or "30"
+    )
+    NUMBERING_AUDIT_ARCHIVE_DIR: str = os.getenv(
+        "NUMBERING_AUDIT_ARCHIVE_DIR", "backups/numbering_audit_archive"
+    )
+
     # CORS配置 - 从环境变量读取允许的源，默认仅允许本地访问
     # 包含 Nginx 统一入口（端口80）、Python HTTP 服务（端口8000/8080）、
     # 直接访问模式（端口5002）以及 Vue/Vite 前端（端口3000）
