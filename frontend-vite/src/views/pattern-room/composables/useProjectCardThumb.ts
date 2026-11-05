@@ -8,12 +8,25 @@
  * （旧链接可能已过期 410 而加载失败）。URL 变化时必须复位加载/失败状态，否则
  * imgFailed 置真后卡片会永久卡在 T 恤占位——占位分支下 <img> 已不在 DOM，
  * 新 URL 根本没机会加载。
+ *
+ * ⚠️ 复位条件必须是「渲染用的 src 真的变了」，不能是「proj 对象被替换了」：
+ * 签名 URL 的 st 按小时对齐（services/signed_urls.py），同一小时内重新签发的 URL
+ * 逐字节相同。此时 <img> 的 src 未变，浏览器不会再派发 load，一旦误复位
+ * thumbLoaded，.is-loaded 被摘掉、模糊占位图重新显形且永远不会淡出——表现为
+ * 「点完成 / 列表静默刷新后图片变模糊」（2026-11-05 线上问题）。
+ * 因此 watch 源直接取模板里那个 src 表达式，而不是 [url, thumbUrl] 数组字面量
+ * （数组字面量每次求值都是新引用，hasChanged 恒为 true，等于「任何刷新都复位」）。
  */
 import { ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 
 interface ThumbSource {
   product_image_url?: string | null
   product_image_thumbnail_url?: string | null
+}
+
+/** 模板 <img> 实际使用的地址：缩略图优先，历史数据无缩略图时回退原图。 */
+function resolveThumbSrc(p: ThumbSource): string {
+  return p.product_image_thumbnail_url || p.product_image_url || ''
 }
 
 export function useProjectCardThumb(proj: MaybeRefOrGetter<ThumbSource>) {
@@ -29,10 +42,7 @@ export function useProjectCardThumb(proj: MaybeRefOrGetter<ThumbSource>) {
   const imgFailed = ref(false)
 
   watch(
-    () => {
-      const p = toValue(proj)
-      return [p.product_image_url, p.product_image_thumbnail_url] as const
-    },
+    () => resolveThumbSrc(toValue(proj)),
     () => {
       imgFailed.value = false
       thumbLoaded.value = false
