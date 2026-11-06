@@ -192,6 +192,60 @@ def test_read_member_bytes_low_peak_on_bomb():
     )
 
 
+def _make_non_deflated_underdeclared_bomb(compression: int, nominal_out: int = 8 * 1024 * 1024) -> bytes:
+    """BZIP2/LZMA 低报成员：声明闸门可过，DEFLATED-only 物理试探对它失明。
+
+    物理数据真实按 BZIP2/LZMA 压缩（与攻击手法一致），只把 local/central 头的
+    file_size 低报为 compress_size×99（<100:1 闸门），CRC 改为声明前缀的 CRC32。
+    修复前：声明闸门放行 + 物理试探因压缩方式不是 DEFLATED 直接 return True →
+    assert_zip_budget 放行（漏洞）；修复后：压缩方式白名单在读取前拒绝。
+    """
+    import zlib
+
+    data = b'\x00' * nominal_out
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', compression) as zf:
+        zf.writestr('bomb.bin', data)
+    raw = bytearray(buf.getvalue())
+    with zipfile.ZipFile(io.BytesIO(bytes(raw))) as zf:
+        comp_size = zf.getinfo('bomb.bin').compress_size
+    declared = max(1, min(64 * 1024, comp_size * 99))
+    crc = zlib.crc32(data[:declared])
+    target = b'bomb.bin'
+    for sig, fsoff, croff, nloff, noff in (
+        (b'PK\x03\x04', 22, 14, 26, 30),   # local file header
+        (b'PK\x01\x02', 24, 16, 28, 46),   # central directory
+    ):
+        pos = 0
+        while (idx := raw.find(sig, pos)) >= 0:
+            name_len = int.from_bytes(raw[idx + nloff:idx + nloff + 2], 'little')
+            if bytes(raw[idx + noff:idx + noff + name_len]) == target:
+                raw[idx + fsoff:idx + fsoff + 4] = declared.to_bytes(4, 'little')
+                raw[idx + croff:idx + croff + 4] = crc.to_bytes(4, 'little')
+            pos = idx + 4
+    return bytes(raw)
+
+
+@pytest.mark.parametrize('compression', [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_non_deflated_member_is_rejected(compression):
+    """BZIP2/LZMA 成员绕过声明闸门与 DEFLATED-only 物理试探，必须被拒绝。
+
+    变异检查锚点：去掉 assert_zip_budget 的压缩方式白名单后，本用例变红
+    （低报成员被放行）。
+    """
+    bomb = _make_non_deflated_underdeclared_bomb(compression)
+    with pytest.raises(XlsxBudgetError, match='压缩方式'):
+        assert_zip_budget(bomb)
+
+
+def test_stored_member_still_allowed():
+    """STORED 无膨胀语义，白名单放行（不误伤已压缩媒体成员）。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+        zf.writestr('xl/media/img1.png', b'plain-bytes' * 10)
+    assert_zip_budget(buf.getvalue())
+
+
 # ---------------------------------------------------------------------------
 # 工作簿层（openpyxl 链：裁剪 + 显式拒绝）
 # ---------------------------------------------------------------------------

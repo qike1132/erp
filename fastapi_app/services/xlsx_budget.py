@@ -83,8 +83,10 @@ def _probe_member_inflation_ok(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bo
     max_length 限制单次解压输出）。读不动的成员（加密/头部异常）不在此
     处拒绝——交给正式解析的既有口径。
     """
-    if info.compress_type != zipfile.ZIP_DEFLATED or info.compress_size <= 0:
-        return True  # STORED 无膨胀语义
+    if info.compress_type == zipfile.ZIP_STORED or info.compress_size <= 0:
+        return True  # STORED 无膨胀语义；空成员无数据
+    if info.compress_type != zipfile.ZIP_DEFLATED:
+        return False  # 其它方法无物理试探；调用方白名单已拒绝
     budget = min(info.compress_size * MAX_COMPRESSION_RATIO, MAX_MEMBER_UNCOMPRESSED_BYTES)
     try:
         fp = zf.fp
@@ -142,6 +144,11 @@ def assert_zip_budget(source: str | bytes) -> None:
                     f'文件内部结构异常（成员数 {len(infos)} 超过上限 {MAX_ZIP_MEMBERS}）')
             total = 0
             for info in infos:
+                # xlsx 只用 STORED/DEFLATED；其它方法的解压不受物理试探约束
+                if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    raise XlsxBudgetError(
+                        f'文件成员 {info.filename!r} 使用了不支持的压缩方式'
+                        f'（{info.compress_type}），仅支持 STORED/DEFLATED')
                 size = info.file_size
                 total += size
                 if size > MAX_MEMBER_UNCOMPRESSED_BYTES:
