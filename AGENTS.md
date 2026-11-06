@@ -122,6 +122,7 @@ npm run check:types               # 类型对齐
 7. **验证过"真的做了"吗？**NSSM 非提权调用**静默失败且退出码仍 0**；重启是否生效只看 PID CreationDate，不看命令回显。
 8. **结论记档**：按 §8 回写。
 9. **重启后端前 `git status --porcelain` 必须为空。**第 6 条管「工作区在别的分支」，本条管**同一分支内未提交的半改代码**——`erp-prod` 吃的是 `D:\erp_system` 工作区源码，**未提交改动同样会跑进生产**。实例（2026-10-22 05:47）：`94194d2d` 的 `purchase_order_revoke.py`（改成 `from fastapi_app.services.order_utils import compute_order_statuses_batch`）已在工作区，而同提交里的 `order_utils.py`（新增该函数）尚未就位 → 重启后删订单走到撤销链路即 `ImportError`，**连崩 8 次**（日志 `ORDER_DELETED 处理失败 ... cannot import name`）→ 该订单的 pending 采购单没被撤销 → 客户订单 10-22 已删，采购中心 `/purchase` 仍挂着 `PO-20261010-0001`。**比第 6 条更阴**：删订单接口照常 200、页面无提示，只是该联动的清理静默没发生，直到用户发现"我没有这订单"才暴露（故改坏的那半必须是**会被撤销链路走到**的代码；不碰该链路的半改代码当时不会炸）。判据：**重启后先 `grep` 一遍日志里的 `处理失败` / `ImportError`**，handler 失败现已落 `logs/domain_events_deadletter.jsonl`（`stage=handler`）。半改代码跨文件（一个文件改了 import、提供者还没改）时，**两个文件一起提交或一起回退，别只提交一半**。
+10. **重启后端前确认生产库已升到「代码 head」。**第 6/9 条管「加载哪份代码」，本条管「代码与库是否同版」——新 ORM 会 `SELECT` 新列，库没迁移就整页 500。实例（2026-11-06 20:00）：BOM 新增 `part_name` 后先重启了 `erp-prod`，生产库仍在 `pg_standalone_109`，打开 BOM 即 `asyncpg UndefinedColumnError: product_material.part_name 不存在`；补跑 `alembic upgrade head`（只应用 110）后恢复。正确顺序：**迁移 → 重启后端 → 发布前端**。重启前用 `python -m alembic -c migrations/alembic.ini current` 与 `alembic heads` 对比，不一致先升级。
 
 ### 6.2 分析方法与历史踩坑（外置）
 
