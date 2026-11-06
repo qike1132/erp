@@ -2,6 +2,7 @@
 // 源: frontend-vite/openapi.json（由 python scripts/check_openapi_frontend_alignment.py --export 产出）
 /* eslint-disable */
 export interface AccessoryItem {
+  part_name?: string | null
   id?: number | null
   role_id?: number | null
   role_key?: string | null
@@ -1119,6 +1120,7 @@ export interface ExportRequest {
 }
 
 export interface FabricItem {
+  part_name?: string | null
   id?: number | null
   role_id?: number | null
   role_key?: string | null
@@ -1167,6 +1169,7 @@ export interface FileUploadResponse {
 }
 
 export interface FillingItem {
+  part_name?: string | null
   id?: number | null
   role_id?: number | null
   role_key?: string | null

@@ -4,7 +4,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 # ============================================================
 # 产品/BOM 相关
@@ -62,9 +62,28 @@ class SearchSuggestionResponse(BaseModel):
 # 由 api/v1/endpoints/purchase_center/schemas.py re-export，保持既有导入路径可用。
 # ------------------------------------------------------------
 
-class FillingItem(BaseModel):
-    """BOM 填充物明细（ProductMaterial）。允许额外字段以兼容前端扩展字段。"""
+def _normalize_part_name(value):
+    """产品部位：字符串 trim 后存；空串/纯空白归一为 NULL。"""
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return value
+
+
+class _BomMaterialItem(BaseModel):
+    """BOM 物料明细公共字段（产品部位为自由文本，非角色字典带值）。"""
+
     model_config = {'extra': 'allow'}
+    part_name: str | None = Field(None, max_length=100, description='产品部位（自由文本）')
+
+    @field_validator('part_name', mode='before')
+    @classmethod
+    def _trim_part_name(cls, value):
+        return _normalize_part_name(value)
+
+
+class FillingItem(_BomMaterialItem):
+    """BOM 填充物明细（ProductMaterial）。允许额外字段以兼容前端扩展字段。"""
     id: int | None = None
     role_id: int | None = None
     role_key: str | None = None
@@ -76,9 +95,8 @@ class FillingItem(BaseModel):
     remark: str = ''
 
 
-class FabricItem(BaseModel):
+class FabricItem(_BomMaterialItem):
     """BOM 面料明细（ProductFabric）。允许额外字段以兼容前端扩展字段。"""
-    model_config = {'extra': 'allow'}
     id: int | None = None
     role_id: int | None = None
     role_key: str | None = None
@@ -91,9 +109,8 @@ class FabricItem(BaseModel):
     remark: str = ''
 
 
-class AccessoryItem(BaseModel):
+class AccessoryItem(_BomMaterialItem):
     """BOM 辅料明细（ProductAccessory）。允许额外字段以兼容前端扩展字段。"""
-    model_config = {'extra': 'allow'}
     id: int | None = None
     role_id: int | None = None
     role_key: str | None = None

@@ -20513,6 +20513,19 @@
     "schemas": {
       "AccessoryItem": {
         "properties": {
+          "part_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Name",
+            "description": "产品部位（自由文本）"
+          },
           "id": {
             "anyOf": [
               {
@@ -26332,6 +26345,19 @@
       },
       "FabricItem": {
         "properties": {
+          "part_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Name",
+            "description": "产品部位（自由文本）"
+          },
           "id": {
             "anyOf": [
               {
@@ -26587,6 +26613,19 @@
       },
       "FillingItem": {
         "properties": {
+          "part_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Name",
+            "description": "产品部位（自由文本）"
+          },
           "id": {
             "anyOf": [
               {

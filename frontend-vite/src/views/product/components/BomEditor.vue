@@ -155,6 +155,7 @@
                   <table class="bom-table-v2">
                     <thead class="bom-table-header-v2">
                       <tr>
+                        <th style="width:120px">产品部位</th>
                         <th style="width:200px">物料名称 <span class="required">*</span></th>
                         <th style="width:180px">规格型号 <span class="required">*</span></th>
                         <th style="width:120px">计量单位 <span class="required">*</span></th>
@@ -166,6 +167,7 @@
                     </thead>
                     <tbody>
                       <tr v-for="(item, idx) in currentBomItems" :key="item.id ?? 'bom-' + idx">
+                        <td><input v-model="item.part_name" type="text" class="bom-table-input" placeholder="如 身体、头部" maxlength="100" name="part-name" autocomplete="off" /></td>
                         <td><input v-model="item.name" type="text" class="bom-table-input" placeholder="输入物料名称" name="material-name" autocomplete="off" /></td>
                         <td><input v-model="item.specification" type="text" class="bom-table-input" placeholder="输入规格型号" name="specification" autocomplete="off" /></td>
                         <td>

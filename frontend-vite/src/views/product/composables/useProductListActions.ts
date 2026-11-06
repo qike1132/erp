@@ -22,6 +22,7 @@ export interface ProductListActionHooks {
 interface BomMaterialRecord {
   id?: number
   category?: string
+  part_name?: string | null
   material_name?: string
   name?: string
   specification?: string
@@ -141,6 +142,7 @@ export function useProductListActions(
       const scope = bomByScope[key]!
       const norm = (items: BomItem[]) => items.map(item => [
         item.id ?? null,
+        item.part_name ?? '',
         item.name,
         item.specification,
         item.unit,
@@ -242,6 +244,7 @@ export function useProductListActions(
         const key = item.role_id != null ? `role-${item.role_id}` : 'default'
         ensureScope(key)[category as BomCategory].push({
           id: item.id,
+          part_name: item.part_name || '',
           name: item.material_name || item.name || '',
           specification: item.specification || '',
           unit: item.unit || '码',
@@ -275,6 +278,7 @@ export function useProductListActions(
       return
     }
     scope[currentBomCategory.value].push({
+      part_name: '',
       name: '',
       specification: '',
       unit: currentBomCategory.value === 'filling' ? '克' : '码',
@@ -408,19 +412,19 @@ export function useProductListActions(
       const role = bomRoles.value.find(r => scopeKeyOf(r) === key) ?? null
       const roleRef = role ? (role.id != null ? { role_id: role.id } : { role_key: role.role_key }) : {}
       scope.fabric.forEach(item => fabrics.push({
-        id: item.id, fabric_name: item.name, specification: item.specification,
+        id: item.id, part_name: item.part_name || '', fabric_name: item.name, specification: item.specification,
         unit: item.unit, quantity: item.usage, supplier_id: item.supplier_id,
         supplier_name: item.supplier_name, remark: item.remark, category: 'fabric', ...roleRef,
       }))
       scope.accessory.forEach(item => accessories.push({
-        id: item.id, accessory_name: item.name, specification: item.specification,
+        id: item.id, part_name: item.part_name || '', accessory_name: item.name, specification: item.specification,
         unit: item.unit, quantity: item.usage, supplier_id: item.supplier_id,
         supplier_name: item.supplier_name, remark: item.remark, category: 'accessory', ...roleRef,
       }))
       if (scope.filling.length > 0) {
         const filling = scope.filling[0]!
         fillings.push({
-          id: filling.id, cotton_usage: filling.usage, specification: filling.specification,
+          id: filling.id, part_name: filling.part_name || '', cotton_usage: filling.usage, specification: filling.specification,
           supplier_id: filling.supplier_id, supplier_name: filling.supplier_name,
           unit: filling.unit, remark: filling.remark, ...roleRef,
         })

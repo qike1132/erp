@@ -15,6 +15,8 @@ export interface Role {
 /** BOM 物料项（前端编辑态） */
 export interface BomItem {
   id?: number
+  /** 产品部位（自由文本，用户逐行输入；默认空串） */
+  part_name?: string
   name: string
   specification: string
   unit: string

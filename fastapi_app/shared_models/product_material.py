@@ -118,6 +118,7 @@ class ProductFabric(Base):
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='关联产品ID')
     role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product_role.id', ondelete='CASCADE'), comment='角色ID(NULL=产品级默认BOM)')
     material_code: Mapped[str | None] = mapped_column(String(50), comment='物料编码')
+    part_name: Mapped[str | None] = mapped_column(String(100), comment='产品部位')
     fabric_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='布料名称')
     specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
     quantity: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, comment='布料码数/数量(单SKU标准用量)')
@@ -146,6 +147,7 @@ class ProductFabric(Base):
             'product_id': self.product_id,
             'role_id': self.role_id,
             'material_code': self.material_code,
+            'part_name': self.part_name,
             'material_name': self.fabric_name,
             'fabric_name': self.fabric_name,
             'specification': self.specification,
@@ -170,6 +172,7 @@ class ProductMaterial(Base):
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='关联产品ID')
     role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product_role.id', ondelete='CASCADE'), comment='角色ID(NULL=产品级默认BOM)')
     material_code: Mapped[str | None] = mapped_column(String(50), comment='物料编码')
+    part_name: Mapped[str | None] = mapped_column(String(100), comment='产品部位')
     cotton_usage: Mapped[float | None] = mapped_column(Numeric(10, 4), default=0, comment='棉花用量（克）- 单SKU标准用量')
     specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
     supplier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('supplier.id'), comment='默认供应商ID')
@@ -200,6 +203,7 @@ class ProductMaterial(Base):
             'role_id': self.role_id,
             'product_name': self.product.name if self.product else None,
             'material_code': self.material_code,
+            'part_name': self.part_name,
             'material_name': '棉花/填充物',
             'cotton_usage': float(self.cotton_usage) if self.cotton_usage else 0,
             'quantity': float(self.cotton_usage) if self.cotton_usage else 0,
@@ -225,6 +229,7 @@ class ProductAccessory(Base):
     product_id: Mapped[int] = mapped_column(Integer, ForeignKey('product.id'), nullable=False, comment='关联产品ID')
     role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('product_role.id', ondelete='CASCADE'), comment='角色ID(NULL=产品级默认BOM)')
     material_code: Mapped[str | None] = mapped_column(String(50), comment='物料编码')
+    part_name: Mapped[str | None] = mapped_column(String(100), comment='产品部位')
     accessory_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='配件名称')
     specification: Mapped[str | None] = mapped_column(String(100), comment='规格型号')
     quantity: Mapped[float] = mapped_column(Numeric(10, 4), nullable=False, default=1, comment='数量(单SKU标准用量)')
@@ -252,6 +257,7 @@ class ProductAccessory(Base):
             'product_id': self.product_id,
             'role_id': self.role_id,
             'material_code': self.material_code,
+            'part_name': self.part_name,
             'material_name': self.accessory_name,
             'accessory_name': self.accessory_name,
             'specification': self.specification,

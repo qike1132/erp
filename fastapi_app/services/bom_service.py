@@ -203,6 +203,14 @@ def _non_negative_decimal(value, label: str) -> Decimal:
     return result
 
 
+def _clean_part_name(value) -> str | None:
+    """产品部位：trim 后落库，空串/纯空白归一为 NULL。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 async def _save_material_bom_items(
     db: AsyncSession,
     product_id: int,
@@ -261,6 +269,7 @@ async def _save_material_bom_items(
                 old_val = getattr(existing, name_field)
                 setattr(existing, name_field, item_data.get(name_field, ''))
                 existing.role_id = role_id  # 归属可迁移（角色变更时挂到新角色）
+                existing.part_name = _clean_part_name(item_data.get('part_name'))
                 existing.specification = item_data.get('specification', '')
                 existing.unit = item_data.get('unit', '')
                 existing.quantity = _non_negative_decimal(item_data.get('quantity', 0), '物料数量')
@@ -280,6 +289,7 @@ async def _save_material_bom_items(
             product_id=product_id,
             role_id=role_id,
             **{name_field: item_data.get(name_field, '')},
+            part_name=_clean_part_name(item_data.get('part_name')),
             specification=item_data.get('specification', ''),
             unit=item_data.get('unit', ''),
             quantity=_non_negative_decimal(item_data.get('quantity', 0), '物料数量'),
@@ -399,6 +409,7 @@ async def _save_filling_items(db: AsyncSession, product_id: int, data: dict, tem
                 'supplier_name': filling_material.supplier_name,
             }
             filling_material.role_id = filling_role_id
+            filling_material.part_name = _clean_part_name(filling_data.get('part_name'))
             filling_material.cotton_usage = _non_negative_decimal(filling_data.get('cotton_usage', 0), '充棉用量')
             filling_material.supplier_id = filling_data.get('supplier_id')
             filling_material.supplier_name = filling_data.get('supplier_name', '')
@@ -421,6 +432,7 @@ async def _save_filling_items(db: AsyncSession, product_id: int, data: dict, tem
             db.add(ProductMaterial(
                 product_id=product_id,
                 role_id=filling_role_id,
+                part_name=_clean_part_name(filling_data.get('part_name')),
                 cotton_usage=_non_negative_decimal(filling_data.get('cotton_usage', 0), '充棉用量'),
                 supplier_id=filling_data.get('supplier_id'),
                 supplier_name=filling_data.get('supplier_name', ''),
@@ -586,6 +598,7 @@ def _add_default_scope_items_to_role(
             product_id=target_product_id,
             role_id=role_id,
             material_code=getattr(default_material, 'material_code', '') or '',
+            part_name=getattr(default_material, 'part_name', None),
             cotton_usage=default_material.cotton_usage,
             specification=getattr(default_material, 'specification', '') or '',
             supplier_id=getattr(default_material, 'supplier_id', None),
@@ -602,6 +615,7 @@ def _add_default_scope_items_to_role(
             product_id=target_product_id,
             role_id=role_id,
             material_code=getattr(old_fabric, 'material_code', '') or '',
+            part_name=getattr(old_fabric, 'part_name', None),
             fabric_name=old_fabric.fabric_name,
             specification=getattr(old_fabric, 'specification', '') or '',
             quantity=old_fabric.quantity,
@@ -619,6 +633,7 @@ def _add_default_scope_items_to_role(
             product_id=target_product_id,
             role_id=role_id,
             material_code=getattr(old_accessory, 'material_code', '') or '',
+            part_name=getattr(old_accessory, 'part_name', None),
             accessory_name=old_accessory.accessory_name,
             specification=getattr(old_accessory, 'specification', '') or '',
             quantity=old_accessory.quantity,
@@ -787,6 +802,7 @@ def _copy_product_level_bom(db: AsyncSession, source_product: Product, target_pr
         db.add(ProductMaterial(
             product_id=target_product_id,
             material_code=getattr(old_mat, 'material_code', '') or '',
+            part_name=getattr(old_mat, 'part_name', None),
             cotton_usage=old_mat.cotton_usage,
             specification=getattr(old_mat, 'specification', '') or '',
             supplier_id=getattr(old_mat, 'supplier_id', None),
@@ -802,6 +818,7 @@ def _copy_product_level_bom(db: AsyncSession, source_product: Product, target_pr
         db.add(ProductFabric(
             product_id=target_product_id,
             material_code=getattr(old_fabric, 'material_code', '') or '',
+            part_name=getattr(old_fabric, 'part_name', None),
             fabric_name=old_fabric.fabric_name,
             specification=getattr(old_fabric, 'specification', '') or '',
             quantity=old_fabric.quantity,
@@ -818,6 +835,7 @@ def _copy_product_level_bom(db: AsyncSession, source_product: Product, target_pr
         db.add(ProductAccessory(
             product_id=target_product_id,
             material_code=getattr(old_accessory, 'material_code', '') or '',
+            part_name=getattr(old_accessory, 'part_name', None),
             accessory_name=old_accessory.accessory_name,
             specification=getattr(old_accessory, 'specification', '') or '',
             quantity=old_accessory.quantity,
@@ -902,6 +920,7 @@ async def _copy_role_materials(
                 product_id=target_product_id,
                 role_id=new_role_id,
                 material_code=getattr(old_fabric, 'material_code', '') or '',
+                part_name=getattr(old_fabric, 'part_name', None),
                 fabric_name=old_fabric.fabric_name,
                 specification=getattr(old_fabric, 'specification', '') or '',
                 quantity=old_fabric.quantity,
@@ -916,6 +935,7 @@ async def _copy_role_materials(
                 product_id=target_product_id,
                 role_id=new_role_id,
                 material_code=getattr(old_accessory, 'material_code', '') or '',
+                part_name=getattr(old_accessory, 'part_name', None),
                 accessory_name=old_accessory.accessory_name,
                 specification=getattr(old_accessory, 'specification', '') or '',
                 quantity=old_accessory.quantity,
@@ -931,6 +951,7 @@ async def _copy_role_materials(
                 product_id=target_product_id,
                 role_id=new_role_id,
                 material_code=getattr(old_material, 'material_code', '') or '',
+                part_name=getattr(old_material, 'part_name', None),
                 cotton_usage=old_material.cotton_usage,
                 specification=getattr(old_material, 'specification', '') or '',
                 supplier_id=getattr(old_material, 'supplier_id', None),
