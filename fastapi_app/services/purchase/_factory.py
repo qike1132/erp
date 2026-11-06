@@ -272,16 +272,26 @@ def _finalize_factory_sku_materials(group_map: dict) -> None:
 
 
 def _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map) -> dict[tuple, bool]:
-    """组内**所有**采购单明细都带 part_name 才按部位拆；混入旧单则整组按物料合并。"""
-    parts_aware_by_po = {
-        po.id: any(_norm_part_name(it.part_name) for it in items_by_order.get(po.id, []))
-        for po in orders
-    }
+    """组内所有采购明细都带 part_name 才按部位拆；混入旧单/手工无部位行则整组合并。
+
+    - 一张 PO 内只要有一条明细 part_name 为空（手工加行、旧接口写入 NULL），该 PO
+      即按物料合并——拆行模式下空部位明细无法与带部位的 BOM 行精确匹配，会少计且不可编辑。
+    - 无明细的 PO 不参与判定，避免它把同组新单的拆行也压掉。
+    """
+    parts_aware_by_po: dict[int, bool] = {}
+    for po in orders:
+        items = items_by_order.get(po.id) or []
+        if items:
+            parts_aware_by_po[po.id] = all(_norm_part_name(it.part_name) for it in items)
+
     split_by_group: dict[tuple, bool] = {}
     for po in orders:
+        aware = parts_aware_by_po.get(po.id)
+        if aware is None:
+            continue
         cust, prod, _order_qty, _pid = _resolve_factory_po_info(po, cust_order_map, prod_name_map)
         key = (cust, prod)
-        split_by_group[key] = split_by_group.get(key, True) and parts_aware_by_po.get(po.id, False)
+        split_by_group[key] = split_by_group.get(key, True) and aware
     return split_by_group
 
 

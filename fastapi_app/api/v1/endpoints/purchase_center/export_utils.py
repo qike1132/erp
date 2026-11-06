@@ -133,6 +133,24 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
     source_orders = source_orders or []
     source_order_map = {o.id: o for o in source_orders}
 
+    # 与工厂汇总同口径：组内所有采购明细都带部位才按部位拆；否则按物料合并，
+    # 避免「屏幕合并 / 打印拆开」以及空部位明细被静默丢弃。
+    split_by_cp: dict[tuple[str, str], bool] = {}
+    for order in orders:
+        items = order_items_map.get(order.id, [])
+        if not items:
+            continue
+        source_order = source_order_map.get(order.source_order_id) if order.source_order_id else None
+        product_name = order.product_name
+        if not product_name and source_order and source_order.product:
+            product_name = source_order.product.name
+        elif not product_name:
+            product_name = order.customer_name or '未指定产品'
+        customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
+        cp_key = (customer_name, product_name)
+        aware = all((getattr(it, 'part_name', None) or '').strip() for it in items)
+        split_by_cp[cp_key] = split_by_cp.get(cp_key, True) and aware
+
     grouped_data: dict[tuple[str, str], dict[str, dict[tuple[str, str, str], dict[str, Any]]]] = {}
     order_count_map = {}
 
@@ -149,6 +167,7 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
             product_qty = source_order.quantity
         customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
         cp_key = (customer_name, product_name)
+        split_parts = split_by_cp.get(cp_key, False)
         if cp_key not in grouped_data:
             grouped_data[cp_key] = {}
             order_count_map[cp_key] = {'order_count': 0, 'total_fabric_qty': 0, 'product_quantity': product_qty}
@@ -159,7 +178,7 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
             fabric_qty = item.quantity or 0
             if supplier_name not in grouped_data[cp_key]:
                 grouped_data[cp_key][supplier_name] = {}
-            part_name = (getattr(item, 'part_name', None) or '').strip()
+            part_name = (getattr(item, 'part_name', None) or '').strip() if split_parts else ''
             fabric_key = (fabric_name, fabric_spec, item.unit or '', part_name)
             if fabric_key not in grouped_data[cp_key][supplier_name]:
                 grouped_data[cp_key][supplier_name][fabric_key] = {

@@ -195,3 +195,44 @@ def test_backend_factory_print_has_part_column():
 
     assert '<th>产品部位</th>' in html
     assert '<td style="text-align:left">身体</td>' in html
+
+
+async def test_po_with_mixed_part_and_null_items_merges(db):
+    """一张 PO 内混有带部位与无部位明细 → 整组按物料合并，空部位明细不得被丢弃。"""
+    session = db
+    po_id = await _seed(session, item_parts=('身体', None), bom_parts=('身体', None))
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+    fabrics = _fabrics(group)
+
+    assert len(fabrics) == 1
+    assert not fabrics[0].get('part_name')
+    assert float(fabrics[0]['quantity']) == 20, '12 + 8 必须都计入，不得丢空部位明细'
+
+
+def test_backend_factory_print_mixed_parts_merges():
+    """后端打印与屏幕同口径：PO 内混有无部位明细时按物料合并，不拆两行。"""
+    from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
+        generate_factory_summary_print,
+    )
+
+    order = SimpleNamespace(
+        id=1, order_no='PO-1', source_order_id=None, product_name='产品A',
+        product_quantity=100, customer_name='客户甲', supplier_name='供应商甲',
+    )
+    items = [
+        SimpleNamespace(
+            material_name=MATERIAL, specification=SPEC, unit=UNIT, quantity=12,
+            supplier_name='供应商甲', part_name='身体',
+        ),
+        SimpleNamespace(
+            material_name=MATERIAL, specification=SPEC, unit=UNIT, quantity=8,
+            supplier_name='供应商甲', part_name=None,
+        ),
+    ]
+
+    html = generate_factory_summary_print([order], {1: items})
+
+    assert '<th>产品部位</th>' in html
+    assert html.count('<td style="text-align:left"></td>') == 1
+    assert '>20.0 米<' in html
