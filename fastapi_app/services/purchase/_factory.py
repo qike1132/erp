@@ -83,11 +83,13 @@ def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
     fkey = (bom['material_name'], bom['specification'], bom['unit'], part_key)
 
     if split_parts:
-        ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'], part_key)
-        matching_items = (items_map_by_part or {}).get(ikey, [])
+        matching_items = (items_map_by_part or {}).get(
+            (po.id, bom['material_name'], bom['specification'], bom['unit'], part_key), [],
+        )
     else:
-        ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'])
-        matching_items = items_map.get(ikey, [])
+        matching_items = items_map.get(
+            (po.id, bom['material_name'], bom['specification'], bom['unit']), [],
+        )
 
     existing = fabric_map.get(fkey)
 

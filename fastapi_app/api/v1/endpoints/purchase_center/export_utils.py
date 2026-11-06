@@ -151,7 +151,7 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
         aware = all((getattr(it, 'part_name', None) or '').strip() for it in items)
         split_by_cp[cp_key] = split_by_cp.get(cp_key, True) and aware
 
-    grouped_data: dict[tuple[str, str], dict[str, dict[tuple[str, str, str], dict[str, Any]]]] = {}
+    grouped_data: dict[tuple[str, str], dict[str, dict[tuple[str, str, str, str], dict[str, Any]]]] = {}
     order_count_map = {}
 
     for order in orders:
