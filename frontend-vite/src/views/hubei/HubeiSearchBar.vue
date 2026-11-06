@@ -168,12 +168,12 @@ async function searchCustomers(q: string): Promise<CustomerSuggestion[]> {
 .hu-ac-name {
   color: var(--color-text);
   font-weight: 500;
-  font-size: 13px;
+  font-size: 14px;
 }
 .hu-ac-barcode {
   color: var(--color-text-muted);
   font-size: 12px;
-  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 .hu-filter-actions {
   display: flex;

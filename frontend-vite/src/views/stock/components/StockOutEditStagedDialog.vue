@@ -81,7 +81,7 @@ const openModel = computed({
 .form-label {
   display: block;
   font-weight: 500;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   margin-bottom: 4px;
 }

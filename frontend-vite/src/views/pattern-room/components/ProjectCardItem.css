@@ -149,7 +149,7 @@
   border-radius: 10px;
   background: rgba(22, 163, 74, 0.92);
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.6;
   pointer-events: none;
@@ -183,7 +183,7 @@
   border: 0;
   background: none;
   font-family: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   line-height: 1.4;
   color: var(--color-text-primary);
@@ -208,7 +208,7 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
 

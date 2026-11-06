@@ -343,7 +343,7 @@ function fillMax() {
 .sr-search-row .sr-input,
 .sr-search-row .sr-btn {
   min-height: 52px;
-  font-size: 17px;
+  font-size: 16px;
 }
 
 @media (max-width: 1100px) {

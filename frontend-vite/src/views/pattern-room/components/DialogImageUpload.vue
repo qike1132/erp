@@ -116,7 +116,7 @@ function onDrop(e: DragEvent) {
   cursor: pointer;
   transition: border-color 0.2s;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 14px;
 }
 .diu-upload-area:hover {
   border-color: var(--color-primary-400);
@@ -149,7 +149,7 @@ function onDrop(e: DragEvent) {
   border: 2px dashed var(--color-primary-500);
   border-radius: 10px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   background: color-mix(in srgb, var(--color-primary-500) 6%, transparent);
 }
 .diu-upload-area i {
@@ -160,7 +160,7 @@ function onDrop(e: DragEvent) {
   display: none;
 }
 .diu-upload-hint {
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.6;
 }
 </style>

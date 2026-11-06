@@ -64,7 +64,7 @@ defineProps<{
   white-space: nowrap;
 }
 .cgl-customer-count {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   padding: 1px 6px;
   border-radius: 8px;

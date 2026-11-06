@@ -173,11 +173,11 @@ function countOf(n: PermissionItem): string {
 .pd-right-head h4 {
   flex: 1;
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--color-text);
 }
 .pd-right-cnt {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 .pd-right-cnt b {
@@ -191,7 +191,7 @@ function countOf(n: PermissionItem): string {
 }
 .pd-group {
   margin: 4px 0 8px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-text-placeholder, #94a3b8);
 }
@@ -211,7 +211,7 @@ function countOf(n: PermissionItem): string {
 .pd-empty {
   margin: 24px 0;
   text-align: center;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-placeholder, #94a3b8);
 }
 
@@ -233,7 +233,7 @@ function countOf(n: PermissionItem): string {
 .pd-tnm {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-secondary);
 }

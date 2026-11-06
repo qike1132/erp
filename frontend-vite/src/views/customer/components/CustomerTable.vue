@@ -139,7 +139,7 @@ function onPageChange(event: { page: number }) {
   color: var(--color-text);
 }
 .cu-customer-code {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 .cu-text-body {

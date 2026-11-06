@@ -202,7 +202,7 @@ const {
 .srp-filter-actions { display: flex; gap: 8px; align-items: center; padding-bottom: 2px; }
 .srp-filter-hint { font-size: 12px; color: var(--color-text-muted); }
 
-.srp-dir { padding: 2px 10px; border-radius: 16px; font-size: 11px; font-weight: 600; }
+.srp-dir { padding: 2px 10px; border-radius: 16px; font-size: 12px; font-weight: 600; }
 .srp-dir-in { background: var(--color-success-50); color: var(--color-success-600); }
 .srp-dir-out { background: var(--color-danger-50); color: var(--color-danger-600); }
 

@@ -205,7 +205,7 @@ function actionLabel(action: string, part: PartDetail, group: GroupedRow): strin
   /* 24px：WCAG 2.5.8 下限，原 22px 不达标（审查 A11Y-14） */
   height: 24px;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   font-family: inherit;
   color: var(--color-text-muted, #94a3b8);
@@ -267,7 +267,7 @@ function actionLabel(action: string, part: PartDetail, group: GroupedRow): strin
   transition: all 0.15s;
 }
 .pvt-action-btn i {
-  font-size: 10px;
+  font-size: 12px;
 }
 .pvt-action-btn:disabled {
   cursor: not-allowed;

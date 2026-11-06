@@ -50,7 +50,7 @@ function fmt(n: number): string {
 .sp-risk-empty {
   padding: 26px 16px;
   text-align: center;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-muted, #8c96ad);
 }
 
@@ -90,7 +90,7 @@ function fmt(n: number): string {
 }
 
 .sp-risk-date {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 800;
   color: var(--color-heading);
 }
@@ -107,7 +107,7 @@ function fmt(n: number): string {
 .sp-risk-tag {
   margin-left: auto;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 6px;

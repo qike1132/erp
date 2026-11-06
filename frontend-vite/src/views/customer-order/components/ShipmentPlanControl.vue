@@ -148,7 +148,7 @@ function removeSplit(idx: number) {
   gap: 8px;
 }
 .plan-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
   cursor: pointer;
@@ -193,7 +193,7 @@ function removeSplit(idx: number) {
   padding: 0 10px;
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   outline: none;
   background: white;

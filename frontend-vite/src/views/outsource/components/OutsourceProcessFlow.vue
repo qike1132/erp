@@ -110,14 +110,14 @@ defineProps<{
   background: #f8fafc;
   border-bottom: 1px solid #e8ecf1;
 }
-.oso-proc-sku { font-weight: 700; font-size: 13.5px; color: var(--color-text); }
+.oso-proc-sku { font-weight: 700; font-size: 14px; color: var(--color-text); }
 .oso-proc-qty { font-size: 12px; color: var(--color-text-muted); }
-.oso-proc-count { margin-left: auto; font-size: 11.5px; color: var(--color-text-muted); }
+.oso-proc-count { margin-left: auto; font-size: 12px; color: var(--color-text-muted); }
 
 .oso-proc-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 .oso-proc-table th,
 .oso-proc-table td {
@@ -126,7 +126,7 @@ defineProps<{
   border-bottom: 1px solid #eef1f5;
 }
 .oso-proc-table th {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
   background: #fafbfc;
@@ -152,7 +152,7 @@ defineProps<{
   border-radius: 6px;
   background: #f1f5f9;
   color: var(--color-text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
 }
 .oso-proc-row--shipped .oso-proc-seq { background: var(--color-primary-50); color: var(--color-primary-600); }
@@ -163,7 +163,7 @@ defineProps<{
 }
 .oso-proc-cum {
   margin-left: 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 
@@ -183,7 +183,7 @@ defineProps<{
   display: inline-block;
   padding: 2px 9px;
   border-radius: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }

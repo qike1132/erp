@@ -128,7 +128,7 @@ const {
   gap: 12px;
 }
 .us-card-title-group h3 {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
   margin: 0;
@@ -148,7 +148,7 @@ const {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 19px;
+  font-size: 20px;
   flex-shrink: 0;
 }
 .us-icon-blue {

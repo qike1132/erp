@@ -220,7 +220,7 @@ const openModel = computed({
 <style scoped>
 .co-form-group { margin-bottom: 14px; }
 .co-label {
-  display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: var(--color-text-secondary);
+  display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; color: var(--color-text-secondary);
 }
 .co-textarea {
   width: 100%; border: 1px solid var(--color-border, #cbd5e1); border-radius: 10px;

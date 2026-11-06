@@ -88,7 +88,7 @@ const disabled = computed(() => !form.value.name?.trim() || props.submitting)
 .sp-form-label i {
   margin-right: 4px;
   color: var(--color-primary-500);
-  font-size: 11px;
+  font-size: 12px;
 }
 .sp-form-input {
   width: 100%;

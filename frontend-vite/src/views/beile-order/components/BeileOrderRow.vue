@@ -168,7 +168,7 @@ function handleConfirm(item: BeileOrderRowType) {
 .bo-block {
   display: grid;
   width: 100%;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
 }
 .bo-td {
@@ -234,7 +234,7 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 /* 下单时间 / 备注：字号与颜色对齐 /outsource（日期正文 13px 正文色、备注 12px text-secondary） */
 .bo-date {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   max-width: 100%;
   overflow: hidden;
@@ -254,7 +254,7 @@ function handleConfirm(item: BeileOrderRowType) {
   align-items: center;
   justify-content: center;
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: 5px;
   line-height: 1.5;
@@ -269,7 +269,7 @@ function handleConfirm(item: BeileOrderRowType) {
 }
 /* 订单号：等宽字体便于逐位比对（单号是给人念/抄的） */
 .bo-order-no {
-  font-family: Consolas, ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text);
   letter-spacing: 0.2px;
@@ -282,7 +282,7 @@ function handleConfirm(item: BeileOrderRowType) {
   justify-content: center;
   padding: 3px 10px;
   border-radius: 8px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }

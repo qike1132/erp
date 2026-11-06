@@ -63,9 +63,9 @@ const cards = computed(() => {
 .boc-dot-muted { background: var(--color-border, #e4e7ed); }
 .boc-label { font-size: 12px; font-weight: 500; color: var(--color-text-muted); letter-spacing: .02em; }
 .boc-value { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; line-height: 1.3; color: var(--color-text); }
-.boc-lg { font-size: 28px; font-weight: 700; }
-.boc-unit { font-size: 13px; font-weight: 500; color: var(--color-text-muted); margin-left: 2px; }
-.boc-desc { margin-top: 6px; font-size: 13px; color: var(--color-text-secondary); }
+.boc-lg { font-size: 32px; font-weight: 700; }
+.boc-unit { font-size: 14px; font-weight: 500; color: var(--color-text-muted); margin-left: 2px; }
+.boc-desc { margin-top: 6px; font-size: 14px; color: var(--color-text-secondary); }
 .boc-progress { height: 8px; background: var(--color-border-light); border-radius: 999px; overflow: hidden; margin-top: 10px; }
 .boc-progress-fill { height: 100%; border-radius: 999px; transition: width .2s ease; }
 .boc-fill-primary { background: var(--color-primary-500, #5b8def); }

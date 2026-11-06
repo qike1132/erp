@@ -220,7 +220,7 @@ function handleSubmit() {
   grid-column: 1 / -1;
 }
 .pjf-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -230,7 +230,7 @@ function handleSubmit() {
   padding: 8px 12px;
   border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
@@ -251,7 +251,7 @@ function handleSubmit() {
   padding-top: 8px;
 }
 .pjf-hint {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--color-text-muted, #94a3b8);
   margin-left: 6px;

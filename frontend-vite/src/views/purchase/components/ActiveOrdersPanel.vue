@@ -276,7 +276,7 @@ defineEmits<{
   align-items: center;
   justify-content: center;
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: 4px;
   line-height: 1.2;
@@ -297,7 +297,7 @@ defineEmits<{
 }
 
 .pc-sku-deduct {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-warning-600, #e88e2e);
 }

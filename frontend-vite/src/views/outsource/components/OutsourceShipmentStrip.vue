@@ -46,11 +46,11 @@ defineProps<{
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
   background: var(--color-surface, #f8fafc);
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-secondary, #64748b);
 }
 .oss-strip-title {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
 }
@@ -59,7 +59,7 @@ defineProps<{
   height: 16px;
   background: var(--color-border-light, #e2e8f0);
 }
-.oss-item strong { color: var(--color-text); font-size: 13.5px; }
+.oss-item strong { color: var(--color-text); font-size: 14px; }
 .oss-dot {
   display: inline-block;
   width: 8px;

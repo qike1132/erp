@@ -8,10 +8,10 @@
   >
     <div class="flex items-start justify-between">
       <div class="flex-1 min-w-0">
-        <div class="text-[11px] text-text-secondary uppercase tracking-[1.2px] mb-2 font-medium">
+        <div class="text-[12px] text-text-secondary uppercase tracking-[1.2px] mb-2 font-medium">
           <slot name="label" />
         </div>
-        <div class="text-3xl font-extrabold text-heading tabular-nums">
+        <div class="text-[32px] font-extrabold text-heading tabular-nums">
           <slot />
         </div>
         <div v-if="$slots.extra" class="text-xs text-text-muted mt-2">

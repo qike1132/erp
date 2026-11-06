@@ -159,7 +159,7 @@ function onReset() {
 
 /* ===== 导出 / 打印按钮（自 BeileOrderTab 工具栏上移至页头右上角） ===== */
 .bo-selected-count {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-primary-600, #2563eb);
 }
@@ -168,7 +168,7 @@ function onReset() {
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 8px;
@@ -225,7 +225,7 @@ function onReset() {
   justify-content: center;
   gap: 6px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--color-text-secondary, #6b7280);
   background: #fff;
@@ -259,7 +259,7 @@ function onReset() {
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
   background: var(--color-warning-100);
@@ -280,7 +280,7 @@ function onReset() {
   background: var(--color-warning-50);
   border: 1px solid var(--color-warning-200);
   color: var(--color-warning-700);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -289,6 +289,6 @@ function onReset() {
 }
 .bo-unconfirmed-hint strong {
   color: var(--color-warning-800);
-  font-size: 15px;
+  font-size: 16px;
 }
 </style>

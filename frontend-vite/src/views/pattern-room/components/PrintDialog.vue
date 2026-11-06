@@ -177,13 +177,13 @@ defineExpose({ updatePrintTime })
 }
 
 .pd-meta-label {
-  font-size: 11px;
+  font-size: 12px;
   color: #75808e;
   letter-spacing: 0.08em;
 }
 
 .pd-meta-value {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: #16202e;
   font-variant-numeric: tabular-nums;
@@ -251,21 +251,21 @@ defineExpose({ updatePrintTime })
 }
 
 .pd-role-title {
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 700;
   color: #16202e;
   letter-spacing: 0.04em;
 }
 
 .pd-role-count {
-  font-size: 11px;
+  font-size: 12px;
   color: #75808e;
 }
 
 .pd-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   /* 固定列宽：每个角色分段是独立 <table>，auto 布局会各按自身内容算列宽，
      导致同一列在不同分段下左右漂移。用 colgroup + fixed 让全部分段共用列位置。 */

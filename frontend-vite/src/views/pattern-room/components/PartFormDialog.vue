@@ -221,7 +221,7 @@ function closeDialog() {
 .batch-part-form__head {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--color-border-light);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -255,7 +255,7 @@ function closeDialog() {
   padding: 6px 10px;
   border: 1px solid var(--color-border-light);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   background: #fff;
   color: var(--color-text-primary);

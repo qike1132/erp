@@ -17,7 +17,7 @@
         :aria-label="`抵扣数量 ${form.deductQuantity}，点击修改`"
         @click="openDeductEdit"
       >
-        <FontAwesomeIcon icon="edit" style="font-size: 11px" aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
+        <FontAwesomeIcon icon="edit" style="font-size: 12px" aria-hidden="true" />抵扣: <strong>{{ form.deductQuantity }}</strong>
       </button>
     </div>
     <div v-if="deductInfoVisible" class="co-deduct-info" aria-live="polite">
@@ -57,7 +57,7 @@ const form = defineModel<FormState>('form', { required: true })
 }
 .co-label {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   margin-bottom: 4px;
   color: var(--color-text-secondary);
@@ -73,7 +73,7 @@ const form = defineModel<FormState>('form', { required: true })
   border: 2px solid var(--color-border-light);
   border-radius: 9px;
   background: white;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: border-color 0.3s ease, color 0.3s ease, transform 0.3s ease;
@@ -96,7 +96,7 @@ const form = defineModel<FormState>('form', { required: true })
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: 14px;
   padding: 6px 14px;
   border-radius: 10px;
   border: 2px dashed var(--color-border-light);

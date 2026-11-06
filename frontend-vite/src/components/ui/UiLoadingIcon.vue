@@ -29,7 +29,7 @@ const sizeClasses: Record<string, string> = {
   xs: 'text-xs',
   sm: 'text-sm',
   base: 'text-base',
-  lg: 'text-lg',
+  lg: 'text-xl',
 }
 </script>
 

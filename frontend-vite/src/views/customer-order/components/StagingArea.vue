@@ -170,7 +170,7 @@ const submitLabel = computed(() => {
   gap: 4px;
 }
 .co-staged-tag i {
-  font-size: 11px;
+  font-size: 12px;
 }
 .co-staged-product {
   display: flex;
@@ -186,7 +186,7 @@ const submitLabel = computed(() => {
   gap: 3px;
 }
 .co-plan-chip i {
-  font-size: 11px;
+  font-size: 12px;
 }
 .co-staged-actions {
   display: flex;
@@ -197,7 +197,7 @@ const submitLabel = computed(() => {
 
 /* ===== 类型徽章 ===== */
 .co-type-badge {
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 8px;
   border-radius: 6px;
   font-weight: 600;

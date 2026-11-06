@@ -112,7 +112,7 @@ const emit = defineEmits<{
   padding: 0 10px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: var(--radius-input, 12px);
-  font-size: 0.9375rem;
+  font-size: 1rem;
   line-height: 1.5;
   outline: none;
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
@@ -184,7 +184,7 @@ const emit = defineEmits<{
   padding: 8px 12px;
   cursor: pointer;
   transition: background 0.15s ease;
-  font-size: 13px;
+  font-size: 14px;
   gap: 8px;
 }
 
@@ -218,7 +218,7 @@ const emit = defineEmits<{
 }
 
 .csd-suggest-barcode {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted);
   font-family: var(--font-mono, monospace);
   background: var(--color-surface);
@@ -227,7 +227,7 @@ const emit = defineEmits<{
 }
 
 .csd-suggest-stock {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-success-600);
   font-weight: 500;
 }
@@ -300,7 +300,7 @@ const emit = defineEmits<{
   border-radius: 10px;
   background: var(--color-danger-50);
   color: var(--color-danger-600);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   border: 1px solid var(--color-danger-200);
 }

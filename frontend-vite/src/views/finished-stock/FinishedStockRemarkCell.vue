@@ -88,13 +88,13 @@ function onEsc(e: KeyboardEvent) {
 .fr-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .fr-view {
   flex: 1; min-width: 0; text-align: left; padding: 4px 8px; border: 1px solid transparent;
-  border-radius: 8px; background: transparent; font-family: inherit; font-size: 12.5px;
+  border-radius: 8px; background: transparent; font-family: inherit; font-size: 12px;
   color: var(--color-text); cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .fr-view:hover { border-color: var(--color-border); background: var(--color-surface); }
 .fr-input {
   flex: 1; min-width: 0; padding: 4px 8px; border: 1.5px solid var(--color-primary-500);
-  border-radius: 8px; font-family: inherit; font-size: 12.5px; color: var(--color-text);
+  border-radius: 8px; font-family: inherit; font-size: 12px; color: var(--color-text);
   background: var(--color-surface-card); outline: none;
 }
 .fr-input::placeholder { color: var(--color-text-placeholder); }

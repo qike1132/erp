@@ -141,7 +141,7 @@
 }
 
 .brand-title {
-  font-size: 42px;
+  font-size: 32px;
   font-weight: 700;
   color: var(--color-text);
   margin-bottom: 16px;
@@ -193,7 +193,7 @@
 }
 
 .feature-title {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-text);
   margin-bottom: 4px;
@@ -207,7 +207,7 @@
 @media (max-width: 1024px) {
   .brand-section { padding: 48px; }
   .logo-frame { width: 120px; height: 120px; }
-  .brand-title { font-size: 28px; }
+  .brand-title { font-size: 24px; }
 }
 
 @media (max-width: 768px) {

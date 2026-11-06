@@ -18,7 +18,7 @@
   align-items: center;
   gap: 5px;
   min-height: 14px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-warning-800, #a06218);
   white-space: nowrap;
 }
@@ -32,7 +32,7 @@
 }
 
 .pc-bom-status b {
-  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   color: var(--color-text, #1d2939);
 }
@@ -74,7 +74,7 @@
   background: var(--color-primary-600, #3a6bd6);
   color: #fff;
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
@@ -139,7 +139,7 @@
   border-radius: 7px;
   background: var(--color-success-50, #e8f9ef);
   color: var(--color-success-700, #2e7d32);
-  font-size: 11px;
+  font-size: 12px;
   box-sizing: border-box;
 }
 
@@ -153,8 +153,8 @@
 
 .pc-bom-generating-count {
   color: var(--color-text-tertiary, #8a97a8);
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .pc-bom-spinner {

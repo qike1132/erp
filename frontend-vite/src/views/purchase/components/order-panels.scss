@@ -30,7 +30,7 @@
 
 .pc-btn-sm {
   padding: 5px 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .pc-btn-success {
@@ -59,7 +59,7 @@
 .pc-table-wrap table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .pc-table-wrap thead th {
@@ -131,7 +131,7 @@
 
 /* 订单号（2026-09-30 新增列）：等宽字体便于逐位比对 */
 .pc-order-no {
-  font-family: Consolas, ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.2px;
 }
@@ -151,7 +151,7 @@
   align-items: center;
   gap: 6px;
   padding: 2px 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.4;
   border-bottom: 1px dashed var(--color-border-light, #f1f5f9);
 }
@@ -171,7 +171,7 @@
 }
 
 .pc-barcode-text {
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-muted, #94a3b8);
   letter-spacing: 0.04em;
@@ -182,7 +182,7 @@
   display: inline-flex;
   align-items: center;
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   border-radius: 4px;
   background: var(--color-surface, #f1f5f9);
@@ -205,7 +205,7 @@
   display: flex;
   align-items: center;
   padding: 2px 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.4;
   border-bottom: 1px dashed var(--color-border-light, #f1f5f9);
 }
@@ -224,7 +224,7 @@
   justify-content: flex-end;
   gap: 4px;
   padding: 2px 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
   border-bottom: 1px dashed var(--color-border-light, #f1f5f9);

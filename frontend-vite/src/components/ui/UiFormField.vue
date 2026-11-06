@@ -105,7 +105,7 @@ const fieldProps = computed<UiFormFieldControlProps>(() => ({
 }
 
 .ui-form-field__label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-primary, #1a1a2e);
 }
@@ -116,7 +116,7 @@ const fieldProps = computed<UiFormFieldControlProps>(() => ({
 
 .ui-form-field__hint {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-muted, #64748b);
 }
@@ -125,7 +125,7 @@ const fieldProps = computed<UiFormFieldControlProps>(() => ({
    11px 小字需 4.5:1（WCAG 1.4.3）；danger-700 #b33335 实测 6.1:1 */
 .ui-form-field__error {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   font-weight: 500;
   color: var(--color-danger-700, #b33335);

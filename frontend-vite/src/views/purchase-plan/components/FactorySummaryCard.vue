@@ -48,13 +48,13 @@ function pctCls(p: number) { return p <= 0 ? 'fm-r' : p < 100 ? 'fm-a' : 'fm-g' 
   gap: 10px;
   padding: 12px 18px;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 800;
   color: var(--color-heading);
 }
 
 .sp-fsum-head .xs {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-muted, #8c96ad);
 }
@@ -97,14 +97,14 @@ function pctCls(p: number) { return p <= 0 ? 'fm-r' : p < 100 ? 'fm-a' : 'fm-g' 
 }
 
 .sp-fsum-plan {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 800;
   color: var(--color-heading);
   line-height: 1.2;
 }
 
 .sp-fsum-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted, #8c96ad);
 }
 

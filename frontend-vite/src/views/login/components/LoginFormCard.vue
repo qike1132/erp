@@ -37,6 +37,7 @@
               class="form-input with-prefix with-suffix"
               aria-describedby="login-error-msg"
             />
+            <!-- secret-scan:allow-next-line 表单可见性切换，非凭据 -->
             <button type="button" class="input-suffix-btn" aria-label="切换密码可见性" @click="showPassword = !showPassword">
               <FontAwesomeIcon :icon="showPassword ? 'eye-slash' : 'eye'" aria-hidden="true" />
             </button>
@@ -78,7 +79,7 @@ defineProps<{
 // 显式双向绑定：父组件 v-model:form 传入，子组件就地编辑表单字段（合法替代直接改 props）
 const form = defineModel<{ username: string; password: string; remember: boolean }>('form', { required: true })
 
-const showPassword = defineModel<boolean>('showPassword', { default: false })
+const showPassword = defineModel<boolean>('showPassword', { default: false }) // secret-scan:allow 表单模型定义，非凭据
 </script>
 
 <style scoped>
@@ -110,7 +111,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false })
 .login-card-header { margin-bottom: 40px; }
 
 .login-heading {
-  font-size: 30px;
+  font-size: 32px;
   font-weight: 700;
   color: var(--color-text);
   margin-bottom: 10px;
@@ -123,7 +124,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false })
 
 .form-label {
   display: block;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--color-text);
   margin-bottom: 8px;
@@ -139,7 +140,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false })
 .btn-login {
   width: 100%;
   height: 48px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   border-radius: var(--radius-md);
   background: var(--color-ocean-deep);
@@ -215,7 +216,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false })
   padding: 12px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 15px;
+  font-size: 16px;
   color: var(--color-text);
   background: var(--color-surface-card);
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -249,7 +250,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false })
 
 .login-error-msg {
   color: var(--color-danger-600);
-  font-size: 13px;
+  font-size: 14px;
   margin-bottom: 8px;
   padding: 8px 12px;
   background: var(--color-danger-50);
@@ -269,6 +270,6 @@ const showPassword = defineModel<boolean>('showPassword', { default: false })
 
 @media (max-width: 480px) {
   .login-card { padding: 32px 24px; border-radius: var(--radius-xl); }
-  .login-heading { font-size: 22px; }
+  .login-heading { font-size: 20px; }
 }
 </style>

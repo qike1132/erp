@@ -205,7 +205,7 @@ function onSearchInput() {
 .so-col-title i {
   color: var(--color-danger-500);
   margin-right: 6px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .so-col-scroll {
   flex: 1;
@@ -222,14 +222,14 @@ function onSearchInput() {
 .form-label {
   display: block;
   font-weight: 500;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 .label-icon {
   color: var(--color-danger-500);
   margin-right: 4px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .form-input {
   width: 100%;
@@ -271,7 +271,7 @@ textarea.form-input::placeholder {
 .shipment-detail {
   margin-left: 4px;
   color: var(--color-text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 767.98px) {

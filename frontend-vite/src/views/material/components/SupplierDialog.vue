@@ -62,7 +62,7 @@ defineEmits<{
   justify-content: center;
   gap: 10px;
   padding: 48px 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--color-text-secondary, #64748b);
 }
@@ -97,14 +97,14 @@ defineEmits<{
   box-sizing: border-box;
 }
 .mr-det-mat-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-muted, #94a3b8);
   line-height: 1.2;
   margin: 0;
 }
 .mr-det-mat-value {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--color-text, #1e293b);
   line-height: 1.2;

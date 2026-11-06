@@ -143,6 +143,6 @@ function onPickProduct(p: ProductSuggestion) {
   gap: 2px;
   align-items: flex-start;
 }
-.preset-ac-name { color: var(--color-text); font-weight: 500; font-size: 13px; }
-.preset-ac-barcode { color: var(--color-text-muted); font-size: 12px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.preset-ac-name { color: var(--color-text); font-weight: 500; font-size: 14px; }
+.preset-ac-barcode { color: var(--color-text-muted); font-size: 12px; font-family: var(--font-mono); }
 </style>

@@ -49,7 +49,7 @@ defineEmits<{ toggle: [] }>()
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 999px;
   background: #fff;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   cursor: pointer;
 }

@@ -1,11 +1,11 @@
 <template>
   <UiDialog :open="open" title="收货登记" max-width-class="max-w-[540px]" overlay-z-class="z-[var(--z-overlay-nested)]" content-z-class="z-[var(--z-modal-nested)]" @update:open="$emit('update:open', $event)">
     <template #title-icon><FontAwesomeIcon icon="box" style="color:var(--color-success-500);" /></template>
-    <div class="mr-fg2"><label>物料名称</label><div style="font-weight:600;font-size:17px;">{{ item.name }}</div></div>
+    <div class="mr-fg2"><label>物料名称</label><div style="font-weight:600;font-size:16px;">{{ item.name }}</div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
-      <div class="mr-fg2"><label>采购数量</label><div style="font-size:17px;">{{ item.ordered }}</div></div>
-      <div class="mr-fg2"><label>已收货</label><div style="font-size:17px;color:var(--color-success-500);">{{ item.received }}</div></div>
-      <div class="mr-fg2"><label>待收货</label><div style="font-size:17px;color:var(--color-warning-500);">{{ item.remaining }}</div></div>
+      <div class="mr-fg2"><label>采购数量</label><div style="font-size:16px;">{{ item.ordered }}</div></div>
+      <div class="mr-fg2"><label>已收货</label><div style="font-size:16px;color:var(--color-success-500);">{{ item.received }}</div></div>
+      <div class="mr-fg2"><label>待收货</label><div style="font-size:16px;color:var(--color-warning-500);">{{ item.remaining }}</div></div>
     </div>
     <div class="mr-fg2"><label>本次收货数量</label><input v-model.number="qty" type="number" min="0.01" step="0.01" placeholder="输入本次收货数量" aria-label="输入本次收货数量" /></div>
     <div class="mr-fg2"><label>备注</label><textarea v-model="remark" rows="2" placeholder="可选备注..." aria-label="可选备注..." /></div>

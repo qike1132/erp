@@ -118,21 +118,21 @@ function fmtSize(bytes?: number | null) {
 <style scoped>
 .brt-card { border: 1px solid var(--color-border-light); border-radius: var(--radius-md, 14px); background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.06); overflow: hidden; }
 .brt-toolbar { display: flex; gap: 12px; padding: 20px 24px; flex-wrap: wrap; }
-.brt-select, .brt-search { height: 36px; padding: 0 12px; border: 2px solid var(--color-border-light); border-radius: var(--radius-input, 12px); font-size: 13px; font-weight: 600; font-family: inherit; background: #ffffff; color: var(--color-text); transition: border-color 0.3s ease, box-shadow 0.3s ease; }
+.brt-select, .brt-search { height: 36px; padding: 0 12px; border: 2px solid var(--color-border-light); border-radius: var(--radius-input, 12px); font-size: 14px; font-weight: 600; font-family: inherit; background: #ffffff; color: var(--color-text); transition: border-color 0.3s ease, box-shadow 0.3s ease; }
 .brt-select:focus, .brt-search:focus { outline: none; border-color: var(--color-primary-300); box-shadow: 0 0 0 3px var(--color-primary-50); }
 .brt-search { width: 220px; }
 .brt-table-wrap { overflow-x: auto; border-top: 1px solid var(--color-border-light); }
 .brt-table { width: 100%; border-collapse: collapse; min-width: 720px; }
 .brt-table th { padding: 10px 14px; background: var(--color-surface); font-weight: 600; color: var(--color-text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid var(--color-border-light); text-align: left; white-space: nowrap; }
-.brt-table td { padding: 10px 14px; font-size: 13px; color: var(--color-text); border-bottom: 1px solid var(--color-border-light); vertical-align: middle; }
+.brt-table td { padding: 10px 14px; font-size: 14px; color: var(--color-text); border-bottom: 1px solid var(--color-border-light); vertical-align: middle; }
 .brt-table tbody tr:hover td { background: var(--color-primary-50); }
-.mono { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; }
+.mono { font-family: var(--font-mono); font-size: 14px; }
 /* 「操作」列整列居中（表头+按钮），与用户页 UiDataTable 操作列 align:'center' 一致。
    必须连写提升特异性：.brt-table th 的 text-align:left(0,1,1) 高于单类 .brt-right(0,1,0)，
    否则表头的对齐设置被吞掉，与列内按钮错位 */
 .brt-table th.brt-right,
 .brt-table td.brt-right { text-align: center; }
-.brt-badge { min-width: 20px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.brt-badge { min-width: 20px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
 .brt-badge-success { background: var(--color-success-50); color: var(--color-success-700); }
 .brt-badge-danger { background: var(--color-danger-50); color: var(--color-danger-700); }
 .brt-badge-processing { background: var(--color-primary-50); color: var(--color-primary-700); }
@@ -146,8 +146,8 @@ function fmtSize(bytes?: number | null) {
 .brt-link-danger:hover { color: var(--color-danger-600); }
 .brt-link:disabled { color: var(--color-text-muted); cursor: not-allowed; }
 .brt-empty { text-align: center; color: var(--color-text-muted); }
-.brt-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 20px 24px; font-size: 13px; color: var(--color-text-secondary); }
-.brt-page { display: inline-flex; align-items: center; padding: 8px 14px; border: 2px solid var(--color-border-light); border-radius: var(--radius-button, 14px); font-size: 13px; font-weight: 600; font-family: inherit; background: #ffffff; color: var(--color-text); cursor: pointer; transition: border-color .3s ease, color .3s ease, background .3s ease; }
+.brt-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 20px 24px; font-size: 14px; color: var(--color-text-secondary); }
+.brt-page { display: inline-flex; align-items: center; padding: 8px 14px; border: 2px solid var(--color-border-light); border-radius: var(--radius-button, 14px); font-size: 14px; font-weight: 600; font-family: inherit; background: #ffffff; color: var(--color-text); cursor: pointer; transition: border-color .3s ease, color .3s ease, background .3s ease; }
 .brt-page:hover:not(:disabled) { background: var(--color-primary-50); color: var(--color-primary-600); border-color: var(--color-primary-200); }
 .brt-page:disabled { opacity: .4; cursor: not-allowed; }
 </style>

@@ -92,7 +92,7 @@ function fmt(n: number): string {
 .mr-search-input {
   width: 250px;
   padding: 7px 12px 7px 30px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-family: inherit;
   border: 1.5px solid var(--color-border, #e4e7ed);
   border-radius: 9px;
@@ -108,8 +108,8 @@ function fmt(n: number): string {
 .kpi-item + .kpi-item { border-left: 1px solid var(--color-border-light, #f0f2f5); }
 .kpi-top { display: flex; align-items: center; gap: 5px; }
 .kpi-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
-.kpi-label { font-size: 11px; color: var(--color-text-secondary, #475569); font-weight: 500; white-space: nowrap; }
-.kpi-value { font-size: 17px; font-weight: 700; color: var(--color-text, #1a1a2e); line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kpi-label { font-size: 12px; color: var(--color-text-secondary, #475569); font-weight: 500; white-space: nowrap; }
+.kpi-value { font-size: 16px; font-weight: 700; color: var(--color-text, #1a1a2e); line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .kpi-value.kpi-danger { color: #d03b3b; }
 
 .mr-export-btn {
@@ -117,7 +117,7 @@ function fmt(n: number): string {
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   font-family: inherit;
   color: var(--color-success-600, #1e9e55);

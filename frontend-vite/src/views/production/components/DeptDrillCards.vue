@@ -18,11 +18,11 @@
           <!-- 标签优先用后端返回的 department_label（部门名后端说了算），
                注册表只作兜底 —— 与移动端 MProductionView 同一口径 -->
           <span class="block text-xs font-bold text-heading">{{ row.department_label || label(row.department) }}</span>
-          <span class="block text-lg font-extrabold tabular-nums text-heading">
+          <span class="block text-xl font-extrabold tabular-nums text-heading">
             {{ formatNumber(row.total_quantity) }}
-            <small class="text-[11px] font-semibold text-text-muted">件</small>
+            <small class="text-[12px] font-semibold text-text-muted">件</small>
           </span>
-          <span class="block text-[11px] font-medium text-text-muted">
+          <span class="block text-[12px] font-medium text-text-muted">
             {{ formatCurrency(row.total_value) }} · {{ row.sku_count }} 种
           </span>
         </span>

@@ -140,7 +140,7 @@ function progCls(pct: number): string {
 
 .sp-sku-table td {
   padding: 9px 14px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
   transition: background 0.2s ease;
@@ -186,7 +186,7 @@ function progCls(pct: number): string {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -229,7 +229,7 @@ function progCls(pct: number): string {
 }
 
 .sp-code {
-  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-muted, #94a3b8);
   letter-spacing: 0.03em;
@@ -262,7 +262,7 @@ function progCls(pct: number): string {
 .prog-g { background: var(--color-success-500, #28c76f); }
 
 .sp-prog-v {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-text-muted, #8c96ad);
   min-width: 32px;

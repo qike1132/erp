@@ -218,7 +218,7 @@ function handleItemClick(item: ParsedNotification) {
 }
 
 .nc-item-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-heading);
   line-height: 1.4;
@@ -246,13 +246,13 @@ function handleItemClick(item: ParsedNotification) {
 }
 
 .nc-item-time i {
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.8;
 }
 
 /* 纯文本内容 */
 .nc-item-text {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   line-height: 1.6;
   padding: 12px 14px;
@@ -269,7 +269,7 @@ function handleItemClick(item: ParsedNotification) {
   flex-wrap: wrap;
   gap: 4px 18px;
   padding: 10px 14px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   background: var(--color-surface, #f8fafc);
   border: 1px solid var(--color-border-light, #e2e8f0);
@@ -322,7 +322,7 @@ function handleItemClick(item: ParsedNotification) {
   align-items: center;
   justify-content: center;
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: 999px;
   background: var(--color-primary-50, #eff3fb);
@@ -347,7 +347,7 @@ function handleItemClick(item: ParsedNotification) {
   .nc-item-type-icon {
     width: 30px;
     height: 30px;
-    font-size: 13px;
+    font-size: 14px;
     border-radius: 9px;
   }
 

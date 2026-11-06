@@ -288,7 +288,7 @@ async function handleAdd() {
   color: var(--color-text-muted) !important;
 }
 .pd-file-inline {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;

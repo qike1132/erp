@@ -136,7 +136,7 @@ const emit = defineEmits<{
   color: white;
   border-color: var(--color-primary-500);
 }
-.pd-btn-sm { padding: 5px 10px; font-size: 11px; }
+.pd-btn-sm { padding: 5px 10px; font-size: 12px; }
 
 /* 尺寸契约（勿改回随内容变化）：弹窗恒定高度 90vh，内容多少只影响内部滚动位置。
    高度 / 圆角 / body 内边距由文件末尾的全局 .copy-bom-modal-card 规则维持
@@ -144,13 +144,13 @@ const emit = defineEmits<{
 .bom-btn-cancel {
   padding: 10px 20px; background: white; color: var(--color-text);
   border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
+  font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
 }
 .bom-btn-cancel:hover { background: var(--color-surface, #f8fafc); transform: translateY(-1px); }
 .bom-btn-save {
   padding: 10px 20px; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
   color: white; border: 2px solid var(--color-primary-500); border-radius: 10px;
-  font-size: 13px; font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
+  font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
   display: flex; align-items: center; gap: 6px;
 }
 .bom-btn-save:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
@@ -171,8 +171,8 @@ const emit = defineEmits<{
 .copy-bom-product-item:hover { border-color: var(--color-primary-300); background: var(--color-primary-50); }
 .copy-bom-product-item.selected { border-color: var(--color-success-500); background: var(--color-success-50); }
 .copy-bom-product-item .product-name { font-weight: 600; color: var(--color-text); }
-.copy-bom-product-item .product-barcode { font-size: 11px; color: var(--color-text-secondary); }
-.copy-bom-product-item .product-status { font-size: 11px; padding: 3px 8px; border-radius: 16px; }
+.copy-bom-product-item .product-barcode { font-size: 12px; color: var(--color-text-secondary); }
+.copy-bom-product-item .product-status { font-size: 12px; padding: 3px 8px; border-radius: 16px; }
 .copy-bom-product-item .product-status.has-bom { background: var(--color-success-50); color: var(--color-success-600); }
 .copy-bom-product-item .product-status.no-bom { background: var(--color-warning-50); color: var(--color-warning-600); }
 

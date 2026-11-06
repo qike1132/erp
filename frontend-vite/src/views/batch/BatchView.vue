@@ -182,7 +182,7 @@ const {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 19px;
+  font-size: 20px;
   flex-shrink: 0;
 }
 .bt-icon-blue {
@@ -216,7 +216,7 @@ const {
   border: none;
   border-radius: 9px;
   background: transparent;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;

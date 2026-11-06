@@ -2,7 +2,7 @@
   <div class="page-card-toolbar">
     <div class="page-toolbar-left">
       <button class="menu-toggle-btn" aria-label="切换侧边栏" @click="sidebarStore.toggle()">
-        <FontAwesomeIcon :icon="!sidebarStore.isCollapsed ? 'angles-left' : 'angles-right'" style="font-size: 18px" aria-hidden="true" />
+        <FontAwesomeIcon :icon="!sidebarStore.isCollapsed ? 'angles-left' : 'angles-right'" style="font-size: 20px" aria-hidden="true" />
       </button>
     </div>
     <div class="page-toolbar-right">
@@ -86,7 +86,7 @@ async function confirmLogout() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 20px;
   transition: transform 0.2s ease, background 0.2s ease;
   box-shadow: 0 2px 8px rgba(176, 224, 230, 0.25);
   will-change: transform;
@@ -126,7 +126,7 @@ async function confirmLogout() {
   align-items: center;
   gap: 6px;
   color: var(--color-text-tertiary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -175,7 +175,7 @@ async function confirmLogout() {
 }
 
 .tb-role {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-tertiary);
   opacity: 0.85;
   line-height: 1.2;
@@ -191,7 +191,7 @@ async function confirmLogout() {
   background: transparent;
   color: var(--color-danger-700);
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.2s ease, color 0.2s ease;

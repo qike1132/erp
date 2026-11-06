@@ -140,7 +140,7 @@ function scopeOf(item: { remark?: string | null }): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: #0f172a;
 }
@@ -156,7 +156,7 @@ function scopeOf(item: { remark?: string | null }): string {
   border-radius: 3px;
   background: #f1f5f9;
   color: #64748b;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -181,7 +181,7 @@ function scopeOf(item: { remark?: string | null }): string {
   padding: 10px 12px;
   text-align: left;
   font-weight: 600;
-  font-size: 11px;
+  font-size: 12px;
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -240,7 +240,7 @@ function scopeOf(item: { remark?: string | null }): string {
 
 .odm-td-muted {
   color: #64748b;
-  font-size: 11px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -256,7 +256,7 @@ function scopeOf(item: { remark?: string | null }): string {
   text-align: center;
   color: #94a3b8;
   padding: 32px 12px !important;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* ============ 单价输入 ============ */
@@ -294,7 +294,7 @@ function scopeOf(item: { remark?: string | null }): string {
 
 .odm-total {
   margin-right: auto;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-primary-700, #2d5ab8);
   font-variant-numeric: tabular-nums;
@@ -304,7 +304,7 @@ function scopeOf(item: { remark?: string | null }): string {
   padding: 7px 16px;
   border: 1px solid var(--color-primary-500, #5b8def);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -328,7 +328,7 @@ function scopeOf(item: { remark?: string | null }): string {
   padding: 7px 16px;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;

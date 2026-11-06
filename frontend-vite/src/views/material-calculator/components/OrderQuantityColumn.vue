@@ -64,7 +64,7 @@ function onQtyInput(e: Event, item: { quantity: number }) {
   padding: 0 8px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   font-family: inherit;
   -moz-appearance: textfield;
@@ -107,7 +107,7 @@ function onQtyInput(e: Event, item: { quantity: number }) {
 .mc-order-name {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--color-text);
   overflow: hidden;
@@ -156,7 +156,7 @@ function onQtyInput(e: Event, item: { quantity: number }) {
   gap: 8px;
   padding: 40px 20px;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .mc-empty-state svg {

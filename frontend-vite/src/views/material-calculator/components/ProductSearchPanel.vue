@@ -167,7 +167,7 @@ const emit = defineEmits<{
 }
 
 .mc-dropdown-item-meta {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 
@@ -175,7 +175,7 @@ const emit = defineEmits<{
   flex-shrink: 0;
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   border: 1px solid;
 }

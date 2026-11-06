@@ -225,7 +225,7 @@ function statusClass(label: string): string {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 .oso-table thead {
   background: var(--color-surface, #f8fafc);
@@ -250,7 +250,7 @@ function statusClass(label: string): string {
 .oso-th-center { text-align: center !important; }
 .oso-table tbody td {
   padding: 10px 14px;
-  font-size: 13px;
+  font-size: 14px;
   border-right: 1px solid #d8dce2;
   border-bottom: 1px solid #d8dce2;
   text-align: center;
@@ -265,7 +265,7 @@ function statusClass(label: string): string {
 .oso-table tbody tr:hover { background: var(--color-primary-50); }
 .oso-customer-cell { font-weight: 600; white-space: nowrap; }
 .oso-cell-main { font-weight: 600; }
-.oso-sku-line { padding: 2px 0; font-size: 13px; line-height: 1.4; }
+.oso-sku-line { padding: 2px 0; font-size: 14px; line-height: 1.4; }
 .oso-sku-name {
   display: block;
   white-space: nowrap;
@@ -291,7 +291,7 @@ function statusClass(label: string): string {
   align-items: center;
   justify-content: center;
   padding: 1px 6px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: 4px;
   line-height: 1.5;
@@ -299,7 +299,7 @@ function statusClass(label: string): string {
 .oso-type-badge--order { background: var(--color-success-50, #e8f9ef); color: var(--color-success-600, #1e9e55); }
 .oso-type-badge--stockin { background: var(--color-primary-50, #eff6ff); color: var(--color-primary-600, #2563eb); }
 /* 订单号：等宽字体便于逐位比对（单号是给人念/抄的） */
-.oso-order-no { font-family: Consolas, ui-monospace, monospace; font-size: 12px; letter-spacing: 0.2px; }
+.oso-order-no { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.2px; }
 .oso-proc-badge {
   display: inline-flex;
   align-items: center;
@@ -369,7 +369,7 @@ function statusClass(label: string): string {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }

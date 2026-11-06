@@ -13,13 +13,13 @@
         iconBgClass,
       ]"
     >
-      <FontAwesomeIcon :icon="icon" :class="['text-sm md:text-lg', iconColorClass]" aria-hidden="true" />
+      <FontAwesomeIcon :icon="icon" :class="['text-sm md:text-xl', iconColorClass]" aria-hidden="true" />
     </div>
     <div class="flex-1 min-w-0">
-      <div class="text-sm md:text-[15px] font-bold text-heading truncate">
+      <div class="text-sm md:text-[16px] font-bold text-heading truncate">
         {{ label }}
       </div>
-      <div class="text-[11px] md:text-xs text-text-secondary truncate mt-0.5">
+      <div class="text-[12px] md:text-xs text-text-secondary truncate mt-0.5">
         {{ description }}
       </div>
     </div>

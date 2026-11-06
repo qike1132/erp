@@ -97,7 +97,7 @@ function onHide() {
     <!-- 头部 -->
     <template #header>
       <slot name="header">
-        <span class="text-lg font-bold text-heading">{{ title }}</span>
+        <span class="text-xl font-bold text-heading">{{ title }}</span>
       </slot>
     </template>
 

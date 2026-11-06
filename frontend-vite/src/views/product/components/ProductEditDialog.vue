@@ -226,11 +226,11 @@ defineExpose({ open })
 .edit-span2 { grid-column: 1 / -1; }
 @media (max-width: 800px) { .edit-grid { grid-template-columns: 1fr; } }
 .edit-grid :deep(.pcs-field) { min-height: 44px; padding: 8px 34px 8px 14px; border-radius: 12px; }
-.edit-grid :deep(.pcs-placeholder) { font-size: 15px; }
+.edit-grid :deep(.pcs-placeholder) { font-size: 16px; }
 .pd-form-group { margin-bottom: 0; }
 .pd-label {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-secondary);
   margin-bottom: 8px;
@@ -244,14 +244,14 @@ defineExpose({ open })
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-text-secondary);
-  font-size: 15px;
+  font-size: 16px;
   z-index: 10;
   pointer-events: none;
 }
 .pd-input {
   width: 100%;
   padding: 11px 14px 11px 40px;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
   color: var(--color-text);
   background: white;
@@ -304,7 +304,7 @@ defineExpose({ open })
   display: flex !important;
   margin-bottom: 0;
   cursor: pointer;
-  font-size: 14.5px !important;
+  font-size: 14px !important;
   font-weight: 400 !important;
   color: var(--color-text-muted) !important;
   align-items: center;
@@ -339,7 +339,7 @@ defineExpose({ open })
   border: none;
   background: rgba(0,0,0,0.4);
   color: white;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   margin-left: 2px;
   transition: background 0.2s ease;

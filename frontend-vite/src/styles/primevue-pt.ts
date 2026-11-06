@@ -8,7 +8,7 @@
  *  - 通用容器：bg-white rounded-[var(--radius-card)] border border-border shadow-sm
  *  - 输入框：bg-slate-50 border-2 border-ocean-light rounded-input focus:...
  *  - 下拉面板：z-[var(--z-dropdown)] bg-white rounded-xl shadow-lg
- *  - 列表项：px-3 py-2 text-[13px] cursor-pointer rounded-md
+ *  - 列表项：px-3 py-2 text-[14px] cursor-pointer rounded-md
  */
 import type { PrimeVuePTOptions } from 'primevue/config'
 
@@ -39,7 +39,7 @@ export const plushCutePT: PrimeVuePTOptions = {
     list: 'py-1',
     option: ({ context }: { context: { focused: boolean; selected: boolean } }) => ({
       class: [
-        'px-3 py-2 text-[13px] cursor-pointer rounded-md mx-1 transition-colors duration-150',
+        'px-3 py-2 text-[14px] cursor-pointer rounded-md mx-1 transition-colors duration-150',
         context.selected
           ? 'bg-primary-100 text-primary-700'
           : context.focused
@@ -47,7 +47,7 @@ export const plushCutePT: PrimeVuePTOptions = {
             : 'text-text hover:bg-ocean-light/20',
       ],
     }),
-    optionGroup: 'px-3 py-1.5 text-[11px] font-semibold text-text-muted uppercase tracking-wider',
+    optionGroup: 'px-3 py-1.5 text-[12px] font-semibold text-text-muted uppercase tracking-wider',
     emptyMessage: 'px-3 py-6 text-center text-sm text-text-muted',
     loader: 'absolute top-1/2 right-4 -translate-y-1/2 animate-spin',
     dropdown: {
@@ -101,7 +101,7 @@ export const plushCutePT: PrimeVuePTOptions = {
       ],
     }),
     header: 'flex items-center justify-between px-6 py-4 border-b border-border-light flex-shrink-0',
-    title: 'text-lg font-bold text-heading',
+    title: 'text-xl font-bold text-heading',
   },
 
   // ============================================================
@@ -216,7 +216,7 @@ export const plushCutePT: PrimeVuePTOptions = {
     listContainer: 'bg-white border border-border rounded-xl shadow-lg overflow-y-auto max-h-60',
     option: ({ context }: { context: { selected: boolean; focused: boolean } }) => ({
       class: [
-        'px-3 py-2 text-[13px] cursor-pointer rounded-md mx-1 transition-colors duration-150',
+        'px-3 py-2 text-[14px] cursor-pointer rounded-md mx-1 transition-colors duration-150',
         context.selected
           ? 'bg-primary-100 text-primary-700'
           : context.focused
@@ -236,7 +236,7 @@ export const plushCutePT: PrimeVuePTOptions = {
     content:
       'relative bg-white rounded-[var(--radius-modal)] shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col animate-slide-up flex-1 px-6 py-5 overflow-y-auto',
     header: 'flex items-center justify-between px-6 py-4 border-b border-border-light flex-shrink-0',
-    title: 'text-lg font-bold text-heading',
+    title: 'text-xl font-bold text-heading',
     pcCloseButton: {
       root: { class: 'inline-flex items-center justify-center w-8 h-8 rounded-full text-text-muted hover:bg-slate-100 hover:text-text transition-colors' },
     },

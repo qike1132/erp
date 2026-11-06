@@ -89,14 +89,14 @@ const riskBreakdown = computed(() => {
 }
 
 .sp-kpi-l {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted, #5a6b8c);
   white-space: nowrap;
 }
 
 .sp-kpi-v {
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 800;
   color: var(--color-heading);
   line-height: 1;
@@ -104,7 +104,7 @@ const riskBreakdown = computed(() => {
 }
 
 .sp-kpi-s {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted, #8c96ad);
   white-space: nowrap;
   overflow: hidden;

@@ -96,7 +96,7 @@ function isPickOn(g: PickGroup): boolean {
 .osw-search svg { color: var(--color-text-muted, #94a3b8); font-size: 12px; flex-shrink: 0; }
 .osw-search input {
   flex: 1; min-width: 0; border: none; outline: none; background: transparent;
-  font: inherit; font-size: 13px; padding: 8px 0; color: var(--color-text, #1e293b);
+  font: inherit; font-size: 14px; padding: 8px 0; color: var(--color-text, #1e293b);
 }
 .osw-search input::placeholder { color: var(--color-text-muted, #94a3b8); }
 
@@ -110,14 +110,14 @@ function isPickOn(g: PickGroup): boolean {
 /* 两栏共用类：scoped 样式不跨组件，在两个子组件内各持一份 */
 .osw-link {
   border: none; background: transparent; color: var(--color-primary-600, #2563eb);
-  font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
   padding: 4px 6px; border-radius: 6px; transition: background 0.15s ease;
 }
 .osw-link:hover:not(:disabled) { background: var(--color-primary-50, #eff6ff); }
 .osw-link:disabled { color: #b6c2d2; cursor: not-allowed; }
 
 .osw-l-list { flex: 1; overflow-y: auto; padding: 2px 12px 12px; scrollbar-gutter: stable; }
-.osw-l-empty { padding: 36px 16px; text-align: center; color: var(--color-text-muted, #94a3b8); font-size: 12.5px; }
+.osw-l-empty { padding: 36px 16px; text-align: center; color: var(--color-text-muted, #94a3b8); font-size: 12px; }
 
 /* 列表表头：sticky 在滚动容器内；内边距/列宽与 .osw-card 逐列对齐 */
 /* 表头与卡片共用 grid 列定义：勾选 | 产品 | 角标 */
@@ -132,7 +132,7 @@ function isPickOn(g: PickGroup): boolean {
   position: sticky; top: 0; z-index: 1;
   margin-bottom: 6px; padding: 6px 12px;
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.03em;
   color: var(--color-text-muted, #94a3b8);
   background: #fff;
 }
@@ -153,14 +153,14 @@ function isPickOn(g: PickGroup): boolean {
 
 /* 单行布局：产品名（完整展示） + 跨订单角标 */
 .osw-prod-name {
-  min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--color-text, #1e293b);
+  min-width: 0; font-size: 14px; font-weight: 600; color: var(--color-text, #1e293b);
   /* 产品名完整展示：允许折行，不使用省略号截断 */
   overflow-wrap: anywhere; line-height: 1.45;
 }
 /* 跨订单角标：同一产品分布在多张订单 */
 .osw-prod-orders {
   justify-self: start;
-  font-size: 10.5px; font-weight: 700; color: var(--color-warning-600, #d97706);
+  font-size: 12px; font-weight: 700; color: var(--color-warning-600, #d97706);
   background: var(--color-warning-50, #fffbeb); border: 1px solid var(--color-warning-200, #fde68a);
   border-radius: 5px; padding: 0 5px; line-height: 1.5; white-space: nowrap;
 }

@@ -131,7 +131,7 @@
      否则「产品名称」会独占剩余宽度，右侧两列被挤在一起 */
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 

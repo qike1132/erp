@@ -144,9 +144,9 @@ function productOrderCount(p: CartProduct): number {
 /* ---- 右栏 ---- */
 .osw-right { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--color-surface, #f8fafc); }
 .osw-r-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; flex-shrink: 0; }
-.osw-r-title { font-size: 13px; font-weight: 800; color: var(--color-text, #1e293b); }
+.osw-r-title { font-size: 14px; font-weight: 800; color: var(--color-text, #1e293b); }
 .osw-chip {
-  font-size: 11.5px; font-weight: 700; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px; font-weight: 700; font-family: var(--font-mono);
   background: var(--color-primary-50, #eff6ff); color: var(--color-primary-600, #2563eb);
   border: 1px solid var(--color-primary-200, #bfdbfe); border-radius: 999px; padding: 1px 9px;
 }
@@ -156,7 +156,7 @@ function productOrderCount(p: CartProduct): number {
 /* 两栏共用类：scoped 样式不跨组件，在两个子组件内各持一份 */
 .osw-link {
   border: none; background: transparent; color: var(--color-primary-600, #2563eb);
-  font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
   padding: 4px 6px; border-radius: 6px; transition: background 0.15s ease;
 }
 .osw-link:hover:not(:disabled) { background: var(--color-primary-50, #eff6ff); }
@@ -174,7 +174,7 @@ function productOrderCount(p: CartProduct): number {
   color: var(--color-primary-300, #93c5fd); display: flex; align-items: center; justify-content: center;
   margin: 0 auto 12px; font-size: 20px;
 }
-.osw-cart-empty-t { font-size: 13.5px; font-weight: 700; color: var(--color-text-secondary, #475569); margin-bottom: 4px; }
+.osw-cart-empty-t { font-size: 14px; font-weight: 700; color: var(--color-text-secondary, #475569); margin-bottom: 4px; }
 .osw-cart-empty-s { font-size: 12px; line-height: 1.7; }
 
 .osw-cart-card {
@@ -185,17 +185,17 @@ function productOrderCount(p: CartProduct): number {
   display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-bottom: 1px solid #eef2f7;
 }
 .osw-cart-title {
-  min-width: 0; font-size: 13px; font-weight: 800; color: var(--color-text, #1e293b);
+  min-width: 0; font-size: 14px; font-weight: 800; color: var(--color-text, #1e293b);
   overflow-wrap: anywhere; line-height: 1.45;
 }
 /* 跨订单合并提示：该产品由多张订单汇总而来 */
 .osw-cart-orders {
-  flex-shrink: 0; font-size: 10.5px; font-weight: 700; color: var(--color-warning-600, #d97706);
+  flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--color-warning-600, #d97706);
   background: var(--color-warning-50, #fffbeb); border: 1px solid var(--color-warning-200, #fde68a);
   border-radius: 5px; padding: 0 5px; line-height: 1.6; white-space: nowrap;
 }
 .osw-cart-sum { margin-left: auto; font-size: 12px; color: var(--color-text-muted, #64748b); white-space: nowrap; }
-.osw-cart-sum b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; font-weight: 800; color: var(--color-primary-600, #2563eb); }
+.osw-cart-sum b { font-family: var(--font-mono); font-size: 14px; font-weight: 800; color: var(--color-primary-600, #2563eb); }
 .osw-rm {
   flex-shrink: 0; width: 24px; height: 24px; border-radius: 7px; border: none; background: transparent;
   color: var(--color-text-muted, #94a3b8); cursor: pointer; font-size: 12px;
@@ -231,7 +231,7 @@ function productOrderCount(p: CartProduct): number {
 .osw-total,
 .osw-remain {
   display: flex; align-items: baseline; gap: 6px;
-  font-size: 11.5px; line-height: 1.5;
+  font-size: 12px; line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
 .osw-total i,
@@ -242,7 +242,7 @@ function productOrderCount(p: CartProduct): number {
 .osw-total b,
 .osw-remain b {
   flex: 1; min-width: 0; text-align: right;
-  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
 }
 .osw-total b { color: var(--color-text-secondary, #475569); }
@@ -250,8 +250,8 @@ function productOrderCount(p: CartProduct): number {
 /* 发完后无剩余：弱化，避免与「已发完」状态混淆 */
 .osw-remain.is-zero b { color: var(--color-text-muted, #94a3b8); font-weight: 500; }
 .osw-qty {
-  width: 100%; padding: 6px 9px; font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 12.5px; font-weight: 700; text-align: right; color: var(--color-text, #1e293b);
+  width: 100%; padding: 6px 9px; font-family: var(--font-mono);
+  font-size: 12px; font-weight: 700; text-align: right; color: var(--color-text, #1e293b);
   border: 1px solid #cbd5e1; border-radius: 8px; outline: none;
   font-variant-numeric: tabular-nums; transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }

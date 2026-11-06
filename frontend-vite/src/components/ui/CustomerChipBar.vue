@@ -60,7 +60,7 @@ defineEmits<{ select: [name: string] }>()
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
   white-space: nowrap;
@@ -117,7 +117,7 @@ defineEmits<{ select: [name: string] }>()
   justify-content: center;
   flex-shrink: 0;
   padding: 0 4px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-primary-500);
 }
 .sk-bar-fade-enter-active { transition: opacity 0.2s ease; }

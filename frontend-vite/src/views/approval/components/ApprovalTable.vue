@@ -87,7 +87,7 @@ const emit = defineEmits<{
 .ap-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 .ap-table thead th {
   padding: 10px 14px;
@@ -102,7 +102,7 @@ const emit = defineEmits<{
 }
 .ap-table tbody td {
   padding: 10px 14px;
-  font-size: 13px;
+  font-size: 14px;
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   text-align: center;
   transition: background 0.2s ease;

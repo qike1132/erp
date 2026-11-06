@@ -177,8 +177,8 @@ function exportInventory() {
 .ip-wrap { display: flex; flex-direction: column; gap: 16px; }
 .ip-stat-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .ip-stat-main { flex: 0 0 220px; }
-.ip-stat-side { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--color-text-secondary); }
-.ip-stat-side b { font-size: 15px; font-weight: 800; color: var(--color-text); font-variant-numeric: tabular-nums; margin-left: 2px; }
+.ip-stat-side { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; color: var(--color-text-secondary); }
+.ip-stat-side b { font-size: 16px; font-weight: 800; color: var(--color-text); font-variant-numeric: tabular-nums; margin-left: 2px; }
 .ip-stat-side .ip-side-in { color: var(--color-success-600); }
 .ip-stat-side .ip-side-out { color: var(--color-danger-500); }
 
@@ -205,7 +205,7 @@ function exportInventory() {
 .ip-btn-ghost { border: 2px solid var(--color-border-light, #e2e8f0); background: white; color: var(--color-text-secondary); }
 .ip-btn-ghost:hover:not(:disabled) { background: var(--color-primary-50); color: var(--color-primary-600); }
 
-.ip-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ip-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ip-table thead th {
   background: var(--color-surface); padding: 9px 12px; text-align: center;
   font-size: 12px; font-weight: 600; color: var(--color-text-secondary);
@@ -228,14 +228,14 @@ function exportInventory() {
 .ip-stock-zero { color: var(--color-danger-500); }
 
 .ip-tag {
-  display: inline-flex; align-items: center; font-size: 11px; padding: 2px 7px;
+  display: inline-flex; align-items: center; font-size: 12px; padding: 2px 7px;
   border-radius: 6px; background: var(--color-primary-50); color: var(--color-primary-700);
   font-weight: 600; margin-left: 6px;
 }
 .ip-tag-part { background: var(--color-border-light); color: var(--color-text-secondary); font-weight: 500; }
 
 .ip-pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 12px; }
-.ip-page-info { font-size: 13px; color: var(--color-text-secondary); }
+.ip-page-info { font-size: 14px; color: var(--color-text-secondary); }
 
 .ip-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px;

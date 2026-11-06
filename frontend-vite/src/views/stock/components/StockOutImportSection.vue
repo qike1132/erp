@@ -237,14 +237,14 @@ function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
 .form-label {
   display: block;
   font-weight: 500;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 .label-icon {
   color: var(--color-danger-500);
   margin-right: 4px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .so-droppable { cursor: pointer; }
 .so-droppable.so-drag-over {
@@ -269,7 +269,7 @@ function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 6px;
   background: white;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;

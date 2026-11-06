@@ -62,7 +62,7 @@ withDefaults(
   gap: 8px;
   padding: 32px 0;
   color: var(--color-text-secondary, #475569);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /*

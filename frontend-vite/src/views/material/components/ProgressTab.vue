@@ -187,16 +187,16 @@ const progressColumns: TableColumn[] = [
   background: #fafbfe;
   flex-wrap: wrap;
 }
-.mr-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-text-secondary, #475569); }
+.mr-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary, #475569); }
 .mr-legend .sw { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-.mr-legend .lg-note { font-size: 11px; color: var(--color-text-muted, #64748b); margin-left: auto; }
+.mr-legend .lg-note { font-size: 12px; color: var(--color-text-muted, #64748b); margin-left: auto; }
 
-.mr-order-link { font-size: 13px; font-weight: 600; color: var(--color-primary-600, #3a6bd6); white-space: nowrap; }
+.mr-order-link { font-size: 14px; font-weight: 600; color: var(--color-primary-600, #3a6bd6); white-space: nowrap; }
 .mr-sku-line { font-size: 14px; color: var(--color-text, #1a1a2e); padding: 2px 0; line-height: 1.4; }
 .mr-sku-line + .mr-sku-line { border-top: 1px dashed var(--color-border, #e5e7eb); }
 
 .mr-td-qty { font-size: 14px; font-weight: 600; color: var(--color-text, #1a1a2e); text-align: right; font-variant-numeric: tabular-nums; }
-.mr-td-date { font-size: 11px; color: var(--color-text-muted, #64748b); white-space: nowrap; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.mr-td-date { font-size: 12px; color: var(--color-text-muted, #64748b); white-space: nowrap; font-variant-numeric: tabular-nums; margin-top: 2px; }
 
 /* === 供应商块容器（块本体在 SupplierGroupCard） === */
 .mr-supplier-groups { display: flex; flex-direction: column; gap: 8px; min-width: 420px; }
@@ -209,7 +209,7 @@ const progressColumns: TableColumn[] = [
 .mr-stack .mr-seg.seg-done { background: #1e9e55; }
 .mr-stack .mr-seg.seg-zero { background: #9a6a00; }
 .mr-stack .mr-seg.seg-overdue { background: #d03b3b; }
-.mr-stack-note { font-size: 10.5px; color: var(--color-text-muted, #64748b); white-space: nowrap; }
+.mr-stack-note { font-size: 12px; color: var(--color-text-muted, #64748b); white-space: nowrap; }
 .mr-stack-note .is-overdue-txt { color: #d03b3b; font-weight: 700; }
 
 /* === Action Buttons === */
@@ -222,7 +222,7 @@ const progressColumns: TableColumn[] = [
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 14px;
   transition: all 0.2s ease;
   cursor: pointer;
 }

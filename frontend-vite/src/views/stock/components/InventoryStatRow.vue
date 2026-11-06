@@ -70,13 +70,13 @@ const stats = computed(() => [
   flex-shrink: 0;
 }
 .sk-stat-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
 .sk-stat-value {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   line-height: 1.2;
   /* 常规文本色：三项完全一致（2026-10-14 起不再有渐变/彩色字/透明填充） */

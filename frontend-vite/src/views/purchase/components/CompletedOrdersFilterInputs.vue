@@ -49,7 +49,7 @@ defineEmits<{ search: [] }>()
   padding: 0 12px 0 30px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   color: var(--color-text);
   background: #fff;

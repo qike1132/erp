@@ -80,7 +80,7 @@ function openPicker() {
 .date-input {
   width: 100%;
   padding: 0.625rem 2.5rem 0.625rem 1rem;
-  font-size: 0.9375rem;
+  font-size: 1rem;
   line-height: 1.5;
   color: var(--color-heading);
   background: white;

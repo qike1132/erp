@@ -147,13 +147,13 @@ watch(visibleSections, (secs) => {
   color: var(--color-text-muted);
 }
 .pd-head-name {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
 }
 .pd-head-total {
   margin-left: auto;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 .pd-head-total b,
@@ -167,7 +167,7 @@ watch(visibleSections, (secs) => {
 }
 .pd-foot-total {
   margin-right: auto;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 .pd-btn {
@@ -175,7 +175,7 @@ watch(visibleSections, (secs) => {
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   background: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;

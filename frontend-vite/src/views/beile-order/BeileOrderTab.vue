@@ -273,7 +273,7 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
 .bo-grid {
   display: grid;
   width: 100%;
-  font-size: 13px;
+  font-size: 14px;
 }
 .bo-grid-header {
   flex-shrink: 0;

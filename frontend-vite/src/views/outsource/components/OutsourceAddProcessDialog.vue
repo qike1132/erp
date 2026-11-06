@@ -139,7 +139,7 @@ async function refreshAfterAdd() {
 <style scoped>
 .osp-form { display: flex; flex-direction: column; gap: 14px; }
 .osp-form-row { display: flex; flex-direction: column; gap: 6px; }
-.osp-form-label { font-size: 12.5px; font-weight: 600; color: var(--color-text-secondary); }
+.osp-form-label { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
 .osp-quick-tags {
   display: flex;
   flex-wrap: wrap;
@@ -155,7 +155,7 @@ async function refreshAfterAdd() {
   border: 1.5px solid var(--color-primary-300);
   background: var(--color-primary-50);
   color: var(--color-primary-700);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
@@ -179,7 +179,7 @@ async function refreshAfterAdd() {
 .osp-text-input {
   width: 100%;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);

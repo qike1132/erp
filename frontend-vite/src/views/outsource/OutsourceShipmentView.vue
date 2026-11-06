@@ -275,7 +275,7 @@ loadUnshippedQty()
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-.osv-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.osv-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
 .osv-table thead { background: var(--color-surface, #f8fafc); position: sticky; top: 0; z-index: 1; }
 .osv-table thead th {
   padding: 10px 14px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
@@ -285,16 +285,16 @@ loadUnshippedQty()
 .osv-table thead th:last-child { border-right: none; }
 .osv-th-center { text-align: center !important; }
 .osv-table tbody td {
-  padding: 10px 14px; font-size: 13px; border-right: 1px solid #d8dce2; border-bottom: 1px solid #d8dce2;
+  padding: 10px 14px; font-size: 14px; border-right: 1px solid #d8dce2; border-bottom: 1px solid #d8dce2;
   text-align: center; vertical-align: middle; color: var(--color-text);
 }
 .osv-table tbody td:last-child { border-right: none; }
 .osv-table tbody tr:hover { background: var(--color-primary-50); }
 .osv-td-center { text-align: center !important; }
 .osv-td-nowrap { white-space: nowrap; }
-.osv-td-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; }
+.osv-td-mono { font-family: var(--font-mono); font-size: 12px; }
 
-.osv-status-badge { display: inline-block; padding: 2px 9px; border-radius: 7px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.osv-status-badge { display: inline-block; padding: 2px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .osv-status-shipped { background: var(--color-warning-50); color: var(--color-warning-600); }
 .osv-status-received { background: var(--color-success-50); color: var(--color-success-700); }
 

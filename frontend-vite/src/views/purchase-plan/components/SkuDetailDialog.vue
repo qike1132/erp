@@ -51,7 +51,7 @@ const emit = defineEmits<{
   align-items: center;
 }
 .sp-sku-detail-title {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-heading);
 }

@@ -210,7 +210,7 @@ function handleImageError(event: Event, row: Product) {
   min-height: 40px;
   height: 40px;
   padding: 0 2.5rem 0 0.75rem;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1;
   border-radius: 10px;
 }
@@ -219,7 +219,7 @@ function handleImageError(event: Event, row: Product) {
   min-height: 40px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1;
   border-radius: 10px;
 }
@@ -239,7 +239,7 @@ function handleImageError(event: Event, row: Product) {
   overflow: hidden;
   border: 1px solid var(--color-border-light, #e2e8f0);
 }
-.pd-factory { font-size: 13px; font-weight: 500; color: var(--color-text); }
+.pd-factory { font-size: 14px; font-weight: 500; color: var(--color-text); }
 
 /* ===== 客户列 ===== */
 .pd-customers { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -291,8 +291,8 @@ function handleImageError(event: Event, row: Product) {
   opacity: 0.5;
 }
 .pd-name { font-size: 14px; font-weight: 500; color: var(--color-text); line-height: 1.5; }
-.pd-barcode { font-size: 12px; color: var(--color-text-secondary); font-family: Consolas, Monaco, monospace; letter-spacing: 0.02em; }
-.pd-price { font-size: 13px; font-weight: 600; color: var(--color-danger-500); }
+.pd-barcode { font-size: 12px; color: var(--color-text-secondary); font-family: var(--font-mono); letter-spacing: 0.02em; }
+.pd-price { font-size: 14px; font-weight: 600; color: var(--color-danger-500); }
 
 /* ===== 操作按钮 ===== */
 .pd-actions { display: flex; gap: 4px; justify-content: center; }

@@ -309,7 +309,7 @@ function handleDetailSaved(orderId: number) {
   padding: 8px 14px;
   border: none;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;
@@ -341,7 +341,7 @@ function handleDetailSaved(orderId: number) {
   padding: 0 5px;
   background: var(--color-danger-500);
   color: white;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   border-radius: 9px;
   line-height: 1;
@@ -357,7 +357,7 @@ function handleDetailSaved(orderId: number) {
   color: var(--color-text-secondary);
   background: var(--color-primary-50, #eff6ff);
   border-bottom: 1px solid var(--color-border-light);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* === Body === */

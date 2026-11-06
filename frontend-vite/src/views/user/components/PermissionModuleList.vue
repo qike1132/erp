@@ -135,7 +135,7 @@ function countOf(node: PermissionItem): string {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text);
 }
 .pd-list {
@@ -147,7 +147,7 @@ function countOf(node: PermissionItem): string {
 .pd-sec {
   margin: 0;
   padding: 10px 8px 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--color-text-placeholder, #94a3b8);
@@ -173,7 +173,7 @@ function countOf(node: PermissionItem): string {
   width: 17px;
   flex: none;
   text-align: center;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-primary-400);
 }
 .pd-mod.act .pd-mod-icon {
@@ -182,7 +182,7 @@ function countOf(node: PermissionItem): string {
 .pd-mod-name {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -193,7 +193,7 @@ function countOf(node: PermissionItem): string {
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 999px;
   background: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-text-muted);
 }
@@ -205,7 +205,7 @@ function countOf(node: PermissionItem): string {
 .pd-empty {
   margin: 24px 0;
   text-align: center;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-placeholder, #94a3b8);
 }
 </style>

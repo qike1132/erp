@@ -48,14 +48,14 @@ defineProps<{ collapsed: boolean }>()
 }
 
 .sb-logo-title {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-text);
   line-height: 1.3;
 }
 
 .sb-logo-subtitle {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   font-weight: 500;
   line-height: 1.4;

@@ -204,7 +204,7 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 
 <style scoped>
 .pr-qe-page { position: relative; height: 100%; min-height: 0; background: #fff; display: flex; flex-direction: column; overflow: hidden; }
-.pr-qe-back { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 13.5px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
+.pr-qe-back { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; color: var(--color-text-secondary); font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; flex: 0 0 auto; }
 .pr-qe-back:hover { border-color: var(--color-primary-400); color: var(--color-primary-700); background: var(--color-primary-50); }
 
 .pr-qe-ctx { display: flex; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid var(--color-border-light); background: #fcfdff; flex-shrink: 0; flex-wrap: wrap; }
@@ -215,7 +215,7 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-seg-btn.on[data-dept='packaging'] { color: var(--color-warning-600); }
 .pr-qe-seg-btn.on[data-dept='handcraft'] { color: var(--color-success-700); }
 .pr-qe-date { display: flex; align-items: center; gap: 7px; }
-.pr-qe-date span { font-size: 12.5px; font-weight: 700; color: var(--color-text-muted); }
+.pr-qe-date span { font-size: 12px; font-weight: 700; color: var(--color-text-muted); }
 .pr-qe-date input { height: 40px; padding: 0 11px; border: 1px solid var(--color-border); border-radius: 8px; font-size: 14px; font-family: inherit; color: var(--color-text); background: #fff; }
 .pr-qe-sp { flex: 1; min-width: 8px; }
 .pr-qe-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--color-text-secondary); cursor: pointer; user-select: none; }
@@ -227,14 +227,14 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-switch input:checked + i { background: var(--color-primary-500); }
 .pr-qe-switch input:checked + i::after { transform: translateX(18px); }
 
-.pr-qe-batchstat { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 99px; background: var(--color-warning-50); border: 1px solid var(--color-warning-300); color: var(--color-warning-700); font-size: 12.5px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.pr-qe-batchstat b { font-size: 10.5px; font-weight: 800; color: #fff; background: var(--color-warning-500); border-radius: 4px; padding: 1px 5px; }
+.pr-qe-batchstat { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 99px; background: var(--color-warning-50); border: 1px solid var(--color-warning-300); color: var(--color-warning-700); font-size: 12px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pr-qe-batchstat b { font-size: 12px; font-weight: 800; color: #fff; background: var(--color-warning-500); border-radius: 4px; padding: 1px 5px; }
 
 .pr-qe-body { flex: 1; min-height: 0; overflow: hidden; padding: 12px 24px 0; display: flex; gap: 10px; }
 .pr-qe-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .pr-qe-add { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 .pr-qe-search { position: relative; flex: 1; min-width: 0; }
-.pr-qe-input { width: 100%; padding: 12px 16px; font-size: 15.5px; line-height: 1.5; color: var(--color-text); background: #fff; border: 1px solid var(--color-border); border-radius: 10px; outline: none; min-height: 48px; box-sizing: border-box; font-family: inherit; }
+.pr-qe-input { width: 100%; padding: 12px 16px; font-size: 16px; line-height: 1.5; color: var(--color-text); background: #fff; border: 1px solid var(--color-border); border-radius: 10px; outline: none; min-height: 48px; box-sizing: border-box; font-family: inherit; }
 .pr-qe-input:focus { border-color: var(--color-primary-500); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.13); }
 .pr-qe-search-input { padding-left: 42px !important; }
 .pr-qe-search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--color-text-placeholder); font-size: 16px; pointer-events: none; }
@@ -242,7 +242,7 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-paste:hover:not(:disabled) { border-color: var(--color-primary-400); color: var(--color-primary-700); background: var(--color-primary-50); }
 
 .pr-qe-actions { display: inline-flex; align-items: stretch; height: 48px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; overflow: hidden; flex: 0 0 auto; }
-.pr-qe-icon-btn { width: 48px; border: none; background: transparent; color: var(--color-text-secondary); font-size: 15px; cursor: pointer; display: grid; place-items: center; }
+.pr-qe-icon-btn { width: 48px; border: none; background: transparent; color: var(--color-text-secondary); font-size: 16px; cursor: pointer; display: grid; place-items: center; }
 .pr-qe-icon-btn:hover:not(:disabled) { background: var(--color-primary-50); color: var(--color-primary-700); }
 .pr-qe-icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .pr-qe-actions-div { width: 1px; background: var(--color-border-light); }
@@ -250,7 +250,7 @@ defineExpose({ handleSubmit: submitBatch, closeEntryDrawer })
 .pr-qe-submit { display: inline-flex; align-items: center; gap: 9px; height: 48px; padding: 0 22px; border: 1px solid transparent; border-radius: 10px; background: var(--color-primary-600); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
 .pr-qe-submit:hover:not(:disabled) { background: var(--color-primary-700); }
 .pr-qe-submit:disabled { opacity: 0.55; cursor: not-allowed; }
-.pr-qe-submit-hint { padding: 2px 6px; background: rgba(255, 255, 255, 0.22); border-radius: 4px; font-size: 11px; font-weight: 700; font-family: 'SF Mono', Consolas, monospace; }
+.pr-qe-submit-hint { padding: 2px 6px; background: rgba(255, 255, 255, 0.22); border-radius: 4px; font-size: 12px; font-weight: 700; font-family: var(--font-mono); }
 
 @media (max-width: 1100px) {
   .pr-qe-ctx { gap: 10px; }

@@ -64,7 +64,7 @@ const submitting = ref(false)
 const form = reactive({ username: '', password: '', isSuper: false, factory: '', department: '' })
 
 /** 密码输入框提示文案（长度取自单一来源常量） */
-const passwordHint = `至少${PASSWORD_MIN_LENGTH}位`
+const passwordHint = `至少${PASSWORD_MIN_LENGTH}位` // secret-scan:allow 提示文案，非凭据
 
 /**
  * 密码长度校验：至少 6 位（内网环境放宽复杂度要求）。
@@ -95,7 +95,7 @@ async function handleAdd() {
   try {
     await userApi.create({
       username: form.username,
-      password: form.password,
+      password: form.password, // secret-scan:allow 请求字段绑定，非凭据
       is_super: form.isSuper,
       factory: form.factory || null,
       department: form.department || null,
@@ -150,7 +150,7 @@ async function handleAdd() {
   gap: 8px;
 }
 .us-checkbox-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
   cursor: pointer;
@@ -216,7 +216,7 @@ async function handleAdd() {
   border-radius: 9px;
   background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
   color: white;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.3s ease, box-shadow 0.3s ease;

@@ -15,7 +15,7 @@
         </div>
       </div>
 
-      <div v-if="orderPreview.remark" style="margin-top:12px;padding:10px 14px;background:var(--color-surface,#f8fafc);border-radius:8px;font-size:13px;color:var(--color-text-secondary);"><b>备注:</b> {{ orderPreview.remark }}</div>
+      <div v-if="orderPreview.remark" style="margin-top:12px;padding:10px 14px;background:var(--color-surface,#f8fafc);border-radius:8px;font-size:14px;color:var(--color-text-secondary);"><b>备注:</b> {{ orderPreview.remark }}</div>
       <div class="mr-preview-section-label"><i class="fas fa-list" /> 物料明细 <span class="mr-preview-count">{{ orderPreview.item_count || (orderPreview.items ? orderPreview.items.length : 0) }} 项</span></div>
       <table v-if="orderPreview.items && orderPreview.items.length" class="mr-item-tbl">
         <thead><tr><th style="width:40%;">物料名称</th><th style="width:30%;">规格</th><th style="width:15%;text-align:right;">数量</th><th style="width:15%;">分类</th></tr></thead>

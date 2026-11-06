@@ -197,11 +197,11 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
 }
 .oso-detail-no {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--color-text);
   white-space: nowrap;
 }
-.oso-detail-meta-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 13px; }
+.oso-detail-meta-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 14px; }
 .oso-detail-meta-label { color: var(--color-text-muted, #64748b); font-size: 12px; }
 .oso-detail-meta-num { color: var(--color-primary-700, #2d5ab8); }
 .oso-detail-overview {
@@ -237,7 +237,7 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
   border-radius: 7px;
   background: transparent;
   color: var(--color-text-secondary, #475569);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -263,7 +263,7 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }

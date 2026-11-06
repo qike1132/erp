@@ -135,7 +135,7 @@ function applyBatch() {
   padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   font-family: inherit;
   -moz-appearance: textfield;

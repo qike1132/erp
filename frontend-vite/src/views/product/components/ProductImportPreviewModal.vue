@@ -132,12 +132,12 @@ const footNote = computed(() => {
 <style scoped>
 .pi-sub {
   margin: 0 0 10px;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 .pi-badge {
   margin-left: 8px;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-ocean-text, #02669e);
   background: var(--color-ocean-light, #d4f1f4);
@@ -157,10 +157,10 @@ const footNote = computed(() => {
   gap: 7px;
   padding: 6px 13px;
   border-radius: 10px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
 }
-.chip b { font-size: 15px; font-weight: 800; }
+.chip b { font-size: 16px; font-weight: 800; }
 .chip-new { background: var(--color-primary-50); color: var(--color-primary-700); }
 .chip-fill { background: var(--color-success-50); color: var(--color-success-700); }
 .chip-skip { background: var(--color-slate-100); color: var(--color-text-secondary); }
@@ -177,11 +177,11 @@ const footNote = computed(() => {
 }
 .pi-warn li { margin: 2px 0; }
 
-.pi-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pi-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .pi-table th {
   text-align: left;
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 9px;
   color: var(--color-text-secondary);
   border-bottom: 1px solid var(--color-border);
@@ -201,7 +201,7 @@ const footNote = computed(() => {
 
 .pill {
   display: inline-block;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 999px;
@@ -220,7 +220,7 @@ const footNote = computed(() => {
 
 .pi-legend {
   margin-top: 14px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-muted);
   display: flex;
   gap: 16px;
@@ -233,5 +233,5 @@ const footNote = computed(() => {
 .sw-skip { background: var(--color-slate-200); }
 .sw-err { background: var(--color-danger-100, #fbd0d0); }
 
-.pi-foot-note { margin-right: auto; font-size: 11.5px; color: var(--color-text-muted); }
+.pi-foot-note { margin-right: auto; font-size: 12px; color: var(--color-text-muted); }
 </style>

@@ -448,14 +448,14 @@ onMounted(() => {
 /* 标题区（对齐采购页 .page-card-header 布局） */
 .bk-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .bk-head-title {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--color-text);
   letter-spacing: -0.01em;
   line-height: 1.35;
 }
 .bk-head-sub {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
@@ -469,7 +469,7 @@ onMounted(() => {
   padding: 9px 16px;
   border: 2px solid var(--color-border-light);
   border-radius: var(--radius-button, 14px);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   font-family: inherit;
   line-height: 1.2;
@@ -497,7 +497,7 @@ onMounted(() => {
   transform: translateY(-1px);
 }
 
-.bk-upload-note { margin-top: 8px; font-size: 13px; color: var(--color-text-muted); }
+.bk-upload-note { margin-top: 8px; font-size: 14px; color: var(--color-text-muted); }
 .bk-section { margin-bottom: 20px; }
 .bk-grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 @media (max-width: 1023px) { .bk-grid-two { grid-template-columns: 1fr; } }

@@ -43,7 +43,7 @@ const rows = computed(() => {
 .sp-dist-empty {
   padding: 22px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-muted, #8c96ad);
 }
 

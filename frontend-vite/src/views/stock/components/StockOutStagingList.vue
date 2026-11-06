@@ -71,7 +71,7 @@ const emit = defineEmits<{
 .so-col-title i {
   color: var(--color-danger-500);
   margin-right: 6px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .so-col-scroll {
   flex: 1;
@@ -102,7 +102,7 @@ const emit = defineEmits<{
   font-weight: 600;
   margin-bottom: 4px;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 14px;
 }
 .so-staged-icon {
   color: var(--color-danger-500);
@@ -137,7 +137,7 @@ const emit = defineEmits<{
 }
 .staged-count {
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
 }
 
@@ -153,7 +153,7 @@ const emit = defineEmits<{
   display: inline-block;
   padding: 2px 8px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 .badge-info { background: var(--color-primary-50); color: var(--color-primary-600); }

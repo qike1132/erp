@@ -167,7 +167,7 @@ function handleDelete(row: UserRow) {
 }
 .us-badge-muted-text {
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* Action Buttons */

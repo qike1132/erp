@@ -69,7 +69,7 @@ const visibleModel = defineModel<boolean>('visible', { default: false })
 <style scoped>
 .ild-header { display: flex; align-items: center; }
 .ild-title { font-size: 16px; font-weight: 700; color: var(--color-text); }
-.ild-sub { margin-top: 2px; font-size: 13px; color: var(--color-text-secondary); display: flex; gap: 8px; align-items: center; }
+.ild-sub { margin-top: 2px; font-size: 14px; color: var(--color-text-secondary); display: flex; gap: 8px; align-items: center; }
 .ild-barcode { color: var(--color-text-muted); font-size: 12px; }
 .ild-fetching-bar { height: 2px; background: var(--color-primary-100, #e0f2fe); overflow: hidden; margin-bottom: 8px; }
 .ild-fetching-progress { height: 100%; width: 30%; background: var(--color-primary-500); animation: ild-slide 1s ease-in-out infinite; }
@@ -79,7 +79,7 @@ const visibleModel = defineModel<boolean>('visible', { default: false })
   padding: 32px 0; color: var(--color-text-muted);
 }
 .ild-empty i { font-size: 28px; opacity: 0.5; }
-.ild-badge { padding: 2px 10px; border-radius: 16px; font-size: 11px; font-weight: 600; }
+.ild-badge { padding: 2px 10px; border-radius: 16px; font-size: 12px; font-weight: 600; }
 .ild-badge-success { background: var(--color-success-50); color: var(--color-success-600); }
 .ild-badge-danger { background: var(--color-danger-50); color: var(--color-danger-600); }
 .ild-date { color: var(--color-text-secondary); }

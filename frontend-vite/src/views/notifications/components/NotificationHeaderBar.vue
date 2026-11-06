@@ -84,7 +84,7 @@ function handleMarkAll() {
   background: var(--color-surface-card);
   color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: 15px;
+  font-size: 16px;
   transition: all var(--transition-fast, 0.2s ease);
   flex-shrink: 0;
 }
@@ -113,7 +113,7 @@ function handleMarkAll() {
 }
 
 .nc-title-badge {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-danger-600);
   background: var(--color-danger-50);
@@ -137,7 +137,7 @@ function handleMarkAll() {
   gap: 6px;
   padding: 8px 16px;
   border-radius: var(--radius-button);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   font-family: var(--font-sans);
   cursor: pointer;
@@ -171,7 +171,7 @@ function handleMarkAll() {
   }
 
   .nc-title {
-    font-size: 1.1rem;
+    font-size: 1rem;
   }
 
   .nc-btn--ghost span {

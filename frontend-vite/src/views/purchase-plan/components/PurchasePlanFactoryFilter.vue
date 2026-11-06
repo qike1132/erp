@@ -65,7 +65,7 @@ function fmt(n: number): string {
 .sp-tab-active[data-tone='other'] { background: var(--color-slate-100, #f1f5f9); color: var(--color-text-secondary, #475569); }
 
 .sp-factory-cnt {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   opacity: 0.65;
 }

@@ -84,7 +84,7 @@ function fmt(n: number): string {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted, #8c96ad);
 }
 
@@ -152,7 +152,7 @@ function fmt(n: number): string {
   align-items: baseline;
   gap: 6px;
   padding: 2px 0;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .sp-prod-name {
@@ -181,7 +181,7 @@ function fmt(n: number): string {
   flex-shrink: 0;
   width: 30px;
   text-align: right;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
 }
 

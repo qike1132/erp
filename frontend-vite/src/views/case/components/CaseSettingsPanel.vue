@@ -230,16 +230,16 @@ async function askRemove(p: CaseItem) {
 .cs-product-details { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .cs-product-name {
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.cs-product-code { flex-shrink: 0; font-size: 11px; font-family: var(--font-mono); color: var(--color-text-muted); }
+.cs-product-code { flex-shrink: 0; font-size: 12px; font-family: var(--font-mono); color: var(--color-text-muted); }
 
-.cs-badge { flex-shrink: 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 500; border: 1px solid; }
+.cs-badge { flex-shrink: 0; padding: 1px 6px; border-radius: 4px; font-size: 12px; font-weight: 500; border: 1px solid; }
 .cs-badge.has { background: var(--color-success-50); color: var(--color-success-700); border-color: var(--color-success-200); }
 .cs-badge.no { background: var(--color-slate-100); color: var(--color-text-muted); border-color: var(--color-border); }
 
@@ -247,14 +247,14 @@ async function askRemove(p: CaseItem) {
 .cs-quick-add {
   flex-shrink: 0; height: 24px; padding: 0 8px; border-radius: 7px;
   border: 1px solid var(--color-primary-300); background: var(--color-primary-50);
-  color: var(--color-primary-700); font-size: 11px; font-weight: 600; cursor: pointer;
+  color: var(--color-primary-700); font-size: 12px; font-weight: 600; cursor: pointer;
   opacity: 0; transition: opacity 0.15s ease;
 }
 .cs-product:hover .cs-quick-add,
 .cs-product.active .cs-quick-add { opacity: 1; }
 .cs-quick-add:focus-visible { opacity: 1; }
 
-.cs-cap-hint { padding: 6px 12px 0; font-size: 11px; color: var(--color-text-muted); }
+.cs-cap-hint { padding: 6px 12px 0; font-size: 12px; color: var(--color-text-muted); }
 
 /* 右侧配件维护 */
 .cs-parts-body { padding: 14px; flex: 1; min-height: 0; overflow-y: auto; }
@@ -274,8 +274,8 @@ async function askRemove(p: CaseItem) {
 .cs-part { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .cs-add-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--color-border-light); }
 
-.cs-tag-main { flex-shrink: 0; display: inline-flex; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-primary-500); color: #fff; }
-.cs-tag-part { flex-shrink: 0; display: inline-flex; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-warning-500); color: #fff; }
+.cs-tag-main { flex-shrink: 0; display: inline-flex; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-primary-500); color: #fff; }
+.cs-tag-part { flex-shrink: 0; display: inline-flex; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--color-warning-500); color: #fff; }
 
 .cs-input {
   flex: 1;
@@ -284,7 +284,7 @@ async function askRemove(p: CaseItem) {
   padding: 0 10px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text);
   font-family: inherit;
   outline: none;
@@ -297,6 +297,6 @@ async function askRemove(p: CaseItem) {
 .cs-btn-del { border: none; background: var(--color-danger-50); color: var(--color-danger-600); }
 .cs-btn-primary { border: none; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); color: #fff; }
 
-.cs-state { padding: 16px; color: var(--color-text-muted); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.cs-state { padding: 16px; color: var(--color-text-muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .cs-state-center { justify-content: center; padding: 40px 16px; }
 </style>

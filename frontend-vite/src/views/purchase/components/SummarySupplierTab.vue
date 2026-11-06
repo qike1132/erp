@@ -5,7 +5,7 @@
   <div class="sms-tab">
     <!-- 概要行（2026-10-31 用户嫌空白多）：删渐变底色大条，压成单行紧凑文字。 -->
     <div class="sms-toolbar flex-shrink-0">
-      <div class="text-[13px] text-text-secondary">
+      <div class="text-[14px] text-text-secondary">
         已选择 <strong class="text-rose">{{ supplierData.order_count || orderCount }}</strong> 个订单，涵盖
         <strong class="text-rose">{{ supplierGroups.length }}</strong> 家供应商，共
         <strong class="text-rose">{{ (supplierData.materials || []).length }}</strong> 种物料
@@ -15,7 +15,7 @@
     <div class="sms-scroll">
       <!-- 2026-10-31 用户反馈：不铺满、但也不要太小——取 72% 宽度居中，
            比例适中；窄屏由 min-w 兜底（容器内可横向滚动）。 -->
-      <table class="w-[72%] min-w-[680px] mx-auto border-collapse font-sans text-[13px] bg-white">
+      <table class="w-[72%] min-w-[680px] mx-auto border-collapse font-sans text-[14px] bg-white">
         <thead>
           <tr class="bg-border-light">
             <th>供应商</th>

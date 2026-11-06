@@ -283,7 +283,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
   gap: 4px;
   padding: 6px 10px;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 14px;
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
@@ -348,7 +348,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
 .bt-batch-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .bt-batch-input::placeholder {
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 .bt-batch-input:focus {
   border-color: var(--color-primary-400);
@@ -365,7 +365,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
 /* ===== 完成批次按钮 ===== */
 .bt-complete-btn {
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-success-600, #16a34a);
   background: var(--color-success-50, #f0fdf4);

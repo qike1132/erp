@@ -49,7 +49,7 @@
           @page="onPage"
         >
           <template #column-body-department="{ row }">
-            <span class="rounded bg-surface px-2 py-0.5 text-[13px] font-bold">
+            <span class="rounded bg-surface px-2 py-0.5 text-[14px] font-bold">
               {{ deptLabel(row.department) }}
             </span>
           </template>
@@ -218,7 +218,7 @@ function onPage(event: { page: number; rows: number }) {
   border: 1px solid transparent;
   border-radius: 8px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -248,11 +248,11 @@ function onPage(event: { page: number; rows: number }) {
 /* 明细整体放大：只作用于本面板（.rec-scope 之内），全站其它表格不受影响 */
 .rec-scope :deep(td) {
   padding: 16px 12px;
-  font-size: 15px;
+  font-size: 16px;
 }
 .rec-scope :deep(th) {
   padding: 14px 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .rec-scope :deep(.ui-select-input) {
   height: 46px;

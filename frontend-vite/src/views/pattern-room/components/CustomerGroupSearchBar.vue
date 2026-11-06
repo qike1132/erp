@@ -100,7 +100,7 @@ function onSearchInput(e: Event) {
   padding: 8px 12px 8px 30px;
   border: 1px solid var(--color-border-light, #e5e7eb);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-primary);
   box-sizing: border-box;
 }
@@ -119,7 +119,7 @@ function onSearchInput(e: Event) {
   padding: 8px 14px;
   border: none;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-primary-700);
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));

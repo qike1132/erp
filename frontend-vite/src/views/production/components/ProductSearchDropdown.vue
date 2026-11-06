@@ -68,7 +68,7 @@ const emit = defineEmits<{
 }
 .pr-entry-dropdown-hint {
   padding: 8px 14px 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border-light);

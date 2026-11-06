@@ -244,7 +244,7 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: #fff;
   color: var(--color-text-secondary, #6b7280);
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   font-weight: 500;
   cursor: pointer;
@@ -322,7 +322,7 @@ onBeforeUnmount(() => {
   border-radius: 7px;
   background: transparent;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-primary);
   text-align: left;
@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
   color: var(--color-text-secondary, #6b7280);
   cursor: pointer;
   transition: all 0.15s ease;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .role-tab-add:hover {
@@ -375,7 +375,7 @@ onBeforeUnmount(() => {
   padding: 6px 10px;
   border: 1px solid var(--color-primary-400, #60a5fa);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   box-shadow: 0 0 0 2px var(--color-primary-100, #dbeafe);
 }

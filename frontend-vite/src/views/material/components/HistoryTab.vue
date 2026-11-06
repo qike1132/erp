@@ -115,8 +115,8 @@ const historyColumns: TableColumn[] = [
 }
 
 /* === Table === */
-.mr-td-order { font-family: 'Courier New', monospace; font-weight: 600; color: var(--color-primary-500); font-size: 14px; }
-.mr-td-small { font-size: 13px; }
+.mr-td-order { font-family: var(--font-mono); font-weight: 600; color: var(--color-primary-500); font-size: 14px; }
+.mr-td-small { font-size: 14px; }
 .mr-td-muted { color: var(--color-text-muted); }
 
 /* 每个订单（行）之间显示分割线 */
@@ -135,7 +135,7 @@ const historyColumns: TableColumn[] = [
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 14px;
   transition: all 0.2s ease;
   cursor: pointer;
 }

@@ -310,7 +310,7 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
 }
 .co-label {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   margin-bottom: 4px;
   color: var(--color-text-secondary);

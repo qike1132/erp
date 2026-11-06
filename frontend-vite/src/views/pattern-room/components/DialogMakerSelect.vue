@@ -154,7 +154,7 @@ function cancelAdd() {
   padding: 8px 12px;
   border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
@@ -162,7 +162,7 @@ function cancelAdd() {
   box-sizing: border-box;
 }
 .dms-trigger i {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-text-secondary, #94a3b8);
   flex-shrink: 0;
   margin-left: 8px;
@@ -202,7 +202,7 @@ function cancelAdd() {
   border: none;
   background: transparent;
   text-align: left;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   color: var(--color-text-primary);
   cursor: pointer;
@@ -262,7 +262,7 @@ function cancelAdd() {
   padding: 8px 12px;
   border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);

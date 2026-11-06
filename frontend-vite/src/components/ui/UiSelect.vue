@@ -38,17 +38,17 @@
         position="inline"
       >
         <ComboboxViewport>
-          <ComboboxEmpty class="px-3 py-2 text-[13px] text-text-muted">
+          <ComboboxEmpty class="px-3 py-2 text-[14px] text-text-muted">
             {{ emptyText }}
           </ComboboxEmpty>
           <ComboboxItem
             v-for="item in filteredItems"
             :key="item.value"
             :value="item.value"
-            class="px-3 py-2 text-[13px] text-text cursor-pointer rounded-md mx-1 outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 data-[highlighted]:bg-primary-50 data-[highlighted]:text-primary-700 transition-colors flex items-center"
+            class="px-3 py-2 text-[14px] text-text cursor-pointer rounded-md mx-1 outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 data-[highlighted]:bg-primary-50 data-[highlighted]:text-primary-700 transition-colors flex items-center"
           >
             <ComboboxItemIndicator class="mr-1 text-primary-500">
-              <FontAwesomeIcon icon="check" class="text-[10px]" aria-hidden="true" />
+              <FontAwesomeIcon icon="check" class="text-[12px]" aria-hidden="true" />
             </ComboboxItemIndicator>
             <span>{{ item.label }}</span>
           </ComboboxItem>
@@ -146,7 +146,7 @@ function onOpenChange(open: boolean) {
 .ui-select-input {
   width: 100%;
   padding: 0.625rem 2.5rem 0.625rem 1rem;
-  font-size: 0.9375rem;
+  font-size: 1rem;
   line-height: 1.5;
   color: var(--color-heading);
   background: white;

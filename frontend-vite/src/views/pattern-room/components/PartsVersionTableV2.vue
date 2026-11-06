@@ -100,7 +100,7 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   gap: 8px;
   padding: 40px 16px;
   color: var(--color-text-muted, #94a3b8);
-  font-size: 13px;
+  font-size: 14px;
 }
 .pvt-empty-parts svg {
   font-size: 32px;
@@ -114,7 +114,7 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
 .pvt-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
   table-layout: fixed;
 }
 .pvt-table th {
@@ -145,7 +145,7 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   position: sticky;
   top: 0;
   z-index: 1;
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 .pvt-table tbody tr:hover {

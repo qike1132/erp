@@ -260,7 +260,7 @@ onBeforeUnmount(() => {
 .bss-root { position: relative; width: 100%; }
 .bss-input {
   width: 100%; padding: 6px 10px; border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 8px; font-size: 13px; background: #fff;
+  border-radius: 8px; font-size: 14px; background: #fff;
   transition: border-color .2s ease, box-shadow .2s ease;
 }
 .bss-input:focus-visible { border-color: var(--color-primary-400, #7aa2f7); box-shadow: 0 0 0 3px rgba(0, 148, 191, .1); }
@@ -276,10 +276,10 @@ onBeforeUnmount(() => {
   pointer-events: auto;
 }
 .bss-option {
-  padding: 8px 10px; font-size: 13px; border-radius: 7px; cursor: pointer;
+  padding: 8px 10px; font-size: 14px; border-radius: 7px; cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .bss-option.active { background: var(--color-primary-50, #eef4ff); color: var(--color-primary-700, #2f6fdd); }
-.bss-empty { padding: 10px 12px; font-size: 12.5px; color: var(--color-text-secondary, #6b7280); line-height: 1.6; }
+.bss-empty { padding: 10px 12px; font-size: 12px; color: var(--color-text-secondary, #6b7280); line-height: 1.6; }
 .bss-empty em { font-style: normal; font-weight: 600; color: var(--color-primary-700, #2f6fdd); }
 </style>

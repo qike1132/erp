@@ -183,7 +183,7 @@ watch(projectPage, () => {
   justify-content: center;
   height: 100%;
   color: var(--color-text-secondary, #9ca3af);
-  font-size: 13px;
+  font-size: 14px;
 }
 .cgl-virtual-list {
   height: 100%;

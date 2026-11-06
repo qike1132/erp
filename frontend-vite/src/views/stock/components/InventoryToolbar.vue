@@ -71,7 +71,7 @@ const emit = defineEmits<{
   border-radius: 9px;
   background: white;
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-success-600);
   white-space: nowrap;

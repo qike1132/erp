@@ -46,16 +46,16 @@ defineProps<{ result: ShipResult }>()
 .osw-result-row {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   background: #fff; border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px; padding: 9px 12px; font-size: 12.5px;
+  border-radius: 10px; padding: 9px 12px; font-size: 12px;
 }
-.osw-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; }
+.osw-mono { font-family: var(--font-mono); font-weight: 700; }
 .osw-badge {
-  margin-left: auto; font-size: 11px; font-weight: 700; color: var(--color-warning-600, #d97706);
+  margin-left: auto; font-size: 12px; font-weight: 700; color: var(--color-warning-600, #d97706);
   background: var(--color-warning-50, #fffbeb); border: 1px solid var(--color-warning-200, #fde68a);
   border-radius: 7px; padding: 2px 9px;
 }
 .osw-result-detail {
   background: #fff; border: 1px solid #fecaca; border-radius: 10px;
-  padding: 10px 12px; font-size: 12.5px; color: #b91c1c;
+  padding: 10px 12px; font-size: 12px; color: #b91c1c;
 }
 </style>

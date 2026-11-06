@@ -56,7 +56,7 @@ defineEmits<{ toggle: [] }>()
 .pd-row-name {
   flex: 1;
   min-width: 0;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
 }

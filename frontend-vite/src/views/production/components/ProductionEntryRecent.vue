@@ -60,15 +60,15 @@ const emit = defineEmits<{
 .pr-recent { flex: 0 0 440px; width: 440px; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: 12px; background: #fcfdff; overflow: hidden; }
 .pr-recent-head { flex: 0 0 auto; padding: 12px 14px; border-bottom: 1px solid var(--color-border-light); display: flex; align-items: flex-start; gap: 8px; background: #fff; }
 .pr-recent-title { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.pr-recent-title b { font-size: 15.5px; font-weight: 800; color: var(--color-text); }
-.pr-recent-title span { font-size: 12.5px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pr-recent-count { margin-left: auto; min-width: 24px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--color-surface); color: var(--color-text-muted); font-size: 12.5px; font-weight: 700; display: grid; place-items: center; }
+.pr-recent-title b { font-size: 16px; font-weight: 800; color: var(--color-text); }
+.pr-recent-title span { font-size: 12px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-recent-count { margin-left: auto; min-width: 24px; height: 22px; padding: 0 7px; border-radius: 11px; background: var(--color-surface); color: var(--color-text-muted); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
 .pr-recent-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 3px; }
 .pr-recent-item { display: flex; flex-direction: column; width: 100%; padding: 12px 13px; border: 1px solid transparent; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; font-family: inherit; transition: background 0.14s, border-color 0.14s; }
 .pr-recent-item:hover { background: #fff; border-color: var(--color-primary-200); }
 .pr-recent-item .n { font-size: 16px; font-weight: 700; color: var(--color-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
-.pr-recent-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 20px 14px; font-size: 13px; line-height: 1.6; color: var(--color-text-placeholder); text-align: center; }
-.pr-recent-state .sub { font-size: 12.5px; color: var(--color-text-4, var(--color-text-placeholder)); }
-.pr-recent-state .browse { border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 13px; font-weight: 600; border-radius: 8px; padding: 7px 12px; cursor: pointer; font-family: inherit; }
+.pr-recent-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 20px 14px; font-size: 14px; line-height: 1.6; color: var(--color-text-placeholder); text-align: center; }
+.pr-recent-state .sub { font-size: 12px; color: var(--color-text-4, var(--color-text-placeholder)); }
+.pr-recent-state .browse { border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 14px; font-weight: 600; border-radius: 8px; padding: 7px 12px; cursor: pointer; font-family: inherit; }
 .pr-recent-state .browse:hover { border-color: var(--color-primary-400); color: var(--color-primary-700); }
 </style>

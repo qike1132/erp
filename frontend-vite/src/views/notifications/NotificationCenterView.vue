@@ -155,7 +155,7 @@ const {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-primary-700);
 }
@@ -206,14 +206,14 @@ const {
 }
 
 .nc-state-text {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--color-heading);
   margin: 0;
 }
 
 .nc-state-hint {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-muted);
   margin: 0;
 }
@@ -258,7 +258,7 @@ const {
 }
 
 .nc-checkbox-text {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text-secondary);
   user-select: none;
@@ -281,7 +281,7 @@ const {
   gap: 6px;
   padding: 8px 16px;
   border-radius: var(--radius-button);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   font-family: var(--font-sans);
   cursor: pointer;

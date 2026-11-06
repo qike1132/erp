@@ -64,7 +64,7 @@ const emit = defineEmits<{
   border: 1.5px solid var(--color-border);
   border-radius: 9px;
   background: white;
-  font-size: 12.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text);
   outline: none;

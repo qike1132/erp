@@ -146,7 +146,7 @@ onUnmounted(() => {
 
 .mc-product-name {
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--color-text);
   white-space: nowrap;
@@ -156,7 +156,7 @@ onUnmounted(() => {
 
 .mc-product-code {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-mono);
   color: var(--color-text-muted);
 }
@@ -165,7 +165,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   border: 1px solid;
 }
@@ -191,7 +191,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 40px 20px;
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .mc-empty-state svg {
@@ -207,6 +207,6 @@ onUnmounted(() => {
   gap: 8px;
   padding: 40px 20px;
   color: var(--color-primary-500);
-  font-size: 13px;
+  font-size: 14px;
 }
 </style>

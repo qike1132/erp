@@ -27,7 +27,7 @@
         :disabled="disabled"
         :name="name"
         :aria-label="label"
-        class="w-20 text-center py-1.5 border-y border-border text-[13px] text-text bg-white tabular-nums focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:ring-2 focus:ring-primary-500/15 focus:border-primary-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        class="w-20 text-center py-1.5 border-y border-border text-[14px] text-text bg-white tabular-nums focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:ring-2 focus:ring-primary-500/15 focus:border-primary-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         @input="$emit('update:modelValue', Number(($event.target as HTMLInputElement).value))"
       />
       <button

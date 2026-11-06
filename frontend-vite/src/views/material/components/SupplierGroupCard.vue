@@ -94,11 +94,11 @@ function meterWidth(i: MergedItem): string {
   user-select: none;
 }
 .mr-supplier-label:focus-visible { outline: 2px solid var(--st-ongoing); outline-offset: -2px; }
-.mr-supplier-label svg { font-size: 11px; color: var(--st-ongoing); flex-shrink: 0; }
+.mr-supplier-label svg { font-size: 12px; color: var(--st-ongoing); flex-shrink: 0; }
 .mr-supplier-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 
 .mr-overdue-tag {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 700;
   color: white;
   background: var(--st-overdue);
@@ -118,9 +118,9 @@ function meterWidth(i: MergedItem): string {
 }
 .mr-supplier-mini i { display: block; height: 100%; border-radius: 3px; }
 
-.mr-supplier-pct { font-size: 11px; font-weight: 700; color: var(--color-text-secondary, #475569); font-variant-numeric: tabular-nums; flex-shrink: 0; }
-.mr-supplier-count { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--color-text-muted, #94a3b8); flex-shrink: 0; }
-.mr-expand-icon { margin-left: 4px; font-size: 10px; color: var(--color-text-muted, #94a3b8); flex-shrink: 0; }
+.mr-supplier-pct { font-size: 12px; font-weight: 700; color: var(--color-text-secondary, #475569); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.mr-supplier-count { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--color-text-muted, #94a3b8); flex-shrink: 0; }
+.mr-expand-icon { margin-left: 4px; font-size: 12px; color: var(--color-text-muted, #94a3b8); flex-shrink: 0; }
 
 /* 色档：mini 条与物料 meter 共用 */
 .mr-supplier-mini .fill-ongoing, .mr-mat-meter .fill-ongoing { background: var(--st-ongoing); }
@@ -169,6 +169,6 @@ function meterWidth(i: MergedItem): string {
 .mr-mat-meter.fill-zero { background: linear-gradient(to right, var(--st-zero) var(--fill, 0%), var(--track) var(--fill, 0%)); }
 .mr-mat-meter.fill-overdue { background: linear-gradient(to right, var(--st-overdue) var(--fill, 0%), var(--track) var(--fill, 0%)); }
 
-.mr-mat-pct { text-align: right; font-size: 11px; font-weight: 700; color: var(--color-text-secondary, #475569); font-variant-numeric: tabular-nums; }
+.mr-mat-pct { text-align: right; font-size: 12px; font-weight: 700; color: var(--color-text-secondary, #475569); font-variant-numeric: tabular-nums; }
 .mr-mat-pct.is-overdue-txt { color: var(--st-overdue); }
 </style>

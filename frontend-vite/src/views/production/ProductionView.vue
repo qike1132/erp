@@ -332,7 +332,7 @@ defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
   border-radius: 10px;
   background: var(--color-danger-50, #fef2f2);
   color: var(--color-danger-700, #b91c1c);
-  font-size: 13px;
+  font-size: 14px;
 }
 .pr-export-toast {
   position: fixed;
@@ -342,7 +342,7 @@ defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
   z-index: var(--z-toast);
   padding: 10px 18px;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .pr-export-toast.info { background: var(--color-primary-50); color: var(--color-primary-700); }

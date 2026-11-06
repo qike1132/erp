@@ -6,7 +6,7 @@
     <!-- 概要行（2026-10-31 用户嫌空白多）：删渐变底色大条，压成单行紧凑文字+操作。
          「工厂内部采购订单汇总」标题删掉——页签已说明所在；只保留订单计数。 -->
     <div class="smf-toolbar flex-shrink-0">
-      <div class="text-[13px] text-text-secondary whitespace-nowrap">
+      <div class="text-[14px] text-text-secondary whitespace-nowrap">
         已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
       </div>
       <div class="flex gap-2 items-center ml-auto">
@@ -22,7 +22,7 @@
               <label class="text-xs text-text-secondary whitespace-nowrap">统一损耗率（千分之几）</label>
               <input
                 type="number"
-                class="w-16 text-right py-1 px-1.5 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                class="w-16 text-right py-1 px-1.5 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                 :value="lossRate"
                 min="0"
                 max="1000"
@@ -37,7 +37,7 @@
             故绝对定位在输入框下方，只做覆盖显示：行宽、行高、按钮与输入框的垂直居中都不变。
           -->
             <span
-              class="sm-loss-hint absolute right-0 top-full mt-0.5 text-[11px] leading-4 whitespace-nowrap"
+              class="sm-loss-hint absolute right-0 top-full mt-0.5 text-[12px] leading-4 whitespace-nowrap"
             >
               <span v-if="lossRateSaveState === 'saving'" class="text-text-muted">保存中…</span>
               <span v-else-if="lossRateSaveState === 'error'" class="text-danger-500">保存失败</span>
@@ -68,7 +68,7 @@
     <div class="smf-scroll">
       <!-- 2026-10-31 用户反馈：不铺满、但也不要太小——取 82% 宽度居中，
            比例适中；窄屏由 min-w 兜底（容器内可横向滚动）。 -->
-      <table class="w-[82%] min-w-[900px] mx-auto border-collapse font-sans text-[13px] bg-white">
+      <table class="w-[82%] min-w-[900px] mx-auto border-collapse font-sans text-[14px] bg-white">
         <thead>
           <tr class="bg-border-light">
             <th>客户</th>
@@ -123,12 +123,12 @@
                     <!-- 非编辑态：率输入框 +「不一致」提示同处一支（与改造前逐字一致；提示仅非编辑态显示） -->
                     <template v-if="!editMode">
                       <input
-                        type="number" class="w-14 text-right py-1 px-1 text-[13px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                        type="number" class="w-14 text-right py-1 px-1 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                         :value="rowRate(item)" min="0" max="1000" step="any"
                         :title="sharedMaterialTitle(item)"
                         @input="onRowRateInput(item, $event)"
                       />
-                      <span v-if="isRowRateMixed(item)" class="text-[10px] text-text-muted whitespace-nowrap">不一致</span>
+                      <span v-if="isRowRateMixed(item)" class="text-[12px] text-text-muted whitespace-nowrap">不一致</span>
                     </template>
                     <template v-else>{{ formatQty(rowRate(item)) }}</template>
                   </template>
@@ -138,7 +138,7 @@
                 <td>
                   <input
                     v-if="rowCoord(item) && editMode"
-                    type="number" class="w-20 text-right py-1 px-1.5 text-[13px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                    type="number" class="w-20 text-right py-1 px-1.5 text-[14px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                     :value="editRowQty(item)" min="0"
                     :title="sharedMaterialTitle(item)"
                     @change="onRowQtyChange(item, $event)"

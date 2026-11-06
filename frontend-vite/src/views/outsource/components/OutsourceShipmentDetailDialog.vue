@@ -113,19 +113,19 @@ function statusClass(status: string): string {
 .osdd-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .osdd-meta { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--color-surface, #f8fafc); border: 1px solid #e8ecf1; border-radius: 10px; }
 .osdd-meta-row { display: flex; align-items: center; gap: 10px; }
-.osdd-meta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 16px; font-size: 13px; }
+.osdd-meta-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 16px; font-size: 14px; }
 .osdd-meta-item { display: flex; gap: 8px; }
 .osdd-meta-label { color: var(--color-text-muted, #64748b); font-weight: 600; flex-shrink: 0; }
-.osdd-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; font-weight: 700; }
-.osdd-status-badge { display: inline-block; padding: 2px 9px; border-radius: 7px; font-size: 11.5px; font-weight: 600; }
+.osdd-mono { font-family: var(--font-mono); font-size: 14px; font-weight: 700; }
+.osdd-status-badge { display: inline-block; padding: 2px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; }
 .osdd-status-shipped { background: var(--color-warning-50); color: var(--color-warning-600); }
 .osdd-status-received { background: var(--color-success-50); color: var(--color-success-700); }
 
 .osdd-table-wrap { max-height: 400px; overflow-y: auto; border: 1px solid #e8ecf1; border-radius: 10px; }
-.osdd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.osdd-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .osdd-table thead { position: sticky; top: 0; background: #f8fafc; z-index: 1; }
 .osdd-table th {
-  padding: 9px 12px; font-size: 11.5px; font-weight: 600; color: var(--color-text-muted, #64748b);
+  padding: 9px 12px; font-size: 12px; font-weight: 600; color: var(--color-text-muted, #64748b);
   text-align: center; border-bottom: 1px solid #e8ecf1; white-space: nowrap;
 }
 .osdd-table td { padding: 8px 12px; border-bottom: 1px solid #eef2f7; text-align: center; vertical-align: middle; }
@@ -140,7 +140,7 @@ function statusClass(status: string): string {
 .osdd-order-qty { color: var(--color-text-muted, #64748b); }
 .osdd-received { color: var(--color-success-600, #16a34a); font-weight: 600; }
 .osdd-pending { color: var(--color-warning-600, #d97706); font-weight: 700; }
-.osdd-foot { display: flex; justify-content: flex-end; font-size: 13px; color: var(--color-text-secondary, #475569); }
+.osdd-foot { display: flex; justify-content: flex-end; font-size: 14px; color: var(--color-text-secondary, #475569); }
 .osdd-foot strong { color: var(--color-primary-600, #2563eb); }
 .osdd-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 20px; color: var(--color-text-muted, #64748b); }
 .osdd-empty span { font-size: 14px; }

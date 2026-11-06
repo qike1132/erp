@@ -131,7 +131,7 @@
 
   /* Font */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
-  --font-mono: 'Courier New', monospace;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
   /* Radius - Plush Cute style: generous rounding for soft feel */
   --radius-sm: 10px;
@@ -179,14 +179,22 @@
   --sp-5: 20px;
   --sp-6: 24px;
 
-  /* Font size */
-  --fs-cap: 11px; /* 角标 / 辅助说明 */
-  --fs-xs: 12px; /* 次要文本、表头 */
-  --fs-sm: 13px; /* 正文（列表、表格） */
-  --fs-base: 14px; /* 强调正文 */
-  --fs-lg: 16px; /* 区块标题 */
-  --fs-title: 18px; /* 页面标题 */
-  --fs-metric: 22px; /* 关键数值 */
+  /* Font size（六档刻度；--fs-* 不进 @theme，避免覆盖 Tailwind v4 的 --text-* 命名空间） */
+  --fs-caption: 12px; /* caption：角标 / 表头 / 辅助说明 / 密集表格 */
+  --fs-body-sm: 14px; /* body-sm：表格正文 / 次要正文 / 按钮 */
+  --fs-body: 16px; /* body：默认正文 / 输入框 */
+  --fs-heading-3: 20px; /* heading-3：区块标题 / 弹窗标题 */
+  --fs-heading-2: 24px; /* heading-2：页面标题 / KPI 中号数字 */
+  --fs-display: 32px; /* display：KPI 大数 / 品牌标题 / 空状态图形 */
+
+  /* 旧令牌：全部指向六档刻度（保留一版兼容） */
+  --fs-xs: var(--fs-caption); /* 12px */
+  --fs-base: var(--fs-body-sm); /* 14px */
+  --fs-lg: var(--fs-body); /* 16px */
+  --fs-cap: var(--fs-caption); /* 12px（批次 2 已收口） */
+  --fs-sm: var(--fs-body-sm); /* 14px（批次 3 已收口） */
+  --fs-title: var(--fs-heading-3); /* 20px（批次 5 已收口） */
+  --fs-metric: var(--fs-heading-2); /* 24px（批次 5 已收口） */
 
   /* Radius（收敛：同页最多 4 档） */
   --r-xs: 4px;
@@ -211,7 +219,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background: var(--color-surface);
-    font-size: 15px;
+    font-size: var(--fs-body);
     line-height: 1.6;
   }
 
@@ -255,7 +263,7 @@ h2 {
 
 /* H3 –Subsection: slightly smaller, still distinct from body */
 h3 {
-  font-size: 1.0625rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--color-slate-700);
   line-height: 1.4;
@@ -263,7 +271,7 @@ h3 {
 
 /* H4 –Card/title: same size as body, distinguished by weight + color */
 h4 {
-  font-size: 0.9375rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--color-slate-600);
   line-height: 1.4;
@@ -276,7 +284,7 @@ h5, h6 {
 }
 
 h5 { font-size: 0.875rem; }
-h6 { font-size: 0.8125rem; }
+h6 { font-size: 0.875rem; }
 
 /* Subtitle –descriptive text below headings */
 .subtitle {
@@ -428,7 +436,7 @@ h6 { font-size: 0.8125rem; }
     padding: 1px 6px;
     background: var(--color-danger-500);
     color: var(--color-text-inverse);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     border-radius: 10px;
     min-width: 18px;
@@ -448,7 +456,7 @@ h6 { font-size: 0.8125rem; }
     background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
     color: var(--color-text-inverse);
     border-radius: 20px;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     white-space: nowrap;
   }
@@ -523,7 +531,7 @@ h6 { font-size: 0.8125rem; }
     height: 44px;
     padding: 0 12px;
     flex-shrink: 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     line-height: 1.4;
     color: var(--color-text);
@@ -615,7 +623,7 @@ h6 { font-size: 0.8125rem; }
   .mc-table thead th {
     padding: 5px 8px;
     text-align: left;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--color-text-muted);
     background: var(--color-slate-50);

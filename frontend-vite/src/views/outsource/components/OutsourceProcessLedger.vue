@@ -126,7 +126,7 @@ defineProps<{
 .oso-stat-card--ship { background: var(--color-primary-50); border-color: var(--color-primary-100); }
 .oso-stat-card--recv { background: var(--color-success-50); border-color: var(--color-success-100); }
 .oso-stat-card--remain { background: var(--color-warning-50); border-color: var(--color-warning-100); }
-.oso-stat-label { font-size: 11.5px; color: var(--color-text-muted); font-weight: 600; }
+.oso-stat-label { font-size: 12px; color: var(--color-text-muted); font-weight: 600; }
 .oso-stat-val { font-size: 20px; font-weight: 800; color: var(--color-text); }
 .oso-stat-card--ship .oso-stat-val { color: var(--color-primary-600); }
 .oso-stat-card--recv .oso-stat-val { color: var(--color-success-700); }
@@ -141,7 +141,7 @@ defineProps<{
 .oso-ledger-title {
   margin: 0;
   padding: 9px 14px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--color-text);
   background: #f8fafc;
@@ -150,7 +150,7 @@ defineProps<{
 .oso-ledger-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 .oso-ledger-table th,
 .oso-ledger-table td {
@@ -159,7 +159,7 @@ defineProps<{
   border-bottom: 1px solid #eef1f5;
 }
 .oso-ledger-table th {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
   background: #fafbfc;
@@ -169,7 +169,7 @@ defineProps<{
 .oso-ledger-empty {
   padding: 16px;
   text-align: center;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--color-text-muted);
 }
 </style>
