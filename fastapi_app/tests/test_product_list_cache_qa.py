@@ -597,13 +597,14 @@ class TestDomainMultiPatternEngine:
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER)
         assert record_patterns == ['erp:orders:*']
 
-    async def test_inventory_domain_issues_inventory_and_product_list(self, record_patterns):
+    async def test_inventory_domain_issues_inventory_product_list_and_customers(self, record_patterns):
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)
-        assert record_patterns == ['erp:inventory:*', 'erp:product:list:*']
+        assert record_patterns == ['erp:inventory:*', 'erp:product:list:*', 'erp:customers:*']
 
-    async def test_order_and_inventory_issues_three_no_dup(self, record_patterns):
+    async def test_order_and_inventory_issues_four_no_dup(self, record_patterns):
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
-        assert record_patterns == ['erp:orders:*', 'erp:inventory:*', 'erp:product:list:*']
+        assert record_patterns == ['erp:orders:*', 'erp:inventory:*', 'erp:product:list:*',
+                                   'erp:customers:*']
         assert len(record_patterns) == len(set(record_patterns)), '不得重复下发同一 pattern'
 
     async def test_other_domain_unaffected_by_tuple_change(self, record_patterns):
@@ -611,8 +612,8 @@ class TestDomainMultiPatternEngine:
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.CUSTOMER)
         assert record_patterns == ['erp:customers:*']
 
-    async def test_inventory_domain_clears_product_list_not_others(self, real_fallback_cache):
-        """真实删除：INVENTORY 只清 inventory:* 与 product:list:*，不误伤其他命名空间"""
+    async def test_inventory_domain_clears_product_list_and_customers_not_others(self, real_fallback_cache):
+        """真实删除：INVENTORY 清 inventory:* / product:list:* / customers:*，不误伤其他命名空间"""
         for k in ('erp:product:list:20', 'erp:inventory:z', 'erp:product:detail:1',
                   'erp:products:all', 'erp:orders:x', 'erp:customers:y'):
             await safe_set(k, {'k': k}, timeout=60)
@@ -624,7 +625,8 @@ class TestDomainMultiPatternEngine:
         assert await safe_get('erp:product:detail:1') is not None
         assert await safe_get('erp:products:all') is not None
         assert await safe_get('erp:orders:x') is not None
-        assert await safe_get('erp:customers:y') is not None
+        # customers:* 必须一并清：库存行与客户 chips 同源，见 test_stock_chip_cache_invalidation.py
+        assert await safe_get('erp:customers:y') is None
 
     async def test_order_and_inventory_clears_orders_inventory_product_list(self, real_fallback_cache):
         for k in ('erp:product:list:20', 'erp:orders:x', 'erp:inventory:z',
@@ -638,7 +640,7 @@ class TestDomainMultiPatternEngine:
         assert await safe_get('erp:inventory:z') is None
         assert await safe_get('erp:products:all') is not None
         assert await safe_get('erp:product:detail:1') is not None
-        assert await safe_get('erp:customers:y') is not None
+        assert await safe_get('erp:customers:y') is None
 
 
 # ---------------------------------------------------------------------------

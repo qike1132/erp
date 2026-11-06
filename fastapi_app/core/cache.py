@@ -148,7 +148,13 @@ _DOMAIN_PATTERN_MAP: dict[CacheDomain, tuple[str, ...]] = {
     # （utils/redis_cache.py:110-112，由 test_redis_key_namespace.py:135 断言），
     # 故与相邻的无前缀字面量物理等价；且该缓存走裸 safe_set、无 L1 层，
     # _match_pattern 不受前缀影响。
-    CacheDomain.INVENTORY: ("inventory:*", PRODUCT_LIST_CACHE_PATTERN),
+    # customers:* = /stock 页「客户快捷切换」chips 的成员列表
+    # （stock_inventory_service._get_all_customers）。它与库存行来自同一批源表
+    # （order / stock_in / daily_production_record），凡改库存行的写路径都必须重算，
+    # 否则新客户会出现「表格看得见、chips 筛不了」——2026-11-06 批量备货
+    # （orchestrate_batch_stockins 只发 ORDER_AND_INVENTORY|STOCKIN|REPORT）
+    # 实测：备货后表格已有该客户的行，chips 里没有，直到缓存 TTL 到期。
+    CacheDomain.INVENTORY: ("inventory:*", PRODUCT_LIST_CACHE_PATTERN, "customers:*"),
     CacheDomain.STOCKIN: ("stockins:*",),
     CacheDomain.PRODUCT: ("products:*",),
     CacheDomain.CUSTOMER: ("customers:*",),

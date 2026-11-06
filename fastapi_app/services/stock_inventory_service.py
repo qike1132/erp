@@ -794,7 +794,11 @@ def _empty_inventory_response(page: int = 1, per_page: int = 50, all_customers: 
     }
 
 
-@cache_result(key_prefix="customers:all", ttl=120, local_ttl=60,
+# local_ttl=0（2026-11-06）：chips 必须「写后即刻可见」。生产 8 worker 且
+# CACHE_L1_BROADCAST_ENABLED=false，invalidate_cache() 只清当前 worker 的 L1，
+# 其余 worker 会在 local_ttl 内继续返回旧的客户列表（同 test_order_derived_cache_no_l1
+# 的口径）。关掉 L1 后每请求多一次 Redis GET，且只在库存响应整体未命中缓存时才走到。
+@cache_result(key_prefix="customers:all", ttl=120, local_ttl=0,
               key_builder=lambda **kwargs: f"pids{hashlib.sha256(str(kwargs.get('pids', '')).encode()).hexdigest()[:16] if kwargs.get('pids') else 'all'}-f:{kwargs.get('factory', '') or ''}")
 async def _get_all_customers(db: AsyncSession, pids: tuple | None, factory: str = '') -> list[str]:
     """获取客户快捷切换栏客户列表：成员 = 库存表格里可能出现的客户，按最近活动排序。
