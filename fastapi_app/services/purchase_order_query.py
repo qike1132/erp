@@ -203,7 +203,7 @@ async def get_supplier_order_summary(db: AsyncSession, order_ids: list | None = 
     bom_data = await _fetch_bom_data(db, product_ids)
 
     po_ids = [o.id for o in orders]
-    items_map, items_by_order = await _fetch_po_items_map(db, po_ids)
+    items_map, items_by_order, _ = await _fetch_po_items_map(db, po_ids)
 
     mat_map = _build_supplier_mat_map(
         orders, bom_data, items_map, items_by_order, cust_order_map,
@@ -375,7 +375,7 @@ async def get_factory_order_summary(
     bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
 
     po_ids = [o.id for o in orders]
-    items_map, items_by_order = await _fetch_po_items_map(db, po_ids)
+    items_map, items_by_order, items_map_by_part = await _fetch_po_items_map(db, po_ids)
 
     # 逐 SKU 展示明细：优先方案 C 的逐 SKU 快照（权威），无快照的单回退 OrderItem 口径
     # （局部 import：本模块顶层保持「不依赖其它 service 模块」的既有约定）
@@ -389,7 +389,7 @@ async def get_factory_order_summary(
 
     group_map = _build_factory_group_map(
         orders, bom_data, items_map, items_by_order, cust_order_map, prod_name_map,
-        po_pids_map=po_pids_map, po_sku_map=sku_rows,
+        po_pids_map=po_pids_map, po_sku_map=sku_rows, items_map_by_part=items_map_by_part,
     )
     groups = _serialize_factory_groups(group_map)
 

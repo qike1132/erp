@@ -132,6 +132,7 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
             supplier_name=item_data.get('supplier_name') or supplier_name,
             customer_name=customer_name,
             material_category=item_data.get('category', ''),
+            part_name=item_data.get('part_name'),
             # 来源 BOM 作用域（默认BOM / 各角色）：写进备注，采购员能看出这条需求由谁产生。
             # 无 source_role（如手工单、旧路径）时保持 remark 原样，不产生多余文本。
             remark=item_data.get('remark') or _scope_remark(item_data.get('source_role')),
@@ -197,6 +198,8 @@ def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: Purchase
     _recalc_item_total_price(item, order.spare_rate)
     line_total = item.total_price or Decimal('0')
     item.material_category = item_data.get('category', '')
+    if 'part_name' in item_data:
+        item.part_name = item_data.get('part_name')
     item.remark = item_data.get('remark') or _scope_remark(item_data.get('source_role'))
     item.supplier_name = order.supplier_name
     item.customer_name = order.customer_name

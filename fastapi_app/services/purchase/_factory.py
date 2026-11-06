@@ -65,7 +65,13 @@ def _resolve_factory_po_info(po, cust_order_map, prod_name_map):
         prod = prod_name_map[pid]
     return cust, prod or '未知产品', order_qty, pid
 
-def _accumulate_factory_bom(group, po, bom, items_map, order_qty):
+def _norm_part_name(value) -> str:
+    """产品部位归一：trim 后作为聚合键；空串表示无部位。"""
+    return (value or '').strip()
+
+
+def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
+                            items_map_by_part=None, split_parts=False):
     sup = bom['supplier_name'] or po.supplier_name or '未指定供应商'
     if sup not in group['_supplier_map']:
         group['_supplier_map'][sup] = {
@@ -73,28 +79,46 @@ def _accumulate_factory_bom(group, po, bom, items_map, order_qty):
             '_fabric_map': {},
         }
     fabric_map = group['_supplier_map'][sup]['_fabric_map']
-    fkey = (bom['material_name'], bom['specification'], bom['unit'])
+    part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
+    fkey = (bom['material_name'], bom['specification'], bom['unit'], part_key)
 
-    ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'])
-    matching_items = items_map.get(ikey, [])
+    if split_parts:
+        ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'], part_key)
+        matching_items = (items_map_by_part or {}).get(ikey, [])
+    else:
+        ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'])
+        matching_items = items_map.get(ikey, [])
+
+    existing = fabric_map.get(fkey)
+
     if matching_items:
+        # 采购明细真值：同一张单在同一聚合键上只能计一次——同 SKU 内多角色 /
+        # 同部位重复的 BOM 行共享同一份明细，逐行累加会翻倍。
+        seen = group.setdefault('_stored_seen', set())
+        seen_key = (po.id, sup, fkey)
+        if seen_key in seen:
+            return
+        seen.add(seen_key)
         per_order_qty = sum(float(it.quantity or 0) for it in matching_items)
         cur_item_ids = [it.id for it in matching_items]
     else:
+        # 无对应采购明细（BOM 生成后新增）：按 BOM 用量逐行累加
         per_order_qty = bom['quantity'] * order_qty
         cur_item_ids = []
 
-    if fkey in fabric_map:
-        fabric_map[fkey]['quantity'] += per_order_qty
-        fabric_map[fkey]['item_ids'].extend(cur_item_ids)
-    else:
-        fabric_map[fkey] = {
-            'fabric_name': bom['material_name'],
-            'specification': bom['specification'],
-            'quantity': per_order_qty,
-            'unit': bom['unit'],
-            'item_ids': cur_item_ids,
-        }
+    if existing is not None:
+        existing['quantity'] += per_order_qty
+        existing['item_ids'].extend(cur_item_ids)
+        return
+
+    fabric_map[fkey] = {
+        'fabric_name': bom['material_name'],
+        'part_name': part_key or None,
+        'specification': bom['specification'],
+        'quantity': per_order_qty,
+        'unit': bom['unit'],
+        'item_ids': cur_item_ids,
+    }
 
 def _accumulate_factory_po_items(group, po, items_by_order):
     """BOM 不可用时的回退：直接使用 PO 明细作为布料/物料数据。"""
@@ -108,7 +132,8 @@ def _accumulate_factory_po_items(group, po, items_by_order):
                 '_fabric_map': {},
             }
         fabric_map = group['_supplier_map'][sup]['_fabric_map']
-        fkey = (item.material_name, item.specification or '', item.unit or '')
+        part_key = _norm_part_name(item.part_name)
+        fkey = (item.material_name, item.specification or '', item.unit or '', part_key)
         if fkey in fabric_map:
             fabric_map[fkey]['quantity'] += float(item.quantity or 0)
             if item.id not in fabric_map[fkey]['item_ids']:
@@ -116,6 +141,7 @@ def _accumulate_factory_po_items(group, po, items_by_order):
         else:
             fabric_map[fkey] = {
                 'fabric_name': item.material_name,
+                'part_name': part_key or None,
                 'specification': item.specification or '',
                 'quantity': float(item.quantity or 0),
                 'unit': item.unit or '',
@@ -127,7 +153,9 @@ def _norm_sku_name(value) -> str:
     return str(value or '').strip()
 
 
-def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -> list[dict]:
+def _sku_material_rows(
+    bom_rows: list, sku_qty: float, supplier_fallback: str, split_parts: bool = False,
+) -> list[dict]:
     """把某个 SKU 的 BOM 行展开为「该 SKU 自己的物料行」（口径 A）。
 
     `quantity` = ``单件用量 × 该 SKU 数量``（**基准量**，不含损耗加放 —— 加放由前端按该
@@ -155,7 +183,8 @@ def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -
         if _is_filling_category(bom.get('category')):
             continue
         sup = bom.get('supplier_name') or supplier_fallback
-        key = (sup, bom['material_name'], bom['specification'], bom['unit'])
+        part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
+        key = (sup, bom['material_name'], bom['specification'], bom['unit'], part_key)
         amount = round_qty(float(bom.get('quantity') or 0) * float(sku_qty or 0))
         if key in buckets:
             buckets[key]['quantity'] += amount
@@ -163,19 +192,23 @@ def _sku_material_rows(bom_rows: list, sku_qty: float, supplier_fallback: str) -
             buckets[key] = {
                 'supplier_name': sup,
                 'material_name': bom['material_name'],
+                'part_name': part_key or None,
                 'specification': bom['specification'],
                 'unit': bom['unit'],
                 'quantity': amount,
             }
-    # 稳定顺序：与既有 fabrics 的排序口径一致（供应商 → 物料名 → 规格 → 单位）
+    # 稳定顺序：供应商 → 部位 → 物料名 → 规格 → 单位
     return sorted(
         buckets.values(),
-        key=lambda r: (r['supplier_name'], r['material_name'], r['specification'], r['unit']),
+        key=lambda r: (
+            r['supplier_name'], r['part_name'] or '', r['material_name'], r['specification'], r['unit'],
+        ),
     )
 
 
 def _accumulate_factory_sku_materials(
-    group: dict, sku_lines: list, po, bom_data: dict, name_to_pid: dict,
+    group: dict, sku_lines: list, po, bom_data: dict, name_to_pid: dict, *,
+    split_parts: bool = False,
 ) -> None:
     """**逐采购单**累加「按 SKU 的物料明细」，供应商兜底取**本单**的 `po.supplier_name`。
 
@@ -203,10 +236,12 @@ def _accumulate_factory_sku_materials(
         sku_qty = float(sku.get('order_qty') or 0)
         supplier_fallback = po.supplier_name or '未指定供应商'
         bucket = group['_sku_materials'].setdefault(sku_name, {})
-        for row in _sku_material_rows(bom_data.get(sku_pid) or [], sku_qty, supplier_fallback):
+        for row in _sku_material_rows(
+            bom_data.get(sku_pid) or [], sku_qty, supplier_fallback, split_parts=split_parts,
+        ):
             key = (
                 row['supplier_name'], row['material_name'],
-                row['specification'], row['unit'],
+                row['specification'], row['unit'], row.get('part_name') or '',
             )
             if key in bucket:
                 bucket[key]['quantity'] += row['quantity']
@@ -227,14 +262,32 @@ def _finalize_factory_sku_materials(group_map: dict) -> None:
         group['_sku_materials'] = {
             name: sorted(
                 buckets.values(),
-                key=lambda r: (r['supplier_name'], r['material_name'], r['specification'], r['unit']),
+                key=lambda r: (
+                    r['supplier_name'], r.get('part_name') or '',
+                    r['material_name'], r['specification'], r['unit'],
+                ),
             )
             for name, buckets in group['_sku_materials'].items()
         }
 
 
+def _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map) -> dict[tuple, bool]:
+    """组内**所有**采购单明细都带 part_name 才按部位拆；混入旧单则整组按物料合并。"""
+    parts_aware_by_po = {
+        po.id: any(_norm_part_name(it.part_name) for it in items_by_order.get(po.id, []))
+        for po in orders
+    }
+    split_by_group: dict[tuple, bool] = {}
+    for po in orders:
+        cust, prod, _order_qty, _pid = _resolve_factory_po_info(po, cust_order_map, prod_name_map)
+        key = (cust, prod)
+        split_by_group[key] = split_by_group.get(key, True) and parts_aware_by_po.get(po.id, False)
+    return split_by_group
+
+
 def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map,
-                             prod_name_map, po_pids_map=None, po_sku_map=None) -> dict[tuple, dict]:
+                             prod_name_map, po_pids_map=None, po_sku_map=None,
+                             items_map_by_part=None) -> dict[tuple, dict]:
     """构建 (客户, 产品名) → 汇总分组。
 
     ``po_pids_map``（``{po_id: [product_id, ...]}``）给出该采购单覆盖的**全部 SKU**，
@@ -250,10 +303,14 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
     重复出现时必须只累加一次，否则数量翻倍。第 1 个 SKU 保持原累加路径（含同 SKU 内
     多角色重复行的既有行为），从第 2 个 SKU 起跳过已出现过的物料键。
     """
+    # 分组级拆行判定：组内所有采购单明细都带 part_name 才按部位拆；混入旧单则整组合并。
+    split_by_group = _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map)
+
     group_map: dict[tuple, dict] = {}
     for po in orders:
         cust, prod, order_qty, pid = _resolve_factory_po_info(po, cust_order_map, prod_name_map)
         key = (cust, prod)
+        split_parts = split_by_group.get(key, False)
         if key not in group_map:
             group_map[key] = {
                 'customer_name': cust,
@@ -288,7 +345,9 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
         # 逐单累加「按 SKU 的物料明细」（细节见 _accumulate_factory_sku_materials）：
         # 供应商兜底取**本单**的 po.supplier_name，与 fabrics 同源同键。
         name_to_pid = {name: pid for pid, name in (prod_name_map or {}).items()}
-        _accumulate_factory_sku_materials(group, sku_lines, po, bom_data, name_to_pid)
+        _accumulate_factory_sku_materials(
+            group, sku_lines, po, bom_data, name_to_pid, split_parts=split_parts,
+        )
 
         if po_pids_map is None:
             pids = [pid] if pid else []
@@ -304,9 +363,10 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
             for bom in bom_list:
                 if _is_filling_category(bom.get('category')):
                     continue
+                part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
                 skey = (
                     bom['supplier_name'] or po.supplier_name or '未指定供应商',
-                    bom['material_name'], bom['specification'], bom['unit'],
+                    bom['material_name'], bom['specification'], bom['unit'], part_key,
                 )
                 # 第 1 个 SKU 走原累加路径（保持同 SKU 内多角色重复行的既有行为），
                 # 从第 2 个 SKU 起跳过已出现过的物料键。注意：**必须先判重再登记**，
@@ -314,7 +374,10 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
                 if idx > 0 and skey in seen_materials:
                     continue
                 seen_materials.add(skey)
-                _accumulate_factory_bom(group, po, bom, items_map, order_qty)
+                _accumulate_factory_bom(
+                    group, po, bom, items_map, order_qty,
+                    items_map_by_part=items_map_by_part, split_parts=split_parts,
+                )
 
         if not has_bom:
             # BOM 完全不可用（所选 SKU 均未配 BOM）时的既有回退
@@ -331,7 +394,10 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
         suppliers = []
         for skey in sorted(group['_supplier_map'].keys()):
             supplier = group['_supplier_map'][skey]
-            fabrics = sorted(supplier['_fabric_map'].values(), key=lambda x: x['fabric_name'])
+            fabrics = sorted(
+                supplier['_fabric_map'].values(),
+                key=lambda x: (x.get('part_name') or '', x['fabric_name']),
+            )
             suppliers.append({'supplier_name': supplier['supplier_name'], 'fabrics': fabrics})
         groups.append({
             'customer_name': group['customer_name'],

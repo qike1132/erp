@@ -72,11 +72,12 @@
         <thead>
           <tr class="bg-border-light">
             <th>客户</th>
-            <th class="w-[280px]">产品名称</th>
+            <th class="w-[240px]">产品名称</th>
             <th>订单数量</th>
             <th>备品数量</th>
             <th>供应商</th>
-            <th class="w-[200px]">布料名称</th>
+            <th>产品部位</th>
+            <th class="w-[180px]">布料名称</th>
             <th>规格型号</th>
             <th>损耗率</th>
             <th>数量</th>
@@ -110,11 +111,12 @@
               </td>
 
               <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU） -->
-              <td v-if="item.row.noBom" colspan="6" class="text-text-muted">无 BOM 明细</td>
+              <td v-if="item.row.noBom" colspan="7" class="text-text-muted">无 BOM 明细</td>
 
               <template v-else>
                 <!-- 供应商：块内首行 -->
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
+                <td>{{ item.row.partName || '' }}</td>
                 <td>{{ item.row.materialName }}</td>
                 <td>{{ item.row.specification || '' }}</td>
                 <!-- 损耗率：有落库坐标才可编辑；无坐标 → 只读并说明原因 -->

@@ -150,6 +150,7 @@ def _material_row(
     return {
         'material_name': material_name,
         'material_code': row.material_code or '',
+        'part_name': getattr(row, 'part_name', None),
         'specification': row.specification or '',
         'unit': row.unit or spec.default_unit,
         'unit_price': 0,

@@ -159,9 +159,13 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
             fabric_qty = item.quantity or 0
             if supplier_name not in grouped_data[cp_key]:
                 grouped_data[cp_key][supplier_name] = {}
-            fabric_key = (fabric_name, fabric_spec, item.unit or '')
+            part_name = (getattr(item, 'part_name', None) or '').strip()
+            fabric_key = (fabric_name, fabric_spec, item.unit or '', part_name)
             if fabric_key not in grouped_data[cp_key][supplier_name]:
-                grouped_data[cp_key][supplier_name][fabric_key] = {'fabric_name': fabric_name, 'specification': fabric_spec, 'quantity': fabric_qty, 'unit': item.unit or ''}
+                grouped_data[cp_key][supplier_name][fabric_key] = {
+                    'fabric_name': fabric_name, 'part_name': part_name,
+                    'specification': fabric_spec, 'quantity': fabric_qty, 'unit': item.unit or '',
+                }
             else:
                 existing = grouped_data[cp_key][supplier_name][fabric_key]
                 existing['quantity'] = (float(existing['quantity']) if existing['quantity'] else 0) + (float(fabric_qty) if fabric_qty else 0)
@@ -196,7 +200,7 @@ th,td{border:1.0pt solid #000000;padding:1px;text-align:center;vertical-align:mi
 th{background:#E6E6E6;font-weight:bold}
 .total-row{background-color:#F0F0F0;font-weight:bold}"""
     body_parts = ['<div class="header"><h1>东莞市滨发玩具有限公司</h1><h2>工厂内部采购订单汇总</h2></div>']
-    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
+    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>产品部位</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
 
     grand_total: float = 0
     for (customer_name, product_name), suppliers in sorted(sorted_groups.items()):
@@ -212,6 +216,7 @@ th{background:#E6E6E6;font-weight:bold}
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{float(order_info["product_quantity"]) if order_info["product_quantity"] else 0:g}</td>')
                 if idx == 0:
                     body_parts.append(f'<td rowspan="{len(supplier["fabrics"])}">{_h(supplier["supplier_name"])}</td>')
+                body_parts.append(f'<td style="text-align:left">{_h(fabric.get("part_name", ""))}</td>')
                 body_parts.append(f'<td style="text-align:left">{_h(fabric["fabric_name"])}</td>')
                 body_parts.append(f'<td style="text-align:left">{_h(fabric.get("specification", ""))}</td>')
                 body_parts.append(f'<td style="text-align:right">{_h(fabric["quantity"])} {_h(fabric["unit"])}</td>')
@@ -219,7 +224,7 @@ th{background:#E6E6E6;font-weight:bold}
                 grand_total += float(fabric["quantity"]) if fabric["quantity"] else 0
                 global_fabric_idx += 1
 
-    body_parts.append(f'<tfoot><tr class="total-row"><td colspan="4">合计</td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>')
+    body_parts.append(f'<tfoot><tr class="total-row"><td colspan="4">合计</td><td></td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>')
     body_parts.append('</table>')
     return build_print_html("工厂内部采购订单汇总", ''.join(body_parts), extra_css)
 

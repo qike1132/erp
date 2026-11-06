@@ -203,6 +203,7 @@ class PurchaseOrderItem(Base):
     total_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=0, comment='总价')
     loss_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), comment='材料损耗率快照(千分之几)，逐布料行配置')
     material_category: Mapped[str | None] = mapped_column(String(20), comment='物料分类')
+    part_name: Mapped[str | None] = mapped_column(String(100), comment='产品部位')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(明细级)')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
@@ -238,6 +239,7 @@ class PurchaseOrderItem(Base):
             'total_price': float(self.total_price) if self.total_price else 0,
             'loss_rate': float(self.loss_rate) if self.loss_rate is not None else None,
             'material_category': self.material_category,
+            'part_name': self.part_name,
             'supplier_name': self.supplier_name,
             'remark': self.remark
         }

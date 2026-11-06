@@ -604,6 +604,9 @@
       "drop_column:product_fabric|part_name",
       "drop_column:product_material|part_name"
     ],
+    "migrations/versions/pg_standalone_111_add_part_name_to_purchase_order_item.py": [
+      "drop_column:purchase_order_item|part_name"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

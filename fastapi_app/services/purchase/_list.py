@@ -45,6 +45,7 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
         name_prefix = prod_name_map.get(row.product_id, '') if prod_name_map else ''
         bom_data.setdefault(row.product_id, []).append({
             'material_name': f'{name_prefix}-填充物' if name_prefix else '填充物',
+            'part_name': row.part_name or '',
             'specification': row.specification or '',
             'unit': row.unit or '克',
             'quantity': float(row.cotton_usage or 0),
@@ -59,6 +60,7 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
         # P2-A2 类型收窄：改用独立循环变量，避免与上方物料循环共用 row 导致类型串味（零行为变化）
         bom_data.setdefault(fabric_row.product_id, []).append({
             'material_name': fabric_row.fabric_name or '面料',
+            'part_name': fabric_row.part_name or '',
             'specification': fabric_row.specification or '',
             'unit': fabric_row.unit or '米',
             'quantity': float(fabric_row.quantity or 0),
@@ -73,6 +75,7 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
         # P2-A2 类型收窄：独立循环变量（零行为变化）
         bom_data.setdefault(accessory_row.product_id, []).append({
             'material_name': accessory_row.accessory_name or '配件',
+            'part_name': accessory_row.part_name or '',
             'specification': accessory_row.specification or '',
             'unit': accessory_row.unit or '个',
             'quantity': float(accessory_row.quantity or 0),
@@ -339,6 +342,7 @@ def _serialize_po_item(item) -> dict:
         'id': item.id,
         'material_name': item.material_name,
         'material_code': item.material_code or '',
+        'part_name': item.part_name,
         'specification': item.specification or '',
         'unit': item.unit or '',
         'unit_price': float(item.unit_price or 0),

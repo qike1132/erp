@@ -128,6 +128,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
               supplierRowSpan: supplier.fabrics?.length || 0,
               supplierName: supplier.supplier_name,
               materialName: fabric.fabric_name,
+              partName: fabric.part_name || '',
               specification: fabric.specification || '',
               unit: fabric.unit || '',
               baseQuantity: parseFloat(String(fabric.quantity)) || 0,
@@ -144,8 +145,8 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
   })
 
   /** 每组的差异列表（按 SKU 模式下才有；回退模式恒为空 ⇒ 不渲染对照块）。 */
-  const rowDiffMap = computed<Record<number, { materialName: string; perSku: number; stored: number }[]>>(() => {
-    const map: Record<number, { materialName: string; perSku: number; stored: number }[]> = {}
+  const rowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() => {
+    const map: Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]> = {}
     ;(props.factoryData?.groups || []).forEach((group, gi) => {
       const rows = buildPerSkuRows(group, spareRateForGroup(gi))
       map[gi] = rows.length > 0 ? computeQuantityDiff(group, rows) : []
@@ -246,7 +247,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
       if (r.legacy || r.row.noBom) return
       const k = materialKeyOf({
         supplier_name: r.row.supplierName, material_name: r.row.materialName,
-        specification: r.row.specification, unit: r.row.unit,
+        specification: r.row.specification, unit: r.row.unit, part_name: r.row.partName,
       })
       counts.set(k, (counts.get(k) || 0) + 1)
     })
@@ -260,7 +261,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     if (item.legacy || item.row.noBom) return ''
     const k = materialKeyOf({
       supplier_name: item.row.supplierName, material_name: item.row.materialName,
-      specification: item.row.specification, unit: item.row.unit,
+      specification: item.row.specification, unit: item.row.unit, part_name: item.row.partName,
     })
     return sharedMaterialKeys.value.has(k)
       ? '该物料各 SKU 共用采购明细中的同一行，改动会影响所有 SKU'

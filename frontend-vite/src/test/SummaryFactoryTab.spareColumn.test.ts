@@ -148,10 +148,10 @@ describe('buildSkuDisplayLines（逐 SKU 行的备品）', () => {
 })
 
 describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
-  it('表头 10 列，「备品数量」在第 4 位（订单数量右侧）', () => {
+  it('表头 11 列，「备品数量」在第 4 位（订单数量右侧）', () => {
     const ths = headerTexts(mountModal(singleSkuGroup()))
     expect(ths).toEqual([
-      '客户', '产品名称', '订单数量', '备品数量', '供应商',
+      '客户', '产品名称', '订单数量', '备品数量', '供应商', '产品部位',
       '布料名称', '规格型号', '损耗率', '数量', '单位',
     ])
   })
@@ -204,16 +204,17 @@ describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
   })
 })
 
-describe('A1 打印 / 导出：与屏幕同源（10 列）', () => {
-  it('共享表头常量含 10 列且第 4 列为「备品数量」', () => {
+describe('A1 打印 / 导出：与屏幕同源（11 列）', () => {
+  it('共享表头常量含 11 列且第 4 列为「备品数量」', () => {
     const doc = new DOMParser().parseFromString(`<table><thead>${FACTORY_TABLE_HEAD}</thead></table>`, 'text/html')
     const headers = [...doc.querySelectorAll('th')].map((th) => th.textContent || '')
-    expect(headers).toHaveLength(10)
+    expect(headers).toHaveLength(11)
     expect(headers[3]).toBe('备品数量')
-    expect(headers[7]).toBe('损耗率')
+    expect(headers[5]).toBe('产品部位')
+    expect(headers[8]).toBe('损耗率')
   })
 
-  it('数据行第 4 列 = 备品（订单级率），第 8 列 = 数量（材料损耗率加放）、第 9 列 = 单位', () => {
+  it('数据行第 4 列 = 备品（订单级率），第 9 列 = 数量（材料损耗率加放）、第 10 列 = 单位', () => {
     // 两种率显式分离：订单级率 15‰ 只喂备品；逐行材料损耗率 450‰ 只喂「数量」列
     const html = buildFactoryHtml(dataWith(singleSkuGroup(), 15), 15, [[[450]]])
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
@@ -221,8 +222,8 @@ describe('A1 打印 / 导出：与屏幕同源（10 列）', () => {
 
     expect(cells[3]).toBe('150.0') // 备品 = ceil(10000 × 15‰)
     // 数量按该行材料损耗率 450‰ 加放：890 × 1.45 = 1290.5 → ceil 1291
-    expect(cells[8]).toBe('1291')
-    expect(cells[9]).toBe('码')
+    expect(cells[9]).toBe('1291')
+    expect(cells[10]).toBe('码')
   })
 
   it('分组级率优先于传入的统一率（打印与屏幕同口径）', () => {

@@ -1,10 +1,10 @@
 <template>
   <template v-if="diffs.length > 0">
-    <!-- 差异横幅：说明「实际下单含手工调整」并点名不一致的物料（跨满 10 列） -->
+    <!-- 差异横幅：说明「实际下单含手工调整」并点名不一致的物料（跨满 11 列） -->
     <tr class="sm-diff-banner">
-      <td :colspan="10">
+      <td :colspan="11">
         ⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：
-        <span v-for="(d, i) in diffs" :key="d.materialName">{{ i > 0 ? '、' : '' }}{{ d.materialName }}（推算 {{ formatQty(d.perSku) }} / 实际 {{ formatQty(d.stored) }}）</span>
+        <span v-for="(d, i) in diffs" :key="`${d.partName}-${d.materialName}`">{{ i > 0 ? '、' : '' }}{{ d.partName ? d.partName + '·' : '' }}{{ d.materialName }}（推算 {{ formatQty(d.perSku) }} / 实际 {{ formatQty(d.stored) }}）</span>
       </td>
     </tr>
     <!--
@@ -21,6 +21,7 @@
     >
       <td v-if="i === 0" :rowspan="storedRows.length" colspan="4" class="sm-diff-label">实际下单（含手工调整）</td>
       <td v-if="r.isSupplierFirst" :rowspan="r.supplierSpan">{{ r.supplierName }}</td>
+      <td>{{ r.partName }}</td>
       <td>{{ r.fabricName }}</td>
       <td>{{ r.specification }}</td>
       <td>{{ formatQty(r.rate) }}</td>
@@ -48,14 +49,14 @@ import { fmtQty as formatQty } from '@/utils/formatQty'
 import type { DiffStoredRow } from '../composables/useFactoryTableRows'
 
 const props = defineProps<{
-  diffs: { materialName: string; perSku: number; stored: number }[]
+  diffs: { materialName: string; partName: string; perSku: number; stored: number }[]
   /** 该组落库真值（率/数量已按主表口径算好） */
   storedRows: DiffStoredRow[]
 }>()
 
-/** 该落库行是否属于「不一致」的物料（横幅点名的那些） */
+/** 该落库行是否属于「不一致」的物料（横幅点名的那些；部位不同视为不同行） */
 function isDiff(row: DiffStoredRow): boolean {
-  return props.diffs.some((d) => d.materialName === row.fabricName)
+  return props.diffs.some((d) => d.materialName === row.fabricName && d.partName === row.partName)
 }
 </script>
 

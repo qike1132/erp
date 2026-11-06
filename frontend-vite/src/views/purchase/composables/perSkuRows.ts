@@ -24,6 +24,7 @@ import type { FactoryGroup } from './useSummaryModal'
 export interface SkuMaterial {
   supplier_name: string
   material_name: string
+  part_name?: string
   specification: string
   unit: string
   quantity: number
@@ -61,8 +62,11 @@ export function summaryMaterialKey(
   materialName: string | null | undefined,
   specification: string | null | undefined,
   unit: string | null | undefined,
+  partName?: string | null,
 ): string {
-  return [supplierName || '未指定供应商', materialName || '', specification || '', unit || ''].join('\u0000')
+  return [
+    supplierName || '未指定供应商', materialName || '', specification || '', unit || '', partName || '',
+  ].join('\u0000')
 }
 
 /**
@@ -136,6 +140,7 @@ export interface PerSkuRow {
   supplierRowSpan: number
   supplierName: string
   materialName: string
+  partName: string
   specification: string
   unit: string
   baseQuantity: number
@@ -148,9 +153,9 @@ export interface PerSkuRow {
 
 /** 物料键：与工厂页/供应商页同源（复用 summaryMaterialKey，不另造一套）。 */
 export function materialKeyOf(m: {
-  supplier_name?: string; material_name?: string; specification?: string; unit?: string
+  supplier_name?: string; material_name?: string; specification?: string; unit?: string; part_name?: string
 }): string {
-  return summaryMaterialKey(m.supplier_name, m.material_name, m.specification, m.unit)
+  return summaryMaterialKey(m.supplier_name, m.material_name, m.specification, m.unit, m.part_name)
 }
 
 /** 落库明细索引：物料键 → 坐标 / item_ids / 落库数量。 */
@@ -163,6 +168,7 @@ function buildStoredIndex(group: FactoryGroup) {
         material_name: fabric.fabric_name,
         specification: fabric.specification,
         unit: fabric.unit,
+        part_name: fabric.part_name,
       })
       const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
       index.set(key, {
@@ -213,6 +219,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         supplierRowSpan: 0,
         supplierName: '',
         materialName: '',
+        partName: '',
         specification: '',
         unit: '',
         baseQuantity: 0,
@@ -246,6 +253,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         supplierRowSpan: supplierCounts.get(m.supplier_name) || 0,
         supplierName: m.supplier_name,
         materialName: m.material_name,
+        partName: m.part_name || '',
         specification: m.specification,
         unit: m.unit,
         baseQuantity: parseFloat(String(m.quantity)) || 0,
@@ -272,21 +280,22 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
  */
 export function computeQuantityDiff(
   group: FactoryGroup, rows: PerSkuRow[],
-): { materialName: string; perSku: number; stored: number }[] {
+): { materialName: string; partName: string; perSku: number; stored: number }[] {
   if (rows.length === 0) return []
   const stored = buildStoredIndex(group)
   const nameOfStoredKey = (key: string) => key.split('\u0000')[1] || ''
+  const partOfStoredKey = (key: string) => key.split('\u0000')[4] || ''
   const summed = new Map<string, number>()
   rows.forEach((r) => {
     if (r.noBom) return   // 占位行不对应任何物料，不参与比对
     const key = materialKeyOf({
       supplier_name: r.supplierName, material_name: r.materialName,
-      specification: r.specification, unit: r.unit,
+      specification: r.specification, unit: r.unit, part_name: r.partName,
     })
     summed.set(key, (summed.get(key) ?? 0) + r.baseQuantity)
   })
 
-  const diffs: { materialName: string; perSku: number; stored: number }[] = []
+  const diffs: { materialName: string; partName: string; perSku: number; stored: number }[] = []
   // 1) 遍历按 SKU 侧的键：既覆盖「两侧都有」的键，也覆盖「只在 BOM 侧」的新增物料
   //    （落库没有 → 不是差异，跳过）。
   summed.forEach((perSku, key) => {
@@ -294,7 +303,10 @@ export function computeQuantityDiff(
     if (!hit) return                       // 只出现在 BOM、落库里没有 → 不是「差异」，是新增物料
     const perSkuRounded = Math.round(perSku * 100) / 100
     if (Math.abs(perSkuRounded - hit.storedQuantity) > 0.005) {
-      diffs.push({ materialName: nameOfStoredKey(key), perSku: perSkuRounded, stored: hit.storedQuantity })
+      diffs.push({
+        materialName: nameOfStoredKey(key), partName: partOfStoredKey(key),
+        perSku: perSkuRounded, stored: hit.storedQuantity,
+      })
     }
   })
   // 2) 只在落库侧的键：Σ 推算 = 0 ⇒ 按 spec「逐键比较」的口径同样是差异
@@ -302,7 +314,10 @@ export function computeQuantityDiff(
   stored.forEach((hit, key) => {
     if (summed.has(key)) return
     if (Math.abs(hit.storedQuantity) > 0.005) {
-      diffs.push({ materialName: nameOfStoredKey(key), perSku: 0, stored: hit.storedQuantity })
+      diffs.push({
+        materialName: nameOfStoredKey(key), partName: partOfStoredKey(key),
+        perSku: 0, stored: hit.storedQuantity,
+      })
     }
   })
   return diffs
@@ -325,6 +340,7 @@ export interface StoredRow {
   /** 本供应商段行数（供应商格的 rowspan） */
   supplierSpan: number
   fabricName: string
+  partName: string
   specification: string
   unit: string
   /** 该落库行的损耗率（快照率优先，缺省回退 `rateOf`） */
@@ -353,6 +369,7 @@ export function buildStoredRows(
         isSupplierFirst: fi === 0,
         supplierSpan: fabrics.length,
         fabricName: f.fabric_name,
+        partName: f.part_name || '',
         specification: f.specification || '',
         unit: f.unit || '',
         rate,

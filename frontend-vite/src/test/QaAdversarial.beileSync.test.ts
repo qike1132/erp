@@ -173,12 +173,13 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
     })
   }
 
-  it('表头 10 列：第 4 列为「备品数量」、第 8 列为「损耗率」', () => {
+  it('表头 11 列：第 4 列为「备品数量」、第 6 列为「产品部位」、第 9 列为「损耗率」', () => {
     const wrapper = mountModal()
     const headers = wrapper.findAll('thead th').map((th) => th.text())
-    expect(headers).toHaveLength(10)
+    expect(headers).toHaveLength(11)
     expect(headers[3]).toBe('备品数量')
-    expect(headers[7]).toBe('损耗率')
+    expect(headers[5]).toBe('产品部位')
+    expect(headers[8]).toBe('损耗率')
   })
 
   it('表头列数 == 每一行数据行的逻辑列数（网格自洽）', () => {
@@ -193,24 +194,24 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
     const wrapper = mountModal()
     const rows = wrapper.findAll('tbody tr')
     const row0 = rows[0]!.findAll('td')
-    expect(row0).toHaveLength(10)
+    expect(row0).toHaveLength(11)
     // 4 个订单级单元格：客户 / 产品名称 / 订单数量 / 备品数量
     for (let i = 0; i < 4; i++) {
       expect(row0[i]!.attributes('rowspan')).toBe('3')
     }
     // 供应商单元格：供应商1 有 2 个 fabric → rowspan=2
     expect(row0[4]!.attributes('rowspan')).toBe('2')
-    expect(row0[5]!.text()).toBe('布料A1')
+    expect(row0[6]!.text()).toBe('布料A1')
 
     // 第 2 个 fabric 行（同供应商1 的第 2 条）：不应再出现订单级单元格
     const row1 = rows[1]!.findAll('td')
-    expect(row1).toHaveLength(5) // 布料名称/规格型号/损耗率/数量/单位
+    expect(row1).toHaveLength(6) // 产品部位/布料名称/规格型号/损耗率/数量/单位
     expect(row1.some((td) => td.attributes('rowspan') !== undefined)).toBe(false)
     expect(row1.map((td) => td.text()).join('|')).not.toContain('客户A')
 
-    // 第 3 个 fabric 行（供应商2 首行）：供应商 rowspan=1 + 布料/规格/损耗率/数量/单位
+    // 第 3 个 fabric 行（供应商2 首行）：供应商 rowspan=1 + 产品部位/布料/规格/损耗率/数量/单位
     const row2 = rows[2]!.findAll('td')
-    expect(row2).toHaveLength(6)
+    expect(row2).toHaveLength(7)
     expect(row2[0]!.attributes('rowspan')).toBe('1')
   })
 
@@ -219,8 +220,8 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
     const rows = wrapper.findAll('tbody tr')
     // 末行不再是合计行（首格文本不是「合计」）
     expect(rows[rows.length - 1]!.findAll('td')[0]!.text()).not.toBe('合计')
-    // 数量列仍为损耗率派生值：10 × 1.005 = 10.05 → 11（第 9 列；第 4 列为新增的备品数量）
-    expect(rows[0]!.findAll('td')[8]!.text()).toBe('11')
+    // 数量列仍为损耗率派生值：10 × 1.005 = 10.05 → 11（第 10 列；第 4 列备品、第 6 列产品部位）
+    expect(rows[0]!.findAll('td')[9]!.text()).toBe('11')
   })
 })
 

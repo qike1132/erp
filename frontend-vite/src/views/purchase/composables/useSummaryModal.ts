@@ -123,7 +123,7 @@ const SUMMARY_PRINT_STYLE = `
  */
 export const FACTORY_TABLE_HEAD =
   '<tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th>' +
-  '<th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
+  '<th>产品部位</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
 
 /**
  * 「按 SKU 展开」的组渲染：每 SKU 一块物料行，组末附差异对照块。
@@ -161,14 +161,15 @@ function buildPerSkuGroupHtml(
         tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
       }
       if (row.noBom) {
-        // 占位行：供应商 + 之后 5 列 = 6 列（左侧三列已在上方补齐）
-        tableHtml += '<td colspan="6" style="color:#8e8e93;">无 BOM 明细</td>'
+        // 占位行：供应商 + 之后 6 列 = 7 列（左侧三列已在上方补齐）
+        tableHtml += '<td colspan="7" style="color:#8e8e93;">无 BOM 明细</td>'
         tableHtml += '</tr>'
         return
       }
       if (row.isFirstSupplierRow) {
         tableHtml += `<td rowspan="${row.supplierRowSpan}" style="font-weight:bold;">${escapeHtml(row.supplierName)}</td>`
       }
+      tableHtml += `<td>${escapeHtml(row.partName)}</td>`
       tableHtml += `<td>${escapeHtml(row.materialName)}</td>`
       tableHtml += `<td>${escapeHtml(row.specification)}</td>`
       if (row.coord) {
@@ -208,9 +209,9 @@ function buildDiffBlockHtml(
   if (diffs.length === 0) return ''
 
   const detail = diffs
-    .map((d) => `${d.materialName}（推算 ${fmtQty(d.perSku)} / 实际 ${fmtQty(d.stored)}）`)
+    .map((d) => `${d.partName ? d.partName + '·' : ''}${d.materialName}（推算 ${fmtQty(d.perSku)} / 实际 ${fmtQty(d.stored)}）`)
     .join('、')
-  let tableHtml = `<tr><td colspan="10" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：${escapeHtml(detail)}</td></tr>`
+  let tableHtml = `<tr><td colspan="11" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：${escapeHtml(detail)}</td></tr>`
 
   const storedRows = buildStoredRows(group, () => spareRate)
   storedRows.forEach((r, i) => {
@@ -221,6 +222,7 @@ function buildDiffBlockHtml(
     if (r.isSupplierFirst) {
       tableHtml += `<td rowspan="${r.supplierSpan}" style="background:#fffaf0;">${escapeHtml(r.supplierName)}</td>`
     }
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.partName)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.fabricName)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.specification)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(fmtQty(r.rate))}</td>`
@@ -271,6 +273,7 @@ export function buildFactoryHtml(
         if (fi === 0) {
           tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
         }
+        tableHtml += `<td>${escapeHtml(fabric.part_name || '')}</td>`
         tableHtml += `<td>${escapeHtml(fabric.fabric_name)}</td>`
         tableHtml += `<td>${escapeHtml(fabric.specification || '')}</td>`
         tableHtml += `<td>${escapeHtml(String(rate))}</td>`
@@ -318,6 +321,7 @@ function downloadAsXls(html: string, filename: string) {
 
 export interface FabricItem {
   fabric_name: string
+  part_name?: string
   specification?: string
   quantity: number
   unit?: string
@@ -343,7 +347,10 @@ export interface SkuLine {
    * 该 SKU 自己的物料明细（后端按 SKU 展开的**基准量** = BOM 单件用量 × 该 SKU 数量）。
    * 缺省/为空表示后端未提供（旧后端、无 BOM、SKU 名解析不出）→ 前端回退订单级单块。
    */
-  materials?: { supplier_name: string; material_name: string; specification: string; unit: string; quantity: number }[]
+  materials?: {
+    supplier_name: string; material_name: string; part_name?: string;
+    specification: string; unit: string; quantity: number;
+  }[]
 }
 
 /** 逐 SKU 展示行：屏幕表格 / 打印预览 / Excel 导出共用同一形状 */

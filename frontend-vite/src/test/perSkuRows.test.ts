@@ -138,7 +138,7 @@ describe('computeQuantityDiff', () => {
 
     group.suppliers![0]!.fabrics[0]!.quantity = 65 // 差 5 → 报
     expect(computeQuantityDiff(group, buildPerSkuRows(group, 10))).toEqual([
-      { materialName: '共享布', perSku: 60, stored: 65 },
+      { materialName: '共享布', partName: '', perSku: 60, stored: 65 },
     ])
   })
 
@@ -149,7 +149,38 @@ describe('computeQuantityDiff', () => {
     })
 
     expect(computeQuantityDiff(group, buildPerSkuRows(group, 10))).toEqual([
-      { materialName: '手工加料', perSku: 0, stored: 12 },
+      { materialName: '手工加料', partName: '', perSku: 0, stored: 12 },
+    ])
+  })
+
+  it('R8 同物料不同部位 → 两行、各自 coord/item_ids；差异按部位区分', () => {
+    const group: FactoryGroup = {
+      customer_name: '客户甲', product_name: '产品A', product_quantity: 100,
+      suppliers: [{
+        supplier_name: '供应商甲',
+        fabrics: [
+          { fabric_name: '面料A', part_name: '身体', specification: 'S1', unit: '米', quantity: 12, item_ids: [1] },
+          { fabric_name: '面料A', part_name: '头部', specification: 'S1', unit: '米', quantity: 8, item_ids: [2] },
+        ],
+      }],
+      skus: [{
+        product_name: '产品A', order_qty: 100,
+        materials: [
+          { supplier_name: '供应商甲', material_name: '面料A', part_name: '身体', specification: 'S1', unit: '米', quantity: 12 },
+          { supplier_name: '供应商甲', material_name: '面料A', part_name: '头部', specification: 'S1', unit: '米', quantity: 8 },
+        ],
+      }],
+    }
+
+    const rows = buildPerSkuRows(group, 0)
+    expect(rows.map((r) => r.partName)).toEqual(['身体', '头部'])
+    expect(rows.map((r) => r.coord)).toEqual([{ si: 0, fi: 0 }, { si: 0, fi: 1 }])
+    expect(rows.map((r) => r.itemIds)).toEqual([[1], [2]])
+    expect(computeQuantityDiff(group, rows)).toEqual([])
+
+    group.suppliers![0]!.fabrics[1]!.quantity = 10
+    expect(computeQuantityDiff(group, rows)).toEqual([
+      { materialName: '面料A', partName: '头部', perSku: 8, stored: 10 },
     ])
   })
 })

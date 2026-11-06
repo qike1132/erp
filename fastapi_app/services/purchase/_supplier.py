@@ -22,6 +22,17 @@ def _build_po_items_map(all_items) -> dict[tuple, list]:
         items_map.setdefault(ikey, []).append(item)
     return items_map
 
+def _build_po_items_map_by_part(all_items) -> dict[tuple, list]:
+    """按 (order_id, material, spec, unit, part_name) 分组，供工厂汇总按部位精确匹配。"""
+    items_map: dict[tuple, list] = {}
+    for item in all_items:
+        ikey = (
+            item.order_id, item.material_name, item.specification or '', item.unit or '',
+            (item.part_name or '').strip(),
+        )
+        items_map.setdefault(ikey, []).append(item)
+    return items_map
+
 def _build_po_items_by_order(all_items) -> dict[int, list]:
     """按 order_id 分组 PO 明细，用于 BOM 不可用时的回退。"""
     items_by_order: dict[int, list] = {}
@@ -29,15 +40,19 @@ def _build_po_items_by_order(all_items) -> dict[int, list]:
         items_by_order.setdefault(item.order_id, []).append(item)
     return items_by_order
 
-async def _fetch_po_items_map(db: AsyncSession, po_ids: list[int]) -> tuple[dict[tuple, list], dict[int, list]]:
-    """获取 PO 明细的两种索引：按 (order_id, material, spec, unit) 和按 order_id。"""
+async def _fetch_po_items_map(db: AsyncSession, po_ids: list[int]) -> tuple[dict[tuple, list], dict[int, list], dict[tuple, list]]:
+    """获取 PO 明细的三种索引：按 (order_id, material, spec, unit)、按 order_id、按部位。"""
     if not po_ids:
-        return {}, {}
+        return {}, {}, {}
     items_result = await db.execute(
         select(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(po_ids))
     )
     all_items = items_result.scalars().all()
-    return _build_po_items_map(all_items), _build_po_items_by_order(all_items)
+    return (
+        _build_po_items_map(all_items),
+        _build_po_items_by_order(all_items),
+        _build_po_items_map_by_part(all_items),
+    )
 
 async def _fetch_supplier_cust_order_map(db: AsyncSession, orders) -> dict[int, tuple[int, float]]:
     source_order_ids: set[int] = set()
