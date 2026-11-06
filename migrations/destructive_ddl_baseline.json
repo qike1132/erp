@@ -599,6 +599,11 @@
     "migrations/versions/pg_standalone_109_add_user_token_version.py": [
       "execute:ALTER TABLE \"user\" DROP COLUMN IF EXISTS token_version"
     ],
+    "migrations/versions/pg_standalone_110_add_part_name_to_bom_tables.py": [
+      "drop_column:product_accessory|part_name",
+      "drop_column:product_fabric|part_name",
+      "drop_column:product_material|part_name"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],
