@@ -26,6 +26,8 @@ from .._constants import (
     MEILI_MASTER_KEY,
     PRE_RESTORE_DIR,
     REDIS_DUMP,
+    ROWS_SOURCE_DUMP,
+    ROWS_SOURCE_EXACT_COUNT_FALLBACK,
     UPLOADS_DIR,
     _backup_in_progress,
     config_files_to_package,
@@ -248,10 +250,6 @@ async def _export_database(db, user, remark, tmpdir_path: Path, snapshot_id,
 
 
 _LARGE_TABLE_ESTIMATE_THRESHOLD = 100_000
-
-#: manifest['rows_source'] 的取值：行数来自备份产物本身 / 回退精确 COUNT。
-ROWS_SOURCE_DUMP = 'dump'
-ROWS_SOURCE_EXACT_COUNT_FALLBACK = 'exact_count_fallback'
 
 #: pg_dump 纯文本格式的数据区表头：`COPY public."order" (id, no) FROM stdin;`
 _COPY_HEADER_RE = re.compile(

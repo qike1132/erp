@@ -44,6 +44,27 @@ class TestEvaluateBackupCompleteness:
         }
         assert evaluate_backup_completeness(manifest) == (STATUS_SUCCESS, '')
 
+    def test_rows_source_fallback_is_not_success(self):
+        """产物不可解析、行数回退实时 COUNT → 不能记成功，否则坏产物占保留位。"""
+        manifest = {
+            'rows_source': 'exact_count_fallback',
+            'coverage': {'complete': True},
+            'failed_tables': [],
+            'dump_format': 'sql',
+        }
+        status, detail = evaluate_backup_completeness(manifest)
+        assert status == STATUS_PARTIAL
+        assert '回退' in detail or 'COUNT' in detail
+
+    def test_rows_source_dump_stays_success(self):
+        manifest = {
+            'rows_source': 'dump',
+            'coverage': {'complete': True},
+            'failed_tables': [],
+            'dump_format': 'sql',
+        }
+        assert evaluate_backup_completeness(manifest) == (STATUS_SUCCESS, '')
+
     def test_failed_tables_make_partial(self):
         status, detail = evaluate_backup_completeness({'failed_tables': ['approval_log']})
         assert status == STATUS_PARTIAL

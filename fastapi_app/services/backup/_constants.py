@@ -22,6 +22,9 @@ BACKUP_DIR = Path(os.environ.get('BACKUP_DIR', 'backups/server'))
 # '*.zip'，导致「有备份却报没有备份/备份过旧」的假阳性，且加密备份从未被 testzip() 校验
 # （2026-10-02 P2 审计实测：生产恒报"最新备份 132 小时前"，而当天 14:00 刚出过加密包）。
 BACKUP_FILE_EXTENSIONS = ('.zip', '.zip.enc', '.tar.gz', '.tar')
+# manifest['rows_source']：行数来自备份产物自身 / 产物不可解析时回退实时 COUNT(*)
+ROWS_SOURCE_DUMP = 'dump'
+ROWS_SOURCE_EXACT_COUNT_FALLBACK = 'exact_count_fallback'
 # 备份文件名前缀/后缀口径（单源，L-1 2026-10-25 上线前审计）：
 # - 统计口径（records）：含已停产的 legacy（erp_incremental_ 增量包 / .json JSON 包），
 #   历史文件在统计与列表里仍要看得见；

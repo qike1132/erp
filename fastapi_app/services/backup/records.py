@@ -20,6 +20,7 @@ from ._constants import (
     BACKUP_NAME_PREFIXES,
     BACKUP_RECORD_SUFFIXES,
     PRE_RESTORE_DIR,
+    ROWS_SOURCE_EXACT_COUNT_FALLBACK,
 )
 from .crypto import sha256_bytes, sha256_file
 from .exceptions import BackupFileError
@@ -175,6 +176,9 @@ def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
       AUD-03（2026-10-24 审计）：JSON 降级包不含 schema、无法在空库/新机恢复，
       若仍判 success，灾难恢复能力会静默失效且 7 天保留期后可用的 pg_dump 包
       被清理光。旧产物无 dump_format 字段不回溯改判（保持其历史状态）。
+    - rows_source 为 exact_count_fallback（产物不可解析、行数回退实时 COUNT）
+      → ('partial', 说明)。回退只发生在读产物失败时，等同于「这份产物没被成功
+      读过」，不能记成功，否则坏产物会占住保留位、挤掉可用的旧备份。
     - 没有完整性自述（None/空 dict/非 dict/只有文件元数据）→ ('unknown', 说明)。
       不能把「没人自述有问题」当成「已验证完整」；旧记录状态不回溯，但重新同步
       或新产物缺 sidecar 时必须让运维看到 unknown。
@@ -185,7 +189,7 @@ def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
     """
     completeness_keys = {
         'coverage', 'failed_tables', 'missing_tables', 'error_tables',
-        'batch_errors', 'dump_format',
+        'batch_errors', 'dump_format', 'rows_source',
     }
     if not isinstance(info, dict) or not any(
         key in info and info[key] is not None for key in completeness_keys
@@ -196,7 +200,10 @@ def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
         )
     problems = _collect_problem_tables(info)
     degraded_json = info.get('dump_format') == 'json'
-    incomplete = bool(problems) or degraded_json
+    # 行数回退 = 读产物失败（_collect_table_row_counts 只在解析异常时回退），
+    # 说明这份产物没被成功读过，不能算「已验证完整」。
+    rows_fallback = info.get('rows_source') == ROWS_SOURCE_EXACT_COUNT_FALLBACK
+    incomplete = bool(problems) or degraded_json or rows_fallback
     coverage = info.get('coverage') if isinstance(info, dict) else None
     if isinstance(coverage, dict) and coverage.get('complete') is False:
         incomplete = True
@@ -204,6 +211,12 @@ def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
         return STATUS_SUCCESS, ''
     if degraded_json:
         detail = 'pg_dump 不可用，本次为 JSON 降级备份（不含 schema，无法在空库恢复）'
+        if problems:
+            shown = problems[:_MAX_REPORTED_TABLES]
+            detail += f'；缺失/失败表: {", ".join(shown)}'
+        return STATUS_PARTIAL, detail
+    if rows_fallback:
+        detail = '备份产物不可解析，行数回退为实时 COUNT(*)（与导出非同一快照，不能视为已验证完整）'
         if problems:
             shown = problems[:_MAX_REPORTED_TABLES]
             detail += f'；缺失/失败表: {", ".join(shown)}'
