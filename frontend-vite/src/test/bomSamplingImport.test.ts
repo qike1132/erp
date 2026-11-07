@@ -263,6 +263,23 @@ describe('BomEditor 从打样单导入完整链路', () => {
     expect(remarks).toEqual(['原备注', '原备注'])
   })
 
+  it('保存后重新打开角色-only BOM：默认作用域为空时自动显示有数据的角色', async () => {
+    mocks.loadBom.mockResolvedValue({
+      success: true,
+      product: { roles: [{ id: 6, name: '默认' }], default_bom_label: null },
+      materials: [
+        { id: 541, category: 'fabric', part_name: '主体', material_name: '1.0超', specification: '1203#', unit: '码', supplier_id: 9, supplier_name: '美利达', quantity: 0.01, remark: '', role_id: 6 },
+        { id: 542, category: 'fabric', part_name: '羊角', material_name: '1.0超', specification: 'A232#', unit: '码', supplier_id: 9, supplier_name: '美利达', quantity: 0.01, remark: '', role_id: 6 },
+        { id: 543, category: 'fabric', part_name: '内耳', material_name: '1.0超', specification: 'A175#', unit: '码', supplier_id: 9, supplier_name: '美利达', quantity: 0.01, remark: '', role_id: 6 },
+      ],
+    })
+    await openEditor()
+
+    expect(q('.bom-role-tab.active').text()).toContain('默认')
+    expect(qa('.bom-table-v2 tbody tr')).toHaveLength(3)
+    expect(qa('.bom-table-v2 input[name="specification"]').map((input) => (input.element as HTMLInputElement).value)).toEqual(['1203#', 'A232#', 'A175#'])
+  })
+
   it('403 在弹窗内给出打样单读权限提示，不是静默失败', async () => {
     mocks.listProjects.mockRejectedValue({ response: { status: 403 } })
     await openEditor()

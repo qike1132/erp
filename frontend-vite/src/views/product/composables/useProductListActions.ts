@@ -257,9 +257,16 @@ export function useProductListActions(
           category: category,
         })
       })
-      // 缺陷①（A-3）：打开弹窗默认停靠「默认BOM」——保持 selectedRole === null，
-      // 不再默认落 bomRoles[0]，避免用户误在某个角色作用域下编辑。
-      selectedRole.value = null
+      // A-3：默认作用域有物料时仍停靠「默认BOM」，避免误在角色作用域编辑。
+      // 打样导入等角色-only BOM 没有默认作用域物料；若仍停 null，重开后只会看到
+      // 空白表格，像保存没成功。此唯一例外落到第一个**实际有物料**的角色。
+      const defaultScope = bomByScope['default']
+      const defaultHasItems = !!defaultScope
+        && [defaultScope.fabric, defaultScope.filling, defaultScope.accessory].some(items => items.length > 0)
+      selectedRole.value = defaultHasItems ? null : bomRoles.value.find((role) => {
+        const scope = bomByScope[scopeKeyOf(role)]
+        return !!scope && [scope.fabric, scope.filling, scope.accessory].some(items => items.length > 0)
+      }) ?? null
       bomLoadFailed.value = false // 数据完整落地，解除保存禁令
       // 审计 F5-5：加载成功即建立编辑基线——此刻屏幕内容 == 服务端内容，不算未保存修改
       bomBaselineSignature.value = bomStateSignature()
