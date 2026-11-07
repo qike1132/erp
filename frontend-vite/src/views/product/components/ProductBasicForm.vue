@@ -26,7 +26,7 @@
         <label class="pd-label" for="create-hidden-carton-ratio">隐藏款随箱配比</label>
         <div class="pd-input-wrap">
           <FontAwesomeIcon icon="box-open" class="pd-input-icon" aria-hidden="true" />
-          <input id="create-hidden-carton-ratio" v-model.number="form.hiddenCartonRatio" type="number" class="pd-input" step="1" min="1" placeholder="例如：72" name="hidden-carton-ratio" autocomplete="off" aria-describedby="create-hidden-carton-ratio-hint" />
+          <input id="create-hidden-carton-ratio" v-model.number="form.hiddenCartonRatio" type="number" class="pd-input" step="1" min="1" max="1000000" placeholder="例如：72" name="hidden-carton-ratio" autocomplete="off" aria-describedby="create-hidden-carton-ratio-hint" />
         </div>
         <small id="create-hidden-carton-ratio-hint" class="pd-field-hint">每多少个订单数量配 1 个隐藏款（如 72，即 10000÷72≈139 个）；留空则不启用。启用需在 BOM 配置恰好 6 个常规角色 + 1 个名为「隐藏款」的角色。</small>
       </div>
@@ -163,8 +163,8 @@ async function handleAdd() {
   const trimmedName = form.name.trim()
   if (!trimmedName) return
   const hiddenCartonRatio = form.hiddenCartonRatio === '' ? null : form.hiddenCartonRatio
-  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1)) {
-    showToast('隐藏款随箱配比必须为正整数', 'warning')
+  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1 || hiddenCartonRatio > 1000000)) {
+    showToast('隐藏款随箱配比必须为正整数（不超过 1000000）', 'warning')
     return
   }
   submitting.value = true

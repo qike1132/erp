@@ -123,7 +123,7 @@ describe('ProductBasicForm · 隐藏款随箱配比', () => {
     await flushPromises()
 
     expect(createMock).not.toHaveBeenCalled()
-    expect(toastMock).toHaveBeenCalledWith('隐藏款随箱配比必须为正整数', 'warning')
+    expect(toastMock).toHaveBeenCalledWith('隐藏款随箱配比必须为正整数（不超过 1000000）', 'warning')
   })
 
   it('提交成功后配比输入复位为空', async () => {
@@ -138,7 +138,7 @@ describe('ProductBasicForm · 隐藏款随箱配比', () => {
 })
 
 describe('ProductEditDialog · 隐藏款随箱配比', () => {
-  it('回显已配置的 72，保存时原样提交', async () => {
+  it('回显已配置的 72；未修改时保存不提交该字段（避免旧值覆盖丢失更新）', async () => {
     const wrapper = mountEditDialog()
     wrapper.vm.open({
       id: 1, name: '陈列样', barcode: '', price: 0, factory: '东莞', image: null,
@@ -153,7 +153,22 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     await flushPromises()
 
     expect(updateMock).toHaveBeenCalledTimes(1)
-    expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBe(72)
+    expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBeUndefined()
+  })
+
+  it('改成 100 时提交新值', async () => {
+    const wrapper = mountEditDialog()
+    wrapper.vm.open({
+      id: 1, name: '陈列样', barcode: '', price: 0, factory: '东莞', image: null,
+      hidden_carton_ratio: 72, customers: [],
+    })
+    await flushPromises()
+    await wrapper.find('input[name="edit-hidden-carton-ratio"]').setValue('100')
+
+    await wrapper.find('.bom-btn-save').trigger('click')
+    await flushPromises()
+
+    expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBe(100)
   })
 
   it('原有配比被清空时保存显式提交 null（停用规则），而不是漏字段', async () => {
@@ -171,7 +186,7 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBeNull()
   })
 
-  it('未配置过的产品保存时提交 null（三态与后端 model_fields_set 对齐）', async () => {
+  it('未配置过的产品未改配比时也不提交该字段（三态与后端 model_fields_set 对齐）', async () => {
     const wrapper = mountEditDialog()
     wrapper.vm.open({
       id: 2, name: '普通公仔', barcode: '', price: 0, factory: '东莞', image: null,
@@ -182,7 +197,7 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     await wrapper.find('.bom-btn-save').trigger('click')
     await flushPromises()
 
-    expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBeNull()
+    expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBeUndefined()
   })
 
   it('非法值本地拦截不发请求', async () => {
@@ -198,6 +213,6 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     await flushPromises()
 
     expect(updateMock).not.toHaveBeenCalled()
-    expect(toastMock).toHaveBeenCalledWith('隐藏款随箱配比必须为正整数', 'warning')
+    expect(toastMock).toHaveBeenCalledWith('隐藏款随箱配比必须为正整数（不超过 1000000）', 'warning')
   })
 })

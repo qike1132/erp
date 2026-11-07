@@ -19,8 +19,9 @@ P 由用户在 SKU 主数据填写（新增/编辑产品表单）；NULL = 不�
 幂等性
 ------
 用 ``ADD COLUMN IF NOT EXISTS``：空库重放时 ``pg_standalone_001`` 按当时 ORM
-元数据建表可能已带上该列（连同同名 CHECK），重复添加会报错。约束先
-``DROP IF EXISTS`` 再 ``ADD``，对已被 001 建出的同名约束是幂等重设。
+元数据建表可能已带上该列（连同同名 CHECK），重复添加会报错。约束用 DO 块
+先查 ``pg_constraint`` 再 ADD（升级路径零删除，不触发破坏性 DDL 门禁）。
+Downgrade 的 ``DROP COLUMN`` 是标准回滚语句，已登记 destructive_ddl_baseline。
 """
 from alembic import op
 

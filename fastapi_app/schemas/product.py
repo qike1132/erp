@@ -21,6 +21,18 @@ def _validate_factory(v: str | None) -> str | None:
     return v
 
 
+def _reject_bool_hidden_ratio(v: object) -> object:
+    """拒绝布尔值当配比。
+
+    Pydantic 宽松模式会把 bool 隐式转成 int（True→1）；若接受，P=1 会让隐藏款
+    数量放大到 N（采购量翻倍）。显式在 before 阶段拦掉，其余合法形态（数字、
+    数字字符串）仍交给字段类型正常收敛。
+    """
+    if isinstance(v, bool):
+        raise ValueError('隐藏款随箱配比必须是正整数（不接受布尔值）')
+    return v
+
+
 class ProductCreate(BaseModel):
     """创建产品请求"""
 
@@ -51,6 +63,11 @@ class ProductCreate(BaseModel):
     @classmethod
     def validate_factory(cls, v: str | None) -> str | None:
         return _validate_factory(v)
+
+    @field_validator('hidden_carton_ratio', mode='before')
+    @classmethod
+    def reject_bool_hidden_ratio(cls, v: object) -> object:
+        return _reject_bool_hidden_ratio(v)
 
 
 class ProductUpdate(BaseModel):
@@ -84,6 +101,11 @@ class ProductUpdate(BaseModel):
     @classmethod
     def validate_factory(cls, v: str | None) -> str | None:
         return _validate_factory(v)
+
+    @field_validator('hidden_carton_ratio', mode='before')
+    @classmethod
+    def reject_bool_hidden_ratio(cls, v: object) -> object:
+        return _reject_bool_hidden_ratio(v)
 
 
 class ProductCustomerBrief(BaseModel):

@@ -315,7 +315,12 @@ async def api_calculate_material(
     try:
         result = await svc.calculate_material(db, [o.model_dump() for o in data.orders])
         return success_response(**{**result})
-    except (ValueError, OperationalError, DisconnectionError, RuntimeError) as e:
+    except ValueError as e:
+        # 业务/配置错误（如陈列样配比 SKU 的角色结构不是 6+1、数量非整数）：
+        # 可读的 400 而不是伪装成「服务故障」的 500——用户需要知道去改 BOM。
+        logger.warning('物料计算参数/配置错误: %s', e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (OperationalError, DisconnectionError, RuntimeError) as e:
         logger.exception('物料计算失败')
         raise HTTPException(status_code=500, detail='物料计算失败，请稍后重试') from e
 

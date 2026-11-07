@@ -6,7 +6,8 @@
 （2026-11-07 与需求方确认）：
 
 - **N**：该 SKU 的订单数量（采购生成按「同客户组内同 SKU 合并后的总量」取 N）；
-- **常规款 6 款**：``base = N // 6``，``rem = N % 6``；按固定角色顺序
+- **常规款 6 款**：``base = N // 6``，``rem = N % 6``；按**固定角色顺序**
+  （= ``role_id`` 升序，即角色创建顺序/角色编码序，与展示用的名称序解耦）
   前 ``rem`` 款各 +1，六款合计**恒等于 N**（不是每款都按 N 采购）；
 - **隐藏款 1 款**：随箱额外配置，``H = ceil(N / P)``，P 为 SKU 主数据
   ``product.hidden_carton_ratio``（用户填写的随箱配比，正整数）；
@@ -85,6 +86,8 @@ def hidden_quantity(total_qty: int, carton_ratio: int) -> int:
 
     例：N=10000、P=72 → 139；N=10000、P=100 → 100。
     """
+    if total_qty < 0:
+        raise ValueError('采购数量必须是非负整数')
     if carton_ratio < 1:
         raise ValueError(f'隐藏款随箱配比必须是正整数，当前为 {carton_ratio!r}')
     return (total_qty + carton_ratio - 1) // carton_ratio
@@ -116,9 +119,10 @@ def allocate_scope_quantities(
         ValueError: P 非正整数 / N 非非负整数 / 角色结构不是
             「6 个常规款 + 1 个隐藏款」。
     """
+    allocation: dict[int | None, object] = {}
     # 未配置 P：历史口径——每个作用域都用完整数量，不做任何结构校验
     if hidden_carton_ratio is None:
-        allocation: dict[int | None, object] = dict.fromkeys(set(role_ids), quantity)
+        allocation = dict.fromkeys(set(role_ids), quantity)
         allocation[None] = quantity
         return allocation
 
@@ -137,7 +141,11 @@ def allocate_scope_quantities(
         if rid is not None and resolver is not None
         and (resolver(rid) or '').strip() == HIDDEN_ROLE_NAME
     ]
-    regular_scopes = [rid for rid in scopes if rid is not None and rid not in hidden_scopes]
+    # 余数分配顺序 = role_id 升序（角色创建顺序/角色编码序）。
+    # 与展示/分组用的名称序（order_scopes）解耦：改名不会改变各款分到多少。
+    regular_scopes = sorted(
+        rid for rid in scopes if rid is not None and rid not in hidden_scopes
+    )
 
     if len(hidden_scopes) != 1 or len(regular_scopes) != REGULAR_ROLE_COUNT:
         raise ValueError(
@@ -146,7 +154,8 @@ def allocate_scope_quantities(
             f'「{HIDDEN_ROLE_NAME}」{len(hidden_scopes)} 个），请先在 BOM 配置中补齐角色'
         )
 
-    allocation = {None: quantity}
+    # 默认 BOM 恒用完整 N（归一为 int，避免 str 数量原样透传成非数值）
+    allocation = {None: total}
     allocation[hidden_scopes[0]] = hidden_quantity(total, hidden_carton_ratio)
     for rid, per_role_qty in zip(regular_scopes, split_regular_quantities(total), strict=True):
         allocation[rid] = per_role_qty

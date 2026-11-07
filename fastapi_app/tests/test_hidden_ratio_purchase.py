@@ -116,6 +116,10 @@ class TestHiddenQuantity:
     def test_positive_ratio_is_accepted(self):
         assert hidden_quantity(100, 2) == 50
 
+    def test_negative_total_is_rejected(self):
+        with pytest.raises(ValueError, match='采购数量必须是非负整数'):
+            hidden_quantity(-1, 72)
+
 
 class TestAllocateScopeQuantities:
     def test_10000_remainder_and_hidden_72(self):
@@ -183,6 +187,23 @@ class TestAllocateScopeQuantities:
     def test_integral_decimal_and_float_quantities_are_accepted(self):
         assert _allocate(quantity=Decimal('10000'))[HIDDEN_ID] == 139
         assert _allocate(quantity=10000.0)[HIDDEN_ID] == 139
+
+    def test_remainder_follows_role_id_order_not_display_name(self):
+        """余数按 role_id 升序（角色编码/创建顺序），改名不改变各款分到多少。
+
+        角色名故意与 id 逆序：若实现按名称序分配，前 4 个 id 会拿到 1666。
+        """
+        names = {
+            201: '角色F', 202: '角色E', 203: '角色D',
+            204: '角色C', 205: '角色B', 206: '角色A', 207: '隐藏款',
+        }
+        quantities = allocate_scope_quantities(
+            10000, set(names), hidden_carton_ratio=72, name_of=names.get,
+        )
+        assert [quantities[rid] for rid in (201, 202, 203, 204, 205, 206)] == [
+            1667, 1667, 1667, 1667, 1666, 1666,
+        ]
+        assert quantities[207] == 139
 
 
 class _FakeProduct:
@@ -336,8 +357,9 @@ class TestMaterialCalculatorParity:
 
 class TestProductHiddenCartonRatioMasterData:
     @pytest.mark.parametrize('schema', [ProductCreate, ProductUpdate])
-    @pytest.mark.parametrize('ratio', [0, -1, 1.5])
+    @pytest.mark.parametrize('ratio', [0, -1, 1.5, True, False])
     def test_schema_rejects_non_positive_integer_ratio(self, schema, ratio):
+        """bool 必须在 before 阶段拒绝：Pydantic 宽松模式会把它隐式转成 1/0。"""
         kwargs = {'name': '陈列样'} if schema is ProductCreate else {}
         with pytest.raises(ValidationError):
             schema(hidden_carton_ratio=ratio, **kwargs)
@@ -447,3 +469,27 @@ class TestEndpointWiring:
         await product_ep.edit_product(product_id=7, data=data, db=AsyncMock(), _user=self._user())
         assert svc.await_args.kwargs['hidden_carton_ratio'] == 100
         assert svc.await_args.kwargs['hidden_carton_ratio_provided'] is True
+
+
+class TestMaterialCalculatorErrorMapping:
+    """物料计算器的业务错误必须是可读 400，而不是伪装成服务故障的 500。"""
+
+    @pytest.mark.asyncio
+    async def test_configuration_error_maps_to_400(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from fastapi_app.api.v1.endpoints.purchase_center import product_routes
+
+        svc = SimpleNamespace(
+            calculate_material=AsyncMock(
+                side_effect=ValueError('配置了隐藏款随箱配比=72 的陈列样 SKU 需要 6 个常规款和 1 个隐藏款'),
+            ),
+        )
+        monkeypatch.setattr(product_routes, 'svc', svc)
+
+        with pytest.raises(HTTPException) as exc:
+            await product_routes.api_calculate_material(
+                data=SimpleNamespace(orders=[]), db=AsyncMock(), _current_user=None,
+            )
+        assert exc.value.status_code == 400
+        assert '6 个常规款' in str(exc.value.detail)
