@@ -75,8 +75,9 @@
             <th class="w-[240px]">产品名称</th>
             <th>订单数量</th>
             <th>备品数量</th>
-            <th>供应商</th>
+            <!-- 2026-11-05 用户要求：产品部位在供应商之前（屏幕 / 打印 / 导出同序） -->
             <th>产品部位</th>
+            <th>供应商</th>
             <th class="w-[180px]">布料名称</th>
             <th>规格型号</th>
             <th>损耗率</th>
@@ -114,9 +115,10 @@
               <td v-if="item.row.noBom" colspan="7" class="text-text-muted">无 BOM 明细</td>
 
               <template v-else>
-                <!-- 供应商：块内首行 -->
+                <!-- 列序：产品部位（逐行渲染）在前，供应商（块内首行 + rowspan）在后。
+                     两个 td 的顺序必须与 thead 严格一致，否则「表头换了、值串列」。 -->
+                <td>{{ item.row.partDisplay }}</td>
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
-                <td>{{ item.row.partName || '' }}</td>
                 <td>{{ item.row.materialName }}</td>
                 <td>{{ item.row.specification || '' }}</td>
                 <!-- 损耗率：有落库坐标才可编辑；无坐标 → 只读并说明原因 -->

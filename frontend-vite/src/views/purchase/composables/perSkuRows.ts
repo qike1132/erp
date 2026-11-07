@@ -24,7 +24,14 @@ import type { FactoryGroup } from './useSummaryModal'
 export interface SkuMaterial {
   supplier_name: string
   material_name: string
+  /** 聚合键里的部位（**只用于键**：合并模式下后端会清空它以与无部位明细匹配） */
   part_name?: string
+  /**
+   * 「产品部位」列的展示文本（后端 `compose_part_display` 产出的唯一真值）。
+   * 合并模式下可能是多部位（如 `身体/头部`），或带固定标记 `未标注`；
+   * 旧后端不返回该字段时回退 `part_name`。
+   */
+  part_display?: string
   specification: string
   unit: string
   quantity: number
@@ -140,7 +147,10 @@ export interface PerSkuRow {
   supplierRowSpan: number
   supplierName: string
   materialName: string
+  /** 聚合键里的部位（参与 `materialKeyOf`，合并模式下为空） */
   partName: string
+  /** 「产品部位」列展示文本（可能多部位）；与 `partName` **刻意分离**，避免污染物料键 */
+  partDisplay: string
   specification: string
   unit: string
   baseQuantity: number
@@ -223,6 +233,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         supplierName: '',
         materialName: '',
         partName: '',
+        partDisplay: '',
         specification: '',
         unit: '',
         baseQuantity: 0,
@@ -257,6 +268,9 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         supplierName: m.supplier_name,
         materialName: m.material_name,
         partName: m.part_name || '',
+        // 展示取后端拼好的文本：合并模式下 `part_name` 恒为空（那是聚合键），
+        // 若这里回退到 `part_name` 整列就会空白（2026-11-05 生产缺陷）。
+        partDisplay: m.part_display || m.part_name || '',
         specification: m.specification,
         unit: m.unit,
         baseQuantity: parseFloat(String(m.quantity)) || 0,
@@ -343,7 +357,10 @@ export interface StoredRow {
   /** 本供应商段行数（供应商格的 rowspan） */
   supplierSpan: number
   fabricName: string
+  /** 聚合键里的部位（差异匹配用，与主表物料键同源） */
   partName: string
+  /** 「产品部位」列展示文本（可能多部位，见 `SkuMaterial.part_display`） */
+  partDisplay: string
   specification: string
   unit: string
   /** 该落库行的损耗率（快照率优先，缺省回退 `rateOf`） */
@@ -373,6 +390,7 @@ export function buildStoredRows(
         supplierSpan: fabrics.length,
         fabricName: f.fabric_name,
         partName: f.part_name || '',
+        partDisplay: f.part_display || f.part_name || '',
         specification: f.specification || '',
         unit: f.unit || '',
         rate,

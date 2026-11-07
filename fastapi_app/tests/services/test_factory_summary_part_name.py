@@ -3,6 +3,7 @@
 需求：同一物料用于多个部位时，工厂汇总按部位拆行；旧采购明细没有 part_name 时
 按物料合并，绝不重复计量或让两行共用同一 item_ids。
 """
+import re
 from types import SimpleNamespace
 
 import pytest_asyncio
@@ -141,6 +142,192 @@ async def test_legacy_order_without_item_part_names_stays_merged(db):
     assert float(sku_materials[0]['quantity']) == 20
 
 
+async def test_legacy_merged_order_still_shows_bom_part_display(db):
+    """2026-11-05 生产缺陷：明细无 part_name ⇒ 合并模式，但「产品部位」不得整列空白。
+
+    口径（不丢信息 + 不撒谎）：
+    - `part_name` 仍是**聚合键**，合并模式下必须为空（否则与无部位明细匹配不上）；
+    - 展示走独立的 `part_display`：BOM 能确定的部位全部列出（多部位用 `/` 连接）；
+    - 两侧（fabrics / skus[].materials）的 `part_display` 必须一致，
+      且 `part_name` 仍同时为空 ⇒ 前端物料键一一对应，不会退化成只读行。
+    """
+    session = db
+    po_id = await _seed(session, item_parts=(None, None))
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+    fabrics = _fabrics(group)
+    assert len(fabrics) == 1
+    assert not fabrics[0].get('part_name'), '合并模式下聚合键里的部位必须仍为空'
+    assert fabrics[0]['part_display'] == '身体/头部', 'BOM 的两个部位都必须展示，不能只显示一个'
+
+    sku_materials = group['skus'][0]['materials']
+    assert len(sku_materials) == 1
+    assert not sku_materials[0].get('part_name')
+    assert sku_materials[0]['part_display'] == '身体/头部'
+
+
+async def test_cross_sku_shared_material_lists_every_sku_part(db):
+    """QA Low-1：2 个 SKU 共用同一物料、各用在**不同部位** + 明细无 part_name（合并模式）。
+
+    采购明细里这个物料只有一份，跨 SKU 去重（`seen_materials`）必须继续只计一次；
+    但第 2 个 SKU 的 BOM 行带来的「部位」是新信息，必须登记到落库合并行上 ——
+    否则「产品部位」只显示第一个 SKU 的部位，冒充了整行。
+
+    `skus[].materials` 是逐 SKU 口径，各自只能含自己 SKU 的部位（不得被跨 SKU 合并污染）。
+    """
+    session = db
+    session.add_all([
+        Product(id=101, name='产品A'),
+        Product(id=102, name='产品B'),
+        # 同一物料、同一规格/单位，两个 SKU 分别用在「身体」「头部」
+        ProductFabric(
+            id=1, product_id=101, fabric_name=MATERIAL, specification=SPEC, unit=UNIT,
+            quantity=0.3, supplier_name='供应商甲', part_name='身体',
+        ),
+        ProductFabric(
+            id=2, product_id=102, fabric_name=MATERIAL, specification=SPEC, unit=UNIT,
+            quantity=0.3, supplier_name='供应商甲', part_name='头部',
+        ),
+        Order(id=9001, order_no='SO-9001', customer='客户甲',
+              product_id=101, quantity=200, status='待备货'),
+        OrderItem(id=1, order_id=9001, product_id=101, product_name='产品A', quantity=100),
+        OrderItem(id=2, order_id=9001, product_id=102, product_name='产品B', quantity=100),
+        PurchaseOrder(
+            id=8001, order_no='PO-8001', customer_name='客户甲', product_name='产品A、产品B',
+            product_quantity=200, supplier_name='供应商甲', source_order_ids='[9001]',
+        ),
+        # 明细只有一行、且没有 part_name → 整组走合并模式（缺陷触发条件）
+        PurchaseOrderItem(
+            id=1, order_id=8001, material_name=MATERIAL, specification=SPEC, unit=UNIT,
+            quantity=60, supplier_name='供应商甲', part_name=None,
+        ),
+        PurchaseOrderSku(
+            id=1, po_id=8001, product_name='产品A', product_barcode='bA',
+            order_qty=100, source_order_id=9001, source_record_type='order',
+        ),
+        PurchaseOrderSku(
+            id=2, po_id=8001, product_name='产品B', product_barcode='bB',
+            order_qty=100, source_order_id=9001, source_record_type='order',
+        ),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8001]))['groups'][0]
+
+    fabrics = _fabrics(group)
+    assert len(fabrics) == 1, '跨 SKU 共用同一物料 → 落库侧仍只有一行'
+    assert fabrics[0]['part_display'] == '身体/头部', '两个 SKU 的部位都必须出现在这一行'
+    assert not fabrics[0].get('part_name'), '合并模式的聚合键部位仍必须为空'
+    assert float(fabrics[0]['quantity']) == 60, '跨 SKU 去重不得改变数量（仍只计这一份明细）'
+    assert len(fabrics[0]['item_ids']) == 1, '同一份明细只能挂一次，不得因补登记部位而重复'
+
+    materials_by_sku = {s['product_name']: s['materials'] for s in group['skus']}
+    assert [m['part_display'] for m in materials_by_sku['产品A']] == ['身体']
+    assert [m['part_display'] for m in materials_by_sku['产品B']] == ['头部']
+    assert float(materials_by_sku['产品A'][0]['quantity']) == 30.0
+    assert float(materials_by_sku['产品B'][0]['quantity']) == 30.0
+
+
+def test_finalize_sku_materials_is_idempotent():
+    """QA Low-2：`_finalize_factory_sku_materials` 连续调用两次，展示文本不得被抹成空串。"""
+    from fastapi_app.services.purchase._factory import _finalize_factory_sku_materials
+
+    group_map = {
+        ('客户甲', '产品A'): {
+            '_sku_materials': {
+                '产品A': {
+                    ('供应商甲', MATERIAL, SPEC, UNIT, ''): {
+                        'supplier_name': '供应商甲', 'material_name': MATERIAL,
+                        'part_name': None, 'specification': SPEC, 'unit': UNIT,
+                        'quantity': 12, '_part_names': ['身体', '头部'], '_part_unknown': False,
+                    },
+                },
+            },
+        },
+    }
+
+    _finalize_factory_sku_materials(group_map)
+    first = group_map[('客户甲', '产品A')]['_sku_materials']['产品A']
+    assert first[0]['part_display'] == '身体/头部'
+    assert '_part_names' not in first[0], '内部记账字段不得泄漏进接口'
+
+    # 二次调用（同一份 group_map，此时 _sku_materials 已定稿为 list）
+    _finalize_factory_sku_materials(group_map)
+    second = group_map[('客户甲', '产品A')]['_sku_materials']['产品A']
+
+    assert second[0]['part_display'] == '身体/头部', '二次定稿不得把展示文本清成空串'
+    assert second == first, '二次定稿必须逐字段等价（幂等）'
+
+
+def test_finalize_sku_materials_keeps_accumulator_state():
+    """定稿必须**复制**行、不能就地 pop —— 就地会毁掉累加态，部位再也算不出来。
+
+    这条锁的是 `dict(row)` 的理由（与 `_serialize_factory_groups` 同写法）：定稿是
+    「把累加态投影成接口形状」，不该反过来破坏累加态；同一份 group_map 若还要再定稿、
+    或将来有第二个消费方要读部位，就地 pop 会让它们只能拿到空串。
+    """
+    from fastapi_app.services.purchase._factory import _finalize_factory_sku_materials
+
+    bucket_key = ('供应商甲', MATERIAL, SPEC, UNIT, '')
+    bucket_row = {
+        'supplier_name': '供应商甲', 'material_name': MATERIAL,
+        'part_name': None, 'specification': SPEC, 'unit': UNIT,
+        'quantity': 12, '_part_names': ['身体'], '_part_unknown': False,
+    }
+    group_map = {('客户甲', '产品A'): {'_sku_materials': {'产品A': {bucket_key: bucket_row}}}}
+
+    _finalize_factory_sku_materials(group_map)
+
+    # 定稿产出了 part_display，但**源桶的记账字段必须还在**
+    assert group_map[('客户甲', '产品A')]['_sku_materials']['产品A'][0]['part_display'] == '身体'
+    assert bucket_row['_part_names'] == ['身体'], '就地 pop 会破掉累加态（必须复制后定稿）'
+    assert bucket_row['_part_unknown'] is False
+
+
+async def test_missing_bom_part_is_marked_unknown_not_silently_dropped(db):
+    """BOM 自己也缺部位时，展示必须带固定标记「未标注」，不许只列已知部位冒充全量。"""
+    session = db
+    po_id = await _seed(session, item_parts=(None, None), bom_parts=('身体', None))
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+    fabrics = _fabrics(group)
+
+    assert len(fabrics) == 1
+    assert fabrics[0]['part_display'] == '身体/未标注'
+
+    sku_materials = group['skus'][0]['materials']
+    assert sku_materials[0]['part_display'] == '身体/未标注'
+
+
+async def test_no_part_anywhere_stays_blank_instead_of_noise(db):
+    """BOM 与明细都没部位 → 展示仍为空（数据缺失），不给每一行添「未标注」噪声。"""
+    session = db
+    po_id = await _seed(session, item_parts=(None, None), bom_parts=(None, None))
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+
+    assert _fabrics(group)[0]['part_display'] == ''
+    assert group['skus'][0]['materials'][0]['part_display'] == ''
+
+
+async def test_split_mode_part_display_equals_part_name(db):
+    """拆行模式（明细带部位）：展示文本逐字等于聚合键部位，零变化。"""
+    session = db
+    po_id = await _seed(session)
+
+    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
+
+    for fabric in _fabrics(group):
+        assert fabric['part_display'] == fabric['part_name']
+    for material in group['skus'][0]['materials']:
+        assert material['part_display'] == material['part_name']
+    # 内部记账字段不得泄漏进接口
+    for fabric in _fabrics(group):
+        assert '_part_names' not in fabric
+        assert '_part_unknown' not in fabric
+
+
+
 async def test_mixed_group_falls_back_to_merged(db):
     """混合组：组内任一旧单即整组按物料合并，避免部分拆分/重复计量。"""
     session = db
@@ -177,7 +364,7 @@ def test_material_row_carries_part_name():
 
 
 def test_backend_factory_print_has_part_column():
-    """后端工厂汇总打印同步 8 列：表头与行都带产品部位。"""
+    """后端工厂汇总打印同步 8 列：表头与行都带产品部位，且部位列在供应商列之前。"""
     from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
         generate_factory_summary_print,
     )
@@ -195,6 +382,75 @@ def test_backend_factory_print_has_part_column():
 
     assert '<th>产品部位</th>' in html
     assert '<td style="text-align:left">身体</td>' in html
+    # 列序（2026-11-05 用户要求）：产品部位在供应商之前
+    assert html.index('<th>产品部位</th>') < html.index('<th>供应商</th>')
+    # 行内同序：部位单元格必须排在供应商单元格之前（防「表头换了、值串列」）
+    assert html.index('<td style="text-align:left">身体</td>') < html.index('>供应商甲</td>')
+
+
+def _row_widths(page: str) -> list[int]:
+    """把打印页每行（含表头/数据/表尾）的**有效列数**算出来。
+
+    规则与浏览器一致：`colspan` 按数展开、`rowspan` 在后续行占位（占位列也算宽度）。
+    用于锁住列位置对调后「表头 8 列 == 每个数据行 8 列 == 表尾合计 8 列」——
+    colspan 少改/多改一处、或把某个 rowspan 挂错格，这里都会变红。
+    """
+    occupied: list[int] = []   # occupied[j] = 该列后续还要被上方 rowspan 覆盖的行数
+    widths: list[int] = []
+    for tr in re.findall(r'<tr[^>]*>(.*?)</tr>', page, re.S):
+        col = 0
+        consumed: list[int] = []   # 本行被上方 rowspan 占掉的列（消费一次要减一）
+        for _tag, attrs in re.findall(r'<(td|th)([^>]*)>', tr):
+            while col < len(occupied) and occupied[col] > 0:
+                consumed.append(col)
+                col += 1
+            colspan_m = re.search(r'colspan="(\d+)"', attrs)
+            rowspan_m = re.search(r'rowspan="(\d+)"', attrs)
+            colspan = int(colspan_m.group(1)) if colspan_m else 1
+            rowspan = int(rowspan_m.group(1)) if rowspan_m else 1
+            for k in range(colspan):
+                idx = col + k
+                while idx >= len(occupied):
+                    occupied.append(0)
+                occupied[idx] = max(occupied[idx], rowspan - 1)
+            col += colspan
+        while col < len(occupied) and occupied[col] > 0:
+            consumed.append(col)
+            col += 1
+        widths.append(col)
+        for j in consumed:
+            occupied[j] = max(0, occupied[j] - 1)
+    return widths
+
+
+def test_backend_factory_print_all_rows_width_equals_header():
+    """表头 8 列：客户/产品名称/订单数量/产品部位/供应商/布料名称/规格型号/数量+单位。"""
+    from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
+        generate_factory_summary_print,
+    )
+
+    order = SimpleNamespace(
+        id=1, order_no='PO-1', source_order_id=None, product_name='产品A',
+        product_quantity=100, customer_name='客户甲', supplier_name='供应商甲',
+    )
+    items = [
+        SimpleNamespace(
+            material_name='面料A', specification='S1', unit='米', quantity=12,
+            supplier_name='供应商甲', part_name='身体',
+        ),
+        SimpleNamespace(
+            material_name='面料B', specification='S2', unit='米', quantity=8,
+            supplier_name='供应商乙', part_name='头部',
+        ),
+    ]
+
+    html = generate_factory_summary_print([order], {1: items})
+
+    header_width = html.count('<th>')
+    assert header_width == 8
+    widths = _row_widths(html)
+    assert widths, '打印页必须至少有一行数据'
+    assert set(widths) == {header_width}, f'列数不齐：{widths} != {header_width}'
 
 
 async def test_po_with_mixed_part_and_null_items_merges(db):
@@ -234,7 +490,9 @@ def test_backend_factory_print_mixed_parts_merges():
     html = generate_factory_summary_print([order], {1: items})
 
     assert '<th>产品部位</th>' in html
-    assert html.count('<td style="text-align:left"></td>') == 1
+    # 合并行覆盖「身体」+ 一条无部位明细 → 展示「身体/未标注」：既列出已知部位，
+    # 又用固定标记说明这一行还有未标注明细，不用「身体」冒充全量。
+    assert '<td style="text-align:left">身体/未标注</td>' in html
     assert '>20.0 米<' in html
 
 

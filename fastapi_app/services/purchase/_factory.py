@@ -70,8 +70,91 @@ def _norm_part_name(value) -> str:
     return (value or '').strip()
 
 
-def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
-                            items_map_by_part=None, split_parts=False):
+# 展示用的固定分隔符 / 未标注标记（屏幕、前端打印、后端打印三处共用同一套词汇）。
+PART_DISPLAY_SEP = '/'
+PART_UNKNOWN_LABEL = '未标注'
+
+
+def compose_part_display(parts, has_unknown: bool = False) -> str:
+    """把「一条聚合行覆盖的全部部位」拼成展示文本。
+
+    为什么需要它（2026-11-05 生产缺陷）：采购明细缺 ``part_name`` 时整组会退化为
+    「按物料合并」（``_split_parts_by_group``），聚合键里的部位必须清空才能与无部位的
+    明细匹配上，于是 ``part_name`` 恒为空 —— 前端「产品部位」整列空白，把「BOM 明确
+    记录了部位」这件事实一起丢掉了。
+
+    口径（**不丢信息 + 不撒谎**）：
+    - 聚合行覆盖到的部位**全部列出**，用 ``/`` 连接，去重且保持首次出现顺序
+      （BOM 行顺序，用户录入 BOM 的顺序就是最自然的阅读顺序）；
+    - 只要**已知**至少一个部位、而该行还有贡献行没标注部位，末尾追加固定标记
+      ``未标注`` —— 绝不把「已知的那几个部位」冒充成「这一行的全部部位」；
+    - 一个部位都不知道时返回空串（与改动前逐字一致）：整列都没有部位是**数据缺失**，
+      此时标 ``未标注`` 只会给每行添一样的噪声，不提供任何信息。
+
+    展示文本**不参与聚合键**（聚合键仍只用 ``part_name``）：否则合并模式下不同 SKU
+    覆盖的部位集合不同（A 只用身体、B 只用头部 → ``身体`` vs ``头部``），键会漂移，
+    前端拿不到落库坐标 → 行退化成只读并误报「只在落库侧」的数量差异。
+    """
+    ordered: list[str] = []
+    for part in parts or []:
+        text = _norm_part_name(part)
+        if text and text not in ordered:
+            ordered.append(text)
+    if has_unknown and ordered:
+        ordered.append(PART_UNKNOWN_LABEL)
+    return PART_DISPLAY_SEP.join(ordered)
+
+
+def _new_part_tracking() -> dict:
+    """部位展示用的内部记账字段（**不进接口**：finalize 时 pop 掉换成 ``part_display``）。"""
+    return {'_part_names': [], '_part_unknown': False}
+
+
+def _record_part(row: dict, part: str) -> None:
+    """登记某聚合行覆盖的一个部位；``part`` 为空表示该贡献行没标注部位。"""
+    if not part:
+        row['_part_unknown'] = True
+        return
+    names = row.setdefault('_part_names', [])
+    if part not in names:
+        names.append(part)
+
+
+def _merge_part_tracking(target: dict, source: dict) -> None:
+    """把 ``source`` 的部位记账并入 ``target``（跨单累加同一聚合键时用）。"""
+    for part in source.get('_part_names') or []:
+        _record_part(target, part)
+    if source.get('_part_unknown'):
+        target['_part_unknown'] = True
+
+
+def _finalize_part_display(row: dict) -> dict:
+    """把内部记账字段压成 ``part_display``（接口只暴露这一个展示字段）。返回入参本身。
+
+    **幂等**：行里已经没有任何记账字段 ⇒ 说明这一行定稿过了，此时原样保留既有
+    ``part_display``，绝不按「空记账」重算成空串。这条守卫是「二次定稿不抹掉展示」
+    的真正保证（``dict(row)`` 副本只保证不破坏源桶的累加态，两者职责不同、都要有）。
+    """
+    if '_part_names' not in row and '_part_unknown' not in row:
+        row.setdefault('part_display', '')
+        return row
+    row['part_display'] = compose_part_display(
+        row.pop('_part_names', []), row.pop('_part_unknown', False),
+    )
+    return row
+
+
+def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate):
+    """定位（必要时创建）该 BOM 行对应的聚合行，并登记它的展示部位。
+
+    **行定位逻辑只有这一份**：跨 SKU 的只登记分支与正常累加分支共用本函数，
+    避免第二套定位代码分叉后两边键算法跑偏（``sup`` / ``fabric_map`` / ``fkey`` /
+    建行四件事必须永远一致）。
+
+    Returns:
+        ``(row, sup, fkey, part_key)``；``row is None`` 表示「只登记、行却不存在」
+        的不可达分支（见下方注释），调用方应直接返回。
+    """
     sup = bom['supplier_name'] or po.supplier_name or '未指定供应商'
     if sup not in group['_supplier_map']:
         group['_supplier_map'][sup] = {
@@ -79,19 +162,79 @@ def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
             '_fabric_map': {},
         }
     fabric_map = group['_supplier_map'][sup]['_fabric_map']
-    part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
+    # BOM 行自己的部位：它是**展示**的唯一权威来源。
+    bom_part = _norm_part_name(bom.get('part_name'))
+    # 聚合键里的部位：只在拆行模式下参与，合并模式下必须为空串才能与无部位明细匹配。
+    part_key = bom_part if split_parts else ''
     fkey = (bom['material_name'], bom['specification'], bom['unit'], part_key)
 
+    existing = fabric_map.get(fkey)
+    if existing is None:
+        if not accumulate:
+            # 只登记、行却不存在：逻辑上不可达，靠三条不变量支撑 ——
+            #   (1) 调用方只在 `skey in seen_materials` 时才传 accumulate=False，
+            #   (2) `skey` 与这里的 `fkey` 是同一套算法（供应商 + 物料 + 规格 + 单位 + 部位），
+            #   (3) 产生该 skey 的那次正常累加必然已建行（建行在数量累加之前）。
+            # 真被破坏时症状只是「部位少标一个」，静默就永远没人发现，故打一条 warning 让
+            # 不变量破坏可观测；返回语义不变：**不建行**（建 quantity=0 的幽灵行会在表里
+            # 多出一行空物料、还会进「落库侧」比对，比少一个部位标记更糟）、**不抛异常**
+            # （展示层面的补登记不该拖垮整个汇总接口）。
+            logger.warning(
+                'part_tracking_missing_row po_id=%s supplier=%s material=%s spec=%s unit=%s',
+                po.id, sup, bom['material_name'], bom['specification'], bom['unit'],
+            )
+            return None, sup, fkey, part_key
+        existing = fabric_map[fkey] = {
+            'fabric_name': bom['material_name'],
+            'part_name': part_key or None,
+            'specification': bom['specification'],
+            'quantity': 0.0,
+            'unit': bom['unit'],
+            'item_ids': [],
+            **_new_part_tracking(),
+        }
+    # **必须先登记部位再判重**：合并模式下同一物料的多条 BOM 行（身体/头部）共享同一个
+    # 聚合键，第二条会命中 `_stored_seen` 提前返回；若把登记放在判重之后，
+    # 第二条的部位就永远进不了展示文本（生产缺陷的同一根因，换个位置复发）。
+    _record_part(existing, bom_part)
+    return existing, sup, fkey, part_key
+
+
+def _matching_po_items(po, bom, items_map, items_map_by_part, *, split_parts, part_key):
+    """该 BOM 行对应的采购明细：拆行模式按部位精确匹配，合并模式按物料匹配。"""
     if split_parts:
-        matching_items = (items_map_by_part or {}).get(
+        return (items_map_by_part or {}).get(
             (po.id, bom['material_name'], bom['specification'], bom['unit'], part_key), [],
         )
-    else:
-        matching_items = items_map.get(
-            (po.id, bom['material_name'], bom['specification'], bom['unit']), [],
-        )
+    return items_map.get(
+        (po.id, bom['material_name'], bom['specification'], bom['unit']), [],
+    )
 
-    existing = fabric_map.get(fkey)
+
+def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
+                            items_map_by_part=None, split_parts=False, accumulate=True):
+    """把一条 BOM 行并入「(供应商, 物料, 规格, 单位, 部位)」聚合行。
+
+    ``accumulate=False`` = **只登记展示部位、不碰数量**：跨 SKU 去重（
+    ``_build_factory_group_map`` 的 ``seen_materials``）命中时，该 BOM 行的用量已经
+    被其它 SKU 的那一行代表过了（同一物料在采购明细里只有一份），数量不能再加；
+    但它的「部位」是新信息，必须登记进来 —— 否则落库合并行的展示部位只覆盖第一个
+    SKU（2026-11-05 QA Low-1：2 个 SKU 共用物料、部位 身体/头部 → 只显示 身体）。
+
+    行定位见 ``_ensure_fabric_row``（唯一一份），明细匹配见 ``_matching_po_items``。
+    """
+    existing, sup, fkey, part_key = _ensure_fabric_row(
+        group, po, bom, split_parts=split_parts, accumulate=accumulate,
+    )
+    if existing is None:
+        return
+    if not accumulate:
+        # 展示部位已登记，数量一律不动（跨 SKU 去重的本意就是「只计一次」）。
+        return
+
+    matching_items = _matching_po_items(
+        po, bom, items_map, items_map_by_part, split_parts=split_parts, part_key=part_key,
+    )
 
     if matching_items:
         # 采购明细真值：同一张单在同一聚合键上只能计一次——同 SKU 内多角色 /
@@ -108,19 +251,8 @@ def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
         per_order_qty = bom['quantity'] * order_qty
         cur_item_ids = []
 
-    if existing is not None:
-        existing['quantity'] += per_order_qty
-        existing['item_ids'].extend(cur_item_ids)
-        return
-
-    fabric_map[fkey] = {
-        'fabric_name': bom['material_name'],
-        'part_name': part_key or None,
-        'specification': bom['specification'],
-        'quantity': per_order_qty,
-        'unit': bom['unit'],
-        'item_ids': cur_item_ids,
-    }
+    existing['quantity'] += per_order_qty
+    existing['item_ids'].extend(cur_item_ids)
 
 def _accumulate_factory_po_items(group, po, items_by_order):
     """BOM 不可用时的回退：直接使用 PO 明细作为布料/物料数据。"""
@@ -148,7 +280,11 @@ def _accumulate_factory_po_items(group, po, items_by_order):
                 'quantity': float(item.quantity or 0),
                 'unit': item.unit or '',
                 'item_ids': [item.id] if item.id else [],
+                **_new_part_tracking(),
             }
+        # 本回退路径（BOM 完全不可用）里聚合键已含部位，故同一键的部位恒相同；
+        # 仍走统一记账，保证接口字段在两条路径上完全同形。
+        _record_part(fabric_map[fkey], part_key)
 
 def _norm_sku_name(value) -> str:
     """SKU 名归一：仅 strip。**不** casefold —— 产品名要逐字匹配 `Product.name`（全局唯一）。"""
@@ -185,7 +321,8 @@ def _sku_material_rows(
         if _is_filling_category(bom.get('category')):
             continue
         sup = bom.get('supplier_name') or supplier_fallback
-        part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
+        bom_part = _norm_part_name(bom.get('part_name'))
+        part_key = bom_part if split_parts else ''
         key = (sup, bom['material_name'], bom['specification'], bom['unit'], part_key)
         amount = round_qty(float(bom.get('quantity') or 0) * float(sku_qty or 0))
         if key in buckets:
@@ -198,7 +335,10 @@ def _sku_material_rows(
                 'specification': bom['specification'],
                 'unit': bom['unit'],
                 'quantity': amount,
+                **_new_part_tracking(),
             }
+        # 展示部位在这里登记（合并模式下同一物料的多条 BOM 行会落到同一桶）。
+        _record_part(buckets[key], bom_part)
     # 稳定顺序：供应商 → 部位 → 物料名 → 规格 → 单位
     return sorted(
         buckets.values(),
@@ -247,6 +387,9 @@ def _accumulate_factory_sku_materials(
             )
             if key in bucket:
                 bucket[key]['quantity'] += row['quantity']
+                # 跨单累加同一聚合键：部位记账必须一起并入（合并模式下不同单的 BOM
+                # 可能各覆盖一部分部位，丢掉任一侧都会让展示文本少列部位）。
+                _merge_part_tracking(bucket[key], row)
             else:
                 bucket[key] = row
 
@@ -254,23 +397,32 @@ def _accumulate_factory_sku_materials(
 def _finalize_factory_sku_materials(group_map: dict) -> None:
     """把逐单累加的物料桶定稿为**稳定排序**的列表（与 ``_sku_material_rows`` 同序）。
 
-    累加期 ``_sku_materials`` 是 ``{sku_name: {(sup, mat, spec, unit): row}}``（跨单 ``+=``）；
+    累加期 ``_sku_materials`` 是 ``{sku_name: {(sup, mat, spec, unit, part): row}}``（跨单 ``+=``）；
     此处转成 ``{sku_name: [row, ...]}``，排序键与 ``_sku_material_rows`` 一致
-    （供应商 → 物料名 → 规格 → 单位），保证块内顺序稳定、且与既有 fabrics 同序。
+    （供应商 → 部位 → 物料名 → 规格 → 单位），保证块内顺序稳定、且与既有 fabrics 同序。
 
     解析不出产品（无 pid）的 SKU 留空数组 —— 前端据此回退订单级单块，绝不编造。
+
+    **本函数必须可重复调用（幂等）**，两条措施各司其职：
+    - 定稿时对每行取 ``dict(row)`` 副本再压展示文本 —— 就地 pop 会把桶里的
+      ``_part_names/_part_unknown`` 记账字段吃掉，累加态被破坏（与
+      ``_serialize_factory_groups`` 同写法：定稿是「投影成接口形状」，不该反向改写累加态）；
+    - 第二轮进来时 ``_sku_materials`` 已经是 list（首轮定稿结果），故两种形状都要认；
+      此时行里没有记账字段，``_finalize_part_display`` 原样保留既有 ``part_display``，
+      绝不按「空记账」重算成空串。
     """
     for group in group_map.values():
-        group['_sku_materials'] = {
-            name: sorted(
-                buckets.values(),
+        finalized: dict[str, list[dict]] = {}
+        for name, buckets in group['_sku_materials'].items():
+            rows = list(buckets.values()) if isinstance(buckets, dict) else list(buckets)
+            finalized[name] = sorted(
+                (_finalize_part_display(dict(row)) for row in rows),
                 key=lambda r: (
                     r['supplier_name'], r.get('part_name') or '',
                     r['material_name'], r['specification'], r['unit'],
                 ),
             )
-            for name, buckets in group['_sku_materials'].items()
-        }
+        group['_sku_materials'] = finalized
 
 
 def _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map) -> dict[tuple, bool]:
@@ -295,6 +447,62 @@ def _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map)
         key = (cust, prod)
         split_by_group[key] = split_by_group.get(key, True) and aware
     return split_by_group
+
+
+def _resolve_po_pids(po_pids_map, po, pid) -> list:
+    """该采购单覆盖的产品 ID 列表（缺 ``po_pids_map`` 时退化为首个 SKU 的 pid）。"""
+    if po_pids_map is None:
+        return [pid] if pid else []
+    return list(po_pids_map.get(po.id) or ([pid] if pid else []))
+
+
+def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
+                            items_map_by_part=None, split_parts=False) -> bool:
+    """把该采购单覆盖的**全部 SKU** 的 BOM 行并入分组。
+
+    Returns:
+        是否有任何 SKU 配了 BOM（``False`` 时调用方回退到采购明细口径）。
+    """
+    seen_materials: set[tuple] = set()
+    has_bom = False
+    for idx, sku_pid in enumerate(pids):
+        bom_list = bom_data.get(sku_pid, [])
+        if bom_list:
+            has_bom = True
+        for bom in bom_list:
+            if _is_filling_category(bom.get('category')):
+                continue
+            part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
+            skey = (
+                bom['supplier_name'] or po.supplier_name or '未指定供应商',
+                bom['material_name'], bom['specification'], bom['unit'], part_key,
+            )
+            # 跨 SKU 去重：第 1 个 SKU 走正常累加（保持同 SKU 内多角色重复行的既有行为），
+            # 从第 2 个 SKU 起对已出现过的物料键只补登记部位、不累加数量。两条约束并存：
+            #   (a) `seen_materials.add(skey)` 必须发生在**数量累加**
+            #       （下面的 `_accumulate_factory_bom`）之前 —— 否则首个 SKU 的键不登记，
+            #       第 2 个 SKU 会再累加一次，数量翻倍；
+            #   (b) 命中 `skey in seen_materials` 时**仍要补登记部位**
+            #       （`accumulate=False`）—— 同一物料在不同 SKU 可以用于不同部位，
+            #       跳过整条 BOM 行会让合并行的部位集合缺项（QA Low-1 就栽在这里）。
+            #       删掉下面这个 accumulate=False 调用，`test_cross_sku_shared_material_
+            #       lists_every_sku_part` 会红。
+            if idx > 0 and skey in seen_materials:
+                # 跳过的是**数量**，不是这条 BOM 行的全部信息：它的部位还没进过
+                # 展示文本（不同 SKU 可以把这个物料用在别的部位），故以
+                # accumulate=False 补登记一次，数量一律不动。
+                _accumulate_factory_bom(
+                    group, po, bom, items_map, order_qty,
+                    items_map_by_part=items_map_by_part, split_parts=split_parts,
+                    accumulate=False,
+                )
+                continue
+            seen_materials.add(skey)
+            _accumulate_factory_bom(
+                group, po, bom, items_map, order_qty,
+                items_map_by_part=items_map_by_part, split_parts=split_parts,
+            )
+    return has_bom
 
 
 def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map,
@@ -361,37 +569,11 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
             group, sku_lines, po, bom_data, name_to_pid, split_parts=split_parts,
         )
 
-        if po_pids_map is None:
-            pids = [pid] if pid else []
-        else:
-            pids = list(po_pids_map.get(po.id) or ([pid] if pid else []))
-
-        seen_materials: set[tuple] = set()
-        has_bom = False
-        for idx, sku_pid in enumerate(pids):
-            bom_list = bom_data.get(sku_pid, [])
-            if bom_list:
-                has_bom = True
-            for bom in bom_list:
-                if _is_filling_category(bom.get('category')):
-                    continue
-                part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
-                skey = (
-                    bom['supplier_name'] or po.supplier_name or '未指定供应商',
-                    bom['material_name'], bom['specification'], bom['unit'], part_key,
-                )
-                # 第 1 个 SKU 走原累加路径（保持同 SKU 内多角色重复行的既有行为），
-                # 从第 2 个 SKU 起跳过已出现过的物料键。注意：**必须先判重再登记**，
-                # 否则首个 SKU 的键不登记，第 2 个 SKU 会再累加一次（数量翻倍）。
-                if idx > 0 and skey in seen_materials:
-                    continue
-                seen_materials.add(skey)
-                _accumulate_factory_bom(
-                    group, po, bom, items_map, order_qty,
-                    items_map_by_part=items_map_by_part, split_parts=split_parts,
-                )
-
-        if not has_bom:
+        pids = _resolve_po_pids(po_pids_map, po, pid)
+        if not _accumulate_po_bom_rows(
+            group, po, pids, bom_data, items_map, order_qty,
+            items_map_by_part=items_map_by_part, split_parts=split_parts,
+        ):
             # BOM 完全不可用（所选 SKU 均未配 BOM）时的既有回退
             _accumulate_factory_po_items(group, po, items_by_order)
 
@@ -407,7 +589,7 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
         for skey in sorted(group['_supplier_map'].keys()):
             supplier = group['_supplier_map'][skey]
             fabrics = sorted(
-                supplier['_fabric_map'].values(),
+                (_finalize_part_display(dict(f)) for f in supplier['_fabric_map'].values()),
                 key=lambda x: (x.get('part_name') or '', x['fabric_name']),
             )
             suppliers.append({'supplier_name': supplier['supplier_name'], 'fabrics': fabrics})

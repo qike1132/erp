@@ -201,7 +201,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     const cellOf = (html: string) => {
       const doc = new DOMParser().parseFromString(`<table>${html}</table>`, 'text/html')
       const cells = [...doc.querySelectorAll('tbody tr td')]
-      return cells[9]!.textContent // 第 10 列 = 数量（第 4 列备品、第 6 列产品部位）
+      return cells[9]!.textContent // 第 10 列 = 数量（第 4 列备品、第 5 列产品部位）
     }
 
     // 10 × 1.005 = 10.05 → 向上取整为 11

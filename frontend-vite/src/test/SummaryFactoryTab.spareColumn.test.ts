@@ -148,10 +148,10 @@ describe('buildSkuDisplayLines（逐 SKU 行的备品）', () => {
 })
 
 describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
-  it('表头 11 列，「备品数量」在第 4 位（订单数量右侧）', () => {
+  it('表头 11 列，「备品数量」在第 4 位（订单数量右侧），产品部位在供应商之前', () => {
     const ths = headerTexts(mountModal(singleSkuGroup()))
     expect(ths).toEqual([
-      '客户', '产品名称', '订单数量', '备品数量', '供应商', '产品部位',
+      '客户', '产品名称', '订单数量', '备品数量', '产品部位', '供应商',
       '布料名称', '规格型号', '损耗率', '数量', '单位',
     ])
   })
@@ -210,7 +210,8 @@ describe('A1 打印 / 导出：与屏幕同源（11 列）', () => {
     const headers = [...doc.querySelectorAll('th')].map((th) => th.textContent || '')
     expect(headers).toHaveLength(11)
     expect(headers[3]).toBe('备品数量')
-    expect(headers[5]).toBe('产品部位')
+    expect(headers[4]).toBe('产品部位')
+    expect(headers[5]).toBe('供应商')
     expect(headers[8]).toBe('损耗率')
   })
 

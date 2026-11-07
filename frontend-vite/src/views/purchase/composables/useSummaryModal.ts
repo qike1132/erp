@@ -122,8 +122,8 @@ const SUMMARY_PRINT_STYLE = `
  * —— 加列时只改一处，避免「屏幕加了、打印没加」。
  */
 export const FACTORY_TABLE_HEAD =
-  '<tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th><th>供应商</th>' +
-  '<th>产品部位</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
+  '<tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th>' +
+  '<th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
 
 /**
  * 「按 SKU 展开」的组渲染：每 SKU 一块物料行，组末附差异对照块。
@@ -166,10 +166,11 @@ function buildPerSkuGroupHtml(
         tableHtml += '</tr>'
         return
       }
+      // 列序与屏幕 thead 严格一致：产品部位在前、供应商在后（供应商含 rowspan）。
+      tableHtml += `<td>${escapeHtml(row.partDisplay)}</td>`
       if (row.isFirstSupplierRow) {
         tableHtml += `<td rowspan="${row.supplierRowSpan}" style="font-weight:bold;">${escapeHtml(row.supplierName)}</td>`
       }
-      tableHtml += `<td>${escapeHtml(row.partName)}</td>`
       tableHtml += `<td>${escapeHtml(row.materialName)}</td>`
       tableHtml += `<td>${escapeHtml(row.specification)}</td>`
       if (row.coord) {
@@ -197,8 +198,8 @@ function buildPerSkuGroupHtml(
 /**
  * 差异对照块（打印/导出版，结构镜像屏幕 `SummaryDiffBlock.vue`）。
  *
- * 列数必须仍是 **10**：标签跨「客户/产品名称/订单数量/备品数量」4 列（`colspan=4`，
- * 跨本块全部行）+ 供应商（段内 rowspan）+ 布料名称/规格型号/损耗率/数量/单位 5 格。
+ * 列数必须仍是 **11**：标签跨「客户/产品名称/订单数量/备品数量」4 列（`colspan=4`，
+ * 跨本块全部行）+ 产品部位 + 供应商（段内 rowspan）+ 布料名称/规格型号/损耗率/数量/单位 5 格。
  * 行数据来自 `buildStoredRows` —— 与屏幕**同一个纯函数**，故两边天然同构：
  * 损耗率取该落库行快照率、数量为按该率加放派生值。无差异时返回空串（不渲染）。
  */
@@ -219,10 +220,11 @@ function buildDiffBlockHtml(
     if (i === 0) {
       tableHtml += `<td colspan="4" rowspan="${storedRows.length}" style="font-weight:bold;background:#fffaf0;color:#7a4a00;">实际下单（含手工调整）</td>`
     }
+    // 列序与主表一致（产品部位 → 供应商 → 布料名称…）：供应商格含 rowspan，位置不可挪到部位格之前。
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.partDisplay)}</td>`
     if (r.isSupplierFirst) {
       tableHtml += `<td rowspan="${r.supplierSpan}" style="background:#fffaf0;">${escapeHtml(r.supplierName)}</td>`
     }
-    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.partName)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.fabricName)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.specification)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(fmtQty(r.rate))}</td>`
@@ -270,10 +272,11 @@ export function buildFactoryHtml(
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.qty))}</td>`
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.spare))}</td>`
         }
+        // 列序与屏幕 thead 严格一致：产品部位在前、供应商在后（供应商含 rowspan）。
+        tableHtml += `<td>${escapeHtml(fabric.part_display || fabric.part_name || '')}</td>`
         if (fi === 0) {
           tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
         }
-        tableHtml += `<td>${escapeHtml(fabric.part_name || '')}</td>`
         tableHtml += `<td>${escapeHtml(fabric.fabric_name)}</td>`
         tableHtml += `<td>${escapeHtml(fabric.specification || '')}</td>`
         tableHtml += `<td>${escapeHtml(String(rate))}</td>`
@@ -321,7 +324,10 @@ function downloadAsXls(html: string, filename: string) {
 
 export interface FabricItem {
   fabric_name: string
+  /** 聚合键里的部位（合并模式下后端清空，仅用于与物料键对齐） */
   part_name?: string
+  /** 「产品部位」列展示文本（合并模式可能是 `身体/头部` 或带 `未标注` 标记） */
+  part_display?: string
   specification?: string
   quantity: number
   unit?: string
@@ -348,7 +354,7 @@ export interface SkuLine {
    * 缺省/为空表示后端未提供（旧后端、无 BOM、SKU 名解析不出）→ 前端回退订单级单块。
    */
   materials?: {
-    supplier_name: string; material_name: string; part_name?: string;
+    supplier_name: string; material_name: string; part_name?: string; part_display?: string;
     specification: string; unit: string; quantity: number;
   }[]
 }

@@ -225,7 +225,7 @@ describe('P9 编辑态预载落库真值（共享行），非编辑态仍显示�
 })
 
 describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
-  it('有差异（落库「共享布」65 vs 推算 20+40=60）→ 组末尾出现对照块并点名该物料；数据行与主表 10 列对齐', () => {
+  it('有差异（落库「共享布」65 vs 推算 20+40=60）→ 组末尾出现对照块并点名该物料；数据行与主表 11 列对齐', () => {
     const g = group()
     const shared = g.suppliers[0]!.fabrics[0]!
     expect(shared.fabric_name).toBe('共享布')
@@ -240,16 +240,18 @@ describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
     // 数据行：该组 3 条落库物料（同一供应商段）→ 3 行
     const diffRows = w.findAll('tbody tr.sm-diff-row')
     expect(diffRows).toHaveLength(3)
-    // 首行 = 标签(colspan=4，跨全部对照行) + 供应商(1) + 后 6 格 = 11 列，与主表表头逐列对齐
+    // 首行 = 标签(colspan=4，跨全部对照行) + 产品部位(1) + 供应商(1) + 后 5 格 = 11 列，与主表表头逐列对齐
     const first = diffRows[0]!.findAll('td')
     expect(first).toHaveLength(8)
     expect(first[0]!.attributes('colspan')).toBe('4')
     expect(first[0]!.attributes('rowspan')).toBe('3')
-    expect(first[1]!.text()).toBe('供应商甲')
-    expect(first[1]!.attributes('rowspan')).toBe('3')
-    // 标签 4 列 + 供应商 1 列 + 后 6 列 = 11 列（回归时会拦住列错位）
-    expect(Number(first[0]!.attributes('colspan')) + 1 + (first.length - 2)).toBe(11)
-    // 其余行由 rowspan 覆盖 → 只剩后 6 格；非差异行不带 data-diff
+    // 列序与主表一致：产品部位在供应商之前（本 fixture 部位为空）
+    expect(first[1]!.text()).toBe('')
+    expect(first[2]!.text()).toBe('供应商甲')
+    expect(first[2]!.attributes('rowspan')).toBe('3')
+    // 标签 4 列 + 产品部位 1 列 + 供应商 1 列 + 后 5 列 = 11 列（回归时会拦住列错位）
+    expect(Number(first[0]!.attributes('colspan')) + 2 + (first.length - 3)).toBe(11)
+    // 其余行由 rowspan 覆盖 → 只剩 部位 + 后 5 格；非差异行不带 data-diff
     expect(diffRows[1]!.findAll('td')).toHaveLength(6)
     expect(diffRows[1]!.attributes('data-diff')).toBeUndefined()
   })

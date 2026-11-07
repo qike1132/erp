@@ -139,12 +139,13 @@ describe('SummaryPanel 数量口径（数据行）', () => {
     })
   }
 
-  it('工厂表格表头含 11 列：第 4 列为「备品数量」、第 6 列为「产品部位」、第 9 列为「损耗率」', () => {
+  it('工厂表格表头含 11 列：第 4 列为「备品数量」、第 5 列为「产品部位」、第 6 列为「供应商」、第 9 列为「损耗率」', () => {
     const wrapper = mountModal(0)
     const headers = wrapper.findAll('thead th').map((th) => th.text())
     expect(headers).toHaveLength(11)
     expect(headers[3]).toBe('备品数量')
-    expect(headers[5]).toBe('产品部位')
+    expect(headers[4]).toBe('产品部位')
+    expect(headers[5]).toBe('供应商')
     expect(headers[8]).toBe('损耗率')
   })
 
@@ -302,17 +303,18 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
     return `<table><thead>${FACTORY_TABLE_HEAD}</thead><tbody>${buildFactoryHtml(data, lossRate)}</tbody></table>`
   }
 
-  it('表头含 11 个 th：第 4 个为「备品数量」、第 6 个为「产品部位」、第 9 个为「损耗率」；数据行第 4 列 = 备品、第 9 列 = 损耗率、第 10 列 = 数量、第 11 列 = 单位', () => {
+  it('表头含 11 个 th：第 4 个为「备品数量」、第 5 个为「产品部位」、第 6 个为「供应商」、第 9 个为「损耗率」；数据行第 4 列 = 备品、第 9 列 = 损耗率、第 10 列 = 数量、第 11 列 = 单位', () => {
     const doc = new DOMParser().parseFromString(wrapFactoryHtml(minimalData, 5), 'text/html')
     const headers = [...doc.querySelectorAll('thead th')].map((th) => th.textContent || '')
     expect(headers).toHaveLength(11)
     expect(headers[3]).toBe('备品数量')
-    expect(headers[5]).toBe('产品部位')
+    expect(headers[4]).toBe('产品部位')
+    expect(headers[5]).toBe('供应商')
     expect(headers[8]).toBe('损耗率')
 
     const firstRow = doc.querySelector('tbody tr')!
     const cells = [...firstRow.querySelectorAll('td')]
-    // 1客户/2产品名称/3订单数量/4备品数量/5供应商/6产品部位/7布料名称/8规格型号/9损耗率/10数量/11单位
+    // 1客户/2产品名称/3订单数量/4备品数量/5产品部位/6供应商/7布料名称/8规格型号/9损耗率/10数量/11单位
     expect(cells[3]!.textContent).toBe('1.0') // 备品 = ceil(100 × 5‰)
     expect(cells[8]!.textContent).toBe('5') // 损耗率
     // 「数量」列 = 损耗加放的展示派生值向上取整：10×1.005=10.05 → '11'。

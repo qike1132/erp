@@ -129,6 +129,9 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
               supplierName: supplier.supplier_name,
               materialName: fabric.fabric_name,
               partName: fabric.part_name || '',
+              // 展示同走 `part_display`：合并模式下 `part_name` 是聚合键（为空），
+              // 直接展示会让「产品部位」整列空白（2026-11-05 生产缺陷）。
+              partDisplay: fabric.part_display || fabric.part_name || '',
               specification: fabric.specification || '',
               unit: fabric.unit || '',
               baseQuantity: parseFloat(String(fabric.quantity)) || 0,

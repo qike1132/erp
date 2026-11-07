@@ -18,6 +18,7 @@ from openpyxl.styles import Side as Sd
 
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.core.logger import logger
+from fastapi_app.services.purchase._factory import compose_part_display
 from utils.report_exporter import _sanitize_excel_value
 
 
@@ -128,6 +129,30 @@ th{background:#f5f5f5;font-weight:bold}
     return build_print_html("采购订单汇总", ''.join(body_parts), extra_css)
 
 
+def _resolve_factory_cp_key(order, source_order_map):
+    """打印侧的 (客户, 产品名) 解析——与屏幕 `_resolve_factory_po_info` 同口径。
+
+    产品名以采购单主表为准（多 SKU 时是拼接清单），主表为空才退化到来源订单的
+    产品名、再退化到客户名；客户名优先取来源订单（采购单上的 customer_name 只是
+    快照，可能缺失）。
+
+    抽成函数是为了让 `generate_factory_summary_print` 的三处循环共用同一份解析：
+    原先是逐字重复三遍的 if/elif，既让主函数圈复杂度超标（C901 27 > 25），
+    也让「改一处忘另两处」成为必然。
+
+    Returns:
+        ``((customer_name, product_name), source_order)``。
+    """
+    source_order = source_order_map.get(order.source_order_id) if order.source_order_id else None
+    product_name = order.product_name
+    if not product_name and source_order and source_order.product:
+        product_name = source_order.product.name
+    elif not product_name:
+        product_name = order.customer_name or '未指定产品'
+    customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
+    return (customer_name, product_name), source_order
+
+
 def generate_factory_summary_print(orders, order_items_map, source_orders=None):
     """生成工厂内部汇总格式打印HTML"""
     source_orders = source_orders or []
@@ -140,14 +165,7 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
         items = order_items_map.get(order.id, [])
         if not items:
             continue
-        source_order = source_order_map.get(order.source_order_id) if order.source_order_id else None
-        product_name = order.product_name
-        if not product_name and source_order and source_order.product:
-            product_name = source_order.product.name
-        elif not product_name:
-            product_name = order.customer_name or '未指定产品'
-        customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
-        cp_key = (customer_name, product_name)
+        cp_key, _ = _resolve_factory_cp_key(order, source_order_map)
         aware = all((getattr(it, 'part_name', None) or '').strip() for it in items)
         split_by_cp[cp_key] = split_by_cp.get(cp_key, True) and aware
 
@@ -156,18 +174,12 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
 
     for order in orders:
         items = order_items_map.get(order.id, [])
-        source_order = source_order_map.get(order.source_order_id) if order.source_order_id else None
-        product_name = order.product_name
-        if not product_name and source_order and source_order.product:
-            product_name = source_order.product.name
-        elif not product_name:
-            product_name = order.customer_name or '未指定产品'
+        cp_key, source_order = _resolve_factory_cp_key(order, source_order_map)
         product_qty = order.product_quantity
         if not product_qty and source_order:
             product_qty = source_order.quantity
-        customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
-        cp_key = (customer_name, product_name)
         split_parts = split_by_cp.get(cp_key, False)
+
         if cp_key not in grouped_data:
             grouped_data[cp_key] = {}
             order_count_map[cp_key] = {'order_count': 0, 'total_fabric_qty': 0, 'product_quantity': product_qty}
@@ -178,27 +190,32 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
             fabric_qty = item.quantity or 0
             if supplier_name not in grouped_data[cp_key]:
                 grouped_data[cp_key][supplier_name] = {}
-            part_name = (getattr(item, 'part_name', None) or '').strip() if split_parts else ''
+            # 明细自己的部位（展示用）与聚合键里的部位（拆行模式才参与）是**两个**概念：
+            # 合并模式必须清空后者才能把无部位明细一起算进来，但展示仍要说出部位。
+            item_part = (getattr(item, 'part_name', None) or '').strip()
+            part_name = item_part if split_parts else ''
             fabric_key = (fabric_name, fabric_spec, item.unit or '', part_name)
             if fabric_key not in grouped_data[cp_key][supplier_name]:
                 grouped_data[cp_key][supplier_name][fabric_key] = {
                     'fabric_name': fabric_name, 'part_name': part_name,
                     'specification': fabric_spec, 'quantity': fabric_qty, 'unit': item.unit or '',
+                    # 展示部位单独记账：合并模式下 part_name 被清空（聚合键需要），
+                    # 但「这条明细属于哪个部位」的事实仍要展示出来（与工厂汇总屏幕同口径）。
+                    '_part_names': [], '_part_unknown': False,
                 }
             else:
                 existing = grouped_data[cp_key][supplier_name][fabric_key]
                 existing['quantity'] = (float(existing['quantity']) if existing['quantity'] else 0) + (float(fabric_qty) if fabric_qty else 0)
+            tracked = grouped_data[cp_key][supplier_name][fabric_key]
+            if item_part:
+                if item_part not in tracked['_part_names']:
+                    tracked['_part_names'].append(item_part)
+            else:
+                tracked['_part_unknown'] = True
             order_count_map[cp_key]['total_fabric_qty'] += fabric_qty
 
     for order in orders:
-        source_order = source_order_map.get(order.source_order_id) if order.source_order_id else None
-        product_name = order.product_name
-        if not product_name and source_order and source_order.product:
-            product_name = source_order.product.name
-        elif not product_name:
-            product_name = order.customer_name or '未指定产品'
-        customer_name = source_order.customer if source_order else (order.customer_name or '未指定客户')
-        cp_key = (customer_name, product_name)
+        cp_key, _ = _resolve_factory_cp_key(order, source_order_map)
         if cp_key in order_count_map:
             order_count_map[cp_key]['order_count'] += 1
 
@@ -209,6 +226,9 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
             fabrics_list = list(fabric_dict.values())
             for f in fabrics_list:
                 f['quantity'] = round_qty(float(f['quantity'])) if f['quantity'] else 0
+                f['part_display'] = compose_part_display(
+                    f.pop('_part_names', []), f.pop('_part_unknown', False),
+                )
             suppliers_list.append({'supplier_name': supplier_name, 'fabrics': fabrics_list})
         sorted_groups[(customer_name, product_name)] = suppliers_list
 
@@ -219,7 +239,7 @@ th,td{border:1.0pt solid #000000;padding:1px;text-align:center;vertical-align:mi
 th{background:#E6E6E6;font-weight:bold}
 .total-row{background-color:#F0F0F0;font-weight:bold}"""
     body_parts = ['<div class="header"><h1>东莞市滨发玩具有限公司</h1><h2>工厂内部采购订单汇总</h2></div>']
-    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>供应商</th><th>产品部位</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
+    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
 
     grand_total: float = 0
     for (customer_name, product_name), suppliers in sorted(sorted_groups.items()):
@@ -233,9 +253,11 @@ th{background:#E6E6E6;font-weight:bold}
                     body_parts.append(f'<td rowspan="{total_fabric_rows}" style="font-weight:bold">{_h(customer_name)}</td>')
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{_h(product_name)}</td>')
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{float(order_info["product_quantity"]) if order_info["product_quantity"] else 0:g}</td>')
+                # 列序（2026-11-05 用户要求）：产品部位在供应商之前；
+                # 供应商跨行合并的 rowspan 仍挂在供应商格上，部位格逐行渲染。
+                body_parts.append(f'<td style="text-align:left">{_h(fabric.get("part_display", ""))}</td>')
                 if idx == 0:
                     body_parts.append(f'<td rowspan="{len(supplier["fabrics"])}">{_h(supplier["supplier_name"])}</td>')
-                body_parts.append(f'<td style="text-align:left">{_h(fabric.get("part_name", ""))}</td>')
                 body_parts.append(f'<td style="text-align:left">{_h(fabric["fabric_name"])}</td>')
                 body_parts.append(f'<td style="text-align:left">{_h(fabric.get("specification", ""))}</td>')
                 body_parts.append(f'<td style="text-align:right">{_h(fabric["quantity"])} {_h(fabric["unit"])}</td>')
