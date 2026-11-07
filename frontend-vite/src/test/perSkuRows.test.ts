@@ -183,6 +183,31 @@ describe('computeQuantityDiff', () => {
       { materialName: '面料A', partName: '头部', perSku: 8, stored: 10 },
     ])
   })
+
+  it('R9 只有 BOM、无 item_ids 的行 → coord=null（只读，不产生静默不落库的编辑框）', () => {
+    const group: FactoryGroup = {
+      customer_name: '客户甲', product_name: '产品A', product_quantity: 100,
+      suppliers: [{
+        supplier_name: '供应商甲',
+        fabrics: [
+          { fabric_name: '面料B', specification: 'S2', unit: '米', quantity: 80, item_ids: [] },
+        ],
+      }],
+      skus: [{
+        product_name: '产品A', order_qty: 1000,
+        materials: [
+          { supplier_name: '供应商甲', material_name: '面料B', specification: 'S2', unit: '米', quantity: 80 },
+        ],
+      }],
+    }
+
+    const rows = buildPerSkuRows(group, 0)
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.coord).toBeNull()
+    expect(rows[0]!.itemIds).toEqual([])
+    expect(computeQuantityDiff(group, rows)).toEqual([])
+  })
 })
 
 describe('buildStoredRows（屏幕与打印共用的落库行模型）', () => {

@@ -171,6 +171,9 @@ function buildStoredIndex(group: FactoryGroup) {
         part_name: fabric.part_name,
       })
       const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
+      // 无落库明细的 BOM 行（BOM 生成后新增 / 旧单未生成）不建坐标：coord=null 只读，
+      // 避免出现可编辑但保存时 item_ids 为空、静默不落库的输入框。
+      if (itemIds.length === 0) return
       index.set(key, {
         coord: { si, fi },
         itemIds,
