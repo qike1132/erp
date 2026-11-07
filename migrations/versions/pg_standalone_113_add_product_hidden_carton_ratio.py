@@ -39,12 +39,23 @@ def upgrade():
         'ALTER TABLE product ADD COLUMN IF NOT EXISTS hidden_carton_ratio '
         'INTEGER NULL'
     )
+    # 约束存在性检查放在 DO 块里：空库重放时 pg_standalone_001 已按当前 ORM 元数据
+    # 建出同名约束，直接 ADD 会报重复；这里不做 DROP（破坏性 DDL 会被
+    # migrations/_destructive_scan 拦下，且升级路径不需要删任何东西）。
     op.execute(
-        'ALTER TABLE product DROP CONSTRAINT IF EXISTS ck_product_hidden_carton_ratio_positive'
-    )
-    op.execute(
-        'ALTER TABLE product ADD CONSTRAINT ck_product_hidden_carton_ratio_positive '
-        'CHECK (hidden_carton_ratio IS NULL OR hidden_carton_ratio > 0)'
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'ck_product_hidden_carton_ratio_positive'
+                  AND conrelid = 'product'::regclass
+            ) THEN
+                ALTER TABLE product ADD CONSTRAINT ck_product_hidden_carton_ratio_positive
+                CHECK (hidden_carton_ratio IS NULL OR hidden_carton_ratio > 0);
+            END IF;
+        END $$;
+        """
     )
     # ORM 声明了 comment，迁移必须同步——否则 alembic check 会报 modify_comment。
     # 文案必须与 shared_models/product.py 的列 comment 逐字一致。

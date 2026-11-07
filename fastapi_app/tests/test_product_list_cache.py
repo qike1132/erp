@@ -32,16 +32,18 @@ _EXPECTED_KEY = build_cache_key(CacheNamespace.PRODUCT_LIST, 20)
 
 
 def _full_item(id_val: int, name: str) -> dict:
-    """与 Product.to_dict() 字段一致的完整商品 dict（10 字段，含 customers）。
+    """与 Product.to_dict() 字段一致的完整商品 dict（11 字段，含 customers）。
 
     ProductListResponse.items 是 list[ProductResponse]，缺必填字段（initial_stock /
     current_stock）会在端点构造响应时抛 ValidationError，故假数据必须补全。
     customers 由 product_service._load_customers_for_products 在服务层补上
-    （Product.to_dict 本身不含该字段）。
+    （Product.to_dict 本身不含该字段）。hidden_carton_ratio 为 2026-11-08 新增的
+    陈列样随箱配比（to_dict 透出，未配置为 None）。
     """
     return {
         'id': id_val, 'name': name, 'barcode': None, 'price': 0.0,
         'image': None, 'factory': None, 'initial_stock': 0, 'current_stock': 0,
+        'hidden_carton_ratio': None,
         'create_time': None, 'customers': [],
     }
 

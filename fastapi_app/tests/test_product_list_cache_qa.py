@@ -57,6 +57,8 @@ _FULL_ITEM = {
     'factory': '东莞',
     'initial_stock': 3,
     'current_stock': 5,
+    # 2026-11-08 新增：陈列样隐藏款随箱配比（Product.to_dict 透出，未配置为 None）
+    'hidden_carton_ratio': None,
     'create_time': '2026-01-01 00:00:00',
     'customers': [],
 }

@@ -607,6 +607,12 @@
     "migrations/versions/pg_standalone_111_add_part_name_to_purchase_order_item.py": [
       "drop_column:purchase_order_item|part_name"
     ],
+    "migrations/versions/pg_standalone_112_add_supplier_name_to_material_registration_item.py": [
+      "drop_column:material_registration_item|supplier_name"
+    ],
+    "migrations/versions/pg_standalone_113_add_product_hidden_carton_ratio.py": [
+      "execute:ALTER TABLE product DROP COLUMN IF EXISTS hidden_carton_ratio"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

@@ -353,6 +353,20 @@ def _finalize_bom_totals(totals: dict[tuple, dict]) -> dict[str, list[dict]]:
     return result
 
 
+def _configured_hidden_ratio(product: Product) -> int | None:
+    """产品的陈列样随箱配比；只有真实的正整数才启用规则。
+
+    DB 列是 INTEGER NULL，但单元测试常以 ``MagicMock`` 充当 Product——
+    ``getattr(mock, 'hidden_carton_ratio', None)`` 会返回一个 Mock（truthy，
+    ``int()`` 后为 1），若直接当真会误触发 6+1 角色校验并让既有测试整批变红。
+    故这里做严格类型收敛：bool / 非 int / 小于 1 一律视为未配置（历史口径）。
+    """
+    ratio = getattr(product, 'hidden_carton_ratio', None)
+    if isinstance(ratio, bool) or not isinstance(ratio, int) or ratio < 1:
+        return None
+    return ratio
+
+
 def _declared_role_ids(product: Product) -> set[int]:
     """产品角色表声明的 role_id 集合（「配了角色但暂无物料」也计入分配校验）。
 
@@ -403,15 +417,15 @@ def aggregate_materials(orders_data: list, product_map: dict) -> dict:
         product = product_map.get(product_id)
         if not product or not product.has_bom():
             continue
-        ratio = getattr(product, 'hidden_carton_ratio', None)
-        if not ratio:
+        ratio = _configured_hidden_ratio(product)
+        if ratio is None:
             continue
         names = _role_names_from_product(product)
         allocations[product_id] = allocate_scope_quantities(
             merged_qty,
             {row.get('role_id') for row in product.get_all_materials()}
             | _declared_role_ids(product) | {None},
-            hidden_carton_ratio=int(ratio),
+            hidden_carton_ratio=ratio,
             name_of=partial(_lookup_role_name, names),
         )
 
@@ -493,13 +507,13 @@ def aggregate_materials_by_scope(
 
         rows = product.get_all_materials()
         allocation = None
-        ratio = getattr(product, 'hidden_carton_ratio', None)
-        if ratio:
+        ratio = _configured_hidden_ratio(product)
+        if ratio is not None:
             allocation = allocate_scope_quantities(
                 quantity,
                 {row.get('role_id') for row in rows}
                 | _declared_role_ids(product) | {None},
-                hidden_carton_ratio=int(ratio),
+                hidden_carton_ratio=ratio,
                 name_of=partial(name_of, product_id),
             )
         scopes = order_scopes(
