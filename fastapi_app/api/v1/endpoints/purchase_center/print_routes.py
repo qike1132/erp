@@ -57,7 +57,12 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
             source_orders = None
             if source_order_ids:
                 source_orders = await svc.get_system_orders_by_ids(db, source_order_ids)
-            html = generate_factory_summary_print(orders, order_items_map, source_orders)
+            # 「产品部位」在合并模式下来自 BOM（采购明细的 part_name 恒为空），
+            # 光凭明细打印件只能印空白 → 与屏幕同源补齐，避免「屏幕有、打印空」。
+            from fastapi_app.services.purchase_order_query import build_bom_part_display_map
+
+            bom_part_map = await build_bom_part_display_map(db, orders)
+            html = generate_factory_summary_print(orders, order_items_map, source_orders, bom_part_map)
             return success_response(html=html, order_count=len(orders))
         elif format_type == 'supplier':
             # 与导出同一份明细级归并；query_supplier_groups 只有金额聚合，

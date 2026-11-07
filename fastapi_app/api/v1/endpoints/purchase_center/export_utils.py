@@ -153,8 +153,14 @@ def _resolve_factory_cp_key(order, source_order_map):
     return (customer_name, product_name), source_order
 
 
-def generate_factory_summary_print(orders, order_items_map, source_orders=None):
-    """生成工厂内部汇总格式打印HTML"""
+def generate_factory_summary_print(orders, order_items_map, source_orders=None, bom_part_map=None):
+    """生成工厂内部汇总格式打印HTML。
+
+    ``bom_part_map``（``{(产品名, 物料, 规格, 单位): [部位, ...]}``）由
+    :func:`fastapi_app.services.purchase_order_query.build_bom_part_display_map` 产出。
+    **必须传**：合并模式下采购明细的 ``part_name`` 恒为空，只凭明细打印件印不出部位，
+    会出现「屏幕有部位、打印空白」。缺省 ``None`` 时退回纯明细口径（旧调用方零变化）。
+    """
     source_orders = source_orders or []
     source_order_map = {o.id: o for o in source_orders}
 
@@ -207,10 +213,18 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None):
                 existing = grouped_data[cp_key][supplier_name][fabric_key]
                 existing['quantity'] = (float(existing['quantity']) if existing['quantity'] else 0) + (float(fabric_qty) if fabric_qty else 0)
             tracked = grouped_data[cp_key][supplier_name][fabric_key]
-            if item_part:
-                if item_part not in tracked['_part_names']:
-                    tracked['_part_names'].append(item_part)
-            else:
+            # 明细没标部位时**回 BOM 取**：合并模式下明细 part_name 恒为空（聚合键需要），
+            # 光凭明细打印件只能印空白 —— 那是「屏幕有、打印空」的唯一成因。
+            # 拆行模式仍以明细自身部位为准（与屏幕 `_accumulate_factory_bom` 同序）。
+            item_parts = [item_part] if item_part else list(
+                (bom_part_map or {}).get(
+                    (cp_key[1], fabric_name, fabric_spec, item.unit or ''), [],
+                )
+            )
+            for tracked_part in item_parts:
+                if tracked_part and tracked_part not in tracked['_part_names']:
+                    tracked['_part_names'].append(tracked_part)
+            if not item_parts:
                 tracked['_part_unknown'] = True
             order_count_map[cp_key]['total_fabric_qty'] += fabric_qty
 

@@ -536,3 +536,93 @@ async def test_stockin_po_without_source_order_ids_loads_live_bom(db):
     assert by_name['面料B']['item_ids'] == []
     sku_materials = group['skus'][0]['materials']
     assert {m['material_name'] for m in sku_materials} == {'面料A', '面料B'}
+
+
+# ===== 后端打印件：合并模式下部位必须来自 BOM（2026-11-07 评审 Low-1） =====
+
+
+def _print_order(product_name: str = '产品A'):
+    return SimpleNamespace(
+        id=1, order_no='PO-1', source_order_id=None, product_name=product_name,
+        product_quantity=100, customer_name='客户甲', supplier_name='供应商甲',
+    )
+
+
+def _print_item(part_name):
+    return SimpleNamespace(
+        material_name=MATERIAL, specification=SPEC, unit=UNIT, quantity=12,
+        supplier_name='供应商甲', part_name=part_name,
+    )
+
+
+def test_backend_factory_print_uses_bom_parts_when_item_part_is_none():
+    """缺陷本体：明细 part_name 为空（合并模式）时，靠 bom_part_map 印出 BOM 部位。
+
+    修复前该列只能印空白，出现「屏幕有部位、打印空白」。
+    """
+    from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
+        generate_factory_summary_print,
+    )
+
+    bom_part_map = {('产品A', MATERIAL, SPEC, UNIT): ['身体', '头部']}
+    html = generate_factory_summary_print(
+        [_print_order()], {1: [_print_item(None)]}, None, bom_part_map,
+    )
+
+    assert '<td style="text-align:left">身体/头部</td>' in html
+
+
+def test_backend_factory_print_without_bom_map_keeps_legacy_blank():
+    """零回归：旧调用方不传 bom_part_map 时，行为与改动前逐字一致（部位仍空）。
+
+    锁住「参数缺省 = 纯明细口径」这条契约，防止后来者把 map 做成必填。
+    """
+    from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
+        generate_factory_summary_print,
+    )
+
+    html = generate_factory_summary_print([_print_order()], {1: [_print_item(None)]})
+
+    assert '<td style="text-align:left"></td>' in html
+    assert '未标注' not in html, '不知道部位时不得凭空编造标记'
+
+
+def test_backend_factory_print_item_part_wins_over_bom_map():
+    """拆行模式：明细自带部位时优先用明细，不被 BOM 映射覆盖。"""
+    from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
+        generate_factory_summary_print,
+    )
+
+    bom_part_map = {('产品A', MATERIAL, SPEC, UNIT): ['别的部位']}
+    html = generate_factory_summary_print(
+        [_print_order()], {1: [_print_item('身体')]}, None, bom_part_map,
+    )
+
+    assert '<td style="text-align:left">身体</td>' in html
+    assert '别的部位' not in html
+
+
+async def test_build_bom_part_display_map_reads_bom_not_items(db):
+    """印刷件的数据源：映射必须取自 BOM（明细无部位时也能拿到），并按产品名分键。"""
+    from sqlalchemy import select
+
+    from fastapi_app.services.purchase_order_query import build_bom_part_display_map
+    from fastapi_app.shared_models import PurchaseOrder
+
+    session = db
+    po_id = await _seed(session, item_parts=(None, None))   # 明细无部位，BOM 有 身体/头部
+    po = (await session.execute(
+        select(PurchaseOrder).where(PurchaseOrder.id == po_id)
+    )).scalars().first()
+
+    part_map = await build_bom_part_display_map(session, [po])
+
+    assert part_map[('产品A', MATERIAL, SPEC, UNIT)] == ['身体', '头部']
+
+
+async def test_build_bom_part_display_map_empty_without_orders(db):
+    """无单 → 空映射，且不发查询（防 N+1 / 无谓往返）。"""
+    from fastapi_app.services.purchase_order_query import build_bom_part_display_map
+
+    assert await build_bom_part_display_map(db, []) == {}
+

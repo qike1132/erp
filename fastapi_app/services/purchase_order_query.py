@@ -425,6 +425,60 @@ async def get_factory_order_summary(
     }
 
 
+async def build_bom_part_display_map(db: AsyncSession, orders) -> dict[tuple[str, str, str, str], list[str]]:
+    """选中采购单所涉产品的 BOM 部位映射，供**后端打印件**与屏幕同口径展示「产品部位」。
+
+    **为什么打印件需要它**：后端打印只拿采购明细（``purchase_order_item``），而部位在
+    合并模式下来自 BOM —— 明细的 ``part_name`` 为空时，光凭明细只能印空白，出现
+    「屏幕有部位、打印空」的不一致（2026-11-07 评审 Low-1）。本函数按
+    ``(产品名, 物料, 规格, 单位)`` 把 BOM 侧的部位备好，由
+    ``export_utils.generate_factory_summary_print`` 逐行取用。键带产品名是为了不把
+    不同产品的同物料部位混在一起（打印分组本身就是按 (客户, 产品) 分的）。
+
+    产品解析与工厂汇总**同一套链路**（``fetch_po_sku_pids_map`` → 快照反查），
+    所以「备货来源、主表无 source_order_ids」的采购单也能取到 BOM。
+
+    Returns:
+        ``{(product_name, material_name, specification, unit): [部位, ...]}``，
+        部位去重保序（BOM 行顺序）、跳过填充物；无部位的行不进映射（不知道就不编造）。
+    """
+    from fastapi_app.services.purchase._common import (
+        _resolve_pids_from_sku_lines,
+        fetch_po_sku_pids_map,
+    )
+    from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
+
+    po_ids = [o.id for o in orders]
+    if not po_ids:
+        return {}
+
+    pids_map = await fetch_po_sku_pids_map(db, orders)
+    # 与工厂汇总 / 撤销路径同款：备货来源的采购单主表没有 source_order_ids，
+    # 必须用快照产品名反查，否则这类单的 BOM 拿不到（部位会退回空白）。
+    await _resolve_pids_from_sku_lines(db, pids_map, await fetch_po_sku_map(db, po_ids))
+    product_ids = list({pid for pids in pids_map.values() for pid in pids if pid})
+    if not product_ids:
+        return {}
+
+    prod_name_map = await _fetch_prod_name_map(db, product_ids)
+    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
+
+    result: dict[tuple[str, str, str, str], list[str]] = {}
+    for product_id, boms in bom_data.items():
+        product_name = prod_name_map.get(product_id) or ''
+        for bom in boms:
+            if _is_filling_category(bom.get('category')):
+                continue
+            part = (bom.get('part_name') or '').strip()
+            if not part:
+                continue
+            key = (product_name, bom['material_name'], bom['specification'], bom['unit'])
+            parts = result.setdefault(key, [])
+            if part not in parts:
+                parts.append(part)
+    return result
+
+
 async def export_completed_orders(
     db: AsyncSession, *, supplier_id: int | None = None,
     date_from: str = '', date_to: str = '',
