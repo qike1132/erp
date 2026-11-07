@@ -44,6 +44,7 @@
               </div>
               <div class="bom-summary-right">
                 <button class="bom-btn-copy-v2" :disabled="quickCopyLoading" @click="quickCopyBom"><FontAwesomeIcon icon="copy" aria-hidden="true" />复制BOM</button>
+                <button class="bom-btn-import-v2" @click="openSamplingImport"><FontAwesomeIcon icon="file-import" aria-hidden="true" />从打样单导入</button>
                 <button class="bom-btn-add-v2" @click="addBomItem"><FontAwesomeIcon icon="plus" aria-hidden="true" />添加物料</button>
               </div>
             </div>
@@ -166,7 +167,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="(item, idx) in currentBomItems" :key="item.id ?? 'bom-' + idx">
+                      <tr v-for="(item, idx) in currentBomItems" :key="item.id ?? 'bom-' + idx" :class="{ 'bom-row-quantity-pending': item.quantity_pending }">
                         <td><input v-model="item.part_name" type="text" class="bom-table-input" placeholder="如 身体、头部" maxlength="100" name="part-name" autocomplete="off" /></td>
                         <td><input v-model="item.name" type="text" class="bom-table-input" placeholder="输入物料名称" name="material-name" autocomplete="off" /></td>
                         <td><input v-model="item.specification" type="text" class="bom-table-input" placeholder="输入规格型号" name="specification" autocomplete="off" /></td>
@@ -179,7 +180,10 @@
                         <td>
                           <BomSupplierSelect v-model="item.supplier_name" :options="bomSupplierOptions" />
                         </td>
-                        <td><input v-model.number="item.usage" type="number" class="bom-table-input" step="0.01" min="0" name="quantity" autocomplete="off" /></td>
+                        <td>
+                          <input v-model.number="item.usage" type="number" class="bom-table-input" :class="{ 'bom-quantity-pending': item.quantity_pending }" step="0.01" min="0" name="quantity" autocomplete="off" @input="item.quantity_pending = !item.usage" />
+                          <span v-if="item.quantity_pending" class="bom-quantity-pending-label">数量待补</span>
+                        </td>
                         <td><input v-model="item.remark" type="text" class="bom-table-input" placeholder="输入备注" name="remark" autocomplete="off" /></td>
                         <td><button class="bom-table-action-btn delete" aria-label="删除" @click="deleteBomItem(idx)"><FontAwesomeIcon icon="trash" aria-hidden="true" /></button></td>
                       </tr>
@@ -218,6 +222,24 @@
     @confirm="confirmCopyBom"
   />
 
+  <BomSamplingImportDialog
+    v-model:open="samplingImportVisible"
+    v-model:search-keyword="samplingSearchKeyword"
+    :projects="samplingProjects"
+    :selected-project-id="samplingSelectedProjectId"
+    :rows="samplingImportRows"
+    :selected-count="samplingSelectedRows.length"
+    :searched="samplingSearched"
+    :searching="samplingSearching"
+    :loading-parts="samplingLoadingParts"
+    :has-roles="samplingHasRoles"
+    :has-conflict="samplingHasConflict"
+    :error="samplingError"
+    @search="searchSamplingProjects"
+    @select-project="selectSamplingProject"
+    @confirm="confirmSamplingImport"
+  />
+
   <UiConfirmDialog
     :open="confirmDialog.open"
     :text="confirmDialog.text"
@@ -237,6 +259,7 @@ import { useProductListActions } from '../composables/useProductListActions'
 import { useBomRoleMenu } from '../composables/useBomRoleMenu'
 import BomCopyDialog from './BomCopyDialog.vue'
 import BomSupplierSelect from './BomSupplierSelect.vue'
+import BomSamplingImportDialog from './BomSamplingImportDialog.vue'
 
 const emit = defineEmits<{
   saved: [payload: { product_id: number }]
@@ -254,6 +277,10 @@ const {
   copyBomDialogVisible, copyBomSearchKeyword, copyBomProducts,
   copyBomSourceProductId, copyBomPreview, copyBomOverwrite, copyBomProgress,
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
+  samplingImportVisible, samplingSearchKeyword, samplingProjects, samplingSearched,
+  samplingSearching, samplingLoadingParts, samplingError, samplingSelectedProjectId,
+  samplingImportRows, samplingSelectedRows, samplingHasRoles, samplingHasConflict,
+  openSamplingImport, searchSamplingProjects, selectSamplingProject, confirmSamplingImport,
 } = useProductListActions(confirmDialog, {
   onBomSaved: (productId) => emit('saved', { product_id: productId }),
   onBomClosed: (productId) => emit('closed', { product_id: productId }),

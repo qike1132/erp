@@ -209,6 +209,8 @@ export interface ProjectListParams {
   page?: number
   per_page?: number
   keyword?: string
+  /** 状态筛选；导入搜索传 all，避免同名历史打样单被默认状态过滤 */
+  status?: string
   customer_id?: number
 }
 

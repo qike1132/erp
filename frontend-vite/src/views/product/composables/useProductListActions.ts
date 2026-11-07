@@ -5,6 +5,7 @@ import type { BomItem, BomCategory, Role, ConfirmDialogLike } from './bomTypes'
 import { buildRolePayload } from './bomTypes'
 import { useBomQuickCopy } from './useBomQuickCopy'
 import { useBomCopyDialog } from './useBomCopyDialog'
+import { useBomSamplingImport } from './useBomSamplingImport'
 import { queryClient } from '@/utils/queryClient'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 
@@ -517,6 +518,24 @@ export function useProductListActions(
     || quickCopy.quickCopyLoading.value
     || copyDialog.copyBomProgress.visible
 
+  // ===== 从打样单导入（只写编辑态；仍由 saveBom 唯一保存通道落库） =====
+  const samplingImport = useBomSamplingImport({
+    productName: bomProductName,
+    bomRoles,
+    supplierOptions: bomSupplierOptions,
+    getFabricItems: role => ensureScope(scopeKeyOf(role)).fabric,
+    addRole,
+    applyItem: (role, item) => {
+      item.role_id = role.id ?? null
+      const items = ensureScope(scopeKeyOf(role)).fabric
+      const index = items.findIndex(existing => (existing.part_name ?? '').trim() === (item.part_name ?? '').trim())
+      if (index >= 0) items[index] = item
+      else items.push(item)
+    },
+    selectRole,
+    showFabricTab: () => { currentBomCategory.value = 'fabric' },
+  })
+
   return {
     // BOM modal
     bomDialogVisible,
@@ -553,5 +572,7 @@ export function useProductListActions(
     ...quickCopy,
     // Copy BOM dialog
     ...copyDialog,
+    // Sampling import
+    ...samplingImport,
   }
 }

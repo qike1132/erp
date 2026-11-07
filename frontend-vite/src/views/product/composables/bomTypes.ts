@@ -24,6 +24,8 @@ export interface BomItem {
   supplier_name: string
   usage: number
   remark: string
+  /** 从打样单导入时数量为 0，保存前提示补录；仅编辑态使用，不提交后端 */
+  quantity_pending?: boolean
   /** 归属角色 id（null = 产品级默认 BOM） */
   role_id?: number | null
   category?: string

@@ -106,6 +106,24 @@
 }
 .bom-btn-copy-v2:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.2); }
 .bom-btn-copy-v2:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+.bom-btn-import-v2 {
+  padding: 10px 20px; background: var(--color-warning-50); color: var(--color-warning-700);
+  border: 2px solid var(--color-warning-200); border-radius: 10px; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; align-items: center; gap: 6px;
+}
+.bom-btn-import-v2:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(180, 83, 9, 0.16); }
+.bom-row-quantity-pending { background: #fffbeb; }
+.bom-quantity-pending { background: #fef3c7; border-color: #d97706; }
+.bom-quantity-pending-label { display: block; margin-top: 4px; color: #92400e; font-size: 12px; font-weight: 600; }
+.bom-btn-import-v2 {
+  padding: 10px 20px; background: var(--color-warning-50); color: var(--color-warning-700);
+  border: 2px solid var(--color-warning-200); border-radius: 10px; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; align-items: center; gap: 6px;
+}
+.bom-btn-import-v2:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(180, 83, 9, 0.16); }
+.bom-row-quantity-pending { background: #fffbeb; }
+.bom-quantity-pending { background: #fef3c7; border-color: #d97706; }
+.bom-quantity-pending-label { display: block; margin-top: 4px; color: #92400e; font-size: 12px; font-weight: 600; }
 
 /* ===== 角色页签（点 tab 切换 BOM，⋯ 菜单管理） ===== */
 .bom-role-bar {
