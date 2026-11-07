@@ -79,14 +79,13 @@
       <div v-else-if="!rows.length && !error" class="sampling-empty" role="status">该打样单各角色的最终版本均无可导入部位</div>
       <div v-else-if="rows.length" class="sampling-table-wrap sampling-preview-table-wrap">
         <table class="sampling-table sampling-preview-table">
-          <thead><tr><th>导入</th><th>部位名</th><th>布料名</th><th>规格</th><th>色号</th><th>供应商</th><th>来源角色</th><th>状态</th><th>数量</th><th>未导入字段</th></tr></thead>
+          <thead><tr><th>导入</th><th>部位名</th><th>布料名</th><th>规格型号</th><th>供应商</th><th>来源角色</th><th>状态</th><th>数量</th><th>未导入字段</th></tr></thead>
           <tbody>
             <tr v-for="row in rows" :key="row.key" :class="`sampling-row-${row.status}`">
               <td><input v-model="row.selected" type="checkbox" :aria-label="`导入 ${row.sourceRoleName} 的 ${row.part.part_name}`" /></td>
               <td class="font-semibold">{{ row.part.part_name }}</td>
               <td>{{ row.part.fabric_name || '—' }}</td>
-              <td>{{ row.part.fabric_spec || '—' }}</td>
-              <td>{{ row.part.fabric_color_no || '—' }}</td>
+              <td>{{ resolveSamplingSpecification(row.part) || '—' }}</td>
               <td>{{ row.part.supplier_name || '—' }}</td>
               <td>{{ row.sourceRoleName }}</td>
               <td><span class="sampling-status" :class="`sampling-status-${row.status}`">{{ statusText(row.status) }}</span></td>
@@ -97,7 +96,7 @@
         </table>
       </div>
       <p v-if="rows.length" class="sampling-mapping-note">
-        色号将追加到 BOM 备注；数量统一填 0 并标黄，请补录后保存。以下字段未导入：单价、交期、联系人、联系电话（BOM 无对应列）。
+        打样色号将进入 BOM 规格型号（无色号时使用布料规格），原备注保持不变；数量统一填 0 并标黄，请补录后保存。以下字段未导入：单价、交期、联系人、联系电话（BOM 无对应列）。
       </p>
     </section>
 
@@ -114,7 +113,7 @@
 <script setup lang="ts">
 import UiDialog from '@/components/ui/UiDialog.vue'
 import type { PartDetail, ProjectStatus } from '@/api/patternRoom'
-import type { SamplingImportRow } from '../composables/bomSamplingImport'
+import { resolveSamplingSpecification, type SamplingImportRow } from '../composables/bomSamplingImport'
 import type { SamplingProjectOption } from '../composables/useBomSamplingImport'
 
 defineProps<{

@@ -20,11 +20,14 @@ export interface SamplingImportRow {
 
 export const SAMPLING_IMPORT_OMITTED_FIELDS = ['unit_price', 'delivery_days', 'contact_person', 'contact_phone'] as const
 
-/** 色号追加到原备注之后；没有色号时原备注逐字保留。 */
-export function buildSamplingRemark(part: Pick<PartDetail, 'remark' | 'fabric_color_no'>): string {
-  const remark = part.remark?.trim() ?? ''
-  const colorNo = part.fabric_color_no?.trim() ?? ''
-  return [remark, colorNo ? `色号：${colorNo}` : ''].filter(Boolean).join('；')
+/** 打样「色号」在 BOM 中对应规格型号；无色号时兼容既有 fabric_spec 数据。 */
+export function resolveSamplingSpecification(part: Pick<PartDetail, 'fabric_color_no' | 'fabric_spec'>): string {
+  return part.fabric_color_no?.trim() || part.fabric_spec?.trim() || ''
+}
+
+/** 备注只保留打样单原备注，不混入口号等其他业务字段。 */
+export function buildSamplingRemark(part: Pick<PartDetail, 'remark'>): string {
+  return part.remark?.trim() ?? ''
 }
 
 /** 打样部位只映射为 BOM 面料；数量没有来源，必须为 0 并显式标记待补。 */
@@ -40,7 +43,7 @@ export function mapSamplingPartToBom(
     id: existing?.id,
     part_name: part.part_name.trim(),
     name: part.fabric_name?.trim() ?? '',
-    specification: part.fabric_spec?.trim() ?? '',
+    specification: resolveSamplingSpecification(part),
     unit: '码',
     supplier_id: supplierId,
     supplier_name: part.supplier_name?.trim() ?? '',

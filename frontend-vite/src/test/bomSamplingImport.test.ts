@@ -75,21 +75,29 @@ function project(id: number, sequenceNo: string): ProjectSummary {
 }
 
 describe('打样单导入纯映射', () => {
-  it('色号追加在原备注之后，数量默认为 0 且标记待补；供应商 id 无效时留空', () => {
+  it('色号进入规格型号且不拼进备注，数量默认为 0；供应商 id 无效时留空', () => {
     const source = part(1, '身体', { fabric_color_no: '红-01', remark: ' keep ', supplier_id: 999 })
     const mapped = mapSamplingPartToBom(source, new Set([9]))
 
-    expect(buildSamplingRemark(source)).toBe('keep；色号：红-01')
+    expect(buildSamplingRemark(source)).toBe('keep')
     expect(mapped).toMatchObject({
       part_name: '身体',
       name: '身体布料',
-      specification: '身体规格',
+      specification: '红-01',
       supplier_id: null,
       supplier_name: '供应商甲',
       usage: 0,
       quantity_pending: true,
       unit: '码',
-      remark: 'keep；色号：红-01',
+      remark: 'keep',
+    })
+  })
+
+  it('色号为空时才回退使用 fabric_spec 作为规格型号', () => {
+    const source = part(2, '领口', { fabric_color_no: '', fabric_spec: '32 支', remark: '原备注' })
+    expect(mapSamplingPartToBom(source, new Set([9]))).toMatchObject({
+      specification: '32 支',
+      remark: '原备注',
     })
   })
 
@@ -207,6 +215,12 @@ describe('BomEditor 从打样单导入完整链路', () => {
     expect(q('.bom-table-v2').text()).toContain('数量待补')
     const quantityInputs = qa('.bom-table-v2 input[name="quantity"]')
     expect(quantityInputs.every((input) => (input.element as HTMLInputElement).value === '0')).toBe(true)
+    // 用户缺陷定向断言：不经过保存，导入后「规格型号 *」与「备注」两个
+    // 原生输入框必须各自绑定正确字段，不能借保存 payload 掩盖表格列错位。
+    const immediateSpecs = qa('.bom-table-v2 input[name="specification"]').map((input) => (input.element as HTMLInputElement).value)
+    const immediateRemarks = qa('.bom-table-v2 input[name="remark"]').map((input) => (input.element as HTMLInputElement).value)
+    expect(immediateSpecs).toEqual(['C-1', 'C-2'])
+    expect(immediateRemarks).toEqual(['原备注', '原备注'])
 
     await q('.bom-btn-save').trigger('click')
     await flushPromises()
@@ -217,9 +231,9 @@ describe('BomEditor 从打样单导入完整链路', () => {
     }
     expect(payload.roles).toEqual([{ id: 7, role_name: '客户A' }, { role_key: 'rk-1', role_name: '客户B' }])
     const bodyA = payload.fabrics.find((item) => item.part_name === '身体' && item.role_id === 7)!
-    expect(bodyA).toMatchObject({ fabric_name: '身体布料', specification: '身体规格', quantity: 0, remark: '原备注；色号：C-2', supplier_id: 9 })
+    expect(bodyA).toMatchObject({ fabric_name: '身体布料', specification: 'C-2', quantity: 0, remark: '原备注', supplier_id: 9 })
     const bodyB = payload.fabrics.find((item) => item.part_name === '身体' && item.role_key === 'rk-1')!
-    expect(bodyB).toMatchObject({ supplier_id: null, quantity: 0, remark: '原备注；色号：C-3' })
+    expect(bodyB).toMatchObject({ specification: 'C-3', supplier_id: null, quantity: 0, remark: '原备注' })
     expect(payload.fabrics.find((item) => item.part_name === '领口')).toMatchObject({ id: 8, role_id: 7, quantity: 0 })
 
     // 模拟既有保存端点提交成功后重新读取，验证回显字段及 role 归属不漂移。
@@ -244,9 +258,9 @@ describe('BomEditor 从打样单导入完整链路', () => {
     const reopenedSpecs = qa('.bom-table-v2 input[name="specification"]').map((input) => (input.element as HTMLInputElement).value)
     expect(reopenedParts).toEqual(['身体', '袖子'])
     expect(reopenedNames).toEqual(['身体布料', '袖子布料'])
-    expect(reopenedSpecs).toEqual(['身体规格', '袖子规格'])
+    expect(reopenedSpecs).toEqual(['C-3', 'C-4'])
     const remarks = qa('.bom-table-v2 input[name="remark"]').map((input) => (input.element as HTMLInputElement).value)
-    expect(remarks).toEqual(['原备注；色号：C-3', '原备注；色号：C-4'])
+    expect(remarks).toEqual(['原备注', '原备注'])
   })
 
   it('403 在弹窗内给出打样单读权限提示，不是静默失败', async () => {
