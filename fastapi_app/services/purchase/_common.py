@@ -25,6 +25,45 @@ def _parse_source_order_ids(po) -> list[int]:
     return ids
 
 
+async def _resolve_pids_from_sku_lines(
+    db: AsyncSession,
+    result: dict[int, list[int]],
+    sku_rows: dict[int, list[dict]],
+) -> None:
+    """工厂汇总：用**已取到**的 sku 快照产品名为无 source_order_ids 的采购单反查 Product.id。
+
+    ``sku_rows`` 为空（表不可用 / 无快照）时不发任何查询，保持既有「无 source_order
+    的汇总不触达 BOM 表」的测试口径；只在确有快照时补一次 Product.name 查询。
+    """
+    empty_po_ids = [
+        po_id for po_id, pids in result.items()
+        if not pids and sku_rows.get(po_id)
+    ]
+    if not empty_po_ids:
+        return
+
+    names = {
+        line.get('product_name')
+        for po_id in empty_po_ids
+        for line in sku_rows.get(po_id, [])
+        if line.get('product_name')
+    }
+    if not names:
+        return
+
+    from fastapi_app.shared_models import Product
+
+    prod_rows = (await db.execute(
+        select(Product.id, Product.name).where(Product.name.in_(names))
+    )).all()
+    pid_by_name = {name: pid for pid, name in prod_rows}
+    for po_id in empty_po_ids:
+        for line in sku_rows.get(po_id, []):
+            pid = pid_by_name.get(line.get('product_name'))
+            if pid and pid not in result[po_id]:
+                result[po_id].append(pid)
+
+
 async def fetch_po_sku_pids_map(db: AsyncSession, orders) -> dict[int, list[int]]:
     """采购单 → 该采购单覆盖的**全部 SKU** 的 product_id（去重、保持出现顺序）。
 

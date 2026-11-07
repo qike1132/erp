@@ -236,3 +236,45 @@ def test_backend_factory_print_mixed_parts_merges():
     assert '<th>产品部位</th>' in html
     assert html.count('<td style="text-align:left"></td>') == 1
     assert '>20.0 米<' in html
+
+
+async def test_stockin_po_without_source_order_ids_loads_live_bom(db):
+    """备货来源采购单没有 PO.source_order_ids 时，仍应从 purchase_order_sku 解析产品并加载当前 BOM。"""
+    session = db
+    session.add(Product(id=101, name='产品A'))
+    session.add_all([
+        ProductFabric(
+            id=1, product_id=101, fabric_name='面料A', specification='S1', unit='米',
+            quantity=0.12, supplier_name='供应商甲', part_name='身体',
+        ),
+        ProductFabric(
+            id=2, product_id=101, fabric_name='面料B', specification='S2', unit='米',
+            quantity=0.08, supplier_name='供应商甲', part_name='头部',
+        ),
+    ])
+    session.add(PurchaseOrder(
+        id=8001, order_no='PO-8001', customer_name='客户甲', product_name='产品A',
+        product_quantity=1000, supplier_name='供应商甲', source_order_ids=None,
+    ))
+    session.add(PurchaseOrderItem(
+        id=1, order_id=8001, material_name='面料A', specification='S1', unit='米',
+        quantity=120, supplier_name='供应商甲', part_name=None,
+    ))
+    session.add(PurchaseOrderSku(
+        id=1, po_id=8001, product_name='产品A', product_barcode='bA',
+        order_qty=1000, source_order_id=87300, source_record_type='stockin',
+    ))
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8001]))['groups'][0]
+
+    assert group['product_name'] == '产品A'
+    fabrics = _fabrics(group)
+    assert len(fabrics) == 2, '当前 BOM 的两行都应出现（不应退化成只有采购明细的一行）'
+    by_name = {f['fabric_name']: f for f in fabrics}
+    assert float(by_name['面料A']['quantity']) == 120
+    assert float(by_name['面料B']['quantity']) == 80
+    # 只在 BOM 侧的新行没有采购明细 → 只读
+    assert by_name['面料B']['item_ids'] == []
+    sku_materials = group['skus'][0]['materials']
+    assert {m['material_name'] for m in sku_materials} == {'面料A', '面料B'}

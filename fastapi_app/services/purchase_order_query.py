@@ -362,20 +362,7 @@ async def get_factory_order_summary(
 
     cust_order_map = await _fetch_factory_cust_order_map(db, orders)
 
-    # 覆盖**全部 SKU**：多 SKU 采购单必须遍历 OrderItem 才知道涉及哪些产品，
-    # 否则 BOM 只按首个 SKU 加载 → 汇总漏料（见 services/purchase/_common.py
-    # fetch_po_sku_pids_map 的说明）。
-    po_pids_map = await fetch_po_sku_pids_map(db, orders)
-    product_ids = list({pid for pids in po_pids_map.values() for pid in pids if pid})
-    if not product_ids:
-        product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})
-
-    prod_name_map = await _fetch_prod_name_map(db, product_ids)
-
-    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
-
     po_ids = [o.id for o in orders]
-    items_map, items_by_order, items_map_by_part = await _fetch_po_items_map(db, po_ids)
 
     # 逐 SKU 展示明细：优先方案 C 的逐 SKU 快照（权威），无快照的单回退 OrderItem 口径
     # （局部 import：本模块顶层保持「不依赖其它 service 模块」的既有约定）
@@ -386,6 +373,23 @@ async def get_factory_order_summary(
         sku_lines = await fetch_po_sku_lines_map(db, orders)
         for po_id in po_ids:
             sku_rows.setdefault(po_id, sku_lines.get(po_id, []))
+
+    # 覆盖**全部 SKU**：多 SKU 采购单必须遍历 OrderItem 才知道涉及哪些产品，
+    # 否则 BOM 只按首个 SKU 加载 → 汇总漏料（见 services/purchase/_common.py
+    # fetch_po_sku_pids_map 的说明）。
+    po_pids_map = await fetch_po_sku_pids_map(db, orders)
+    # 工厂汇总专用：备货来源的采购单可能没有 source_order_ids，用已取到的 sku 快照
+    # 产品名反查产品 ID（sku_rows 为空时直接跳过，不增加查询）。
+    from fastapi_app.services.purchase._common import _resolve_pids_from_sku_lines
+    await _resolve_pids_from_sku_lines(db, po_pids_map, sku_rows)
+
+    product_ids = list({pid for pids in po_pids_map.values() for pid in pids if pid})
+    if not product_ids:
+        product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})
+
+    prod_name_map = await _fetch_prod_name_map(db, product_ids)
+    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
+    items_map, items_by_order, items_map_by_part = await _fetch_po_items_map(db, po_ids)
 
     group_map = _build_factory_group_map(
         orders, bom_data, items_map, items_by_order, cust_order_map, prod_name_map,
