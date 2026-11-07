@@ -151,7 +151,10 @@ async def revoke_pending_purchase_orders_for_product(db: AsyncSession, product_i
     Returns:
         dict: ``{'revoked': 撤销的采购单数, 'orders_reset': 状态被改写的订单数}``。
     """
-    from fastapi_app.services.purchase._common import fetch_po_sku_pids_map
+    from fastapi_app.services.purchase._common import (
+        _resolve_pids_from_sku_lines,
+        fetch_po_sku_pids_map,
+    )
     from fastapi_app.services.purchase._unprocessed import _fetch_bom_product_ids
     from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderStatus
 
@@ -177,6 +180,22 @@ async def revoke_pending_purchase_orders_for_product(db: AsyncSession, product_i
     # 精确判定仍走原口径（来源订单 → order_item / order / stock_in 三级回退），
     # 只是作用范围从「全部 pending 单」收窄到候选集，判定结果与旧实现逐字一致。
     pids_map = await fetch_po_sku_pids_map(db, pending)
+    # **备货来源的采购单必须再补一次快照反查**（2026-11-07 生产缺陷）：
+    # `fetch_po_sku_pids_map` 的来源只读采购单主表的 `source_order_id/source_order_ids`，
+    # 而「一键生成」的备货单这两个字段是 NULL，来源只落在 `purchase_order_sku` 快照里
+    # → pids_map 恒为空 → 下面的 `product_id in pids` 永不命中 → **删空 BOM 也撤不掉单**
+    # （实证：PO-20261106-0003 删空 BOM 后仍可下单，日志 `revoked: 0`，而同函数对
+    #   客户订单来源的 product 20909 是 `revoked: 1`）。
+    # 与工厂汇总 `purchase_order_query.get_factory_order_summary` 同款补丁：用**直接读表**
+    # 的 `fetch_po_sku_map`（而不是 `fetch_po_sku_lines_map` —— 后者同样从主表
+    # `source_order_ids` 出发，对这类单也是空的，一开始就写错过）取逐 SKU 快照，
+    # 再用产品名反查 Product.id。**只在对不上时才查**：没有任何空 pids 的单就不发
+    # 这次查询，普通客户订单来源的撤销路径查询次数与改动前逐字一致。
+    if any(not pids for pids in pids_map.values()):
+        from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
+
+        sku_rows = await fetch_po_sku_map(db, [po.id for po in pending])
+        await _resolve_pids_from_sku_lines(db, pids_map, sku_rows)
     targets = [po for po in pending if product_id in pids_map.get(po.id, [])]
 
     result = await _revoke_targets(db, targets)
