@@ -2,8 +2,8 @@
 // 方案4：迁移到 @tanstack/vue-query，删除手写 SWR/sessionStorage 缓存（由 persistQueryClient 接管）
 // 方案1：Vue Query shallowRef + structural sharing 避免全量重渲染
 // 方案5：在预处理阶段格式化 parseFloat，消除模板内反复类型转换
-// 方案A改版：分组键改为登记级 supplier_name（item 级字段后端不返回），
-// 同单多条登记合并为一行、每条登记一个供应商块；30 天逾期标记与后端 stats/distribution 同口径
+// 方案A改版：分组键为明细级 supplier_name（缺省回退登记级），
+// 同单多条登记合并为一行、登记内按供应商拆成多个供应商块；30 天逾期标记与后端 stats/distribution 同口径
 import { ref, computed, watch, onUnmounted, type Ref } from 'vue'
 import { useQuery, keepPreviousData } from '@tanstack/vue-query'
 import { queryClient } from '@/utils/queryClient'
@@ -27,7 +27,7 @@ export interface MergedItem extends RegItem {
   overdue: boolean
 }
 
-// 按供应商分组的物料行（= 一条登记：登记级 supplier_name）
+// 按供应商分组的物料行（= 登记内同一供应商的物料集合；条目带明细级 supplier_name）
 export interface SupplierGroupRow {
   supplierName: string
   items: MergedItem[]
@@ -95,9 +95,15 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
     const regDate = parseUtcDate(r.registration_date)
     const regOverdue = !!regDate && regDate < cutoff
 
-    // 组内按物料名合并
-    const mergedMap = new Map<string, MergedItem>()
+    // 登记内先按明细级供应商分桶，再在桶内按物料名合并
+    const supplierBuckets = new Map<string, Map<string, MergedItem>>()
     for (const i of items) {
+      const supName = i.supplier_name || r.supplier_name || '未指定'
+      let mergedMap = supplierBuckets.get(supName)
+      if (!mergedMap) {
+        mergedMap = new Map<string, MergedItem>()
+        supplierBuckets.set(supName, mergedMap)
+      }
       const ordered = parseFloat(String(i.ordered_quantity || 0))
       const received = parseFloat(String(i.received_quantity || 0))
       const existing = mergedMap.get(i.material_name)
@@ -123,17 +129,6 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
         })
       }
     }
-    const mergedItems = Array.from(mergedMap.values())
-    const gOrdered = mergedItems.reduce((s, i) => s + i.ordered_quantity, 0)
-    const gReceived = mergedItems.reduce((s, i) => s + i.received_quantity, 0)
-    const group: SupplierGroupRow = {
-      supplierName: r.supplier_name || '未指定',
-      items: mergedItems,
-      status: gReceived > 0 ? 'partial' : 'pending',
-      progress: gOrdered > 0 ? Math.round((gReceived / gOrdered) * 100) : 0,
-      overdue: regOverdue && mergedItems.some((i) => i.received_quantity < i.ordered_quantity),
-      registrationDate: r.registration_date || '',
-    }
 
     // 同单合并（一行 = 一个采购订单）
     const key = r.purchase_order_no
@@ -149,7 +144,24 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
       }
       orderMap.set(key, order)
     }
-    order.groups.push(group)
+
+    // 一条登记可产出多个供应商块；无明细时保留一个空块（旧行为）
+    const buckets = supplierBuckets.size
+      ? Array.from(supplierBuckets, ([supplierName, mergedMap]) => [supplierName, mergedMap] as const)
+      : [[r.supplier_name || '未指定', new Map<string, MergedItem>()] as const]
+    for (const [supplierName, mergedMap] of buckets) {
+      const mergedItems = Array.from(mergedMap.values())
+      const gOrdered = mergedItems.reduce((s, i) => s + i.ordered_quantity, 0)
+      const gReceived = mergedItems.reduce((s, i) => s + i.received_quantity, 0)
+      order.groups.push({
+        supplierName,
+        items: mergedItems,
+        status: gReceived > 0 ? 'partial' : 'pending',
+        progress: gOrdered > 0 ? Math.round((gReceived / gOrdered) * 100) : 0,
+        overdue: regOverdue && mergedItems.some((i) => i.received_quantity < i.ordered_quantity),
+        registrationDate: r.registration_date || '',
+      })
+    }
     order.productQuantity += r.product_quantity || 0
   }
 

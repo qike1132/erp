@@ -13,6 +13,7 @@ class MaterialRegistrationItemCreate(BaseModel):
     ordered_quantity: float = Field(..., ge=0)
     received_quantity: float = Field(0, ge=0)
     material_category: str | None = Field(default=None, max_length=20)
+    supplier_name: str | None = Field(default=None, max_length=100)
     remark: str | None = None
 
 

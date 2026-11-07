@@ -5,7 +5,7 @@
  * 分段堆叠条 / 四档状态色 / 逾期 30 天口径 / 客户端搜索」这些是结构事实，在此固化。
  *
  * 设计要点（与 mockups/material-redesign-2026-09-29.html 对齐，两处诚实修正）：
- *  · 一行 = 一个采购订单（同单多条登记合并，每条登记一个供应商块）
+ *  · 一行 = 一个采购订单（同单多条登记合并，登记内按明细供应商拆块）
  *  · 供应商块默认展开（collapse 语义反转：记"已收起"集合）
  *  · 总进度列 = 按供应商分段堆叠条，段宽=该登记采购量占比，段色=登记状态
  *  · 逾期口径与后端 stats/distribution 完全一致：登记日期 < 今天-30 且未收齐
@@ -79,6 +79,28 @@ describe('buildProgressOrderRows —— 同单合并与供应商分组', () => {
 
     expect(rows).toHaveLength(1)
     expect(rows[0]?.groups.map((g) => g.supplierName)).toEqual(['佳宝', '华源'])
+  })
+
+  it('一条登记内按明细供应商拆块：同供应商物料合并，缺字段回退登记级', () => {
+    const rows = buildProgressOrderRows([reg({
+      purchase_order_no: 'PO-S',
+      supplier_name: '三虎',
+      items: [
+        { id: 1, material_name: '7毛精兔绒', specification: '1214#', material_category: 'fabric', ordered_quantity: 270, received_quantity: 0, remaining_quantity: 270, progress: 0, unit: '码', supplier_name: '三虎' },
+        { id: 2, material_name: '1.0超柔', specification: 'A126#', material_category: 'fabric', ordered_quantity: 12, received_quantity: 0, remaining_quantity: 12, progress: 0, unit: '码', supplier_name: '美利达' },
+        { id: 3, material_name: '1.0超柔', specification: 'A50#', material_category: 'fabric', ordered_quantity: 39, received_quantity: 0, remaining_quantity: 39, progress: 0, unit: '码', supplier_name: '美利达' },
+        { id: 4, material_name: '2mm吉荣', specification: 'B016#', material_category: 'fabric', ordered_quantity: 11, received_quantity: 0, remaining_quantity: 11, progress: 0, unit: '码' },
+      ],
+    })], NOW)
+
+    const groups = rows[0]!.groups
+    expect(groups.map((g) => g.supplierName)).toEqual(['三虎', '美利达'])
+    // 缺明细供应商 → 回退登记级（三虎）
+    expect(groups[0]?.items.map((i) => i.material_name)).toEqual(['7毛精兔绒', '2mm吉荣'])
+    // 同供应商同名物料合并
+    expect(groups[1]?.items).toHaveLength(1)
+    expect(groups[1]?.items[0]?.ordered_quantity).toBe(51)
+    expect(rows[0]?.groups.length).toBe(2)
   })
 
   it('filling 类物料不进入进度块（与旧实现口径一致）', () => {

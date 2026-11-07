@@ -190,12 +190,13 @@ class TestUpdateSupplier:
 
         await update_supplier(db, 1, {"name": "NewName"})
 
-        # 1 次同名检查 + 11 次 UPDATE（双轨同步）：
+        # 1 次同名检查 + 12 次 UPDATE（双轨同步）：
         # - 物料表 3 表 × 2 (按 id + 按 name) = 6
         # - PurchaseOrder 1 (按 id) + 1 (按 name) = 2
         # - PurchaseOrderItem 1 (按 name)
         # - MaterialRegistration 1 (按 id) + 1 (按 name) = 2
-        assert db.execute.await_count == 1 + 11
+        # - MaterialRegistrationItem 1 (按 name，明细级供应商)
+        assert db.execute.await_count == 1 + 12
 
     @pytest.mark.asyncio
     async def test_update_supplier_contact_only_triggers_po_sync(self):

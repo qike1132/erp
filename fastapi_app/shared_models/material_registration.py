@@ -132,6 +132,7 @@ class MaterialRegistrationItem(Base):
     ordered_quantity: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     received_quantity: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     material_category: Mapped[str | None] = mapped_column(String(20))
+    supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(明细级)')
     remark: Mapped[str | None] = mapped_column(Text)
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
@@ -163,6 +164,7 @@ class MaterialRegistrationItem(Base):
             'remaining_quantity': remaining,
             'progress': item_progress,
             'material_category': self.material_category or '',
+            'supplier_name': self.supplier_name or '',
             'remark': self.remark or '',
             'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else '',
         }

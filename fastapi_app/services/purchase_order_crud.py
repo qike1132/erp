@@ -47,7 +47,12 @@ def _scope_remark(source_role: str | None) -> str:
 async def _create_material_registration(
     db: AsyncSession, order: PurchaseOrder, items: Sequence[PurchaseOrderItem],
 ) -> MaterialRegistration:
-    """创建来料登记及其明细行（由调用方负责最终 flush/commit）。"""
+    """创建来料登记及其明细行（由调用方负责最终 flush/commit）。
+
+    明细 = 采购明细 + BOM 中未被采购明细覆盖的物料行（见
+    ``services/material_registration/_bom_items.py``），使 /material 与工厂汇总
+    一样能显示产品 BOM 的全部物料及其明细级供应商。
+    """
     registration = MaterialRegistration(
         purchase_order_id=order.id,
         purchase_order_no=order.order_no,
@@ -60,18 +65,23 @@ async def _create_material_registration(
     db.add(registration)
     await db.flush()
 
-    for item in items:
+    from fastapi_app.services.material_registration._bom_items import (
+        build_registration_items,
+    )
+
+    for row in await build_registration_items(db, order, items):
         db.add(MaterialRegistrationItem(
             registration_id=registration.id,
-            order_item_id=item.id,
-            material_code=item.material_code or '',
-            material_name=item.material_name,
-            specification=item.specification or '',
-            unit=item.unit or '',
-            ordered_quantity=item.quantity,
-            received_quantity=0,
-            material_category=item.material_category or '',
-            remark=item.remark or '',
+            order_item_id=row['order_item_id'],
+            material_code=row['material_code'],
+            material_name=row['material_name'],
+            specification=row['specification'],
+            unit=row['unit'],
+            ordered_quantity=row['ordered_quantity'],
+            received_quantity=row['received_quantity'],
+            material_category=row['material_category'],
+            supplier_name=row['supplier_name'],
+            remark=row['remark'],
         ))
     return registration
 

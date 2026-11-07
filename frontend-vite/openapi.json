@@ -27739,6 +27739,18 @@
             ],
             "title": "Material Category"
           },
+          "supplier_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Name"
+          },
           "remark": {
             "anyOf": [
               {

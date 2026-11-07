@@ -1390,6 +1390,7 @@ export interface MaterialRegistrationItemCreate {
   ordered_quantity: number
   received_quantity?: number
   material_category?: string | null
+  supplier_name?: string | null
   remark?: string | null
 }
 

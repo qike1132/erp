@@ -15,6 +15,7 @@ from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
 from fastapi_app.shared_models import (
     MaterialRegistration,
+    MaterialRegistrationItem,
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
@@ -268,6 +269,11 @@ async def _sync_supplier_info(
             update(MaterialRegistration).where(
                 MaterialRegistration.supplier_name == old_name,
                 MaterialRegistration.supplier_id.is_(None)
+            ).values(supplier_name=new_name)
+        )
+        await db.execute(
+            update(MaterialRegistrationItem).where(
+                MaterialRegistrationItem.supplier_name == old_name
             ).values(supplier_name=new_name)
         )
 

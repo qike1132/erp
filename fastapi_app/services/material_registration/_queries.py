@@ -140,7 +140,7 @@ async def get_supplier_detail(db, order_no: str) -> dict:
     """获取按供应商分组的来料聚合详情（服务端预聚合，消除前端 60+ 行同步计算）。
 
     查询指定 order_no 的未完成登记，遍历所有 items（排除 filling 类），
-    按 reg.supplier_name 分组，组内按 material_name 合并数量并计算进度。
+    按 item 级 supplier_name（回退登记级）分组，组内按 material_name 合并数量并计算进度。
     L1 10s + L2 30s 缓存，写操作时通过 MATERIAL 域失效。
     """
     query = (
@@ -158,11 +158,11 @@ async def get_supplier_detail(db, order_no: str) -> dict:
     supplier_map: dict[str, dict[str, dict]] = {}
 
     for reg in registrations:
-        sup_name = reg.supplier_name or '未指定'
-        mat_map = supplier_map.setdefault(sup_name, {})
         for item in reg.items:
             if (item.material_category or '') == 'filling':
                 continue
+            sup_name = item.supplier_name or reg.supplier_name or '未指定'
+            mat_map = supplier_map.setdefault(sup_name, {})
             ordered = float(item.ordered_quantity or 0)
             received = float(item.received_quantity or 0)
             mat_name = item.material_name

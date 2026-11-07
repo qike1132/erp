@@ -13,9 +13,56 @@ from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
     PurchaseOrder,
+    PurchaseOrderItem,
 )
 
+from ._bom_items import _material_key, aggregate_bom_rows
+
 logger = logging.getLogger(__name__)
+
+
+async def _enrich_items_with_supplier_and_bom(db, po, items_data: list[dict]) -> None:
+    """补明细级供应商，并追加 BOM 中未被传入明细覆盖的物料行（原地修改）。"""
+    po_items = (await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == po.id)
+    )).scalars().all()
+    by_id = {item.id: item for item in po_items}
+    by_key = {
+        _material_key(item.material_name, item.specification, item.unit): item
+        for item in po_items
+    }
+    default_supplier = po.supplier_name or ''
+
+    for item_data in items_data:
+        if item_data.get('supplier_name'):
+            continue
+        matched = by_id.get(item_data.get('order_item_id')) or by_key.get(
+            _material_key(
+                item_data.get('material_name', ''),
+                item_data.get('specification', ''),
+                item_data.get('unit', ''),
+            )
+        )
+        item_data['supplier_name'] = (
+            (matched.supplier_name if matched else '') or default_supplier
+        )
+
+    covered = {
+        _material_key(d.get('material_name', ''), d.get('specification', ''), d.get('unit', ''))
+        for d in items_data
+    }
+    try:
+        bom_rows = await aggregate_bom_rows(db, po)
+    except Exception:  # broad-except: BOM 补全失败不能阻断登记创建
+        logger.warning('来料登记补全 BOM 行失败 order_id=%s', po.id, exc_info=True)
+        return
+    for bom in bom_rows:
+        if _material_key(
+            bom['material_name'], bom['specification'], bom['unit'],
+        ) in covered:
+            continue
+        bom['supplier_name'] = bom['supplier_name'] or default_supplier
+        items_data.append(bom)
 
 
 async def create_registration(db, purchase_order_id: int, user_id: int | None = None,
@@ -39,7 +86,8 @@ async def create_registration(db, purchase_order_id: int, user_id: int | None = 
     db.add(reg)
     await db.flush()
 
-    items_data = items_data or []
+    items_data = list(items_data or [])
+    await _enrich_items_with_supplier_and_bom(db, po, items_data)
     for item_data in items_data:
         item = MaterialRegistrationItem(
             registration_id=reg.id,
@@ -51,6 +99,7 @@ async def create_registration(db, purchase_order_id: int, user_id: int | None = 
             ordered_quantity=Decimal(str(item_data.get('ordered_quantity', 0))),
             received_quantity=Decimal(str(item_data.get('received_quantity', 0))),
             material_category=item_data.get('material_category', ''),
+            supplier_name=item_data.get('supplier_name') or '',
             remark=item_data.get('remark', ''),
         )
         db.add(item)
