@@ -387,13 +387,21 @@ async def get_factory_order_summary(
     if not product_ids:
         product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})
 
-    prod_name_map = await _fetch_prod_name_map(db, product_ids)
+    # 产品名与陈列样随箱配比一次取回（不新增固定查询）；配比 SKU 才追加角色表查询。
+    # 按 SKU 推算必须与生成路径同口径，否则差异对照块会误报「手工调整」。
+    from fastapi_app.services.purchase._factory import (
+        _fetch_prod_name_and_ratio,
+        _fetch_roles_ctx,
+    )
+    prod_name_map, ratio_map = await _fetch_prod_name_and_ratio(db, product_ids)
     bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
     items_map, items_by_order, items_map_by_part = await _fetch_po_items_map(db, po_ids)
+    hidden_ratio_ctx = await _fetch_roles_ctx(db, ratio_map)
 
     group_map = _build_factory_group_map(
         orders, bom_data, items_map, items_by_order, cust_order_map, prod_name_map,
         po_pids_map=po_pids_map, po_sku_map=sku_rows, items_map_by_part=items_map_by_part,
+        hidden_ratio_ctx=hidden_ratio_ctx,
     )
     groups = _serialize_factory_groups(group_map)
 

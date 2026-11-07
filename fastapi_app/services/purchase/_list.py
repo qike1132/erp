@@ -51,6 +51,9 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
             'quantity': float(row.cotton_usage or 0),
             'supplier_name': row.supplier_name or '',
             'category': 'filling',
+            # 作用域：陈列样随箱配比 SKU 的按 SKU 推算要按角色取分配数量
+            # （见 purchase/_factory._sku_material_rows 的 allocation 参数）
+            'role_id': row.role_id,
         })
 
     fab_result = await db.execute(
@@ -66,6 +69,7 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
             'quantity': float(fabric_row.quantity or 0),
             'supplier_name': fabric_row.supplier_name or '',
             'category': 'fabric',
+            'role_id': fabric_row.role_id,
         })
 
     acc_result = await db.execute(
@@ -81,6 +85,7 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
             'quantity': float(accessory_row.quantity or 0),
             'supplier_name': accessory_row.supplier_name or '',
             'category': 'accessory',
+            'role_id': accessory_row.role_id,
         })
 
     return bom_data

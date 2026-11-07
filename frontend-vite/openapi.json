@@ -31021,6 +31021,20 @@
             "description": "初始库存",
             "default": 0
           },
+          "hidden_carton_ratio": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden Carton Ratio",
+            "description": "隐藏款随箱配比：每多少个订单数量配 1 个隐藏款；需在 BOM 配置 6 个常规角色 + 1 个「隐藏款」角色；空 = 不启用"
+          },
           "customer_ids": {
             "items": {
               "type": "integer"
@@ -31368,6 +31382,17 @@
             "type": "integer",
             "title": "Current Stock"
           },
+          "hidden_carton_ratio": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden Carton Ratio"
+          },
           "create_time": {
             "anyOf": [
               {
@@ -31567,6 +31592,20 @@
             ],
             "title": "Initial Stock",
             "description": "初始库存"
+          },
+          "hidden_carton_ratio": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden Carton Ratio",
+            "description": "隐藏款随箱配比；未提交 = 不改动，显式 null = 清空（停用规则）"
           },
           "customer_ids": {
             "anyOf": [

@@ -119,7 +119,11 @@ async def create_product(data: ProductCreate, db: AsyncSession=Depends(get_async
     # 不接受客户端传参（与库存/订单写路径同口径）。
     factory = _user.factory if (_user.factory and not _user.is_super) else data.factory
     async with db_transaction(db):
-        await product_service.create_product(db, name=data.name, barcode=data.barcode, price=data.price, image=data.image, factory=factory, initial_stock=data.initial_stock, customer_ids=data.customer_ids)
+        await product_service.create_product(
+            db, name=data.name, barcode=data.barcode, price=data.price, image=data.image,
+            factory=factory, initial_stock=data.initial_stock,
+            hidden_carton_ratio=data.hidden_carton_ratio, customer_ids=data.customer_ids,
+        )
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)
     return ProductActionResponse(success=True, message='产品添加成功！')
 
@@ -161,7 +165,16 @@ async def edit_product(product_id: int, data: ProductUpdate, db: AsyncSession=De
         # 「不改归属」，避免厂绑定用户只改价格就把空工厂历史产品静默认领。
         factory = _user.factory if data.factory else None
     async with db_transaction(db):
-        await product_service.update_product(db, product_id=product_id, name=data.name, barcode=data.barcode, price=data.price, image=data.image, factory=factory, initial_stock=data.initial_stock, customer_ids=data.customer_ids)
+        # 配比三态：字段在请求体里显式出现（含 null）才写；未提交 = 保持原值，
+        # 旧客户端只改价格时不会把已配的随箱配比静默清掉。
+        await product_service.update_product(
+            db, product_id=product_id, name=data.name, barcode=data.barcode,
+            price=data.price, image=data.image, factory=factory,
+            initial_stock=data.initial_stock,
+            hidden_carton_ratio=data.hidden_carton_ratio,
+            hidden_carton_ratio_provided='hidden_carton_ratio' in data.model_fields_set,
+            customer_ids=data.customer_ids,
+        )
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)
     return ProductActionResponse(success=True, message='产品编辑成功！')
 

@@ -8,6 +8,8 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import partial
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -43,6 +45,7 @@ from fastapi_app.utils.scope_order import (
     order_scopes,
     scope_label,
 )
+from fastapi_app.utils.scope_quantities import allocate_scope_quantities
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +100,13 @@ def _scope_label(pid: int, role_id: int | None, role_names: dict[tuple[int, int]
     return scope_label(role_id, role_name)
 
 
+def _role_name_lookup(
+    role_names: dict[tuple[int, int], str], pid: int, rid: int,
+) -> str | None:
+    """``partial`` 用的角色名查找：``(role_names, pid)`` 绑定后即 ``rid -> str|None``。"""
+    return role_names.get((pid, rid))
+
+
 @dataclass(frozen=True)
 class _MaterialSpec:
     """三类 BOM 物料的字段映射。
@@ -124,13 +134,16 @@ _MATERIAL_SPECS: tuple[_MaterialSpec, ...] = (
 
 @dataclass
 class _BomContext:
-    """一次生成所需的 BOM 上下文（三类分桶 + 作用域清单 + 角色名）。"""
+    """一次生成所需的 BOM 上下文（三类分桶 + 作用域清单 + 角色名 + 陈列样配比）。"""
 
     filling: dict = field(default_factory=dict)
     fabric: dict = field(default_factory=dict)
     accessory: dict = field(default_factory=dict)
     scopes_by_pid: dict[int, list] = field(default_factory=dict)
     role_names: dict[tuple[int, int], str] = field(default_factory=dict)
+    # 陈列样隐藏款随箱配比：{product_id: P}。键存在 = 该 SKU 启用
+    # 「6 常规款均分 + 隐藏款 ceil(N/P)」规则；不存在的 SKU 走历史全量口径。
+    hidden_ratios: dict[int, int] = field(default_factory=dict)
 
     def scopes_for(self, pid: int) -> list:
         """产品无任何角色 BOM 时回退到 [None]（仅默认BOM），保持旧行为。"""
@@ -170,13 +183,56 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
     多 SKU 模型：遍历每条记录的所有 SKU（Order.items 或 StockIn 单 SKU），
     为每个 SKU 独立展开 BOM，并**对每个 BOM 作用域各算一遍**（都用该 SKU 的
     完整数量，不分摊），与物料计算器口径一致。
+
+    陈列样随箱配比 SKU（ctx.hidden_ratios 有该 pid）：同客户组内同 SKU 先把
+    数量**合并成订单总数量 N** 再分配——常规 6 款 ``floor(N/6)`` + 余数按固定
+    角色顺序逐款 +1，隐藏款 ``ceil(N/P)``（ceil 只取整一次，多行同 SKU 不会
+    重复进位）；该 SKU 的明细按合并口径**整体产出一次**（默认 BOM 仍用完整 N）。
+    未配置配比的 SKU 走历史逐行全量路径，行为零变化。
     """
+    # 先把启用规则的 SKU 在本组内的数量合并为「订单总数量」
+    merged_configured_qty: dict[int, float] = {}
+    if ctx.hidden_ratios:
+        for rec in records:
+            for pid, qty in _iter_source_skus(rec):
+                if pid in ctx.hidden_ratios:
+                    merged_configured_qty[pid] = merged_configured_qty.get(pid, 0) + float(qty)
+
     result_items: list = []
+    emitted_configured: set[int] = set()
     for rec in records:
         customer_name = rec.customer
         for pid, qty in _iter_source_skus(rec):
             product_name = pid_name_map.get(pid, '未知产品')
-            for role_id in ctx.scopes_for(pid):
+            scopes = ctx.scopes_for(pid)
+
+            if pid in ctx.hidden_ratios:
+                if pid in emitted_configured:
+                    # 该 SKU 的明细已在首次遇到时按合并后的订单总数量整体产出，
+                    # 跳过后续来源行，避免重复落库。
+                    continue
+                emitted_configured.add(pid)
+                allocation = allocate_scope_quantities(
+                    merged_configured_qty.get(pid, 0),
+                    scopes,
+                    hidden_carton_ratio=ctx.hidden_ratios[pid],
+                    name_of=partial(_role_name_lookup, ctx.role_names, pid),
+                )
+                for role_id in scopes:
+                    scope_label = _scope_label(pid, role_id, ctx.role_names)
+                    # 分配值恒为 int（各角色）/ float（默认 BOM=合并总量），
+                    # cast 只是把「object 返回类型」收窄回 _material_row 的数量参数。
+                    scope_qty = cast('int | float', allocation.get(role_id, qty))
+                    for spec in _MATERIAL_SPECS:
+                        for row in getattr(ctx, spec.map_attr).get(role_id, []):
+                            if row.product_id != pid:
+                                continue
+                            result_items.append(
+                                _material_row(spec, row, scope_qty, product_name, customer_name, scope_label)
+                            )
+                continue
+
+            for role_id in scopes:
                 scope_label = _scope_label(pid, role_id, ctx.role_names)
                 for spec in _MATERIAL_SPECS:
                     for row in getattr(ctx, spec.map_attr).get(role_id, []):
@@ -320,6 +376,14 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
             material_roles,
             name_of=lambda rid, _pid=pid: ctx.role_names.get((_pid, rid)),
         )
+
+    # 陈列样隐藏款随箱配比（第 5 次查询）：只收集非空值，键存在即启用分摊规则。
+    ratio_result = await db.execute(
+        select(Product.id, Product.hidden_carton_ratio).where(Product.id.in_(product_ids))
+    )
+    for p_id, ratio in ratio_result.all():
+        if ratio:
+            ctx.hidden_ratios[p_id] = int(ratio)
     return ctx
 
 

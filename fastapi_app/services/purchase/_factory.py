@@ -3,6 +3,7 @@
 从 purchase_order_query_helpers.py 按主题拆出,行为与原实现完全一致。
 """
 import logging
+from functools import partial
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,8 +12,9 @@ from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.purchase._common import _parse_source_order_ids
 from fastapi_app.services.purchase._list import _is_filling_category
 from fastapi_app.services.purchase_order_sku import merge_sku_lines
-from fastapi_app.shared_models import Product
+from fastapi_app.shared_models import Product, ProductRole
 from fastapi_app.shared_models.order import Order
+from fastapi_app.utils.scope_quantities import allocate_scope_quantities
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,74 @@ async def _fetch_prod_name_map(db: AsyncSession, product_ids: list[int]) -> dict
         select(Product.id, Product.name).where(Product.id.in_(product_ids))
     )
     return dict(prod_result.tuples().all())
+
+
+async def _fetch_prod_name_and_ratio(
+    db: AsyncSession, product_ids: list[int],
+) -> tuple[dict[int, str], dict[int, int]]:
+    """一次查询取回产品名与陈列样随箱配比：``({pid: name}, {pid: ratio})``。
+
+    合并进原 ``_fetch_prod_name_map`` 的同一次往返（不新增固定查询——工厂汇总有
+    「读查询数 ≤10」护栏，见 test_c12）；只有配比非空的 SKU 才进第二个字典。
+    """
+    if not product_ids:
+        return {}, {}
+    prod_result = await db.execute(
+        select(Product.id, Product.name, Product.hidden_carton_ratio)
+        .where(Product.id.in_(product_ids))
+    )
+    names: dict[int, str] = {}
+    ratios: dict[int, int] = {}
+    for pid, name, ratio in prod_result.all():
+        names[pid] = name
+        if ratio:
+            ratios[pid] = int(ratio)
+    return names, ratios
+
+
+async def _fetch_roles_ctx(db: AsyncSession, ratios: dict[int, int]) -> dict[int, dict]:
+    """按配比 SKU 加载角色名：``{pid: {'ratio': int, 'roles': {rid: name}}}``。
+
+    只在存在配置配比的 SKU 时查询角色表（存量数据零额外查询，既有 SQLite
+    子集夹具无需补 ``product_role`` 表）。
+    """
+    if not ratios:
+        return {}
+    role_result = await db.execute(
+        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
+        .where(ProductRole.product_id.in_(list(ratios)))
+    )
+    roles: dict[int, dict[int, str]] = {}
+    for rid, pid, role_name in role_result.all():
+        roles.setdefault(pid, {})[rid] = role_name or ''
+    return {pid: {'ratio': ratio, 'roles': roles.get(pid, {})} for pid, ratio in ratios.items()}
+
+
+def _role_name_from_map(role_names: dict[int, str], rid: int) -> str | None:
+    """``partial`` 用的角色名查找（避免 mypy 对闭包 lambda 的推断限制）。"""
+    return role_names.get(rid)
+
+
+def _factory_sku_allocation(ctx_entry: dict, sku_qty: float) -> dict | None:
+    """按随箱配比算该 SKU 各作用域的数量乘子；结构非法时告警并回退全量（不阻断页面）。
+
+    工厂汇总展示的是**已存在的采购单**：即使 SKU 当前角色结构不完整（历史脏数据），
+    也不得让整页 500——回退历史全量口径只影响推算对照，不影响落库真值。
+    """
+    role_names = ctx_entry.get('roles') or {}
+    try:
+        return allocate_scope_quantities(
+            sku_qty,
+            set(role_names) | {None},
+            hidden_carton_ratio=ctx_entry['ratio'],
+            name_of=partial(_role_name_from_map, role_names),
+        )
+    except ValueError:
+        logger.warning(
+            '工厂汇总按 SKU 推算：陈列样配比分配失败（sku_qty=%s），回退全量口径',
+            sku_qty, exc_info=True,
+        )
+        return None
 
 def _resolve_factory_source_info(po, cust_order_map, cust, order_qty):
     sids = _parse_source_order_ids(po)
@@ -293,11 +363,18 @@ def _norm_sku_name(value) -> str:
 
 def _sku_material_rows(
     bom_rows: list, sku_qty: float, supplier_fallback: str, split_parts: bool = False,
+    allocation: dict | None = None,
 ) -> list[dict]:
     """把某个 SKU 的 BOM 行展开为「该 SKU 自己的物料行」（口径 A）。
 
     `quantity` = ``单件用量 × 该 SKU 数量``（**基准量**，不含损耗加放 —— 加放由前端按该
     物料的行损耗率实时做，故这里必须给基准值）。
+
+    ``allocation``：陈列样随箱配比的 ``{role_id: 数量乘子}``（见
+    ``utils/scope_quantities.allocate_scope_quantities``）。传入时按 BOM 行的
+    ``role_id`` 取对应乘子（常规款均分值 / 隐藏款 ceil 值 / 默认 BOM 全量），
+    使「按 SKU 推算」与生成路径落库值同口径；``None`` = 历史口径（每行都用
+    ``sku_qty``，未配置配比的 SKU 行为零变化）。
 
     口径要点：
     - 过滤填充类（与工厂汇总既有展示口径一致）；
@@ -324,7 +401,8 @@ def _sku_material_rows(
         bom_part = _norm_part_name(bom.get('part_name'))
         part_key = bom_part if split_parts else ''
         key = (sup, bom['material_name'], bom['specification'], bom['unit'], part_key)
-        amount = round_qty(float(bom.get('quantity') or 0) * float(sku_qty or 0))
+        row_qty = sku_qty if allocation is None else allocation.get(bom.get('role_id'), sku_qty)
+        amount = round_qty(float(bom.get('quantity') or 0) * float(row_qty or 0))
         if key in buckets:
             buckets[key]['quantity'] += amount
         else:
@@ -350,7 +428,7 @@ def _sku_material_rows(
 
 def _accumulate_factory_sku_materials(
     group: dict, sku_lines: list, po, bom_data: dict, name_to_pid: dict, *,
-    split_parts: bool = False,
+    split_parts: bool = False, hidden_ratio_ctx: dict | None = None,
 ) -> None:
     """**逐采购单**累加「按 SKU 的物料明细」，供应商兜底取**本单**的 `po.supplier_name`。
 
@@ -369,17 +447,43 @@ def _accumulate_factory_sku_materials(
        多张单共用同一 SKU 名时数量相加（与既有语义一致）。逐单 `round_qty` 后相加，正好
        复现生成路径「逐单、逐 SKU 舍入后再汇总」的落库真值。绝不改回「按 SKU 名整体赋值」
        ——那会丢掉多单累加（Task-1 曾犯的缺陷）。
+    4. **陈列样随箱配比 SKU**（``hidden_ratio_ctx`` 有该 pid）：同一张采购单内先把各来源行
+       数量**合并成订单总数量**再分配（常规 6 款均分 / 隐藏款 ``ceil(N/P)``，ceil 只进位
+       一次），与生成路径「同客户组同 SKU 先合并再分配」同口径——逐行分配会让隐藏款重复
+       进位，前端差异对照块就会把「没差异」误报成手工调整。未配置的 SKU 走原逐行全量路径。
     """
+    # 配置了配比的 SKU：先按本单来源行合并数量（生成时同一批来源已合并过一次）
+    merged_configured_qty: dict[str, float] = {}
+    if hidden_ratio_ctx:
+        for sku in sku_lines:
+            sku_name = _norm_sku_name(sku.get('product_name'))
+            if name_to_pid.get(sku_name) in hidden_ratio_ctx:
+                merged_configured_qty[sku_name] = (
+                    merged_configured_qty.get(sku_name, 0.0) + float(sku.get('order_qty') or 0)
+                )
+
+    emitted_configured: set[str] = set()
     for sku in sku_lines:
         sku_name = _norm_sku_name(sku.get('product_name'))
         sku_pid = name_to_pid.get(sku_name)
         if sku_pid is None:
             continue
-        sku_qty = float(sku.get('order_qty') or 0)
+        ctx_entry = (hidden_ratio_ctx or {}).get(sku_pid)
+        if ctx_entry:
+            if sku_name in emitted_configured:
+                # 合并口径下该 SKU 的物料已整体产出，跳过后续来源行避免重复累加
+                continue
+            emitted_configured.add(sku_name)
+            sku_qty = merged_configured_qty.get(sku_name, float(sku.get('order_qty') or 0))
+            allocation = _factory_sku_allocation(ctx_entry, sku_qty)
+        else:
+            sku_qty = float(sku.get('order_qty') or 0)
+            allocation = None
         supplier_fallback = po.supplier_name or '未指定供应商'
         bucket = group['_sku_materials'].setdefault(sku_name, {})
         for row in _sku_material_rows(
-            bom_data.get(sku_pid) or [], sku_qty, supplier_fallback, split_parts=split_parts,
+            bom_data.get(sku_pid) or [], sku_qty, supplier_fallback,
+            split_parts=split_parts, allocation=allocation,
         ):
             key = (
                 row['supplier_name'], row['material_name'],
@@ -507,7 +611,7 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
 
 def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map,
                              prod_name_map, po_pids_map=None, po_sku_map=None,
-                             items_map_by_part=None) -> dict[tuple, dict]:
+                             items_map_by_part=None, hidden_ratio_ctx=None) -> dict[tuple, dict]:
     """构建 (客户, 产品名) → 汇总分组。
 
     ``po_pids_map``（``{po_id: [product_id, ...]}``）给出该采购单覆盖的**全部 SKU**，
@@ -567,6 +671,7 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
         name_to_pid = {name: pid for pid, name in (prod_name_map or {}).items()}
         _accumulate_factory_sku_materials(
             group, sku_lines, po, bom_data, name_to_pid, split_parts=split_parts,
+            hidden_ratio_ctx=hidden_ratio_ctx,
         )
 
         pids = _resolve_po_pids(po_pids_map, po, pid)

@@ -289,6 +289,7 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
                          image: str | None, initial_stock: int,
                          price: float | None = None,
                          factory: str | None = None,
+                         hidden_carton_ratio: int | None = None,
                          customer_ids: list[int] | None = None) -> dict:
     """
     创建产品
@@ -299,6 +300,7 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
     - 初始库存 >= 0
     - 初始库存 > 0 时记录 InventoryLog
     - customer_ids 非空时挂上客户归属；留空 = 所有客户可见
+    - hidden_carton_ratio 正整数（schema 已 gt=0），None = 不启用陈列样规则
     """
     validate_not_empty(name, "产品名称")
     if initial_stock < 0:
@@ -319,7 +321,8 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
         image=strip_upload_signature(image or ''),
         factory=factory or '',
         initial_stock=initial_stock,
-        current_stock=initial_stock
+        current_stock=initial_stock,
+        hidden_carton_ratio=hidden_carton_ratio,
     )
     db.add(product)
     try:
@@ -358,6 +361,8 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
                          initial_stock: int | None,
                          price: float | None = None,
                          factory: str | None = None,
+                         hidden_carton_ratio: int | None = None,
+                         hidden_carton_ratio_provided: bool = False,
                          customer_ids: list[int] | None = None) -> dict:
     """
     更新产品
@@ -367,6 +372,9 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     - 初始库存变更时调整 current_stock 并记录 InventoryLog；负库存判定收口到统一入口
       assert_stock_available（策略开关见 ALLOW_NEGATIVE_STOCK），不再内联比较
     - customer_ids 为 None 时不动归属；传列表则整体替换（空列表 = 清空，回到所有客户可见）
+    - hidden_carton_ratio 三态：hidden_carton_ratio_provided=False 不改动（旧客户端
+      只改价格时绝不能把已配的配比静默清掉）；True 时按值写入（None = 清空停用）。
+      端点用 ProductUpdate.model_fields_set 计算 provided。
     """
     product = await get_product_for_update(db, product_id)
     if not product:
@@ -395,6 +403,8 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
         product.image = strip_upload_signature(image)
     if factory is not None:
         product.factory = factory
+    if hidden_carton_ratio_provided:
+        product.hidden_carton_ratio = hidden_carton_ratio
 
     if initial_stock is not None and initial_stock != product.initial_stock:
         stock_change = initial_stock - product.initial_stock

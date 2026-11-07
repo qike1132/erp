@@ -22,6 +22,7 @@ from fastapi_app.shared_models import (
 )
 from fastapi_app.utils import calc_total_pages
 from fastapi_app.utils.scope_order import order_scopes, scope_label
+from fastapi_app.utils.scope_quantities import allocate_scope_quantities
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,47 @@ async def get_products_statistics(db: AsyncSession) -> dict:
     }
 
 
+def _accumulate_bom_row(totals: dict[tuple, dict], mat: dict, quantity: Decimal) -> None:
+    """把**一条** BOM 行按数量乘子累加进 ``totals``（聚合内核的最小单元）。
+
+    文本/数值字段的归一规则与历史行为逐字一致（见 _accumulate_bom_rows 的
+    docstring 与 2026-09-17 / null unit_usage 事故注记）；抽出单行函数是为了让
+    陈列样随箱配比 SKU 能**逐作用域**用不同的数量乘子累加（常规款均分值、
+    隐藏款 ceil 值），与共用内核保持同一套键与舍入口径。
+    """
+    category = mat.get('category', '')
+    # 文本字段一律归一：三张物料表的 material_code/unit/specification/supplier_name
+    # 在 DB 层均可空，`to_dict()` 原样透出 None。响应模型 MaterialCalcRow 声明为
+    # `str`（契约文档 +str），若不归一会抛 ResponseValidationError → 接口 500
+    # （2026-09-17 线上事故，见 test_calculate_material_null_code.py）。
+    name = mat.get('material_name', '') or ''
+    supplier_name = mat.get('supplier_name', '') or ''
+    specification = mat.get('specification', '') or ''
+    key = (category, name, supplier_name, specification)
+
+    bucket = totals.get(key)
+    if bucket is None:
+        bucket = {
+            'total': Decimal(0),
+            'name': name,
+            'category': category,
+            'unit': mat.get('unit', '') or '',
+            'supplier_name': supplier_name,
+            'specification': specification,
+            'material_code': mat.get('material_code', '') or '',
+        }
+        totals[key] = bucket
+
+    # 数值字段同样不得裸露：`Decimal(str(None))` 抛 arithmetic.InvalidOperation，
+    # 而它是 ArithmeticError 子类，**不在**接口 except 元组
+    # (ValueError, OperationalError, DisconnectionError, RuntimeError) 内
+    # ⇒ 会退化成无友好文案的 500。`unit_usage` 目前由三张表的 to_dict() 各自兜底
+    # （float(x) if x else 0），但那是**生产者自觉**；内核必须自己防住
+    # （见 test_kernel_tolerates_null_unit_usage）。
+    per_unit = Decimal(str(mat.get('unit_usage') or 0))
+    bucket['total'] += per_unit * quantity
+
+
 def _accumulate_bom_rows(
     totals: dict[tuple, dict], rows: list, quantity: Decimal,
 ) -> None:
@@ -280,37 +322,7 @@ def _accumulate_bom_rows(
         quantity: 该组行共用的数量乘子（订单总数量，不分摊）。
     """
     for mat in rows:
-        category = mat.get('category', '')
-        # 文本字段一律归一：三张物料表的 material_code/unit/specification/supplier_name
-        # 在 DB 层均可空，`to_dict()` 原样透出 None。响应模型 MaterialCalcRow 声明为
-        # `str`（契约文档 +str），若不归一会抛 ResponseValidationError → 接口 500
-        # （2026-09-17 线上事故，见 test_calculate_material_null_code.py）。
-        name = mat.get('material_name', '') or ''
-        supplier_name = mat.get('supplier_name', '') or ''
-        specification = mat.get('specification', '') or ''
-        key = (category, name, supplier_name, specification)
-
-        bucket = totals.get(key)
-        if bucket is None:
-            bucket = {
-                'total': Decimal(0),
-                'name': name,
-                'category': category,
-                'unit': mat.get('unit', '') or '',
-                'supplier_name': supplier_name,
-                'specification': specification,
-                'material_code': mat.get('material_code', '') or '',
-            }
-            totals[key] = bucket
-
-        # 数值字段同样不得裸露：`Decimal(str(None))` 抛 arithmetic.InvalidOperation，
-        # 而它是 ArithmeticError 子类，**不在**接口 except 元组
-        # (ValueError, OperationalError, DisconnectionError, RuntimeError) 内
-        # ⇒ 会退化成无友好文案的 500。`unit_usage` 目前由三张表的 to_dict() 各自兜底
-        # （float(x) if x else 0），但那是**生产者自觉**；内核必须自己防住
-        # （见 test_kernel_tolerates_null_unit_usage）。
-        per_unit = Decimal(str(mat.get('unit_usage') or 0))
-        bucket['total'] += per_unit * quantity
+        _accumulate_bom_row(totals, mat, quantity)
 
 
 def _finalize_bom_totals(totals: dict[tuple, dict]) -> dict[str, list[dict]]:
@@ -341,28 +353,89 @@ def _finalize_bom_totals(totals: dict[tuple, dict]) -> dict[str, list[dict]]:
     return result
 
 
+def _declared_role_ids(product: Product) -> set[int]:
+    """产品角色表声明的 role_id 集合（「配了角色但暂无物料」也计入分配校验）。
+
+    与生成路径 ``_load_bom_context`` 的「物料 role_id ∪ 声明角色 ∪ {None}」口径
+    一致：隐藏款角色即使还没配物料行，也必须参与 6+1 结构校验。
+    """
+    return {
+        pr.id
+        for pr in getattr(product, 'roles', None) or ()
+        if getattr(pr, 'id', None) is not None
+    }
+
+
+def _role_names_from_product(product: Product) -> dict[int, str]:
+    """从 ``product.roles`` 就地构建 ``{role_id: 显示名}``（扁平口径内自带角色名）。"""
+    names: dict[int, str] = {}
+    for pr in getattr(product, 'roles', None) or ():
+        rid = getattr(pr, 'id', None)
+        if rid is not None:
+            names[rid] = getattr(pr, 'role_name', '') or ''
+    return names
+
+
+def _lookup_role_name(names: dict[int, str], rid: int) -> str | None:
+    """``partial`` 用的角色名查找：绑定 ``names`` 后即 ``rid -> str|None``。"""
+    return names.get(rid)
+
+
 def aggregate_materials(orders_data: list, product_map: dict) -> dict:
     """按 (分类, 物料名, 供应商, 规格) 聚合物料用量（**全作用域合并口径**）。
 
-    纯函数：无 DB 依赖，便于单元测试聚合策略。口径与迁移前**完全一致**——
-    所有作用域的物料合并累计，供旧客户端兼容（§7#8/#9）。
+    纯函数：无 DB 依赖，便于单元测试聚合策略。未配置随箱配比的 SKU 口径与
+    迁移前**完全一致**——所有作用域的物料合并累计（§7#8/#9）。
 
-    Args:
-        orders_data: 订单列表，每项含 product_id 与 quantity。
-        product_map: {product_id: Product} 映射，Product 须实现 has_bom() 与 get_all_materials()。
-
-    Returns:
-        dict: {category: [CalcRow, ...]}，category ∈ filling/fabric/accessory/packaging。
+    陈列样随箱配比 SKU（``product.hidden_carton_ratio`` 非空）：先把订单行按
+    SKU 合并成订单总数量 N，再按 ``utils/scope_quantities`` 分配到各作用域
+    （常规 6 款均分、隐藏款 ``ceil(N/P)``），逐行累加——与
+    ``aggregate_materials_by_scope`` 及采购单生成共用同一分配函数，
+    「计算器算出来的」与「一键生成落单的」恒等。
     """
     totals: dict[tuple, dict] = {}
+
+    # 配置了配比的 SKU：先合并订单行数量（非线性分配必须对总量做一次，
+    # 逐行分配会让隐藏款 ceil 重复进位），预计算 {role_id: 数量乘子}
+    merged = _merge_order_quantities(orders_data)
+    allocations: dict[int, dict] = {}
+    for product_id, merged_qty in merged.items():
+        product = product_map.get(product_id)
+        if not product or not product.has_bom():
+            continue
+        ratio = getattr(product, 'hidden_carton_ratio', None)
+        if not ratio:
+            continue
+        names = _role_names_from_product(product)
+        allocations[product_id] = allocate_scope_quantities(
+            merged_qty,
+            {row.get('role_id') for row in product.get_all_materials()}
+            | _declared_role_ids(product) | {None},
+            hidden_carton_ratio=int(ratio),
+            name_of=partial(_lookup_role_name, names),
+        )
+
+    emitted: set[int] = set()
     for order_item in orders_data:
         product_id = order_item.get('product_id')
-        quantity = Decimal(str(order_item.get('quantity', 0)))
-
         product = product_map.get(product_id)
         if not product or not product.has_bom():
             continue
 
+        allocation = allocations.get(product_id)
+        if allocation is not None:
+            # 启用规则的 SKU：对合并后的总量整体累加一次（跳过后续同 SKU 订单行）
+            if product_id in emitted:
+                continue
+            emitted.add(product_id)
+            for row in product.get_all_materials():
+                row_qty = allocation.get(row.get('role_id'))
+                if row_qty is None:
+                    continue  # 防御：分配清单覆盖全部声明作用域，正常不可达
+                _accumulate_bom_row(totals, row, Decimal(str(row_qty)))
+            continue
+
+        quantity = Decimal(str(order_item.get('quantity', 0)))
         _accumulate_bom_rows(totals, product.get_all_materials(), quantity)
 
     return _finalize_bom_totals(totals)
@@ -393,8 +466,13 @@ def aggregate_materials_by_scope(
     **天然自洽**：``Σ(groups 各块[category]) ≡ aggregate_materials[category]``
     （由单测恒等式固化）。
 
-    数量语义（§7#9）：一个产品只有一个订单总数量，**每个作用域都用该总数量展开，
-    不分摊**。空作用域（该角色下无任何物料）不产出块。
+    数量语义（§7#9）：未配置随箱配比的 SKU，一个产品只有一个订单总数量，
+    **每个作用域都用该总数量展开，不分摊**。空作用域（该角色下无任何物料）
+    不产出块。
+
+    陈列样随箱配比 SKU：各作用域改用 ``utils/scope_quantities`` 的分配值
+    （常规 6 款均分、隐藏款 ``ceil(N/P)``、默认 BOM 仍用完整总量），块内
+    ``quantity`` 即该作用域的分配数量——与采购单生成、扁平口径三方恒等。
 
     Args:
         orders_data: 订单列表，每项含 ``product_id`` 与 ``quantity``。
@@ -414,17 +492,31 @@ def aggregate_materials_by_scope(
             continue
 
         rows = product.get_all_materials()
+        allocation = None
+        ratio = getattr(product, 'hidden_carton_ratio', None)
+        if ratio:
+            allocation = allocate_scope_quantities(
+                quantity,
+                {row.get('role_id') for row in rows}
+                | _declared_role_ids(product) | {None},
+                hidden_carton_ratio=int(ratio),
+                name_of=partial(name_of, product_id),
+            )
         scopes = order_scopes(
             {row.get('role_id') for row in rows} | {None},
             # P2-A2 类型收窄：partial 等价于原绑定默认值的 lambda（order_scopes.name_of 只接收 1 个参数）
             name_of=partial(name_of, product_id),
         )
         for role_id in scopes:
+            scope_qty = quantity if allocation is None else allocation.get(role_id, quantity)
+            # 分配值可能是 int（角色分摊）/ float / Decimal（未启用时的原量）；
+            # 统一经 Decimal 收敛一次，累加与块内 quantity 共用同一数值。
+            scope_qty_dec = Decimal(str(scope_qty))
             scope_totals: dict[tuple, dict] = {}
             _accumulate_bom_rows(
                 scope_totals,
                 [row for row in rows if row.get('role_id') == role_id],
-                quantity,
+                scope_qty_dec,
             )
             block = _finalize_bom_totals(scope_totals)
             if not any(block.values()):
@@ -436,7 +528,7 @@ def aggregate_materials_by_scope(
                 'role_name': scope_label(
                     role_id, name_of(product_id, role_id) if role_id is not None else None,
                 ),
-                'quantity': float(quantity),
+                'quantity': float(scope_qty_dec),
                 **block,
             })
     return groups

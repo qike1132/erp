@@ -40,6 +40,13 @@ class Product(Base):
     initial_stock: Mapped[int] = mapped_column(Integer, default=0, comment='初始库存')
     current_stock: Mapped[int] = mapped_column(Integer, default=0, comment='当前库存')
     default_bom_label: Mapped[str | None] = mapped_column(String(50), comment='默认BOM自定义名称(NULL=显示"默认BOM")')
+    # 陈列样隐藏款随箱配比 P（2026-11-08）：每 P 个订单数量随箱配 1 个「隐藏款」角色，
+    # 常规 6 款按订单数量均分。NULL = 不启用该规则，采购生成保持历史口径
+    # （每个角色都用完整订单数量）。分配算法唯一实现在 utils/scope_quantities.py。
+    hidden_carton_ratio: Mapped[int | None] = mapped_column(
+        Integer,
+        comment='隐藏款随箱配比P(每P个订单数量配1个隐藏款;NULL=不启用陈列样角色分摊)',
+    )
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0', comment='乐观锁版本号')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
@@ -55,6 +62,12 @@ class Product(Base):
         # 库存非负兜底（P1-6）：DB 级约束，防止绕过应用层校验的写点落负值；
         # 对应的 Alembic 迁移见 migrations/versions/pg_standalone_061_add_product_stock_check.py
         CheckConstraint('current_stock >= 0', name='ck_product_current_stock_nonneg'),
+        # 随箱配比 DB 级兜底：绕过 Pydantic 校验的写点不得落 0/负值
+        # （schema 层 gt=0 是第一道；对应迁移 pg_standalone_113_add_product_hidden_carton_ratio）
+        CheckConstraint(
+            'hidden_carton_ratio IS NULL OR hidden_carton_ratio > 0',
+            name='ck_product_hidden_carton_ratio_positive',
+        ),
     )
 
     # 皮套关联（由 Case 模型 backref 自动创建，此处显式声明以确保类型检查）
@@ -96,6 +109,7 @@ class Product(Base):
             'factory': self.factory,
             'initial_stock': self.initial_stock,
             'current_stock': self.current_stock,
+            'hidden_carton_ratio': self.hidden_carton_ratio,
             'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None
         }
 

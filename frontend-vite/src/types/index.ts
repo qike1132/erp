@@ -442,6 +442,8 @@ export interface Product {
   specification?: string
   /** 所属工厂：东莞/湖北 */
   factory?: string
+  /** 隐藏款随箱配比：每多少订单数量配 1 个隐藏款；null/缺省 = 不启用陈列样分配 */
+  hidden_carton_ratio?: number | null
 }
 
 export interface ProductionCraft {

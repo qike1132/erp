@@ -30,6 +30,10 @@ class ProductCreate(BaseModel):
     image: str | None = Field(None, max_length=200, description='产品图片路径')
     factory: str | None = Field(None, max_length=50, description='所属工厂')
     initial_stock: int = Field(0, ge=0, le=100000, description='初始库存')
+    hidden_carton_ratio: int | None = Field(
+        None, gt=0, le=1000000,
+        description='隐藏款随箱配比：每多少个订单数量配 1 个隐藏款；'
+                    '需在 BOM 配置 6 个常规角色 + 1 个「隐藏款」角色；空 = 不启用')
     customer_ids: list[int] = Field(
         default_factory=list, description='所属客户ID列表；留空 = 所有客户可见')
 
@@ -58,6 +62,11 @@ class ProductUpdate(BaseModel):
     image: str | None = Field(None, max_length=200, description='产品图片路径')
     factory: str | None = Field(None, max_length=50, description='所属工厂')
     initial_stock: int | None = Field(None, ge=0, le=100000, description='初始库存')
+    # 三态：字段未提交 = 不改动（旧客户端兼容）；显式提交 null = 清空（停用规则）；
+    # 提交正整数 = 设置。端点用 model_fields_set 区分「未提交」与「显式 null」。
+    hidden_carton_ratio: int | None = Field(
+        None, gt=0, le=1000000,
+        description='隐藏款随箱配比；未提交 = 不改动，显式 null = 清空（停用规则）')
     customer_ids: list[int] | None = Field(
         None, description='所属客户ID列表；None = 不改动归属，[] = 清空（回到所有客户可见）')
 
@@ -101,6 +110,7 @@ class ProductResponse(BaseModel):
     factory: str | None = None
     initial_stock: int
     current_stock: int
+    hidden_carton_ratio: int | None = None
     create_time: datetime | str | None = None
     customers: list[ProductCustomerBrief] = Field(default_factory=list)
 

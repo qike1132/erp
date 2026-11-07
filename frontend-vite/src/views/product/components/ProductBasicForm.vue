@@ -23,6 +23,14 @@
         </div>
       </div>
       <div class="pd-form-group">
+        <label class="pd-label" for="create-hidden-carton-ratio">隐藏款随箱配比</label>
+        <div class="pd-input-wrap">
+          <FontAwesomeIcon icon="box-open" class="pd-input-icon" aria-hidden="true" />
+          <input id="create-hidden-carton-ratio" v-model.number="form.hiddenCartonRatio" type="number" class="pd-input" step="1" min="1" placeholder="例如：72" name="hidden-carton-ratio" autocomplete="off" aria-describedby="create-hidden-carton-ratio-hint" />
+        </div>
+        <small id="create-hidden-carton-ratio-hint" class="pd-field-hint">每多少个订单数量配 1 个隐藏款（如 72，即 10000÷72≈139 个）；留空则不启用。启用需在 BOM 配置恰好 6 个常规角色 + 1 个名为「隐藏款」的角色。</small>
+      </div>
+      <div class="pd-form-group">
         <label class="pd-label">工厂</label>
         <div class="pd-input-wrap">
           <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
@@ -99,7 +107,11 @@ catalogStore.ensureActiveCustomerNames().catch(() => {
 const customerOptions = computed(() => catalogStore.activeCustomerNames)
 
 const submitting = ref(false)
-const form = reactive({ name: '', barcode: '', price: 0, factory: '', image: '', customerIds: [] as number[] })
+const form = reactive({
+  name: '', barcode: '', price: 0, factory: '', image: '',
+  hiddenCartonRatio: null as number | null | '',
+  customerIds: [] as number[],
+})
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const imageDropZoneRef = ref<HTMLElement | null>(null)
 const imageDragOver = ref(false)
@@ -150,6 +162,11 @@ function uploadImageFile(file: File) {
 async function handleAdd() {
   const trimmedName = form.name.trim()
   if (!trimmedName) return
+  const hiddenCartonRatio = form.hiddenCartonRatio === '' ? null : form.hiddenCartonRatio
+  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1)) {
+    showToast('隐藏款随箱配比必须为正整数', 'warning')
+    return
+  }
   submitting.value = true
   try {
     await productApi.create({
@@ -158,10 +175,14 @@ async function handleAdd() {
       price: form.price ?? undefined,
       factory: form.factory || undefined,
       image: form.image || undefined,
+      hidden_carton_ratio: hiddenCartonRatio ?? undefined,
       customer_ids: form.customerIds,
     })
     showToast('添加成功', 'success')
-    Object.assign(form, { name: '', barcode: '', price: 0, factory: '', image: '', customerIds: [] })
+    Object.assign(form, {
+      name: '', barcode: '', price: 0, factory: '', image: '',
+      hiddenCartonRatio: null, customerIds: [],
+    })
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
   } catch (err: unknown) {
     showToast(getErrorMessage(err, '添加失败'), 'error')
@@ -188,6 +209,13 @@ async function handleAdd() {
 }
 .pd-input-wrap {
   position: relative;
+}
+.pd-field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 .pd-input-icon {
   position: absolute;

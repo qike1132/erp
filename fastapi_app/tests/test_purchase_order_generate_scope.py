@@ -83,12 +83,13 @@ class TestLoadBomContext:
             def all(self):
                 return self._rows
 
-        # 三条 BOM 查询 + 一条 ProductRole 查询
+        # 三条 BOM 查询 + 一条 ProductRole 查询 + 一条随箱配比查询
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
             _Result([SimpleNamespace(role_id=7, product_id=1)]),   # filling
             _Result([]),                                           # fabric
             _Result([]),                                           # accessory
             _Result([(99, 1, '角色A')]),                           # ProductRole
+            _Result([(1, None)]),                                  # Product.hidden_carton_ratio
         ]))
 
         ctx = await _load_bom_context(db, [1])
@@ -96,6 +97,33 @@ class TestLoadBomContext:
         # 物料行 role_id=7 必须进入作用域（旧实现 m.get(pid) 恒空，只剩 99/None）
         assert ctx.scopes_by_pid[1] == [None, 7, 99]
         assert ctx.role_names[(1, 99)] == '角色A'
+        # 未配置配比的 SKU 不进 hidden_ratios（键不存在 = 走历史全量口径）
+        assert ctx.hidden_ratios == {}
+
+    @pytest.mark.asyncio
+    async def test_configured_ratio_lands_in_hidden_ratios(self):
+        """陈列样随箱配比：非空 P 进 hidden_ratios，空值被跳过。"""
+
+        class _Result:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def scalars(self):
+                return self
+
+            def all(self):
+                return self._rows
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            _Result([]),        # filling
+            _Result([]),        # fabric
+            _Result([]),        # accessory
+            _Result([]),        # ProductRole
+            _Result([(1, 72), (2, None), (3, 0)]),  # hidden_carton_ratio
+        ]))
+
+        ctx = await _load_bom_context(db, [1, 2, 3])
+        assert ctx.hidden_ratios == {1: 72}
 
 
 class TestBomRowsByScope:

@@ -34,6 +34,14 @@
         </div>
       </div>
       <div class="pd-form-group">
+        <label class="pd-label" for="edit-hidden-carton-ratio">隐藏款随箱配比</label>
+        <div class="pd-input-wrap">
+          <FontAwesomeIcon icon="box-open" class="pd-input-icon" aria-hidden="true" />
+          <input id="edit-hidden-carton-ratio" v-model.number="editForm.hiddenCartonRatio" type="number" class="pd-input" step="1" min="1" placeholder="例如：72" name="edit-hidden-carton-ratio" autocomplete="off" aria-describedby="edit-hidden-carton-ratio-hint" />
+        </div>
+        <small id="edit-hidden-carton-ratio-hint" class="pd-field-hint">每多少个订单数量配 1 个隐藏款（如 72，即 10000÷72≈139 个）；留空则不启用。启用需在 BOM 配置恰好 6 个常规角色 + 1 个名为「隐藏款」的角色。</small>
+      </div>
+      <div class="pd-form-group">
         <label class="pd-label">工厂</label>
         <div class="pd-input-wrap">
           <FontAwesomeIcon icon="industry" class="pd-input-icon" aria-hidden="true" />
@@ -103,6 +111,7 @@ interface Product {
   price: number
   image: string | null
   factory?: string
+  hidden_carton_ratio?: number | null
   current_stock?: number
   customers?: ProductCustomerRef[]
 }
@@ -140,7 +149,10 @@ const customerOptions = computed<ProductCustomerRef[]>(() => {
 // ===== 编辑产品弹窗 =====
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
-const editForm = reactive({ id: 0, name: '', barcode: '', price: 0, factory: '', image: '', customerIds: [] as number[] })
+const editForm = reactive({
+  id: 0, name: '', barcode: '', price: 0, factory: '', image: '',
+  hiddenCartonRatio: null as number | null | '', customerIds: [] as number[],
+})
 const editImageInputRef = ref<HTMLInputElement | null>(null)
 const editDropZoneRef = ref<HTMLElement | null>(null)
 const editDragOver = ref(false)
@@ -172,6 +184,7 @@ function open(row: Product) {
   Object.assign(editForm, {
     id: row.id, name: row.name, barcode: row.barcode, price: row.price,
     factory: row.factory || '', image: row.image || '',
+    hiddenCartonRatio: row.hidden_carton_ratio ?? null,
     customerIds: (row.customers ?? []).map((c) => c.id),
   })
   editDialogVisible.value = true
@@ -201,9 +214,16 @@ function uploadEditImage(file: File) {
 
 async function handleEditSave() {
   if (!editForm.name.trim()) { showToast('请输入产品名称', 'warning'); return }
+  const hiddenCartonRatio = editForm.hiddenCartonRatio === '' ? null : editForm.hiddenCartonRatio
+  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1)) { showToast('隐藏款随箱配比必须为正整数', 'warning'); return }
   editSubmitting.value = true
   try {
-    await productApi.update(editForm.id, { name: editForm.name, barcode: editForm.barcode, price: editForm.price, factory: editForm.factory, image: editForm.image, customer_ids: editForm.customerIds })
+    await productApi.update(editForm.id, {
+      name: editForm.name, barcode: editForm.barcode, price: editForm.price,
+      factory: editForm.factory, image: editForm.image,
+      hidden_carton_ratio: hiddenCartonRatio,
+      customer_ids: editForm.customerIds,
+    })
     showToast('保存成功', 'success')
     editDialogVisible.value = false
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
@@ -228,6 +248,7 @@ defineExpose({ open })
 .edit-grid :deep(.pcs-field) { min-height: 44px; padding: 8px 34px 8px 14px; border-radius: 12px; }
 .edit-grid :deep(.pcs-placeholder) { font-size: 16px; }
 .pd-form-group { margin-bottom: 0; }
+.pd-field-hint { display: block; margin-top: 6px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
 .pd-label {
   display: block;
   font-size: 14px;

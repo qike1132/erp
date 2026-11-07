@@ -1962,6 +1962,7 @@ export interface ProductCreate {
   image?: string | null
   factory?: string | null
   initial_stock?: number
+  hidden_carton_ratio?: number | null
   customer_ids?: Array<number>
 }
 
@@ -2026,6 +2027,7 @@ export interface ProductResponse {
   factory?: string | null
   initial_stock: number
   current_stock: number
+  hidden_carton_ratio?: number | null
   create_time?: string | null
   customers?: Array<ProductCustomerBrief>
 }
@@ -2057,6 +2059,7 @@ export interface ProductUpdate {
   image?: string | null
   factory?: string | null
   initial_stock?: number | null
+  hidden_carton_ratio?: number | null
   customer_ids?: Array<number> | null
 }
 
