@@ -97,8 +97,9 @@
 
               <!-- 产品名称 / 订单数量 / 备品数量：该 SKU 块首行，rowspan = 该块行数。
                  cellLines 在 per-SKU 模式恒 1 行；回退模式为逐 SKU 名堆叠（与改动前逐字一致）。
-                 「订单数量」列按角色段拆分时：SKU 总量挪到名称格副行（合计 N），
-                 数量列在每个角色段渲染该角色的数量（2026-11-08 需求：盲盒按角色核对生产量）。 -->
+                 「订单数量/备品数量」列按角色段拆分时（2026-11-08 需求：备品也按角色逐段
+                 算，不合并）：SKU 总量挪到名称格副行（合计 N），数量列在每个角色段渲染
+                 该角色的数量与备品（ceil(该角色数量 × 订单级率‰)，rowspan 与角色格同段）。 -->
               <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
                 <div v-for="(line, li) in item.row.cellLines" :key="`n-${li}`"
                      :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
@@ -122,11 +123,19 @@
                 <div>{{ formatQty(item.row.roleQuantity) }}</div>
                 <div v-if="item.row.roleIsHidden" class="sm-sku-total-sub">（隐藏款）</div>
               </td>
-              <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
+              <!-- 备品数量：拆分口径与订单数量同构（每角色段一格，ceil(该角色数量×率‰)） -->
+              <td
+                v-if="item.row.isFirstSkuRow && !item.row.hasRoleQtySplit"
+                :rowspan="item.row.skuRowSpan"
+              >
                 <div v-for="(line, li) in item.row.cellLines" :key="`sp-${li}`"
                      :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
                 >{{ formatQty(line.spare) }}</div>
               </td>
+              <td
+                v-else-if="item.row.isFirstRoleRow && item.row.roleSpare != null"
+                :rowspan="item.row.roleRowSpan"
+              >{{ formatQty(item.row.roleSpare) }}</td>
 
               <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU） -->
               <td v-if="item.row.noBom" colspan="8" class="text-text-muted">无 BOM 明细</td>

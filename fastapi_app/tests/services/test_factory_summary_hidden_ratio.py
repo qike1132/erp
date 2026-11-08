@@ -165,10 +165,10 @@ async def test_h1_configured_sku_projection_matches_stored(db):
 
 
 async def test_h3_invalid_role_structure_falls_back_without_500(db):
-    """H3：配了 P 但角色不足 6+1 —— 推算回退全量（页面不炸，落库真值不受影响）。
+    """H3：配了 P 但没设置隐藏款 —— **降级为按角色数量均分**（不回退全量，页面不炸）。
 
-    回退全量时**不产出** role_quantities（前端「订单数量」列保持 SKU 级大格），
-    与物料行的回退口径一致。
+    用户口径（2026-11-08）：没设置隐藏款就按「角色数量」得出每角色订单数量；
+    连均分都不行（无任何角色）才回退全量。降级只影响推算/展示，落库真值不受影响。
     """
     po_id = await _seed_configured_sku(
         db, role_names=['角色A', '角色B', '角色C', '角色D', '角色E'],
@@ -177,7 +177,49 @@ async def test_h3_invalid_role_structure_falls_back_without_500(db):
     group = (await get_factory_order_summary(db, [po_id]))['groups'][0]
     projected = _materials_by_name(group)
 
-    # 回退全量：每个已配角色的布料 = 1（单件用量）× 10000（合并数量）
+    # 降级均分：5 个角色各 2000（1 单件 × 10000÷5），不是回退全量的 10000
     assert set(projected) == {f'角色{chr(ord("A") + i)}布' for i in range(5)}
-    assert all(qty == 10000 for qty in projected.values())
+    assert all(qty == 2000 for qty in projected.values())
+    # role_quantities 同口径：按角色数量均分，前端据此拆「订单数量」列
+    role_quantities = group['skus'][0]['role_quantities']
+    assert {r['role_name']: r['quantity'] for r in role_quantities} == {
+        f'角色{chr(ord("A") + i)}': 2000 for i in range(5)
+    }
+
+
+async def test_h5_no_roles_at_all_falls_back_to_full(db):
+    """H5：盲盒但**没有任何角色**（连均分都不行）→ 回退全量，role_quantities 为空。
+
+    前端此时「订单数量/备品」列保持 SKU 级大格（无拆分数据 = 零行为变化）。
+    """
+    db.add(Product(
+        id=202, name='无角色盲盒', hidden_carton_ratio=72,
+        is_blind_box=True, has_hidden_role=True,
+    ))
+    # 只有默认 BOM 行（role_id=None），没有任何 ProductRole
+    db.add(ProductFabric(
+        id=50, product_id=202, role_id=None,
+        fabric_name='默认布', specification='S1', unit='米',
+        quantity=1, supplier_name='供应商甲',
+    ))
+    db.add(Order(id=9201, order_no='SO-9201', customer='客户丙', product_id=202, quantity=10000, status='已备货'))
+    db.add(OrderItem(id=10, order_id=9201, product_id=202, product_name='无角色盲盒', quantity=10000))
+    db.add(PurchaseOrder(
+        id=8201, order_no='PO-8201', customer_name='客户丙',
+        product_name='无角色盲盒', product_quantity=10000,
+        supplier_name='供应商甲', source_order_ids='[9201]',
+    ))
+    db.add(PurchaseOrderSku(id=10, po_id=8201, product_name='无角色盲盒', order_qty=10000,
+                            source_order_id=9201, source_record_type='order'))
+    db.add(PurchaseOrderItem(
+        id=50, order_id=8201, material_name='默认布',
+        specification='S1', unit='米', quantity=10000, supplier_name='供应商甲',
+    ))
+    await db.commit()
+
+    group = (await get_factory_order_summary(db, [8201]))['groups'][0]
+    projected = _materials_by_name(group)
+
+    # 兜底全量：默认 BOM 行按完整订单数量推算
+    assert projected == {'默认布': 10000}
     assert group['skus'][0]['role_quantities'] == []

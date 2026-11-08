@@ -190,6 +190,11 @@ export interface PerSkuRow {
   hasRoleQtySplit: boolean
   /** 该角色段的数量（hasRoleQtySplit 时恒非 null；null = 不拆分走大格） */
   roleQuantity: number | null
+  /**
+   * 该角色段的**备品数量**（2026-11-08 用户要求：备品也按角色逐段算，不合并）：
+   * ceil(该角色数量 × 订单级率‰)。hasRoleQtySplit 时恒非 null；null = 不拆分走大格。
+   */
+  roleSpare: number | null
   /** 该角色是否隐藏款（数量格里加标记，便于工厂区分常规/随箱配比） */
   roleIsHidden: boolean
   /** 该 SKU 无 BOM 明细时的占位行（保留块结构，不隐藏该 SKU） */
@@ -281,6 +286,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         // 占位行没有物料段，无从按角色拆分数量——保持 SKU 级大格（总量在数量格里）
         hasRoleQtySplit: false,
         roleQuantity: null,
+        roleSpare: null,
         roleIsHidden: false,
         noBom: true,
       })
@@ -344,6 +350,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
       const key = materialKeyOf(m)
       const hit = stored.get(key)
       const sharedInSku = (keyCounts.get(key) || 0) > 1
+      const roleQty = roleQtyOf(m.role_id)
       rows.push({
         skuIdx,
         cellLines: [{
@@ -375,7 +382,8 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
           ? '该物料被多个角色共用采购明细中的同一行，此处按角色分行显示分配量；如需调整总量请在采购明细中修改'
           : '',
         hasRoleQtySplit,
-        roleQuantity: roleQtyOf(m.role_id),
+        roleQuantity: roleQty,
+        roleSpare: roleQty != null ? calcSpareQuantity(roleQty, groupRate) : null,
         roleIsHidden: roleHiddenOf(m.role_id),
         noBom: false,
       })

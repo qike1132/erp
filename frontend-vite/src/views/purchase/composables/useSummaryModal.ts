@@ -162,24 +162,26 @@ function buildPerSkuGroupHtml(
           : ''
         tableHtml += `<td rowspan="${block.length}">${escapeHtml(line?.name || '')}${totalSub}</td>`
         if (row.hasRoleQtySplit) {
-          // 按角色拆分：首行必为首个角色段段首——先渲染该角色段数量格（rowspan=段行数，
-          // 隐藏款带标记），再渲染备品大格。列序 = 名称 | 订单数量 | 备品数量，不可乱序。
+          // 按角色拆分：首行必为首个角色段段首——先渲染该角色段的订单数量格与备品格
+          // （各 rowspan=段行数，隐藏款带标记）。列序 = 名称 | 订单数量 | 备品数量，不可乱序。
+          // 备品也按角色逐段算（2026-11-08 用户要求：ceil(该角色数量 × 订单级率‰)，不合并）。
           const hiddenMark = row.roleIsHidden
             ? '<div style="font-size:10px;color:#8e8e93;">（隐藏款）</div>'
             : ''
           tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}${hiddenMark}</td>`
-          tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
+          tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleSpare ?? 0))}</td>`
         } else {
           tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.qty ?? 0))}</td>`
           tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
         }
       } else if (row.hasRoleQtySplit && row.isFirstRoleRow) {
-        // 后续角色段首行：名称/备品被块级 rowspan 覆盖，只渲染该角色段的数量格
+        // 后续角色段首行：名称被块级 rowspan 覆盖，只渲染该角色段的订单数量/备品格
         // （列序仍在角色格之前；rowspan=roleRowSpan 与屏幕同一套行模型）
         const hiddenMark = row.roleIsHidden
           ? '<div style="font-size:10px;color:#8e8e93;">（隐藏款）</div>'
           : ''
         tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}${hiddenMark}</td>`
+        tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleSpare ?? 0))}</td>`
       }
       if (row.noBom) {
         // 占位行：角色名称 + 供应商 + 之后 6 列 = 8 列（左侧三列已在上方补齐）

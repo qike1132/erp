@@ -90,10 +90,17 @@ def _role_name_from_map(role_names: dict[int, str], rid: int) -> str | None:
 
 
 def _factory_sku_allocation(ctx_entry: dict, sku_qty: float) -> dict | None:
-    """按随箱配比算该 SKU 各作用域的数量乘子；结构非法时告警并回退全量（不阻断页面）。
+    """按随箱配比算该 SKU 各作用域的数量乘子；结构非法时**降级均分**，不阻断页面。
 
     工厂汇总展示的是**已存在的采购单**：即使 SKU 当前角色结构不完整（历史脏数据），
-    也不得让整页 500——回退历史全量口径只影响推算对照，不影响落库真值。
+    也不得让整页 500。降级阶梯（用户口径 2026-11-08：没设置隐藏款就按「角色数量」
+    得出每角色订单数量，设置了隐藏款才走配比）：
+
+    1. 正常：配了配比且隐藏款配置合法 → 常规均分 + 隐藏款 ``ceil(N/P)``；
+    2. 降级：配了配比但**没设置隐藏款**（候选 0 个）或配置冲突（候选 > 1 个）、
+       或 N 非整数 → **按角色数量均分**（与「盲盒无隐藏款」同口径）——展示层
+       不回退全量，否则工厂看不到每角色数量；
+    3. 兜底：连均分都不行（没有任何角色）→ 回退全量（None），只影响推算对照。
     """
     role_names = ctx_entry.get('roles') or {}
     try:
@@ -108,10 +115,25 @@ def _factory_sku_allocation(ctx_entry: dict, sku_qty: float) -> dict | None:
         )
     except ValueError:
         logger.warning(
-            '工厂汇总按 SKU 推算：陈列样配比分配失败（sku_qty=%s），回退全量口径',
+            '工厂汇总按 SKU 推算：配比口径分配失败（sku_qty=%s），降级为按角色数量均分',
             sku_qty, exc_info=True,
         )
-        return None
+        try:
+            return allocate_scope_quantities(
+                sku_qty,
+                set(role_names) | {None},
+                hidden_carton_ratio=None,
+                name_of=partial(_role_name_from_map, role_names),
+                hidden_role_id=ctx_entry.get('hidden_role_id'),
+                blind_box=True,
+                has_hidden=False,
+            )
+        except ValueError:
+            logger.warning(
+                '工厂汇总按 SKU 推算：按角色数量均分也失败（sku_qty=%s），回退全量口径',
+                sku_qty, exc_info=True,
+            )
+            return None
 
 def _record_sku_role_quantities(group, sku_name, ctx_entry, allocation, bom_role_ids) -> None:
     """把该 SKU 的「按角色数量」记账到分组，供前端把「订单数量」列按角色段拆格。

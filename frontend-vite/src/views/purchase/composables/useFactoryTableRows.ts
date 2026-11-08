@@ -147,6 +147,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
               // 回退模式（订单级单块）没有 role_quantities：订单数量保持大格
               hasRoleQtySplit: false,
               roleQuantity: null,
+              roleSpare: null,
               roleIsHidden: false,
               noBom: false,
             },

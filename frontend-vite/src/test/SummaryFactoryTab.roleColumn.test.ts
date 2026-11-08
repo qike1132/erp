@@ -17,8 +17,9 @@
  *      覆盖的列）——任何 rowspan/colspan 算错都会在这里现形；
  *   R5 多角色共用同一物料：损耗率照常显示/编辑（一条明细一个率），数量编辑锁定
  *      并说明原因（明细是合并总量，角色行只显示分配量）；
- *   R6/R7 「订单数量」列按角色段拆格（role_quantities，与物料分配同源）：各角色
- *      数量格 rowspan=角色段行数、SKU 总量挪名称格副行（合计 N）、隐藏款带标记；
+ *   R6/R7 「订单数量」与「备品数量」列都按角色段拆格（role_quantities，与物料分配
+ *      同源）：各角色数量格 rowspan=角色段行数、SKU 总量挪名称格副行（合计 N）、
+ *      隐藏款带标记、备品 = ceil(该角色数量 × 订单级率‰) 逐段计算不合并；
  *      每行有效列宽仍恒 12（数量列从块级 rowspan 变段级后的核心对齐防线）。
  */
 import { describe, it, expect } from 'vitest'
@@ -122,13 +123,13 @@ function dataOf(group: FactoryGroup): FactorySummaryData {
   return { success: true, order_count: 1, spare_rate: 0, groups: [group] }
 }
 
-function mountModal(group: FactoryGroup, editMode = false) {
+function mountModal(group: FactoryGroup, editMode = false, lossRate = 0) {
   return mount(SummaryPanel, {
     props: {
       factoryData: dataOf(group),
       supplierData: { success: true, order_count: 1, materials: [] },
       editMode,
-      lossRate: 0,
+      lossRate,
       orderCount: 1,
       supplierGroups: [],
     },
@@ -267,29 +268,34 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     wrapper.unmount()
   })
 
-  it('R6 订单数量按角色段拆格：各角色数量 + 名称格合计副行 + 隐藏款标记；列宽恒 12', () => {
-    const wrapper = mountModal(roleQtyGroup())
+  it('R6 订单数量与备品都按角色段拆格：各角色数量/备品 + 名称格合计副行 + 隐藏款标记；列宽恒 12', () => {
+    // rate=50‰：角色A 备品 = ceil(60×50/1000)=3，角色B（隐藏款）= ceil(40×50/1000)=2
+    const wrapper = mountModal(roleQtyGroup(), false, 50)
     const rows = wrapper.findAll('.smf-scroll tbody tr')
     expect(rows).toHaveLength(5)
 
-    // 首行：名称格（SKU 名 + 合计副行）+ 角色A 数量格（60.0，rowspan=2=角色段行数）+ 备品大格
+    // 首行：名称格（SKU 名 + 合计副行）+ 角色A 订单数量格（60.0）+ 角色A 备品格（3.0），均 rowspan=2
     const r0 = rows[0]!.findAll('td')
     expect(r0[1]!.text()).toContain('合计 100.0')
     expect(r0[2]!.text()).toBe('60.0')
     expect(r0[2]!.attributes('rowspan')).toBe('2')
+    expect(r0[3]!.text()).toBe('3.0')
+    expect(r0[3]!.attributes('rowspan')).toBe('2')
 
-    // 第 2 行（角色A 段内）：数量格被段 rowspan 覆盖（无订单数量格）
+    // 第 2 行（角色A 段内）：订单数量/备品格都被段 rowspan 覆盖
     const r1 = rows[1]!.findAll('td')
     expect(r1.map((td) => td.text()).slice(0, 2)).toEqual(['身体', '松紧带'])
 
-    // 第 3 行（角色B 段首）：数量格 40.0 + （隐藏款）标记，rowspan=3
+    // 第 3 行（角色B 段首）：订单数量格 40.0 + （隐藏款）标记、备品格 2.0，均 rowspan=3
     const r2 = rows[2]!.findAll('td')
     expect(r2[0]!.text()).toContain('40.0')
     expect(r2[0]!.text()).toContain('（隐藏款）')
     expect(r2[0]!.attributes('rowspan')).toBe('3')
-    expect(r2[1]!.text()).toBe('角色B')
+    expect(r2[1]!.text()).toBe('2.0')
+    expect(r2[1]!.attributes('rowspan')).toBe('3')
+    expect(r2[2]!.text()).toBe('角色B')
 
-    // 对齐护栏：每行有效列宽恰好 12（数量列从块级 rowspan 变段级后的核心回归防线）
+    // 对齐护栏：每行有效列宽恰好 12（订单数量/备品列从块级 rowspan 变段级后的核心回归防线）
     const trs = Array.from(
       wrapper.element.querySelectorAll('.smf-scroll tbody tr'),
     ) as HTMLTableRowElement[]
@@ -300,7 +306,7 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
   })
 
   it('R7 打印/导出与屏幕同一套拆分：列宽恒 12，合计与隐藏款标记齐全', () => {
-    const html = buildFactoryHtml(dataOf(roleQtyGroup()), 0)
+    const html = buildFactoryHtml(dataOf(roleQtyGroup()), 50)
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
     const widths = rowWidthsOf(Array.from(doc.querySelectorAll('tbody tr')) as HTMLTableRowElement[])
     expect(widths.length).toBeGreaterThan(0)
@@ -309,5 +315,8 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(html).toContain('（隐藏款）')
     expect(html).toContain('60.0')
     expect(html).toContain('40.0')
+    // 备品也按角色逐段打印（同一 spareRate 口径：ceil(角色数量 × 率‰)）
+    expect(html).toContain('3.0')
+    expect(html).toContain('2.0')
   })
 })
