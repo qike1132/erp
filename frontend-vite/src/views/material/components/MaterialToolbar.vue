@@ -26,8 +26,8 @@
         <div class="kpi-top"><span class="kpi-dot" style="background:#9a6a00" /><span class="kpi-label">待收货登记</span></div>
         <span class="kpi-value">{{ fmt(stats.notStarted) }}</span>
       </div>
-      <div class="kpi-item" title="登记超 30 天仍未收齐的物料数">
-        <div class="kpi-top"><span class="kpi-dot" style="background:#d03b3b" /><span class="kpi-label">逾期物料</span></div>
+      <div class="kpi-item" title="到货登记满 30 天仍未收齐的物料数（系统无约定交期，此处只报到货时间与数量事实）">
+        <div class="kpi-top"><span class="kpi-dot" style="background:#c0392b" /><span class="kpi-label">超 30 天未收齐</span></div>
         <span class="kpi-value" :class="{ 'kpi-danger': stats.overdueItems > 0 }">{{ fmt(stats.overdueItems) }}</span>
       </div>
       <div class="kpi-item" title="全部登记的已到货 / 采购总量">
@@ -103,7 +103,15 @@ function fmt(n: number): string {
 .mr-search-input::placeholder { color: var(--color-text-muted, #64748b); }
 .mr-search-input:focus { border-color: var(--color-primary-500, #5b8def); box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.15); }
 
-.mr-kpi { display: flex; align-items: center; margin-left: auto; flex-shrink: 0; }
+.mr-kpi {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 .kpi-item { display: flex; flex-direction: column; gap: 1px; padding: 0 16px; cursor: default; }
 .kpi-item + .kpi-item { border-left: 1px solid var(--color-border-light, #f0f2f5); }
 .kpi-top { display: flex; align-items: center; gap: 5px; }
@@ -131,7 +139,20 @@ function fmt(n: number): string {
 }
 .mr-export-btn:hover { background: var(--color-success-50, #e8f9ef); border-color: var(--color-success-500, #28c76f); }
 
-@media (max-width: 1100px) {
+@media (max-width: 1180px) {
   .mr-kpi { margin-left: 0; }
+  .kpi-item { padding: 0 11px; }
+  .kpi-label { font-size: 11px; }
+  .kpi-value { font-size: 14px; }
+}
+
+@media (max-width: 760px) {
+  .mr-toolbar { gap: 8px; padding: 8px 12px; }
+  .mr-search { flex: 1 1 100%; order: 3; }
+  .mr-search-input { width: 100%; }
+  .mr-kpi { flex: 1 1 100%; order: 4; justify-content: space-between; }
+  .kpi-item { padding: 0; }
+  .kpi-item + .kpi-item { border-left: none; }
+  .mr-export-btn { margin-left: auto; order: 2; }
 }
 </style>

@@ -1,486 +1,424 @@
 /**
- * /material 来料进度改版的结构断言（2026-11-08：表格 → 订单卡片）。
+ * /material 来料进度（2026-11-08 二次改版）的结构断言。
  *
- * 本机开不了浏览器预览，排版靠人眼实测；但「同单合并 / 供应商块默认展开 /
- * 三级层级 / 四档状态词 / 逾期 30 天口径 / 客户端搜索与本页筛选」是结构事实，在此固化。
+ * 这一版的前提是 owner 的一句话：**这个页面只是登记到货时间以及到货数量**。
+ * 系统里只有 `material_registration.registration_date` 与明细 `received_quantity`，
+ * 没有约定交期，所以本文件把「不许出现逾期/延期措辞」也当成结构事实来断言——
+ * 上一版正是因为凭 30 天阈值讲「逾期」而被判定逻辑不成立。
  *
- * 设计要点：
- *  · 一行 = 一张订单卡（同单多条登记合并，登记内按明细供应商拆块）
- *  · 供应商块默认展开（collapse 语义反转：记"已收起"集合）
- *  · 订单头摘要 = 供应商数 / 待收项数 / 逾期项数 + 总进度（原独立"总进度"列已并入）
- *  · 供应商行与物料行共用列轨道，状态四档同时给色与词
- *  · 逾期口径与后端 stats/distribution 完全一致：登记日期 < 今天-30 且未收齐
- *  · KPI 四格：进行中登记 / 待收货登记 / 逾期物料 / 总到货率（全局 stats）
- *  · 搜索与本页筛选均为客户端过滤（订单号/客户/产品/供应商/物料名）
+ * 断言分两层：
+ *  1. progressRows.ts 纯函数：摊平（批次不合并）、账龄、久未收齐、分组统计、跨单位不给百分比；
+ *  2. ProgressTable/ProgressTab：有表头、日期与数量各自成列、分组是视图模式、筛选按事实分档。
  */
 import { describe, it, expect } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
-
+import PrimeVue from 'primevue/config'
+import { plushCutePT } from '@/styles/primevue-pt'
+import type { Registration, RegItem } from '@/api/material'
+import { buildProgressOrderRows } from '@/views/material/composables/useMaterialRegistrations'
 import {
-  buildProgressOrderRows,
-  filterProgressRows,
-  type ProgressOrderRow,
-} from '@/views/material/composables/useMaterialRegistrations'
-import SupplierGroupCard from '@/views/material/components/SupplierGroupCard.vue'
-import MaterialToolbar from '@/views/material/components/MaterialToolbar.vue'
+  SLOW_DAYS,
+  ageInDays,
+  flattenProgressRows,
+  groupProgressRows,
+  productLabel,
+  rowStatus,
+  summarizeProgressRows,
+} from '@/views/material/composables/progressRows'
 import ProgressTab from '@/views/material/components/ProgressTab.vue'
-import type { Registration } from '@/api/material'
+import ProgressTable from '@/views/material/components/ProgressTable.vue'
 
-/** 固定"今天"：cutoff = 2026-08-30（UTC），早于它且未收齐 → 逾期 */
-const NOW = new Date('2026-09-29T12:00:00+08:00')
+/** 固定「今天」：2026-11-08（与截图同期，避免用系统时钟导致断言漂移） */
+const NOW = new Date(Date.UTC(2026, 10, 8))
 
-function reg(over: Partial<Registration>): Registration {
+function item(over: Partial<RegItem> = {}): RegItem {
   return {
     id: 1,
-    purchase_order_no: 'PO-1',
-    supplier_name: '供应商A',
-    customer_name: '客户X',
-    product_name: '产品甲',
-    product_quantity: 100,
-    items: [],
-    status: 'pending',
-    progress: 0,
-    total_ordered: 0,
-    total_received: 0,
+    material_name: '1.0超柔',
+    specification: 'A126#',
+    material_category: 'main',
+    ordered_quantity: 1200,
+    received_quantity: 600,
+    remaining_quantity: 600,
+    progress: 50,
+    unit: '码',
     ...over,
   }
 }
 
-const REG_OVERDUE = reg({
-  id: 11,
-  purchase_order_no: 'PO-OLD',
-  supplier_name: '佳宝',
-  registration_date: '2026-08-28', // < cutoff 08-30 → 逾期
-  items: [
-    { id: 1, material_name: '浓缩苹果汁', specification: '', material_category: 'main', ordered_quantity: 2000, received_quantity: 0, remaining_quantity: 2000, progress: 0, unit: 'kg' },
-  ],
-})
-const REG_FRESH = reg({
-  id: 12,
-  purchase_order_no: 'PO-NEW',
-  supplier_name: '华源',
-  registration_date: '2026-08-31', // ≥ cutoff → 不逾期
-  items: [
-    { id: 2, material_name: '易拉盖', specification: '', material_category: 'main', ordered_quantity: 5000, received_quantity: 1500, remaining_quantity: 3500, progress: 30, unit: '只' },
-  ],
-})
-
-// ============================================================
-// 预处理纯函数：同单合并 · 分组 · 逾期 · 状态
-// ============================================================
-describe('buildProgressOrderRows —— 同单合并与供应商分组', () => {
-  it('同一订单的多条登记合并为一行，每条登记一个供应商块', () => {
-    const rows = buildProgressOrderRows([
-      { ...REG_FRESH, purchase_order_no: 'PO-M', supplier_name: '佳宝', registration_date: '2026-09-01' },
-      { ...REG_OVERDUE, purchase_order_no: 'PO-M', supplier_name: '华源', registration_date: '2026-09-02' },
-    ], NOW)
-
-    expect(rows).toHaveLength(1)
-    expect(rows[0]?.groups.map((g) => g.supplierName)).toEqual(['佳宝', '华源'])
-  })
-
-  it('一条登记内按明细供应商拆块：同供应商物料合并，缺字段回退登记级', () => {
-    const rows = buildProgressOrderRows([reg({
-      purchase_order_no: 'PO-S',
-      supplier_name: '三虎',
-      items: [
-        { id: 1, material_name: '7毛精兔绒', specification: '1214#', material_category: 'fabric', ordered_quantity: 270, received_quantity: 0, remaining_quantity: 270, progress: 0, unit: '码', supplier_name: '三虎' },
-        { id: 2, material_name: '1.0超柔', specification: 'A126#', material_category: 'fabric', ordered_quantity: 12, received_quantity: 0, remaining_quantity: 12, progress: 0, unit: '码', supplier_name: '美利达' },
-        { id: 3, material_name: '1.0超柔', specification: 'A50#', material_category: 'fabric', ordered_quantity: 39, received_quantity: 0, remaining_quantity: 39, progress: 0, unit: '码', supplier_name: '美利达' },
-        { id: 4, material_name: '2mm吉荣', specification: 'B016#', material_category: 'fabric', ordered_quantity: 11, received_quantity: 0, remaining_quantity: 11, progress: 0, unit: '码' },
-      ],
-    })], NOW)
-
-    const groups = rows[0]!.groups
-    expect(groups.map((g) => g.supplierName)).toEqual(['三虎', '美利达'])
-    // 缺明细供应商 → 回退登记级（三虎）
-    expect(groups[0]?.items.map((i) => i.material_name)).toEqual(['7毛精兔绒', '2mm吉荣'])
-    // 同供应商同名物料合并
-    expect(groups[1]?.items).toHaveLength(1)
-    expect(groups[1]?.items[0]?.ordered_quantity).toBe(51)
-    expect(rows[0]?.groups.length).toBe(2)
-  })
-
-  it('filling 类物料不进入进度块（与旧实现口径一致）', () => {
-    const rows = buildProgressOrderRows([reg({
-      items: [
-        { id: 1, material_name: '主料', specification: '', material_category: 'main', ordered_quantity: 10, received_quantity: 0, remaining_quantity: 10, progress: 0, unit: 'kg' },
-        { id: 2, material_name: '填充料', specification: '', material_category: 'filling', ordered_quantity: 99, received_quantity: 99, remaining_quantity: 0, progress: 100, unit: 'kg' },
-      ],
-    })], NOW)
-
-    expect(rows[0]?.groups[0]?.items.map((i) => i.material_name)).toEqual(['主料'])
-  })
-
-  it('同组同名物料合并数量、进度取合并后的比值', () => {
-    const rows = buildProgressOrderRows([reg({
-      items: [
-        { id: 1, material_name: '易拉盖', specification: '', material_category: 'main', ordered_quantity: 3000, received_quantity: 1000, remaining_quantity: 2000, progress: 33, unit: '只' },
-        { id: 2, material_name: '易拉盖', specification: '', material_category: 'main', ordered_quantity: 2000, received_quantity: 1000, remaining_quantity: 1000, progress: 50, unit: '只' },
-      ],
-    })], NOW)
-
-    const item = rows[0]?.groups[0]?.items[0]
-    expect(item?.ordered_quantity).toBe(5000)
-    expect(item?.received_quantity).toBe(2000)
-    expect(item?.progress).toBe(40)
-  })
-
-  it('行进度 = 各组已收 / 各组采购（数量加权，非简单平均）', () => {
-    const rows = buildProgressOrderRows([REG_OVERDUE, REG_FRESH], NOW)
-    // 两单未合并（不同订单），各查一行
-    const old = rows.find((r) => r.orderNo === 'PO-OLD')
-    expect(old?.progress).toBe(0)
-    const fresh = rows.find((r) => r.orderNo === 'PO-NEW')
-    expect(fresh?.progress).toBe(30)
-  })
-
-  it('组状态：有任何收货 → partial，完全没有 → pending', () => {
-    const rows = buildProgressOrderRows([REG_OVERDUE, REG_FRESH], NOW)
-    expect(rows.find((r) => r.orderNo === 'PO-OLD')?.groups[0]?.status).toBe('pending')
-    expect(rows.find((r) => r.orderNo === 'PO-NEW')?.groups[0]?.status).toBe('partial')
-  })
-})
-
-describe('buildProgressOrderRows —— 逾期判定（后端 30 天口径）', () => {
-  it('登记日期早于今天-30 且未收齐 → 组与物料都标逾期', () => {
-    const rows = buildProgressOrderRows([REG_OVERDUE], NOW)
-    const g = rows[0]?.groups[0]
-
-    expect(g?.overdue).toBe(true)
-    expect(g?.items[0]?.overdue).toBe(true)
-    expect(rows[0]?.hasOverdue).toBe(true)
-  })
-
-  it('29 天前登记 → 不逾期（边界：cutoff 当天与之后都算新）', () => {
-    const rows = buildProgressOrderRows([REG_FRESH], NOW)
-
-    expect(rows[0]?.groups[0]?.overdue).toBe(false)
-    expect(rows[0]?.hasOverdue).toBe(false)
-  })
-
-  it('超 30 天但已收齐 → 不逾期', () => {
-    const done = reg({
-      purchase_order_no: 'PO-DONE',
-      registration_date: '2026-07-01',
-      items: [
-        { id: 3, material_name: '罐体', specification: '', material_category: 'main', ordered_quantity: 100, received_quantity: 100, remaining_quantity: 0, progress: 100, unit: '只' },
-      ],
-    })
-    const rows = buildProgressOrderRows([done], NOW)
-
-    expect(rows[0]?.groups[0]?.overdue).toBe(false)
-  })
-
-  it('超 30 天且部分到货 → 未收齐的物料仍逾期（收到的不标）', () => {
-    const partial = reg({
-      purchase_order_no: 'PO-PART',
-      registration_date: '2026-08-01',
-      items: [
-        { id: 4, material_name: '罐体', specification: '', material_category: 'main', ordered_quantity: 100, received_quantity: 100, remaining_quantity: 0, progress: 100, unit: '只' },
-        { id: 5, material_name: '易拉盖', specification: '', material_category: 'main', ordered_quantity: 100, received_quantity: 20, remaining_quantity: 80, progress: 20, unit: '只' },
-      ],
-    })
-    const rows = buildProgressOrderRows([partial], NOW)
-
-    expect(rows[0]?.groups[0]?.overdue).toBe(true)
-    expect(rows[0]?.groups[0]?.items[0]?.overdue).toBe(false)
-    expect(rows[0]?.groups[0]?.items[1]?.overdue).toBe(true)
-  })
-})
-
-// ============================================================
-// 客户端搜索（当前页过滤）
-// ============================================================
-describe('filterProgressRows —— 客户端搜索', () => {
-  const rows = buildProgressOrderRows([REG_OVERDUE, REG_FRESH], NOW)
-
-  it('匹配订单号 / 客户 / 产品 / 供应商 / 物料名（大小写不敏感）', () => {
-    expect(filterProgressRows(rows, 'po-old')).toHaveLength(1)
-    expect(filterProgressRows(rows, '客户X')).toHaveLength(2)
-    expect(filterProgressRows(rows, '产品甲')).toHaveLength(2)
-    expect(filterProgressRows(rows, '华源')).toHaveLength(1)
-    expect(filterProgressRows(rows, '易拉盖')).toHaveLength(1)
-  })
-
-  it('空关键词 = 不过滤；无命中 = 空（调用方渲染"当前页无匹配"）', () => {
-    expect(filterProgressRows(rows, '')).toHaveLength(2)
-    expect(filterProgressRows(rows, '不存在的料')).toHaveLength(0)
-  })
-})
-
-// ============================================================
-// 供应商块组件：默认展开 · 状态词 · 列轨道对齐
-// ============================================================
-const GROUP = buildProgressOrderRows([REG_OVERDUE, REG_FRESH], NOW)
-
-function mountGroup(props: Record<string, unknown> = {}) {
-  return mount(SupplierGroupCard, {
-    props: {
-      group: GROUP[0]!.groups[0]!, // 佳宝：逾期 pending 组
-      collapsed: false,
-      ...props,
-    },
-  })
+function reg(over: Partial<Registration> = {}): Registration {
+  return {
+    id: 1,
+    purchase_order_no: 'PO-1',
+    supplier_name: '佳宝纺织',
+    registration_date: '2026-10-01',
+    customer_name: '华美玩具',
+    product_name: '12 寸毛绒兔',
+    product_quantity: 500,
+    items: [item()],
+    status: 'partial',
+    progress: 50,
+    total_ordered: 1200,
+    total_received: 600,
+    ...over,
+  }
 }
 
-/** 造一个指定到货量与逾期状态的供应商组 */
-function mkGroup(received: number, ordered: number, overdue: boolean) {
-  return buildProgressOrderRows([reg({
-    purchase_order_no: 'PO-T',
-    registration_date: overdue ? '2026-08-01' : '2026-09-01',
-    items: [{ id: 1, material_name: '测试料', specification: '', material_category: 'main', ordered_quantity: ordered, received_quantity: received, remaining_quantity: ordered - received, progress: ordered ? Math.round(received / ordered * 100) : 0, unit: 'kg' }],
-  })], NOW)[0]!.groups[0]!
+/** 登记 → 订单行 → 表格行（后续大多数断言都从这一步开始） */
+function rowsOf(regs: Registration[]) {
+  return flattenProgressRows(buildProgressOrderRows(regs, NOW), NOW)
 }
 
-describe('SupplierGroupCard —— 供应商块', () => {
-  it('默认展开：不点击就能看到物料行（病灶①）', () => {
-    const w = mountGroup()
-
-    expect(w.findAll('.mr-mat')).toHaveLength(1)
-    expect(w.text()).toContain('浓缩苹果汁')
-  })
-
-  it('组头显示供应商名 · 已到项数 · 进度条与百分比', () => {
-    const w = mountGroup({ group: GROUP[1]!.groups[0] }) // 华源 30%
-
-    expect(w.find('.mr-grp-title').text()).toBe('华源')
-    expect(w.find('.mr-grp-count').text()).toContain('0/1 项已到')
-    expect(w.find('.mr-grp-pct').text()).toContain('30%')
-    expect(w.find('.mr-grp-bar').exists()).toBe(true)
-  })
-
-  it('四档状态同时给色与词：未开始 / 进行中 / 已到齐 / 逾期', () => {
-    const cases: Array<[number, number, boolean, string, string]> = [
-      [0, 100, false, 'st-pending', '未开始'],
-      [30, 100, false, 'st-ongoing', '进行中'],
-      [100, 100, false, 'st-done', '已到齐'],
-      [30, 100, true, 'st-overdue', '逾期'],
-    ]
-    for (const [received, ordered, overdue, cls, text] of cases) {
-      const w = mountGroup({ group: mkGroup(received, ordered, overdue) })
-      expect(w.find('.mr-group').classes()).toContain(cls)
-      expect(w.find('.mr-chip').text()).toBe(text)
-    }
-  })
-
-  it('逾期组：物料行带文字徽标（不依赖颜色单独传达）', () => {
-    const w = mountGroup()
-
-    expect(w.find('.mr-mat.is-overdue').exists()).toBe(true)
-    expect(w.find('.mr-flag').text()).toBe('逾期')
-  })
-
-  it('物料行数量千分位 + 单位：1,500 / 5,000 只', () => {
-    const w = mountGroup({ group: GROUP[1]!.groups[0] })
-
-    expect(w.find('.mr-mat-qty').text()).toContain('1,500 / 5,000')
-    expect(w.find('.mr-mat-qty').text()).toContain('只')
-  })
-
-  it('物料条按状态着色：未动琥珀 / 进行中蓝 / 已到齐绿 / 逾期红', () => {
-    const fillOf = (received: number, ordered: number, overdue: boolean) =>
-      mountGroup({ group: mkGroup(received, ordered, overdue) }).find('.mr-mat-bar i').classes()
-
-    expect(fillOf(0, 100, false)).toContain('fill-zero')
-    expect(fillOf(30, 100, false)).toContain('fill-ongoing')
-    expect(fillOf(100, 100, false)).toContain('fill-done')
-    expect(fillOf(30, 100, true)).toContain('fill-overdue')
-  })
-
-  it('点击整行 emit toggle；键盘 Enter / 空格同样 emit（可键盘操作）', async () => {
-    const w = mountGroup()
-
-    await w.find('.mr-grp-head').trigger('click')
-    await w.find('.mr-grp-head').trigger('keydown.enter')
-    await w.find('.mr-grp-head').trigger('keydown.space')
-
-    expect(w.emitted('toggle')).toHaveLength(3)
-  })
-
-  it('头部 aria-expanded 跟随收起状态，aria-label 含状态与项数', () => {
-    const open = mountGroup()
-    expect(open.find('.mr-grp-head').attributes('aria-expanded')).toBe('true')
-    expect(open.find('.mr-grp-head').attributes('aria-label')).toContain('逾期')
-
-    const shut = mountGroup({ collapsed: true })
-    expect(shut.find('.mr-grp-head').attributes('aria-expanded')).toBe('false')
-    expect(shut.find('.mr-grp-head').attributes('aria-label')).toContain('已收起')
-  })
-
-  it('collapsed=true 时物料行不渲染', () => {
-    expect(mountGroup({ collapsed: true }).find('.mr-mat').exists()).toBe(false)
-  })
-})
-
-// ============================================================
-// ProgressTab：订单卡 · 供应商分组 · 本页筛选 · 分页
-// ============================================================
-function mountTab(rows: ProgressOrderRow[], over: Record<string, unknown> = {}) {
+function mountTab(regs: Registration[]) {
+  const orderRows = buildProgressOrderRows(regs, NOW)
   return mount(ProgressTab, {
     props: {
-      filteredRows: rows,
-      progressOrderRows: rows,
+      filteredRows: orderRows,
+      progressOrderRows: orderRows,
       pIsLoading: false,
       pIsFetching: false,
       pPerPage: 20,
       pPages: 1,
-      pCount: rows.length,
+      pCount: regs.length,
       pPage: 1,
       showSearchEmpty: false,
-      ...over,
     },
+    global: { plugins: [[PrimeVue, { unstyled: true, pt: plushCutePT }]] },
   })
 }
 
-/** 同一订单两条登记（佳宝已收齐 + 华源部分到货） */
-const MERGED_ORDER = buildProgressOrderRows([
-  { ...REG_OVERDUE, purchase_order_no: 'PO-M', supplier_name: '佳宝', registration_date: '2026-09-01', items: REG_OVERDUE.items!.map((i) => ({ ...i, ordered_quantity: 5000, received_quantity: 5000, remaining_quantity: 0, progress: 100 })) },
-  { ...REG_FRESH, purchase_order_no: 'PO-M', supplier_name: '华源' },
-], NOW)
+// ============================================================
+// 一、摊平：一行 = 一条登记里的一行物料
+// ============================================================
+describe('progressRows —— 摊平与事实口径', () => {
+  it('一行 = 登记里的一行物料，带「到货日期 + 到货数量」两个事实', () => {
+    const rows = rowsOf([reg({ items: [item(), item({ id: 2, material_name: '2mm吉荣', ordered_quantity: 800, received_quantity: 800, remaining_quantity: 0, unit: '码' })] })])
 
-describe('ProgressTab —— 订单卡与供应商分组', () => {
-  it('一行 = 一张订单卡：同单多条登记只出现一张卡', () => {
-    const w = mountTab(MERGED_ORDER)
-
-    expect(w.findAll('.mr-order')).toHaveLength(1)
-    expect(w.findAll('.mr-group')).toHaveLength(2)
-    expect(w.find('.mr-order-no').text()).toBe('PO-M')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.arrivedDate).toBe('2026-10-01')
+    expect(rows[0]?.received).toBe(600)
+    expect(rows[0]?.ordered).toBe(1200)
+    expect(rows[0]?.materialName).toBe('1.0超柔')
   })
 
-  it('订单头摘要：供应商数 · 待收项数 · 逾期项数', () => {
-    const w = mountTab(buildProgressOrderRows([REG_OVERDUE], NOW))
-    const sums = w.findAll('.mr-sum').map((s) => s.text())
+  it('同一供应商的两批登记不合并：到货日期不同就是两行（合并会抹掉哪一批没到齐）', () => {
+    const rows = rowsOf([
+      reg({ registration_date: '2026-10-01', items: [item({ id: 1, received_quantity: 600 })] }),
+      reg({ id: 2, registration_date: '2026-11-05', items: [item({ id: 2, received_quantity: 300 })] }),
+    ])
 
-    expect(sums).toContain('1 家供应商')
-    expect(sums).toContain('待收 1 项')
-    expect(sums).toContain('逾期 1 项')
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.arrivedDate).sort()).toEqual(['2026-10-01', '2026-11-05'])
+    expect(rows.every((r) => r.supplierName === '佳宝纺织')).toBe(true)
   })
 
-  it('无逾期订单不渲染逾期摘要（重要异常才着色）', () => {
-    const w = mountTab(buildProgressOrderRows([REG_FRESH], NOW))
-
-    expect(w.find('.mr-sum.is-danger').exists()).toBe(false)
+  it('账龄按自然日算：当天 0 天、前一天 1 天、未来为负、非法日期 null', () => {
+    expect(ageInDays('2026-11-08', NOW)).toBe(0)
+    expect(ageInDays('2026-11-07', NOW)).toBe(1)
+    expect(ageInDays('2026-11-10', NOW)).toBe(-2)
+    expect(ageInDays('', NOW)).toBeNull()
+    expect(ageInDays('2026-13-40', NOW)).toBeNull()
   })
 
-  it('供应商块默认展开：挂载即见物料行，无需点击（病灶①）', () => {
-    const w = mountTab(buildProgressOrderRows([REG_FRESH], NOW))
+  it('久未收齐 = 登记满 30 天且仍未收齐；已到齐的老批次不算', () => {
+    const rows = rowsOf([
+      reg({ registration_date: '2026-10-01', items: [item({ id: 1, received_quantity: 600 })] }),
+      reg({ id: 2, registration_date: '2026-11-05', items: [item({ id: 2, received_quantity: 600 })] }),
+      reg({ id: 3, registration_date: '2026-09-01', items: [item({ id: 3, received_quantity: 1200, remaining_quantity: 0 })] }),
+    ])
 
-    expect(w.find('.mr-mat').exists()).toBe(true)
+    const old = rows.find((r) => r.arrivedDate === '2026-10-01')!
+    const fresh = rows.find((r) => r.arrivedDate === '2026-11-05')!
+    const doneOld = rows.find((r) => r.arrivedDate === '2026-09-01')!
+
+    expect(old.ageDays).toBe(38)
+    expect(old.isSlow).toBe(true)
+    expect(fresh.isSlow).toBe(false)
+    expect(doneOld.isSlow).toBe(false)
   })
 
-  it('点供应商行收起后，同组物料行隐藏', async () => {
-    const w = mountTab(buildProgressOrderRows([REG_FRESH], NOW))
+  it('行状态只表达数量事实：未到 / 部分 / 到齐', () => {
+    const rows = rowsOf([
+      reg({ registration_date: '2026-10-01', items: [item({ id: 1, received_quantity: 0 })] }),
+      reg({ id: 2, registration_date: '2026-10-02', items: [item({ id: 2, received_quantity: 600 })] }),
+      reg({ id: 3, registration_date: '2026-10-03', items: [item({ id: 3, received_quantity: 1200, remaining_quantity: 0 })] }),
+    ])
 
-    await w.find('.mr-grp-head').trigger('click')
+    expect(rowStatus(rows.find((r) => r.arrivedDate === '2026-10-01')!)).toBe('todo')
+    expect(rowStatus(rows.find((r) => r.arrivedDate === '2026-10-02')!)).toBe('partial')
+    expect(rowStatus(rows.find((r) => r.arrivedDate === '2026-10-03')!)).toBe('done')
+  })
+
+  it('统计四档：total / todo / partial / done / slow', () => {
+    const rows = rowsOf([
+      reg({ registration_date: '2026-10-01', items: [item({ id: 1, received_quantity: 0 })] }),
+      reg({ id: 2, registration_date: '2026-10-02', items: [item({ id: 2, received_quantity: 600 })] }),
+      reg({ id: 3, registration_date: '2026-10-03', items: [item({ id: 3, received_quantity: 1200, remaining_quantity: 0 })] }),
+    ])
+
+    // 10-01 未到、10-02 部分到货：两者登记都超过 30 天且未收齐 → slow 2
+    expect(summarizeProgressRows(rows)).toEqual({ total: 3, todo: 1, partial: 1, done: 1, slow: 2 })
+  })
+
+  it('多 SKU 订单的产品名超过两个时收口为「等 N 个」', () => {
+    const order = buildProgressOrderRows([reg({
+      sku_items: [
+        { product_name: '甲', barcode: 'A', quantity: 1 },
+        { product_name: '乙', barcode: 'B', quantity: 1 },
+        { product_name: '丙', barcode: 'C', quantity: 1 },
+      ],
+    })], NOW)[0]!
+
+    expect(productLabel(order)).toBe('甲 · 乙 等 3 个')
+  })
+})
+
+// ============================================================
+// 二、分组：视图模式，不是层级
+// ============================================================
+describe('progressRows —— 分组统计（视图模式）', () => {
+  const threeRows = [
+    reg({ registration_date: '2026-10-01', items: [item({ id: 1, received_quantity: 0 })] }),
+    reg({ id: 2, registration_date: '2026-10-02', items: [item({ id: 2, received_quantity: 600 })] }),
+    reg({ id: 3, registration_date: '2026-11-06', supplier_name: '华源', purchase_order_no: 'PO-2', items: [item({ id: 3, received_quantity: 1200, remaining_quantity: 0 })] }),
+  ]
+
+  it('按供应商分组：组头给「x/y 项到齐」与最近到货', () => {
+    const first = groupProgressRows(rowsOf(threeRows), 'supplier')[0]!
+
+    expect(first.label).toBe('佳宝纺织')
+    expect(first.rows).toHaveLength(2)
+    expect(first.doneCount).toBe(0)
+    expect(first.latestDate).toBe('2026-10-02')
+  })
+
+  it('组按「最久已等天数」倒序：最该处理的排最前', () => {
+    const groups = groupProgressRows(rowsOf(threeRows), 'supplier')
+
+    expect(groups.map((g) => g.label)).toEqual(['佳宝纺织', '华源'])
+    expect(groups[0]?.oldestAgeDays).toBe(38)
+    expect(groups[1]?.oldestAgeDays).toBe(2)
+  })
+
+  it('组内单位一致才给数量进度；跨单位只报项数', () => {
+    const sameUnit = groupProgressRows(rowsOf([
+      reg({ registration_date: '2026-10-01', items: [item({ id: 1, ordered_quantity: 1000, received_quantity: 500 })] }),
+      reg({ id: 2, registration_date: '2026-10-02', items: [item({ id: 2, ordered_quantity: 1000, received_quantity: 1000, remaining_quantity: 0 })] }),
+    ]), 'supplier')[0]!
+
+    expect(sameUnit.unit).toBe('码')
+    expect(sameUnit.progressPct).toBe(75)
+
+    const mixedUnit = groupProgressRows(rowsOf([
+      reg({ registration_date: '2026-10-01', items: [item({ id: 1, unit: '码' })] }),
+      reg({ id: 2, registration_date: '2026-10-02', items: [item({ id: 2, unit: '只' })] }),
+    ]), 'supplier')[0]!
+
+    expect(mixedUnit.unit).toBeNull()
+    expect(mixedUnit.progressPct).toBeNull()
+    expect(mixedUnit.orderedTotal).toBeNull()
+  })
+
+  it('按订单分组以订单号为准；不分组只有一个无标题组', () => {
+    const byOrder = groupProgressRows(rowsOf(threeRows), 'order')
+    expect(byOrder.map((g) => g.label).sort()).toEqual(['PO-1', 'PO-2'])
+
+    const flat = groupProgressRows(rowsOf(threeRows), 'none')
+    expect(flat).toHaveLength(1)
+    expect(flat[0]?.label).toBe('')
+    expect(flat[0]?.rows).toHaveLength(3)
+  })
+
+  it('空输入不产出空组', () => {
+    expect(groupProgressRows([], 'supplier')).toEqual([])
+    expect(groupProgressRows([], 'none')).toEqual([])
+  })
+})
+
+// ============================================================
+// 三、表格：有表头，日期与数量各自成列
+// ============================================================
+describe('ProgressTable —— 扁平行列表', () => {
+  const orderRows = buildProgressOrderRows([reg({
+    items: [
+      item({ id: 1, material_name: '1.0超柔', received_quantity: 600 }),
+      item({ id: 2, material_name: '2mm吉荣', ordered_quantity: 800, received_quantity: 800, remaining_quantity: 0 }),
+      item({ id: 3, material_name: '塑料眼珠', unit: '只', ordered_quantity: 24000, received_quantity: 0, remaining_quantity: 24000 }),
+    ],
+  })], NOW)
+
+  function mountTable() {
+    const rows = flattenProgressRows(orderRows, NOW)
+    return mount(ProgressTable, {
+      props: { groups: groupProgressRows(rows, 'supplier'), mode: 'supplier', rowCount: rows.length },
+    })
+  }
+
+  it('有表头：到货日期 / 已到·采购 / 进度（上一版没有表头，用户靠猜列义）', () => {
+    const w = mountTable()
+
+    expect(w.find('.mrt-head').text()).toContain('到货日期')
+    expect(w.find('.mrt-head').text()).toContain('已到 / 采购')
+    expect(w.find('.mrt-head').text()).toContain('进度')
+  })
+
+  it('日期列给「MM-DD + 已等 N 天」，数量列给「已到 / 采购 + 单位」', () => {
+    const first = mountTable().findAll('.mrt-row')[0]!
+
+    expect(first.find('.mrt-date').text()).toBe('10-01')
+    expect(first.find('.mrt-age').text()).toBe('38 天')
+    expect(first.find('.c-qty').text()).toContain('600')
+    expect(first.find('.c-qty').text()).toContain('1,200')
+    expect(first.find('.c-qty').text()).toContain('码')
+  })
+
+  it('全表不出现「逾期 / 延期」措辞（系统没有约定交期，说「逾期」是虚构）', () => {
+    const text = mountTable().text()
+
+    expect(text).not.toContain('逾期')
+    expect(text).not.toContain('延期')
+  })
+
+  it('0 到货写「未到」、收齐写「到齐」，不写 0% / 100%', () => {
+    const labels = mountTable().findAll('.mrt-row').map((r) => r.find('.mrt-pct').text())
+
+    expect(labels).toContain('未到')
+    expect(labels).toContain('到齐')
+    expect(labels).toContain('50%')
+  })
+
+  it('久未收齐的行整行淡红底，其余不染色', () => {
+    const rows = mountTable().findAll('.mrt-row')
+
+    expect(rows[0]?.classes()).toContain('is-slow')
+    expect(rows.some((r) => !r.classes().includes('is-slow'))).toBe(true)
+  })
+
+  it('按供应商分组时供应商列不占位（与组标题重复）；按订单时显示', async () => {
+    const w = mountTable()
+    expect(w.classes()).toContain('is-suphide')
+
+    await w.setProps({ mode: 'order' })
+    expect(w.classes()).not.toContain('is-suphide')
+  })
+
+  it('组头给「x/y 项到齐」，并在跨单位时不给数量百分比', () => {
+    const w = mountTable()
+
+    expect(w.find('.mrt-group').text()).toContain('佳宝纺织')
+    expect(w.find('.mrt-group').text()).toContain('1/3 项到齐')
+    expect(w.find('.mrt-g-meter').exists()).toBe(false) // 码 / 只 混单位
+  })
+
+  it('明细按钮把供应商与订单抛给父级', async () => {
+    const w = mountTable()
+
+    await w.findAll('.mrt-btn')[0]!.trigger('click')
+
+    expect(w.emitted('view-detail')?.[0]).toEqual(['佳宝纺织', 'PO-1'])
+  })
+})
+
+// ============================================================
+// 四、ProgressTab：筛选按事实分档 · 分组可切
+// ============================================================
+describe('ProgressTab —— 筛选与分组', () => {
+  const regs = [
+    reg({ registration_date: '2026-10-01', items: [item({ id: 1, received_quantity: 0 })] }),
+    reg({ id: 2, registration_date: '2026-10-02', items: [item({ id: 2, received_quantity: 600 })] }),
+    reg({ id: 3, registration_date: '2026-11-06', supplier_name: '华源', purchase_order_no: 'PO-2', items: [item({ id: 3, received_quantity: 1200, remaining_quantity: 0 })] }),
+  ]
+
+  it('默认按供应商分组，挂载即见表头与分组行', () => {
+    const w = mountTab(regs)
+
+    expect(w.find('.mrt-head').exists()).toBe(true)
+    expect(w.findAll('.mrt-group')).toHaveLength(2)
+    expect(w.findAll('.mrt-row')).toHaveLength(3)
+  })
+
+  it('筛选条只按到货事实分档：全部 / 未到 / 部分到货 / 已到齐 / ≥30 天', () => {
+    const labels = mountTab(regs).findAll('.mr-chip').map((c) => c.text())
+
+    expect(labels[0]).toContain('全部')
+    expect(labels[1]).toContain('未到')
+    expect(labels[2]).toContain('部分到货')
+    expect(labels[3]).toContain('已到齐')
+    expect(labels[4]).toContain('≥30 天')
+  })
+
+  it('分档计数与数据一致（10-01 与 10-02 两批都满 30 天未收齐 → ≥30 天 2 项）', () => {
+    const chips = mountTab(regs).findAll('.mr-chip').map((c) => c.find('.mr-chip-n').text())
+
+    expect(chips).toEqual(['3', '1', '1', '1', '2'])
+  })
+
+  it('点「未到」只剩未到的行；点「≥30 天」只剩久未收齐的行', async () => {
+    const w = mountTab(regs)
+
+    await w.findAll('.mr-chip')[1]!.trigger('click')
+    expect(w.findAll('.mrt-row')).toHaveLength(1)
+    expect(w.find('.mrt-pct').text()).toBe('未到')
+
+    await w.findAll('.mr-chip')[4]!.trigger('click')
+    expect(w.findAll('.mrt-row')).toHaveLength(2)
+    expect(w.findAll('.mrt-row').every((r) => r.classes().includes('is-slow'))).toBe(true)
+  })
+
+  it('切「不分组」后没有分组行，行数不变', async () => {
+    const w = mountTab(regs)
+
+    await w.findAll('.mr-seg-btn')[2]!.trigger('click')
     await nextTick()
 
-    expect(w.find('.mr-mat').exists()).toBe(false)
+    expect(w.findAll('.mrt-group')).toHaveLength(0)
+    expect(w.findAll('.mrt-row')).toHaveLength(3)
   })
 
-  it('本页筛选「有逾期」只保留存在逾期物料的订单', async () => {
-    const w = mountTab(buildProgressOrderRows([REG_OVERDUE, REG_FRESH], NOW))
-    expect(w.findAll('.mr-order')).toHaveLength(2)
+  it('切「按订单」分组行变订单号', async () => {
+    const w = mountTab(regs)
 
-    await w.findAll('.mr-filter')[1]!.trigger('click')
+    await w.findAll('.mr-seg-btn')[1]!.trigger('click')
+    await nextTick()
 
-    expect(w.findAll('.mr-order')).toHaveLength(1)
-    expect(w.find('.mr-order-no').text()).toBe('PO-OLD')
+    const labels = w.findAll('.mrt-g-label').map((n) => n.text())
+    expect(labels.sort()).toEqual(['PO-1', 'PO-2'])
   })
 
-  it('筛选无命中时给「本页」口径的空态（不是全局无数据）', async () => {
-    const w = mountTab(buildProgressOrderRows([REG_FRESH], NOW))
+  it('明细按钮透传 view-supplier 给父级', async () => {
+    const w = mountTab(regs)
 
-    await w.findAll('.mr-filter')[1]!.trigger('click')
+    await w.findAll('.mrt-btn')[0]!.trigger('click')
 
-    expect(w.findAll('.mr-order')).toHaveLength(0)
-    expect(w.text()).toContain('本页没有')
+    expect(w.emitted('view-supplier')?.[0]).toEqual(['佳宝纺织', 'PO-1'])
   })
 
-  it('showSearchEmpty=true 时渲染"当前页无匹配"空态（搜索仅作用于当前页）', async () => {
+  it('搜索无命中时给「当前页无匹配」，不冒充「暂无登记」', async () => {
     const w = mountTab([])
+
     await w.setProps({ showSearchEmpty: true })
 
     expect(w.text()).toContain('当前页无匹配')
   })
 
-  it('无任何数据时给基础空态', () => {
-    expect(mountTab([]).text()).toContain('暂无进行中的来料登记')
+  it('筛选无命中时说明是本页无该类物料', async () => {
+    const w = mountTab([reg({ registration_date: '2026-11-07' })])
+
+    await w.findAll('.mr-chip')[3]!.trigger('click')
+
+    expect(w.find('.mr-empty').text()).toContain('本页没有')
   })
 
-  it('分页按后端登记总数渲染，翻页按 1 基转 0 基上抛', async () => {
-    const w = mountTab(buildProgressOrderRows([REG_FRESH], NOW), { pCount: 42, pPages: 3, pPage: 2 })
-
-    expect(w.find('.ui-pagination').exists()).toBe(true)
-    expect(w.text()).toContain('共 42')
-
-    const next = w.findAll('.ui-page-btn')[1]!
-    await next.trigger('click')
-
-    expect(w.emitted('page')?.[0]).toEqual([{ page: 2, rows: 20 }])
-  })
-
-  it('首次加载渲染骨架屏，不渲染空态', () => {
-    const w = mountTab([], { pIsLoading: true, pCount: 0 })
+  it('首次加载显示骨架，不显示表头（避免表头跳动）', async () => {
+    const w = mountTab([])
+    await w.setProps({ pIsLoading: true, progressOrderRows: [] })
 
     expect(w.find('.mr-skel').exists()).toBe(true)
-    expect(w.find('.mr-empty').exists()).toBe(false)
-  })
-})
-
-// ============================================================
-// MaterialToolbar：单行工具条（标题·搜索·KPI 四格·导出）
-// ============================================================
-const STATS = { inProgress: 6, notStarted: 4, overdueItems: 2, overallProgress: 54 }
-
-function mountToolbar(over: Record<string, unknown> = {}) {
-  return mount(MaterialToolbar, {
-    props: { search: '', stats: STATS, hasData: true, canExport: true, ...over },
-  })
-}
-
-describe('MaterialToolbar —— 单行工具条（病灶④⑤）', () => {
-  it('四格 KPI：进行中登记 / 待收货登记 / 逾期物料 / 总到货率', () => {
-    const w = mountToolbar()
-    const text = w.text()
-
-    expect(text).toContain('进行中登记')
-    expect(text).toContain('待收货登记')
-    expect(text).toContain('逾期物料')
-    expect(text).toContain('总到货率')
-    expect(text).toContain('54%')
+    expect(w.find('.mrt-head').exists()).toBe(false)
   })
 
-  it('逾期格 >0 时数字标红，=0 时不标（重要异常才着色）', () => {
-    expect(mountToolbar().find('.kpi-danger').exists()).toBe(true)
-    expect(mountToolbar({ stats: { ...STATS, overdueItems: 0 } }).find('.kpi-danger').exists()).toBe(false)
-  })
-
-  it('搜索框受控：输入上抛 update:search，回车 emit search', async () => {
-    const w = mountToolbar()
-    const input = w.find('.mr-search-input')
-
-    await input.setValue('易拉盖')
-    expect(w.emitted('update:search')?.[0]).toEqual(['易拉盖'])
-
-    await input.trigger('keyup.enter')
-    expect(w.emitted('search')).toHaveLength(1)
-  })
-
-  it('导出按钮点击上抛 export；无数据或无权限时隐藏 KPI 行与导出', async () => {
-    const w = mountToolbar()
-    await w.find('.mr-export-btn').trigger('click')
-    expect(w.emitted('export')).toHaveLength(1)
-
-    expect(mountToolbar({ hasData: false }).find('.mr-export-btn').exists()).toBe(false)
-    expect(mountToolbar({ canExport: false }).find('.mr-export-btn').exists()).toBe(false)
-    expect(mountToolbar({ hasData: false }).find('.kpi-item').exists()).toBe(false)
-  })
-
-  it('KPI 数值千分位（12,840 量级一眼可辨）', () => {
-    const w = mountToolbar({ stats: { inProgress: 12840, notStarted: 0, overdueItems: 0, overallProgress: 0 } })
-
-    expect(w.text()).toContain('12,840')
+  it('30 天阈值是单一来源（SLOW_DAYS）', () => {
+    expect(SLOW_DAYS).toBe(30)
   })
 })

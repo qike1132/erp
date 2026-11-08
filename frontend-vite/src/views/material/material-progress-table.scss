@@ -1,0 +1,282 @@
+/* 来料进度表（ProgressTable.vue 专用）
+ *
+ * 列轨只有一处定义：--cols。表头与每行都用 var(--cols)，
+ * 列宽变化（隐藏供应商列 / 断点）只改这一个变量，不会表头与数据错位。
+ * 窄屏把行重排为三行网格，而不是横向滚动——表格在 900px 以下不可用是上一版的问题。
+ */
+
+.mrt {
+  --cols: 76px minmax(170px, 215px) minmax(150px, 1.4fr) 104px 148px 94px 50px;
+  --mrt-line: #eef2f8;
+  --mrt-line-strong: #e3e9f3;
+  --mrt-text: #1a1a2e;
+  --mrt-text-2: #475569;
+  --mrt-muted: #64748b;
+  --mrt-blue: #3a6bd6;
+  --mrt-green: #1e9e55;
+  --mrt-amber: #9a6a00;
+  --mrt-red: #c0392b;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px 8px;
+}
+
+/* 按供应商分组时，供应商列与组标题重复，直接不占位（含轨道收缩） */
+.mrt.is-suphide {
+  --cols: 76px minmax(170px, 240px) minmax(150px, 1.4fr) 148px 94px 50px;
+}
+.mrt.is-suphide .c-sup { display: none; }
+
+.mrt-head,
+.mrt-row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+  column-gap: 12px;
+}
+
+.mrt-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 7px 10px;
+  background: #fbfcff;
+  border-bottom: 1px solid var(--mrt-line-strong);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mrt-muted);
+  letter-spacing: 0.02em;
+}
+.mrt-head .c-qty,
+.mrt-head .c-pct { text-align: right; }
+
+/* 视觉隐藏但保留给读屏（表头最后一列无文字标题） */
+.mrt-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 行：斑马纹比边框线更轻，且不增加视觉噪声 */
+.mrt-row {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--mrt-line);
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--mrt-text-2);
+  transition: background 0.12s;
+}
+.mrt-row:nth-of-type(even) { background: #fcfdff; }
+.mrt-row:hover { background: #f6f9ff; }
+.mrt-row.is-slow { background: #fffafa; }
+.mrt-row.is-slow:hover { background: #fff5f5; }
+
+.c-date { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
+.mrt-date {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--mrt-text);
+  font-size: 12.5px;
+}
+.mrt-age { font-size: 11px; color: var(--mrt-muted); font-variant-numeric: tabular-nums; }
+.mrt-age.is-warm { color: var(--mrt-amber); }
+.mrt-age.is-slow { color: var(--mrt-red); font-weight: 600; }
+
+.c-ord { display: flex; flex-direction: column; gap: 1px; min-width: 0; line-height: 1.3; }
+.mrt-po {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--mrt-blue);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mrt-sub {
+  font-size: 11px;
+  color: var(--mrt-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c-mat { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.mrt-material {
+  font-weight: 600;
+  color: var(--mrt-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mrt-spec {
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--mrt-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c-sup {
+  min-width: 0;
+  color: var(--mrt-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c-qty {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--mrt-text);
+}
+.c-qty b { font-weight: 700; }
+.c-qty .mrt-of { color: var(--mrt-muted); font-weight: 400; margin-left: 2px; }
+.c-qty .mrt-unit { color: var(--mrt-muted); font-size: 11px; margin-left: 4px; }
+.mrt-row.st-todo .c-qty b { color: #9aa6b8; font-weight: 600; }
+
+.c-pct { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.mrt-meter {
+  display: block;
+  width: 46px;
+  height: 5px;
+  border-radius: 999px;
+  background: #e6ebf3;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.mrt-meter i { display: block; height: 100%; border-radius: inherit; background: var(--mrt-blue); }
+.mrt-meter i.fill-done { background: var(--mrt-green); }
+.mrt-meter i.fill-slow { background: var(--mrt-red); }
+.mrt-meter i.fill-zero { background: transparent; }
+.mrt-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--mrt-text);
+  min-width: 30px;
+  text-align: right;
+}
+.mrt-pct.is-done { color: var(--mrt-green); }
+.mrt-pct.is-zero { color: #9aa6b8; font-weight: 600; }
+.mrt-pct.is-slow { color: var(--mrt-red); }
+
+.c-act { display: flex; justify-content: flex-end; }
+.mrt-btn {
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--mrt-blue);
+  background: #fff;
+  border: 1px solid #cfdcf6;
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.mrt-btn:hover { background: #eef4ff; border-color: #a9c2ee; }
+.mrt-btn:focus-visible { outline: 2px solid var(--mrt-blue); outline-offset: 1px; }
+
+/* === 分组行：视图模式产生的一层，不是卡片 === */
+.mrt-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-top: 6px;
+  background: #f3f6fc;
+  border-bottom: 1px solid var(--mrt-line-strong);
+  border-radius: 6px 6px 0 0;
+  font-size: 12px;
+  color: var(--mrt-text-2);
+  flex-wrap: wrap;
+}
+.mrt-group:first-of-type { margin-top: 4px; }
+.mrt-g-label { font-weight: 700; color: var(--mrt-text); font-size: 12.5px; }
+.mrt-g-sub { color: var(--mrt-muted); font-size: 11px; }
+.mrt-g-flag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mrt-red);
+  background: #fdecec;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.mrt-g-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.mrt-g-stat { font-variant-numeric: tabular-nums; color: var(--mrt-text-2); font-weight: 600; font-size: 11.5px; }
+.mrt-g-meter {
+  display: block;
+  width: 60px;
+  height: 5px;
+  border-radius: 999px;
+  background: #dfe6f2;
+  overflow: hidden;
+}
+.mrt-g-meter i { display: block; height: 100%; background: var(--mrt-blue); border-radius: inherit; }
+.mrt-g-date { font-size: 11px; color: var(--mrt-muted); font-variant-numeric: tabular-nums; }
+
+/* === ≤1180px：收紧轨道，保证 1024 笔电不横向溢出 === */
+@media (max-width: 1180px) {
+  .mrt {
+    --cols: 64px minmax(140px, 180px) minmax(112px, 1.2fr) 92px 128px 78px 44px;
+  }
+  .mrt.is-suphide {
+    --cols: 64px minmax(140px, 200px) minmax(112px, 1.2fr) 128px 78px 44px;
+  }
+  .mrt-head,
+  .mrt-row { column-gap: 10px; }
+  .mrt-meter { width: 36px; }
+}
+
+/* === ≤900px：行重排为三行网格，取消横向挤压 === */
+@media (max-width: 900px) {
+  .mrt { padding: 0 10px 6px; }
+  .mrt-head { display: none; }
+
+  .mrt-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'ord  ord  act'
+      'mat  mat  pct'
+      'date sup  qty';
+    row-gap: 3px;
+    column-gap: 10px;
+    padding: 8px 6px;
+  }
+  .c-ord { grid-area: ord; }
+  .c-mat { grid-area: mat; }
+  .c-date { grid-area: date; flex-direction: row; align-items: baseline; gap: 5px; }
+  .c-sup { grid-area: sup; }
+  .c-qty { grid-area: qty; text-align: right; }
+  .c-pct { grid-area: pct; }
+  .c-act { grid-area: act; }
+
+  .mrt-po { font-size: 12px; }
+  .mrt-sub { font-size: 10.5px; }
+  .mrt-meter { width: 34px; }
+
+  .mrt-group {
+    padding: 6px 8px;
+    gap: 6px;
+    row-gap: 3px;
+  }
+  .mrt-g-right { width: 100%; margin-left: 0; justify-content: space-between; }
+}
+
+/* === ≤560px：进一步收窄，数量与进度同行 === */
+@media (max-width: 560px) {
+  .mrt-row { column-gap: 8px; font-size: 12px; }
+  .mrt-pct { min-width: 26px; font-size: 11.5px; }
+  .mrt-btn { padding: 3px 7px; font-size: 11px; }
+  .mrt-g-date { display: none; }
+}
