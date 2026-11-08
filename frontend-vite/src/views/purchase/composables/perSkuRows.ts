@@ -164,6 +164,13 @@ export interface PerSkuRow {
   /** 该物料在落库明细中的坐标；无对应明细时为 null（只读行） */
   coord: { si: number; fi: number } | null
   itemIds: number[]
+  /**
+   * 只读原因（空串 = 可编辑）。两种只读：
+   * 1. 无落库坐标（BOM 生成后新增的物料）；
+   * 2. **同一 SKU 内多个角色共用同一采购明细行**——按角色分行后每行只是该角色的
+   *    分配量，而明细是合并总量；此时写入会把总量改成某个角色的分量，故禁止编辑。
+   */
+  readonlyReason: string
   /** 该 SKU 无 BOM 明细时的占位行（保留块结构，不隐藏该 SKU） */
   noBom: boolean
 }
@@ -247,6 +254,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         baseQuantity: 0,
         coord: null,
         itemIds: [],
+        readonlyReason: '',
         noBom: true,
       })
       return
@@ -255,10 +263,18 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
     const supplierCounts = new Map<string, number>()
     materials.forEach((m) => supplierCounts.set(m.supplier_name, (supplierCounts.get(m.supplier_name) || 0) + 1))
     const seenSupplier = new Set<string>()
+    // 同一 SKU 内同一物料键出现多次（多角色共用同一采购明细行）→ 只读：
+    // 明细存的是**合并总量**，按角色分行后每行只是该角色的分配量，写入会把总量改错。
+    const keyCounts = new Map<string, number>()
+    materials.forEach((m) => {
+      const k = materialKeyOf(m)
+      keyCounts.set(k, (keyCounts.get(k) || 0) + 1)
+    })
 
     materials.forEach((m, i) => {
       const key = materialKeyOf(m)
       const hit = stored.get(key)
+      const sharedInSku = (keyCounts.get(key) || 0) > 1
       const isFirstSupplierRow = !seenSupplier.has(m.supplier_name)
       seenSupplier.add(m.supplier_name)
       rows.push({
@@ -283,8 +299,11 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         specification: m.specification,
         unit: m.unit,
         baseQuantity: parseFloat(String(m.quantity)) || 0,
-        coord: hit?.coord ?? null,
-        itemIds: hit?.itemIds ?? [],
+        coord: sharedInSku ? null : (hit?.coord ?? null),
+        itemIds: sharedInSku ? [] : (hit?.itemIds ?? []),
+        readonlyReason: sharedInSku
+          ? '该物料被多个角色共用同一采购明细行，此处按角色分行显示分配量；如需调整请在采购明细中改总量'
+          : '',
         noBom: false,
       })
     })

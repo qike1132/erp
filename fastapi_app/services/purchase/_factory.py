@@ -256,6 +256,15 @@ def _finalize_role_display(row: dict) -> dict:
     return row
 
 
+def _role_sort_key(role_id) -> tuple[int, int]:
+    """角色排序键：默认 BOM（None）排最前，其余按 role_id 升序（= 角色创建顺序）。
+
+    「按角色分类汇总」要求同一角色的物料连续排列，角色必须作为**第一排序键**；
+    默认 BOM 放最前，与 BOM 配置页「默认BOM 页签在首位」的阅读习惯一致。
+    """
+    return (0, 0) if role_id is None else (1, int(role_id))
+
+
 def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: str = ''):
     """定位（必要时创建）该 BOM 行对应的聚合行，并登记它的展示部位。
 
@@ -447,16 +456,20 @@ def _sku_material_rows(
         sup = bom.get('supplier_name') or supplier_fallback
         bom_part = _norm_part_name(bom.get('part_name'))
         part_key = bom_part if split_parts else ''
-        key = (sup, bom['material_name'], bom['specification'], bom['unit'], part_key)
-        row_qty = sku_qty if allocation is None else allocation.get(bom.get('role_id'), sku_qty)
+        role_id = bom.get('role_id')
+        # **角色参与聚合键**：工厂内部订单要「按角色分类汇总」——不同角色的同名物料
+        # 必须各自成行（各自的数量 = 该角色的分配量），不能合并成一行再并列角色名。
+        # 无角色（默认 BOM）时 role_id 为 None，键退化为历史口径，普通 SKU 零变化。
+        key = (role_id, sup, bom['material_name'], bom['specification'], bom['unit'], part_key)
+        row_qty = sku_qty if allocation is None else allocation.get(role_id, sku_qty)
         amount = round_qty(float(bom.get('quantity') or 0) * float(row_qty or 0))
-        # 角色名（「角色名称」列的唯一来源）：默认 BOM（role_id=None）不登记，
-        # 同一物料被多个角色共用时在展示文本里并列（见 _record_role 注释）。
-        role_name = (role_names or {}).get(bom.get('role_id')) or ''
+        role_name = (role_names or {}).get(role_id) or ''
         if key in buckets:
             buckets[key]['quantity'] += amount
         else:
             buckets[key] = {
+                'role_id': role_id,
+                'role_name': role_name,
                 'supplier_name': sup,
                 'material_name': bom['material_name'],
                 'part_name': part_key or None,
@@ -469,10 +482,13 @@ def _sku_material_rows(
         # 展示部位在这里登记（合并模式下同一物料的多条 BOM 行会落到同一桶）。
         _record_part(buckets[key], bom_part)
         _record_role(buckets[key], role_name)
-    # 稳定顺序：供应商 → 部位 → 物料名 → 规格 → 单位
+    # 稳定顺序：**角色（默认 BOM 在前，其后按 role_id 升序）** → 供应商 → 部位 →
+    # 物料名 → 规格 → 单位。角色必须排在首位，否则同角色物料会被供应商打散，
+    # 「按角色分类汇总」的视觉效果就不成立。
     return sorted(
         buckets.values(),
         key=lambda r: (
+            _role_sort_key(r.get('role_id')),
             r['supplier_name'], r['part_name'] or '', r['material_name'], r['specification'], r['unit'],
         ),
     )
@@ -540,7 +556,7 @@ def _accumulate_factory_sku_materials(
             role_names=(role_names_by_pid or {}).get(sku_pid),
         ):
             key = (
-                row['supplier_name'], row['material_name'],
+                row.get('role_id'), row['supplier_name'], row['material_name'],
                 row['specification'], row['unit'], row.get('part_name') or '',
             )
             if key in bucket:
@@ -578,6 +594,7 @@ def _finalize_factory_sku_materials(group_map: dict) -> None:
             finalized[name] = sorted(
                 (_finalize_role_display(_finalize_part_display(dict(row))) for row in rows),
                 key=lambda r: (
+                    _role_sort_key(r.get('role_id')),
                     r['supplier_name'], r.get('part_name') or '',
                     r['material_name'], r['specification'], r['unit'],
                 ),

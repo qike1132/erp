@@ -35,14 +35,19 @@ function roleGroup(): FactoryGroup {
             specification: 'S1', unit: '米', quantity: 10,
           },
           {
+            supplier_name: '供应商甲', material_name: '松紧带', part_name: '',
+            part_display: '身体', role_display: '角色A',
+            specification: 'S3', unit: '米', quantity: 3,
+          },
+          {
             supplier_name: '供应商甲', material_name: '蓝布', part_name: '',
             part_display: '头部', role_display: '角色B',
             specification: 'S2', unit: '米', quantity: 20,
           },
           {
             supplier_name: '供应商甲', material_name: '松紧带', part_name: '',
-            part_display: '身体', role_display: '角色A/角色B',
-            specification: 'S3', unit: '米', quantity: 5,
+            part_display: '身体', role_display: '角色B',
+            specification: 'S3', unit: '米', quantity: 2,
           },
         ],
       },
@@ -64,12 +69,12 @@ function dataOf(group: FactoryGroup): FactorySummaryData {
   return { success: true, order_count: 1, spare_rate: 0, groups: [group] }
 }
 
-function mountModal(group: FactoryGroup) {
+function mountModal(group: FactoryGroup, editMode = false) {
   return mount(SummaryPanel, {
     props: {
       factoryData: dataOf(group),
       supplierData: { success: true, order_count: 1, materials: [] },
-      editMode: false,
+      editMode,
       lossRate: 0,
       orderCount: 1,
       supplierGroups: [],
@@ -95,14 +100,30 @@ describe('工厂内部订单 · 角色名称列', () => {
     const rows = wrapper.findAll('.smf-scroll tbody tr').filter(
       (tr) => ['红布', '蓝布', '松紧带'].some((name) => tr.text().includes(name)),
     )
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(4)
 
     const cells = (i: number) => rows[i]!.findAll('td').map((td) => td.text())
-    // 首行：客户/产品/订单/备品 4 格 + 角色 + 部位 + 供应商(rowspan) + 布料/规格/损耗率/数量/单位
+    // 角色连续成块：角色A（红布、松紧带）→ 角色B（蓝布、松紧带）
     expect(cells(0).slice(4, 7)).toEqual(['角色A', '身体', '供应商甲'])
-    // 第 2、3 行：供应商被 rowspan 覆盖 → 角色 + 部位 + 后 5 格
-    expect(cells(1).slice(0, 2)).toEqual(['角色B', '头部'])
-    expect(cells(2).slice(0, 2)).toEqual(['角色A/角色B', '身体'])
+    expect(cells(1).slice(0, 2)).toEqual(['角色A', '身体'])
+    expect(cells(2).slice(0, 2)).toEqual(['角色B', '头部'])
+    expect(cells(3).slice(0, 2)).toEqual(['角色B', '身体'])
+    // 同一物料（松紧带）按角色分成两行，数量各是各的分配量
+    expect(cells(1)[5]).toBe('3')
+    expect(cells(3)[5]).toBe('2')
+    wrapper.unmount()
+  })
+
+  it('R5 多角色共用同一物料：按角色分行显示，编辑态只读并说明原因', () => {
+    const wrapper = mountModal(roleGroup(), true)
+    const rows = wrapper.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
+    expect(rows).toHaveLength(2)
+    for (const tr of rows) {
+      // 无落库坐标 → 损耗率渲染「—」，且 title 说明是「多角色共用同一采购明细行」
+      const dash = tr.findAll('span').find((el) => el.text() === '—')
+      expect(dash).toBeDefined()
+      expect(dash!.attributes('title')).toContain('多个角色共用')
+    }
     wrapper.unmount()
   })
 
@@ -117,6 +138,7 @@ describe('工厂内部订单 · 角色名称列', () => {
     expect(first[4]).toBe('角色A')
     expect(first[5]).toBe('身体')
     expect(first[6]).toBe('供应商甲')
-    expect(html).toContain('角色A/角色B')
+    expect(html).toContain('角色A')
+    expect(html).toContain('角色B')
   })
 })

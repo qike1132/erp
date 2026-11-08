@@ -139,6 +139,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
               baseQuantity: parseFloat(String(fabric.quantity)) || 0,
               coord: { si, fi },
               itemIds: fabric.item_ids || (fabric.item_id ? [fabric.item_id] : []),
+              readonlyReason: '',
               noBom: false,
             },
           })

@@ -139,7 +139,7 @@
                     </template>
                     <template v-else>{{ formatQty(rowRate(item)) }}</template>
                   </template>
-                  <span v-else class="text-text-muted" title="该物料不在采购明细中（BOM 生成后新增），无法在此修改">—</span>
+                  <span v-else class="text-text-muted" :title="item.row.readonlyReason || '该物料不在采购明细中（BOM 生成后新增），无法在此修改'">—</span>
                 </td>
                 <!-- 数量：编辑态可改（同物料跨 SKU 联动，故给出提示）；否则取派生展示值 -->
                 <td>

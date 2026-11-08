@@ -4,8 +4,9 @@
 属于哪个角色。角色归属来自 BOM 行的 ``role_id``（生成采购单时同一套作用域），
 由 ``_sku_material_rows`` 记账、定稿为 ``role_display``：
 
-- 同一物料被多个角色共用 → 聚合行**并列**角色名（``角色A/角色B``），不拆行
-  （拆行会让同一落库明细被多行共享，编辑一个角色就改写整行数量）；
+- 同一物料被多个角色共用 → **按角色各成一行**（各自数量 = 该角色的分配量），
+  不合并成一行——合并后工厂看不出每个角色各要多少（2026-11-08 用户反馈）；
+- 排序第一键是角色（默认 BOM 在前，其后 role_id 升序），保证同角色物料连续；
 - 默认 BOM（``role_id=None``）→ 空串（没有角色可标）；
 - 旧调用方不传 ``role_names`` → 空串（零行为变化）。
 """
@@ -45,15 +46,40 @@ def test_each_role_keeps_its_own_role_name():
     }
 
 
-def test_shared_material_lists_every_role():
-    """同一物料被两个角色共用：聚合行并列角色名，数量累加（不拆行）。"""
+def test_shared_material_splits_per_role():
+    """同一物料被两个角色共用：**按角色各成一行**（数量各按该角色分配量），不合并。
+
+    这是 2026-11-08 用户反馈的缺陷：工厂内部订单要「按角色分类汇总」，
+    合并成一行再并列角色名，工厂看不出每个角色各要多少。
+    """
     rows = _rows(
         [_bom('共享布', role_id=7, quantity=2), _bom('共享布', role_id=8, quantity=3)],
         role_names={7: '角色A', 8: '角色B'},
     )
-    assert len(rows) == 1
-    assert rows[0]['role_display'] == '角色A/角色B'
-    assert rows[0]['quantity'] == 50.0  # (2 + 3) × 10
+    assert len(rows) == 2
+    assert [(row['role_display'], row['quantity']) for row in rows] == [
+        ('角色A', 20.0),  # 2 × 10
+        ('角色B', 30.0),  # 3 × 10
+    ]
+    # 两行仍是同一个物料（落库侧只有一行明细，前端据此把它标为只读）
+    assert {row['material_name'] for row in rows} == {'共享布'}
+
+
+def test_rows_are_grouped_by_role():
+    """排序第一键是角色：同一角色的物料必须连续，不能被供应商/物料名打散。"""
+    rows = _rows(
+        [
+            _bom('乙布', role_id=8),
+            _bom('甲布', role_id=7),
+            _bom('丙布', role_id=8),
+            _bom('默认布', role_id=None),
+        ],
+        role_names={7: '角色A', 8: '角色B'},
+    )
+    # 默认 BOM 在前，其后 role_id 升序；角色内再按供应商/部位/物料名
+    assert [row['role_display'] for row in rows] == ['', '角色A', '角色B', '角色B']
+    # 角色内再按物料名排序（丙 U+4E19 < 乙 U+4E59）
+    assert [row['material_name'] for row in rows] == ['默认布', '甲布', '丙布', '乙布']
 
 
 def test_default_bom_has_empty_role_display():
