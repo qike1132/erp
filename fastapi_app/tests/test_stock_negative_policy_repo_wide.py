@@ -798,6 +798,10 @@ class _T42Product:
         self.version = 0
         self.current_stock = current_stock
         self.initial_stock = initial_stock
+        # 盲盒三件套：update_product 的配比归一化会读这两个开关（迁移 115）
+        self.is_blind_box = False
+        self.has_hidden_role = False
+        self.hidden_carton_ratio = None
 
     def to_dict(self) -> dict:
         return {"id": self.id, "current_stock": self.current_stock}

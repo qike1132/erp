@@ -229,7 +229,11 @@ describe('BomEditor 从打样单导入完整链路', () => {
       roles: Array<Record<string, unknown>>
       fabrics: Array<Record<string, unknown>>
     }
-    expect(payload.roles).toEqual([{ id: 7, role_name: '客户A' }, { role_key: 'rk-1', role_name: '客户B' }])
+    // is_hidden 随角色负载一起提交（BOM 保存的隐藏款标记，缺省 false）
+    expect(payload.roles).toEqual([
+      { id: 7, role_name: '客户A', is_hidden: false },
+      { role_key: 'rk-1', role_name: '客户B', is_hidden: false },
+    ])
     const bodyA = payload.fabrics.find((item) => item.part_name === '身体' && item.role_id === 7)!
     expect(bodyA).toMatchObject({ fabric_name: '身体布料', specification: 'C-2', quantity: 0, remark: '原备注', supplier_id: 9 })
     const bodyB = payload.fabrics.find((item) => item.part_name === '身体' && item.role_key === 'rk-1')!
