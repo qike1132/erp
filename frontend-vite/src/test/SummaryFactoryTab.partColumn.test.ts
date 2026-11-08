@@ -28,14 +28,15 @@ vi.mock('@/api', () => ({
 
 import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import {
-  FACTORY_TABLE_HEAD,
+  factoryTableHead,
   buildFactoryHtml,
 } from '@/views/purchase/composables/useSummaryModal'
 import type { FactoryGroup, FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 /** 屏幕列序的期望值（唯一真值，屏幕与打印都必须与它一致） */
+// 本文件夹具无角色名（单角色/无角色）→ 「角色名称」列整表隐藏（11 列，2026-11-08 用户要求）
 const EXPECTED_HEADERS = [
-  '客户', '产品名称', '角色名称', '订单数量', '备品数量', '产品部位', '供应商',
+  '客户', '产品名称', '订单数量', '备品数量', '产品部位', '供应商',
   '布料名称', '规格型号', '损耗率', '数量', '单位',
 ]
 
@@ -162,7 +163,7 @@ describe('P1 列序：产品部位在供应商之前（屏幕 / 打印同序）'
     wrapper.unmount()
 
     const doc = new DOMParser().parseFromString(
-      `<table><thead>${FACTORY_TABLE_HEAD}</thead></table>`, 'text/html',
+      `<table><thead>${factoryTableHead(false)}</thead></table>`, 'text/html',
     )
     const printed = [...doc.querySelectorAll('th')].map((th) => th.textContent || '')
     expect(printed).toEqual(screen)
@@ -176,18 +177,17 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     const rows = dataRows(wrapper)
     expect(rows).toHaveLength(3)
 
-    // 第 1 行：客户/产品名称 2 格 + 角色 + 订单数量/备品数量（块 rowspan=3）+ 部位 + 供应商(rowspan=2) + 布料…
-    // 列序（2026-11-08）：客户0 产品1 角色2 订单3 备品4 部位5 供应商6 物料7
+    // 第 1 行：客户/产品名称 + 订单数量/备品数量（块 rowspan=3）+ 部位 + 供应商(rowspan=2) + 布料…
+    // 无角色名 → 角色列隐藏（11 列）：客户0 产品1 订单2 备品3 部位4 供应商5 物料6
     const first = rowCells(wrapper, 0)
-    expect(first).toHaveLength(12)
-    expect(first[2]!.text()).toBe('')
-    expect(first[3]!.text()).toBe('25000.0')
-    expect(first[4]!.text()).toBe('0.0')
-    expect(first[5]!.text()).toBe('身体/头部')
-    expect(first[5]!.attributes('rowspan')).toBeUndefined()
-    expect(first[6]!.text()).toBe('坤成')
-    expect(first[6]!.attributes('rowspan')).toBe('2')
-    expect(first[7]!.text()).toBe('起柔')
+    expect(first).toHaveLength(11)
+    expect(first[2]!.text()).toBe('25000.0')
+    expect(first[3]!.text()).toBe('0.0')
+    expect(first[4]!.text()).toBe('身体/头部')
+    expect(first[4]!.attributes('rowspan')).toBeUndefined()
+    expect(first[5]!.text()).toBe('坤成')
+    expect(first[5]!.attributes('rowspan')).toBe('2')
+    expect(first[6]!.text()).toBe('起柔')
 
     // 第 2 行：角色与供应商都被上一行 rowspan 覆盖 → 只剩 部位 + 布料/规格/损耗率/数量/单位
     const second = rowCells(wrapper, 1)
@@ -211,19 +211,20 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     expect(rows).toHaveLength(3)
 
     const first = rowCells(wrapper, 0)
-    expect(first).toHaveLength(12)
-    expect(first[5]!.text()).toBe('身体/头部')
-    expect(first[6]!.text()).toBe('坤成')
-    expect(first[6]!.attributes('rowspan')).toBe('2')
+    expect(first).toHaveLength(11)
+    expect(first[4]!.text()).toBe('身体/头部')
+    expect(first[5]!.text()).toBe('坤成')
+    expect(first[5]!.attributes('rowspan')).toBe('2')
 
+    // 隐藏角色列后段内行 6 格：部位/布料/规格/损耗率/数量/单位
     const second = rowCells(wrapper, 1)
-    expect(second).toHaveLength(7)
-    expect(second[1]!.text()).toBe('头部')
-    expect(second[2]!.text()).toBe('狗狗')
+    expect(second).toHaveLength(6)
+    expect(second[0]!.text()).toBe('头部')
+    expect(second[1]!.text()).toBe('狗狗')
 
     const third = rowCells(wrapper, 2)
-    expect(third[1]!.text()).toBe('身体')
-    expect(third[2]!.text()).toBe('美利达')
+    expect(third[0]!.text()).toBe('身体')
+    expect(third[1]!.text()).toBe('美利达')
     wrapper.unmount()
   })
 
@@ -231,11 +232,11 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     const html = buildFactoryHtml(dataOf(mergedGroup()), 0)
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
     const first = [...doc.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent || '')
-    expect(first[2]).toBe('')
-    expect(first[3]).toBe('25000.0')
-    expect(first[5]).toBe('身体/头部')
-    expect(first[6]).toBe('坤成')
-    expect(first[7]).toBe('起柔')
+    expect(first[2]).toBe('25000.0')
+    expect(first[3]).toBe('0.0')
+    expect(first[4]).toBe('身体/头部')
+    expect(first[5]).toBe('坤成')
+    expect(first[6]).toBe('起柔')
   })
 })
 
@@ -247,7 +248,7 @@ describe('P3 不空白：合并模式下产品部位仍能展示', () => {
       // 行内第 6 列（或供应商 rowspan 覆盖时行首第 2 格）就是部位格
       return cells.map((td) => td.text())
     })
-    expect(shown[0]![5]).toBe('身体/头部')
+    expect(shown[0]![4]).toBe('身体/头部')
     expect(shown[1]![0]).toBe('头部')
     expect(shown[2]![0]).toBe('身体')
     wrapper.unmount()

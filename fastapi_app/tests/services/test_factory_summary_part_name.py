@@ -427,7 +427,8 @@ def _row_widths(page: str) -> list[int]:
 
 
 def test_backend_factory_print_all_rows_width_equals_header():
-    """表头 9 列：客户/产品名称/角色名称/订单数量/产品部位/供应商/布料名称/规格型号/数量+单位。"""
+    """单角色/无角色订单：隐藏「角色名称」列，表头 8 列（客户/产品名称/订单数量/产品部位/
+    供应商/布料名称/规格型号/数量+单位）；列宽必须与表头一致（2026-11-08 用户要求）。"""
     from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
         generate_factory_summary_print,
     )
@@ -450,7 +451,8 @@ def test_backend_factory_print_all_rows_width_equals_header():
     html = generate_factory_summary_print([order], {1: items})
 
     header_width = html.count('<th>')
-    assert header_width == 9
+    assert header_width == 8, '单角色订单必须隐藏角色名称列（8 列）'
+    assert '<th>角色名称</th>' not in html
     widths = _row_widths(html)
     assert widths, '打印页必须至少有一行数据'
     assert set(widths) == {header_width}, f'列数不齐：{widths} != {header_width}'

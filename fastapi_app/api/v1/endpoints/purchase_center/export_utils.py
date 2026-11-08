@@ -153,6 +153,21 @@ def _resolve_factory_cp_key(order, source_order_map):
     return (customer_name, product_name), source_order
 
 
+def _factory_print_show_role_column(sorted_groups) -> bool:
+    """「角色名称」列是否显示（2026-11-08 用户要求：单角色/无角色订单隐藏该列）。
+
+    判定按落库侧 ``role_display`` 去重计数（并列名按 ``/`` 拆分，与前端同口径）。
+    """
+    role_names: set[str] = set()
+    for suppliers in sorted_groups.values():
+        for sup in suppliers:
+            for f in sup['fabrics']:
+                for n in str(f.get('role_display') or '').split('/'):
+                    if n.strip():
+                        role_names.add(n.strip())
+    return len(role_names) >= 2
+
+
 def generate_factory_summary_print(
     orders, order_items_map, source_orders=None, bom_part_map=None, bom_role_map=None,
 ):
@@ -261,7 +276,14 @@ th,td{border:1.0pt solid #000000;padding:1px;text-align:center;vertical-align:mi
 th{background:#E6E6E6;font-weight:bold}
 .total-row{background-color:#F0F0F0;font-weight:bold}"""
     body_parts = ['<div class="header"><h1>东莞市滨发玩具有限公司</h1><h2>工厂内部采购订单汇总</h2></div>']
-    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>角色名称</th><th>订单数量</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
+    # 「角色名称」列只在多角色产品时显示（单角色/无角色订单隐藏该列）
+    show_role_column = _factory_print_show_role_column(sorted_groups)
+    role_th = '<th>角色名称</th>' if show_role_column else ''
+    body_parts.append(
+        '<table><thead><tr><th>客户</th><th>产品名称</th>' + role_th +
+        '<th>订单数量</th><th>产品部位</th><th>供应商</th><th>布料名称</th>'
+        '<th>规格型号</th><th>数量</th></tr></thead><tbody>'
+    )
 
     grand_total: float = 0
     for (customer_name, product_name), suppliers in sorted(sorted_groups.items()):
@@ -276,7 +298,9 @@ th{background:#E6E6E6;font-weight:bold}
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{_h(product_name)}</td>')
                 # 列序（2026-11-08 用户要求）：角色名称在订单数量左边，两者都在部位之前；
                 # 供应商跨行合并的 rowspan 仍挂在供应商格上，角色/部位格逐行渲染。
-                body_parts.append(f'<td style="text-align:left">{_h(fabric.get("role_display", ""))}</td>')
+                # 单角色/无角色订单不渲染角色格（整表隐藏该列，与表头同一判定）。
+                if show_role_column:
+                    body_parts.append(f'<td style="text-align:left">{_h(fabric.get("role_display", ""))}</td>')
                 if global_fabric_idx == 0:
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{float(order_info["product_quantity"]) if order_info["product_quantity"] else 0:g}</td>')
                 body_parts.append(f'<td style="text-align:left">{_h(fabric.get("part_display", ""))}</td>')
@@ -289,8 +313,13 @@ th{background:#E6E6E6;font-weight:bold}
                 grand_total += float(fabric["quantity"]) if fabric["quantity"] else 0
                 global_fabric_idx += 1
 
-    # 合计行必须与表头同宽（9 列）：colspan 5（客户/产品/角色/订单/部位）+ 3 空格 + 数量
-    body_parts.append(f'<tfoot><tr class="total-row"><td colspan="5">合计</td><td></td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>')
+    # 合计行必须与表头同宽：含角色列 9 列（colspan 5 + 3 空格 + 数量）；
+    # 隐藏角色列 8 列（colspan 4 + 3 空格 + 数量）。
+    label_colspan = 5 if show_role_column else 4
+    body_parts.append(
+        f'<tfoot><tr class="total-row"><td colspan="{label_colspan}">合计</td>'
+        f'<td></td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>'
+    )
     body_parts.append('</table>')
     return build_print_html("工厂内部采购订单汇总", ''.join(body_parts), extra_css)
 

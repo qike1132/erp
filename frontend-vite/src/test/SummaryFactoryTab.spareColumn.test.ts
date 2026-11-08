@@ -27,7 +27,7 @@ vi.mock('@/api', () => ({
 
 import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import {
-  FACTORY_TABLE_HEAD,
+  factoryTableHead,
   buildFactoryHtml,
   buildSkuDisplayLines,
   calcSpareQuantity,
@@ -148,19 +148,19 @@ describe('buildSkuDisplayLines（逐 SKU 行的备品）', () => {
 })
 
 describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
-  it('表头 12 列：角色名称在订单数量左边，「备品数量」在订单数量右侧', () => {
+  it('表头 11 列（无角色名 → 隐藏角色列）：「备品数量」在订单数量右侧', () => {
     const ths = headerTexts(mountModal(singleSkuGroup()))
     expect(ths).toEqual([
-      '客户', '产品名称', '角色名称', '订单数量', '备品数量', '产品部位', '供应商',
+      '客户', '产品名称', '订单数量', '备品数量', '产品部位', '供应商',
       '布料名称', '规格型号', '损耗率', '数量', '单位',
     ])
   })
 
   it('备品单元格 = 150.0（订单级率 15‰），与相邻「订单数量」列同格式', () => {
-    // 列序：客户0 产品1 角色2 订单3 备品4
+    // 列序（隐藏角色列）：客户0 产品1 订单2 备品3
     const cells = firstRowCells(mountModal(singleSkuGroup()))
-    expect(cells[3]!.text()).toBe('10000.0')
-    expect(cells[4]!.text()).toBe('150.0')
+    expect(cells[2]!.text()).toBe('10000.0')
+    expect(cells[3]!.text()).toBe('150.0')
   })
 
   it('A3 自定义行率（450‰ 材料损耗）不得影响备品：仍为 150.0', () => {
@@ -172,8 +172,8 @@ describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
     })
     const cells = firstRowCells(wrapper)
 
-    expect(cells[4]!.text()).toBe('150.0')
-    expect(cells[4]!.text()).not.toContain('4500')
+    expect(cells[3]!.text()).toBe('150.0')
+    expect(cells[3]!.text()).not.toContain('4500')
   })
 
   it('A3 反向：即使逐行率被改成 0，备品也不变（仍取订单级率）', () => {
@@ -182,7 +182,7 @@ describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
       groupSpareRates: [15],
       fabricLossRates: [[[0]]],
     })
-    expect(firstRowCells(wrapper)[4]!.text()).toBe('150.0')
+    expect(firstRowCells(wrapper)[3]!.text()).toBe('150.0')
   })
 
   it('多分组：各分组按自己的订单级率算备品（不共用顶部值）', () => {
@@ -200,41 +200,40 @@ describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
 
     const rows = wrapper.findAll('tbody tr')
     // g2 的率是 30‰ → ceil(1000 × 30‰) = 30
-    // 列序：客户0 产品1 角色2 订单3 备品4
-    const secondGroupSpare = rows[1]!.findAll('td')[4]!.text()
+    // 列序（隐藏角色列）：客户0 产品1 订单2 备品3
+    const secondGroupSpare = rows[1]!.findAll('td')[3]!.text()
     expect(secondGroupSpare).toBe('30.0')
   })
 })
 
 describe('A1 打印 / 导出：与屏幕同源（11 列）', () => {
-  it('共享表头常量含 12 列且第 4 列为「备品数量」', () => {
-    const doc = new DOMParser().parseFromString(`<table><thead>${FACTORY_TABLE_HEAD}</thead></table>`, 'text/html')
+  it('隐藏角色列的表头常量含 11 列且第 3 列为「备品数量」', () => {
+    const doc = new DOMParser().parseFromString(`<table><thead>${factoryTableHead(false)}</thead></table>`, 'text/html')
     const headers = [...doc.querySelectorAll('th')].map((th) => th.textContent || '')
-    expect(headers).toHaveLength(12)
-    expect(headers[2]).toBe('角色名称')
-    expect(headers[3]).toBe('订单数量')
-    expect(headers[4]).toBe('备品数量')
-    expect(headers[5]).toBe('产品部位')
-    expect(headers[6]).toBe('供应商')
-    expect(headers[9]).toBe('损耗率')
+    expect(headers).toHaveLength(11)
+    expect(headers[2]).toBe('订单数量')
+    expect(headers[3]).toBe('备品数量')
+    expect(headers[4]).toBe('产品部位')
+    expect(headers[5]).toBe('供应商')
+    expect(headers[8]).toBe('损耗率')
   })
 
-  it('数据行第 5 列 = 备品（订单级率），第 11 列 = 数量（材料损耗率加放）、第 12 列 = 单位', () => {
+  it('数据行第 4 列 = 备品（订单级率），第 10 列 = 数量（材料损耗率加放）、第 11 列 = 单位', () => {
     // 两种率显式分离：订单级率 15‰ 只喂备品；逐行材料损耗率 450‰ 只喂「数量」列
     const html = buildFactoryHtml(dataWith(singleSkuGroup(), 15), 15, [[[450]]])
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
     const cells = [...doc.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent || '')
 
-    expect(cells[4]).toBe('150.0') // 备品 = ceil(10000 × 15‰)（列序：客户0 产品1 角色2 订单3 备品4）
+    expect(cells[3]).toBe('150.0') // 备品 = ceil(10000 × 15‰)（隐藏角色列：客户0 产品1 订单2 备品3）
     // 数量按该行材料损耗率 450‰ 加放：890 × 1.45 = 1290.5 → ceil 1291
-    expect(cells[10]).toBe('1291')
-    expect(cells[11]).toBe('码')
+    expect(cells[9]).toBe('1291')
+    expect(cells[10]).toBe('码')
   })
 
   it('分组级率优先于传入的统一率（打印与屏幕同口径）', () => {
     const html = buildFactoryHtml(dataWith(singleSkuGroup(), 15), 15, undefined, [30])
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
     const cells = [...doc.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent || '')
-    expect(cells[4]).toBe('300.0')
+    expect(cells[3]).toBe('300.0')
   })
 })

@@ -73,8 +73,9 @@
           <tr class="bg-border-light">
             <th>客户</th>
             <th class="w-[240px]">产品名称</th>
-            <!-- 2026-11-08 用户要求：角色名称在「订单数量」左边；隐藏款标记挂在角色名称上 -->
-            <th>角色名称</th>
+            <!-- 2026-11-08 用户要求：角色名称在「订单数量」左边；隐藏款标记挂在角色名称上。
+                 该列只在「多角色产品」时显示（单角色/无角色订单隐藏，整表按数据判定）。 -->
+            <th v-if="showRoleColumn">角色名称</th>
             <th>订单数量</th>
             <th>备品数量</th>
             <!-- 2026-11-05 用户要求：产品部位在供应商之前（屏幕 / 打印 / 导出同序） -->
@@ -106,9 +107,10 @@
                 >{{ line.name }}</div>
                 <div v-if="item.row.hasRoleQtySplit" class="sm-sku-total-sub">合计 {{ formatQty(item.row.cellLines[0]?.qty) }}</div>
               </td>
-              <!-- 角色名称：角色段首行（rowspan=段行数）；隐藏款标记显示在角色名上 -->
+              <!-- 角色名称：角色段首行（rowspan=段行数）；隐藏款标记显示在角色名上；
+                   单角色/无角色订单不渲染该列（整表隐藏） -->
               <td
-                v-if="item.row.isFirstRoleRow"
+                v-if="showRoleColumn && item.row.isFirstRoleRow"
                 :rowspan="item.row.roleRowSpan > 1 ? item.row.roleRowSpan : undefined"
               >
                 <div>{{ item.row.roleDisplay }}</div>
@@ -143,8 +145,8 @@
               >{{ formatQty(item.row.roleSpare) }}</td>
 
               <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU；角色格已渲染空占位，
-                   剩余 部位/供应商/布料/规格/损耗率/数量/单位 = 7 列） -->
-              <td v-if="item.row.noBom" colspan="7" class="text-text-muted">无 BOM 明细</td>
+                   剩余 部位/供应商/布料/规格/损耗率/数量/单位 = 7 列；隐藏角色列时 8 列） -->
+              <td v-if="item.row.noBom" :colspan="showRoleColumn ? 7 : 8" class="text-text-muted">无 BOM 明细</td>
 
               <template v-else>
                 <!-- 列序：产品部位（逐行）→ 供应商（子段首行 + rowspan）。
@@ -198,6 +200,7 @@
               v-if="rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
               :diffs="rowDiffMap[item.gi]!"
               :stored-rows="storedRowsOf(item.group, item.gi)"
+              :show-role-column="showRoleColumn"
             />
           </template>
         </tbody>
@@ -220,11 +223,19 @@
  *   混用会虚高（2026-09-30 生产实证：单张单备品 150 → 4500）。
  */
 import { fmtQty as formatQty } from '@/utils/formatQty'
+import { computed } from 'vue'
+import { anyGroupMultiRole } from '../composables/useSummaryModal'
 import { useFactoryTableRows } from '../composables/useFactoryTableRows'
 import type { FactoryTabEmit, FactoryTabProps } from '../composables/useFactoryTableRows'
 import SummaryDiffBlock from './SummaryDiffBlock.vue'
 
 const props = defineProps<FactoryTabProps>()
+
+/**
+ * 「角色名称」列是否显示（2026-11-08 用户要求）：只有多角色产品才显示。
+ * 整表级判定——任一分组出现 ≥2 个不同角色名即显示；单角色/无角色订单隐藏该列。
+ */
+const showRoleColumn = computed(() => anyGroupMultiRole(props.factoryData))
 
 const emit = defineEmits<FactoryTabEmit>()
 

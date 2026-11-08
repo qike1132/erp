@@ -310,6 +310,38 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     wrapper.unmount()
   })
 
+  it('R8 单角色/无角色产品：整表隐藏「角色名称」列（11 列）；多角色才显示（12 列）', () => {
+    // 单角色夹具：所有物料行同一个角色名 → 隐藏列（2026-11-08 用户要求）
+    const single = roleGroup()
+    single.skus![0]!.materials = (single.skus![0]!.materials || []).map((m) => ({
+      ...m, role_display: '角色A',
+    }))
+    const wrapper = mountModal(single)
+    const headers = wrapper.findAll('thead th').map((th) => th.text())
+    expect(headers).toHaveLength(11)
+    expect(headers).not.toContain('角色名称')
+    // 屏幕每行有效列宽 11（隐藏角色列后仍全对齐）
+    const trs = Array.from(
+      wrapper.element.querySelectorAll('.smf-scroll tbody tr'),
+    ) as HTMLTableRowElement[]
+    expect(rowWidthsOf(trs).every((w) => w === 11)).toBe(true)
+    wrapper.unmount()
+
+    // 打印同一判定：11 列、无角色表头
+    const html = buildFactoryHtml(dataOf(single), 0)
+    expect(html).not.toContain('<th>角色名称</th>')
+    const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
+    const widths = rowWidthsOf(Array.from(doc.querySelectorAll('tbody tr')) as HTMLTableRowElement[])
+    expect(widths.length).toBeGreaterThan(0)
+    expect(widths.every((w) => w === 11)).toBe(true)
+
+    // 多角色夹具（roleGroup）：列显示、12 列（回归：别把多角色也隐藏了）
+    const multi = mountModal(roleGroup())
+    expect(multi.findAll('thead th').map((th) => th.text())).toContain('角色名称')
+    expect(multi.findAll('thead th')).toHaveLength(12)
+    multi.unmount()
+  })
+
   it('R7 打印/导出与屏幕同一套拆分：列宽恒 12，合计与隐藏款标记齐全', () => {
     const html = buildFactoryHtml(dataOf(roleQtyGroup()), 50)
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')

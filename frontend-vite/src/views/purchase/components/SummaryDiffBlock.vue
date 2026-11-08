@@ -1,8 +1,8 @@
 <template>
   <template v-if="diffs.length > 0">
-    <!-- 差异横幅：说明「实际下单含手工调整」并点名不一致的物料（跨满 12 列） -->
+    <!-- 差异横幅：说明「实际下单含手工调整」并点名不一致的物料（跨满整行：含角色列 12 / 隐藏时 11） -->
     <tr class="sm-diff-banner">
-      <td :colspan="12">
+      <td :colspan="showRoleColumn ? 12 : 11">
         ⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：
         <span v-for="(d, i) in diffs" :key="`${d.partName}-${d.materialName}`">{{ i > 0 ? '、' : '' }}{{ d.partName ? d.partName + '·' : '' }}{{ d.materialName }}（推算 {{ formatQty(d.perSku) }} / 实际 {{ formatQty(d.stored) }}）</span>
       </td>
@@ -20,8 +20,9 @@
       class="sm-diff-row"
       :data-diff="isDiff(r) ? 'true' : undefined"
     >
+      <!-- 标签跨 2 列（客户/产品名称）；角色列存在时其后紧跟角色格（条件渲染），不存在时直接接订单/备品空位 -->
       <td v-if="i === 0" :rowspan="storedRows.length" colspan="2" class="sm-diff-label">实际下单（含手工调整）</td>
-      <td>{{ r.roleDisplay }}</td>
+      <td v-if="showRoleColumn">{{ r.roleDisplay }}</td>
       <!-- 订单数量 / 备品数量：落库明细侧没有这两个值（只有物料量），留空格对齐列位 -->
       <td />
       <td />
@@ -53,11 +54,14 @@
 import { fmtQty as formatQty } from '@/utils/formatQty'
 import type { DiffStoredRow } from '../composables/useFactoryTableRows'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   diffs: { materialName: string; partName: string; perSku: number; stored: number }[]
   /** 该组落库真值（率/数量已按主表口径算好） */
   storedRows: DiffStoredRow[]
-}>()
+  /** 是否显示「角色名称」列（单角色/无角色订单隐藏该列，与主表同一判定）；
+      缺省 true = 保持「含角色列」形态（既有调用零变化） */
+  showRoleColumn?: boolean
+}>(), { showRoleColumn: true })
 
 /** 该落库行是否属于「不一致」的物料（横幅点名的那些；部位不同视为不同行） */
 function isDiff(row: DiffStoredRow): boolean {
