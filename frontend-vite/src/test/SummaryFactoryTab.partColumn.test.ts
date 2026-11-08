@@ -35,7 +35,7 @@ import type { FactoryGroup, FactorySummaryData } from '@/views/purchase/composab
 
 /** 屏幕列序的期望值（唯一真值，屏幕与打印都必须与它一致） */
 const EXPECTED_HEADERS = [
-  '客户', '产品名称', '订单数量', '备品数量', '角色名称', '产品部位', '供应商',
+  '客户', '产品名称', '角色名称', '订单数量', '备品数量', '产品部位', '供应商',
   '布料名称', '规格型号', '损耗率', '数量', '单位',
 ]
 
@@ -176,10 +176,13 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     const rows = dataRows(wrapper)
     expect(rows).toHaveLength(3)
 
-    // 第 1 行：客户/产品名称/订单数量/备品数量 4 格（rowspan=3）+ 角色 + 部位 + 供应商(rowspan=2) + 布料…
+    // 第 1 行：客户/产品名称 2 格 + 角色 + 订单数量/备品数量（块 rowspan=3）+ 部位 + 供应商(rowspan=2) + 布料…
+    // 列序（2026-11-08）：客户0 产品1 角色2 订单3 备品4 部位5 供应商6 物料7
     const first = rowCells(wrapper, 0)
     expect(first).toHaveLength(12)
-    expect(first[4]!.text()).toBe('')
+    expect(first[2]!.text()).toBe('')
+    expect(first[3]!.text()).toBe('25000.0')
+    expect(first[4]!.text()).toBe('0.0')
     expect(first[5]!.text()).toBe('身体/头部')
     expect(first[5]!.attributes('rowspan')).toBeUndefined()
     expect(first[6]!.text()).toBe('坤成')
@@ -228,7 +231,8 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     const html = buildFactoryHtml(dataOf(mergedGroup()), 0)
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
     const first = [...doc.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent || '')
-    expect(first[4]).toBe('')
+    expect(first[2]).toBe('')
+    expect(first[3]).toBe('25000.0')
     expect(first[5]).toBe('身体/头部')
     expect(first[6]).toBe('坤成')
     expect(first[7]).toBe('起柔')

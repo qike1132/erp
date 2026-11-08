@@ -173,12 +173,13 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
     })
   }
 
-  it('表头 12 列：第 4 列为「备品数量」、第 5 列为「角色名称」、第 6 列为「产品部位」、第 7 列为「供应商」、第 10 列为「损耗率」', () => {
+  it('表头 12 列：第 3 列为「角色名称」、第 4 列为「订单数量」、第 5 列为「备品数量」、第 6 列为「产品部位」、第 7 列为「供应商」、第 10 列为「损耗率」', () => {
     const wrapper = mountModal()
     const headers = wrapper.findAll('thead th').map((th) => th.text())
     expect(headers).toHaveLength(12)
-    expect(headers[3]).toBe('备品数量')
-    expect(headers[4]).toBe('角色名称')
+    expect(headers[2]).toBe('角色名称')
+    expect(headers[3]).toBe('订单数量')
+    expect(headers[4]).toBe('备品数量')
     expect(headers[5]).toBe('产品部位')
     expect(headers[6]).toBe('供应商')
     expect(headers[9]).toBe('损耗率')
@@ -197,13 +198,14 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
     const rows = wrapper.findAll('tbody tr')
     const row0 = rows[0]!.findAll('td')
     expect(row0).toHaveLength(12)
-    // 4 个订单级单元格：客户 / 产品名称 / 订单数量 / 备品数量
-    for (let i = 0; i < 4; i++) {
+    // 列序（2026-11-08）：客户0 产品1 角色2 订单3 备品4 部位5 供应商6 物料7
+    // 4 个订单级单元格：客户 / 产品名称 / 订单数量 / 备品数量（角色格夹在中间，不连续）
+    for (const i of [0, 1, 3, 4]) {
       expect(row0[i]!.attributes('rowspan')).toBe('3')
     }
-    // 角色名称在第 5 格（本文件夹具无 skus → 回退模式，角色格逐行渲染、无 rowspan 属性）、
+    // 角色名称在第 3 格（本文件夹具无 skus → 回退模式，角色格逐行渲染、无 rowspan 属性）、
     // 产品部位在第 6 格（无 rowspan）；供应商在第 7 格：供应商1 有 2 个 fabric → rowspan=2
-    expect(row0[4]!.attributes('rowspan')).toBeUndefined()
+    expect(row0[2]!.attributes('rowspan')).toBeUndefined()
     expect(row0[5]!.attributes('rowspan')).toBeUndefined()
     expect(row0[6]!.attributes('rowspan')).toBe('2')
     expect(row0[7]!.text()).toBe('布料A1')

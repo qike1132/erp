@@ -261,7 +261,7 @@ th,td{border:1.0pt solid #000000;padding:1px;text-align:center;vertical-align:mi
 th{background:#E6E6E6;font-weight:bold}
 .total-row{background-color:#F0F0F0;font-weight:bold}"""
     body_parts = ['<div class="header"><h1>东莞市滨发玩具有限公司</h1><h2>工厂内部采购订单汇总</h2></div>']
-    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>角色名称</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
+    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>角色名称</th><th>订单数量</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
 
     grand_total: float = 0
     for (customer_name, product_name), suppliers in sorted(sorted_groups.items()):
@@ -274,10 +274,11 @@ th{background:#E6E6E6;font-weight:bold}
                 if global_fabric_idx == 0:
                     body_parts.append(f'<td rowspan="{total_fabric_rows}" style="font-weight:bold">{_h(customer_name)}</td>')
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{_h(product_name)}</td>')
-                    body_parts.append(f'<td rowspan="{total_fabric_rows}">{float(order_info["product_quantity"]) if order_info["product_quantity"] else 0:g}</td>')
-                # 列序（2026-11-08 用户要求）：角色名称在部位之前，两者都在供应商之前；
+                # 列序（2026-11-08 用户要求）：角色名称在订单数量左边，两者都在部位之前；
                 # 供应商跨行合并的 rowspan 仍挂在供应商格上，角色/部位格逐行渲染。
                 body_parts.append(f'<td style="text-align:left">{_h(fabric.get("role_display", ""))}</td>')
+                if global_fabric_idx == 0:
+                    body_parts.append(f'<td rowspan="{total_fabric_rows}">{float(order_info["product_quantity"]) if order_info["product_quantity"] else 0:g}</td>')
                 body_parts.append(f'<td style="text-align:left">{_h(fabric.get("part_display", ""))}</td>')
                 if idx == 0:
                     body_parts.append(f'<td rowspan="{len(supplier["fabrics"])}">{_h(supplier["supplier_name"])}</td>')
@@ -288,8 +289,8 @@ th{background:#E6E6E6;font-weight:bold}
                 grand_total += float(fabric["quantity"]) if fabric["quantity"] else 0
                 global_fabric_idx += 1
 
-    # 合计行必须与表头同宽（9 列）：colspan 4（客户/产品/订单/角色）+ 4 空格 + 数量
-    body_parts.append(f'<tfoot><tr class="total-row"><td colspan="4">合计</td><td></td><td></td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>')
+    # 合计行必须与表头同宽（9 列）：colspan 5（客户/产品/角色/订单/部位）+ 3 空格 + 数量
+    body_parts.append(f'<tfoot><tr class="total-row"><td colspan="5">合计</td><td></td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>')
     body_parts.append('</table>')
     return build_print_html("工厂内部采购订单汇总", ''.join(body_parts), extra_css)
 

@@ -427,7 +427,7 @@ def _row_widths(page: str) -> list[int]:
 
 
 def test_backend_factory_print_all_rows_width_equals_header():
-    """表头 9 列：客户/产品名称/订单数量/角色名称/产品部位/供应商/布料名称/规格型号/数量+单位。"""
+    """表头 9 列：客户/产品名称/角色名称/订单数量/产品部位/供应商/布料名称/规格型号/数量+单位。"""
     from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
         generate_factory_summary_print,
     )

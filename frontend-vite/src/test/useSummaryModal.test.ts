@@ -139,12 +139,13 @@ describe('SummaryPanel 数量口径（数据行）', () => {
     })
   }
 
-  it('工厂表格表头含 12 列：第 4 列为「备品数量」、第 5 列为「角色名称」、第 6 列为「产品部位」、第 7 列为「供应商」、第 10 列为「损耗率」', () => {
+  it('工厂表格表头含 12 列：第 3 列为「角色名称」、第 4 列为「订单数量」、第 5 列为「备品数量」、第 6 列为「产品部位」、第 7 列为「供应商」、第 10 列为「损耗率」', () => {
     const wrapper = mountModal(0)
     const headers = wrapper.findAll('thead th').map((th) => th.text())
     expect(headers).toHaveLength(12)
-    expect(headers[3]).toBe('备品数量')
-    expect(headers[4]).toBe('角色名称')
+    expect(headers[2]).toBe('角色名称')
+    expect(headers[3]).toBe('订单数量')
+    expect(headers[4]).toBe('备品数量')
     expect(headers[5]).toBe('产品部位')
     expect(headers[6]).toBe('供应商')
     expect(headers[9]).toBe('损耗率')
@@ -250,10 +251,11 @@ describe('SummaryPanel 数量口径（数据行）', () => {
     const wrapper = mountModal(5, data)
     const rows = wrapper.findAll('tbody tr')
     const firstRowCells = rows[0]!.findAll('td')
-    // 客户/产品名称/订单数量 → 第 3 列应正确解析字符串 product_quantity '100'
-    expect(firstRowCells[2]!.text()).toBe(fmtQty(100))
-    // 备品数量（第 4 列）= ceil(100 × 5‰) = 1
-    expect(firstRowCells[3]!.text()).toBe('1.0')
+    // 客户/产品名称/角色名称/订单数量 → 第 4 列应正确解析字符串 product_quantity '100'
+    // （列序 2026-11-08：客户0 产品1 角色2 订单3 备品4）
+    expect(firstRowCells[3]!.text()).toBe(fmtQty(100))
+    // 备品数量（第 5 列）= ceil(100 × 5‰) = 1
+    expect(firstRowCells[4]!.text()).toBe('1.0')
     // 数量列按该行损耗率放大取整：10×1.005=10.05 → 11，而非 0
     expect(firstRowCells[10]!.text()).toBe('11')
   })
@@ -304,12 +306,13 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
     return `<table><thead>${FACTORY_TABLE_HEAD}</thead><tbody>${buildFactoryHtml(data, lossRate)}</tbody></table>`
   }
 
-  it('表头含 12 个 th：第 4 个为「备品数量」、第 5 个为「角色名称」、第 6 个为「产品部位」、第 7 个为「供应商」、第 10 个为「损耗率」；数据行第 4 列 = 备品、第 10 列 = 损耗率、第 11 列 = 数量、第 12 列 = 单位', () => {
+  it('表头含 12 个 th：第 3 个为「角色名称」、第 4 个为「订单数量」、第 5 个为「备品数量」、第 6 个为「产品部位」、第 7 个为「供应商」、第 10 个为「损耗率」；数据行第 5 列 = 备品、第 10 列 = 损耗率、第 11 列 = 数量、第 12 列 = 单位', () => {
     const doc = new DOMParser().parseFromString(wrapFactoryHtml(minimalData, 5), 'text/html')
     const headers = [...doc.querySelectorAll('thead th')].map((th) => th.textContent || '')
     expect(headers).toHaveLength(12)
-    expect(headers[3]).toBe('备品数量')
-    expect(headers[4]).toBe('角色名称')
+    expect(headers[2]).toBe('角色名称')
+    expect(headers[3]).toBe('订单数量')
+    expect(headers[4]).toBe('备品数量')
     expect(headers[5]).toBe('产品部位')
     expect(headers[6]).toBe('供应商')
     expect(headers[9]).toBe('损耗率')
@@ -317,7 +320,7 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
     const firstRow = doc.querySelector('tbody tr')!
     const cells = [...firstRow.querySelectorAll('td')]
     // 1客户/2产品名称/3订单数量/4备品数量/5角色名称/6产品部位/7供应商/8布料名称/9规格型号/10损耗率/11数量/12单位
-    expect(cells[3]!.textContent).toBe('1.0') // 备品 = ceil(100 × 5‰)
+    expect(cells[4]!.textContent).toBe('1.0') // 备品 = ceil(100 × 5‰)（列序：客户0 产品1 角色2 订单3 备品4）
     expect(cells[9]!.textContent).toBe('5') // 损耗率
     // 「数量」列 = 损耗加放的展示派生值向上取整：10×1.005=10.05 → '11'。
     expect(cells[10]!.textContent).toBe('11')
@@ -328,7 +331,7 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
     const doc = new DOMParser().parseFromString(wrapFactoryHtml(minimalData, 0), 'text/html')
     const row = doc.querySelector('tbody tr')!
     const cells = [...row.querySelectorAll('td')]
-    expect(cells[3]!.textContent).toBe('0.0')
+    expect(cells[4]!.textContent).toBe('0.0')
     expect(cells[10]!.textContent).toBe('10')
   })
 })

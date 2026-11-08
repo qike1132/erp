@@ -9,8 +9,9 @@
     </tr>
     <!--
       落库真值：该组全部物料（与采购单明细一致）。
-      列序与主表后 8 格对齐：标签(客户/产品/订单数量/备品数量) | 角色名称 | 产品部位 | 供应商 | 布料名称 | 规格型号 | 损耗率 | 数量 | 单位。
-      标签与供应商用 rowspan 跨行，故每行合计仍为 12 列（4 + 1 + 1 + 1 + 5）。
+      列序与主表对齐（2026-11-08 用户要求：角色名称在订单数量左边）：
+      标签(客户/产品名称) | 角色名称 | 订单数量(空) | 备品数量(空) | 产品部位 | 供应商 | 布料名称 | 规格型号 | 损耗率 | 数量 | 单位。
+      标签与供应商用 rowspan 跨行，故每行合计仍为 12 列（2 + 1 + 1 + 1 + 1 + 1 + 5）。
       率与数量由 composable 按主表同源口径算好，组件只做展示。
     -->
     <tr
@@ -19,8 +20,11 @@
       class="sm-diff-row"
       :data-diff="isDiff(r) ? 'true' : undefined"
     >
-      <td v-if="i === 0" :rowspan="storedRows.length" colspan="4" class="sm-diff-label">实际下单（含手工调整）</td>
+      <td v-if="i === 0" :rowspan="storedRows.length" colspan="2" class="sm-diff-label">实际下单（含手工调整）</td>
       <td>{{ r.roleDisplay }}</td>
+      <!-- 订单数量 / 备品数量：落库明细侧没有这两个值（只有物料量），留空格对齐列位 -->
+      <td />
+      <td />
       <td>{{ r.partDisplay }}</td>
       <td v-if="r.isSupplierFirst" :rowspan="r.supplierSpan">{{ r.supplierName }}</td>
       <td>{{ r.fabricName }}</td>

@@ -164,9 +164,9 @@ describe('SummaryPanel 渲染（逐 SKU 分行）', () => {
     const wrapper = mountModal(multiSkuGroup())
     const cells = firstRowCells(wrapper)
 
-    // 列序：0 客户 | 1 产品名称 | 2 订单数量 | 3 供应商 …
+    // 列序（2026-11-08）：0 客户 | 1 产品名称 | 2 角色名称 | 3 订单数量 | 4 备品数量 …
     const nameLines = cells[1]!.findAll('.sm-sku-line')
-    const qtyLines = cells[2]!.findAll('.sm-sku-line')
+    const qtyLines = cells[3]!.findAll('.sm-sku-line')
 
     expect(nameLines.map((n) => n.text())).toEqual([
       '妹妹二代',
@@ -188,7 +188,8 @@ describe('SummaryPanel 渲染（逐 SKU 分行）', () => {
 
     expect(cells[1]!.findAll('.sm-sku-line')).toHaveLength(1)
     expect(cells[1]!.text()).toBe('变形金刚')
-    expect(cells[2]!.text()).toBe(fmtQty(969461))
+    // 列序（2026-11-08）：0 客户 | 1 产品名称 | 2 角色名称 | 3 订单数量
+    expect(cells[3]!.text()).toBe(fmtQty(969461))
     expect(wrapper.find('.sm-sku-line--total').exists()).toBe(false)
 
     wrapper.unmount()

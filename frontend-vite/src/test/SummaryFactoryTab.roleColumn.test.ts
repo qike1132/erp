@@ -164,11 +164,11 @@ function rowWidthsOf(trs: HTMLTableRowElement[]): number[] {
 }
 
 describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
-  it('R1 屏幕表头 12 列：角色名称在「备品数量」与「产品部位」之间', () => {
+  it('R1 屏幕表头 12 列：角色名称在「产品名称」与「订单数量」之间', () => {
     const wrapper = mountModal(roleGroup())
     const headers = wrapper.findAll('thead th').map((th) => th.text())
     expect(headers).toEqual([
-      '客户', '产品名称', '订单数量', '备品数量', '角色名称', '产品部位', '供应商',
+      '客户', '产品名称', '角色名称', '订单数量', '备品数量', '产品部位', '供应商',
       '布料名称', '规格型号', '损耗率', '数量', '单位',
     ])
     wrapper.unmount()
@@ -180,9 +180,10 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(rows).toHaveLength(5)
 
     // 第 1 行：角色A 段首（rowspan=2）+ 供应商甲 子段首（rowspan=2）
+    // 列序：客户0 产品1 角色2 订单3 备品4 部位5 供应商6 物料7
     const r0 = rows[0]!.findAll('td')
-    expect(r0[4]!.text()).toBe('角色A')
-    expect(r0[4]!.attributes('rowspan')).toBe('2')
+    expect(r0[2]!.text()).toBe('角色A')
+    expect(r0[2]!.attributes('rowspan')).toBe('2')
     expect(r0[5]!.text()).toBe('身体')
     expect(r0[6]!.text()).toBe('供应商甲')
     expect(r0[6]!.attributes('rowspan')).toBe('2')
@@ -236,7 +237,7 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(widths.length).toBeGreaterThan(0)
     expect(widths.every((w) => w === 12)).toBe(true)
     // 共享常量列序与屏幕一致
-    expect(FACTORY_TABLE_HEAD).toContain('<th>角色名称</th><th>产品部位</th><th>供应商</th>')
+    expect(FACTORY_TABLE_HEAD).toContain('<th>角色名称</th><th>订单数量</th><th>备品数量</th><th>产品部位</th><th>供应商</th>')
   })
 
   it('R5 多角色共用同一物料：损耗率正常显示，数量编辑锁定并说明原因', () => {
@@ -274,26 +275,30 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     const rows = wrapper.findAll('.smf-scroll tbody tr')
     expect(rows).toHaveLength(5)
 
-    // 首行：名称格（SKU 名 + 合计副行）+ 角色A 订单数量格（60.0）+ 角色A 备品格（3.0），均 rowspan=2
+    // 首行：名称格（SKU 名 + 合计副行）+ 角色A 格 + 角色A 订单数量格（60.0）+ 角色A 备品格（3.0），均 rowspan=2
+    // 列序：客户0 产品1 角色2 订单3 备品4
     const r0 = rows[0]!.findAll('td')
     expect(r0[1]!.text()).toContain('合计 100.0')
-    expect(r0[2]!.text()).toBe('60.0')
+    expect(r0[2]!.text()).toBe('角色A')
     expect(r0[2]!.attributes('rowspan')).toBe('2')
-    expect(r0[3]!.text()).toBe('3.0')
+    expect(r0[3]!.text()).toBe('60.0')
     expect(r0[3]!.attributes('rowspan')).toBe('2')
+    expect(r0[4]!.text()).toBe('3.0')
+    expect(r0[4]!.attributes('rowspan')).toBe('2')
 
     // 第 2 行（角色A 段内）：订单数量/备品格都被段 rowspan 覆盖
     const r1 = rows[1]!.findAll('td')
     expect(r1.map((td) => td.text()).slice(0, 2)).toEqual(['身体', '松紧带'])
 
-    // 第 3 行（角色B 段首）：订单数量格 40.0 + （隐藏款）标记、备品格 2.0，均 rowspan=3
+    // 第 3 行（角色B 段首）：角色格 角色B +（隐藏款）标记、订单数量格 40.0、备品格 2.0，均 rowspan=3
     const r2 = rows[2]!.findAll('td')
-    expect(r2[0]!.text()).toContain('40.0')
+    expect(r2[0]!.text()).toContain('角色B')
     expect(r2[0]!.text()).toContain('（隐藏款）')
     expect(r2[0]!.attributes('rowspan')).toBe('3')
-    expect(r2[1]!.text()).toBe('2.0')
+    expect(r2[1]!.text()).toBe('40.0')
     expect(r2[1]!.attributes('rowspan')).toBe('3')
-    expect(r2[2]!.text()).toBe('角色B')
+    expect(r2[2]!.text()).toBe('2.0')
+    expect(r2[2]!.attributes('rowspan')).toBe('3')
 
     // 对齐护栏：每行有效列宽恰好 12（订单数量/备品列从块级 rowspan 变段级后的核心回归防线）
     const trs = Array.from(
@@ -313,6 +318,8 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(widths.every((w) => w === 12)).toBe(true)
     expect(html).toContain('合计')
     expect(html).toContain('（隐藏款）')
+    // 隐藏款标记挂在角色名称格（角色名后紧跟小字），不是订单数量格
+    expect(html).toMatch(/角色B<div style="font-size:10px;color:#8e8e93;">（隐藏款）<\/div>/)
     expect(html).toContain('60.0')
     expect(html).toContain('40.0')
     // 备品也按角色逐段打印（同一 spareRate 口径：ceil(角色数量 × 率‰)）

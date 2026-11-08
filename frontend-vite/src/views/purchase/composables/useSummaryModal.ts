@@ -122,8 +122,8 @@ const SUMMARY_PRINT_STYLE = `
  * —— 加列时只改一处，避免「屏幕加了、打印没加」。
  */
 export const FACTORY_TABLE_HEAD =
-  '<tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th>' +
-  '<th>角色名称</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
+  '<tr><th>客户</th><th>产品名称</th><th>角色名称</th><th>订单数量</th><th>备品数量</th>' +
+  '<th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
 
 /**
  * 「按 SKU 展开」的组渲染：每 SKU 一块物料行，组末附差异对照块。
@@ -150,25 +150,32 @@ function buildPerSkuGroupHtml(
     }
     block.forEach((row, i) => {
       tableHtml += '<tr>'
+      const line = row.cellLines[0]
       if (i === 0) {
         // 客户列：整组只出现一次（rowspan = 该组全部行数）；误写成「每块都渲染」会与表头错位。
         if (blockNo === 0) {
           tableHtml += `<td rowspan="${perSkuRows.length}" style="font-weight:bold;">${escapeHtml(group.customer_name)}</td>`
         }
-        const line = row.cellLines[0]
         // 名称格：按角色拆分数量时，SKU 总量挪到名称格副行（合计 N）——总量信息不丢
         const totalSub = row.hasRoleQtySplit
           ? `<div style="font-size:10px;color:#8e8e93;">合计 ${escapeHtml(fmtQty(line?.qty ?? 0))}</div>`
           : ''
         tableHtml += `<td rowspan="${block.length}">${escapeHtml(line?.name || '')}${totalSub}</td>`
+      }
+      // 角色名称（列序：在订单数量左边；2026-11-08 用户要求隐藏款标记挂在角色名上）。
+      // 角色段首行渲染，rowspan=段行数；span=1 时不输出 rowspan（与屏幕同 DOM 口径）。
+      if (row.isFirstRoleRow) {
+        const roleSpan = row.roleRowSpan > 1 ? ` rowspan="${row.roleRowSpan}"` : ''
+        const hiddenMark = row.roleIsHidden
+          ? '<div style="font-size:10px;color:#8e8e93;">（隐藏款）</div>'
+          : ''
+        tableHtml += `<td${roleSpan}>${escapeHtml(row.roleDisplay)}${hiddenMark}</td>`
+      }
+      if (i === 0) {
         if (row.hasRoleQtySplit) {
-          // 按角色拆分：首行必为首个角色段段首——先渲染该角色段的订单数量格与备品格
-          // （各 rowspan=段行数，隐藏款带标记）。列序 = 名称 | 订单数量 | 备品数量，不可乱序。
-          // 备品也按角色逐段算（2026-11-08 用户要求：ceil(该角色数量 × 订单级率‰)，不合并）。
-          const hiddenMark = row.roleIsHidden
-            ? '<div style="font-size:10px;color:#8e8e93;">（隐藏款）</div>'
-            : ''
-          tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}${hiddenMark}</td>`
+          // 按角色拆分：首行必为首个角色段段首——渲染该角色段的订单数量格与备品格
+          // （各 rowspan=段行数）。备品也按角色逐段算（ceil(该角色数量 × 订单级率‰)）。
+          tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}</td>`
           tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleSpare ?? 0))}</td>`
         } else {
           tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.qty ?? 0))}</td>`
@@ -176,26 +183,18 @@ function buildPerSkuGroupHtml(
         }
       } else if (row.hasRoleQtySplit && row.isFirstRoleRow) {
         // 后续角色段首行：名称被块级 rowspan 覆盖，只渲染该角色段的订单数量/备品格
-        // （列序仍在角色格之前；rowspan=roleRowSpan 与屏幕同一套行模型）
-        const hiddenMark = row.roleIsHidden
-          ? '<div style="font-size:10px;color:#8e8e93;">（隐藏款）</div>'
-          : ''
-        tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}${hiddenMark}</td>`
+        // （rowspan=roleRowSpan 与屏幕同一套行模型）
+        tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}</td>`
         tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleSpare ?? 0))}</td>`
       }
       if (row.noBom) {
-        // 占位行：角色名称 + 供应商 + 之后 6 列 = 8 列（左侧三列已在上方补齐）
-        tableHtml += '<td colspan="8" style="color:#8e8e93;">无 BOM 明细</td>'
+        // 占位行：角色格已渲染（空），剩余 部位/供应商/布料/规格/损耗率/数量/单位 = 7 列
+        tableHtml += '<td colspan="7" style="color:#8e8e93;">无 BOM 明细</td>'
         tableHtml += '</tr>'
         return
       }
-      // 列序与屏幕 thead 严格一致：角色名称（角色段首行 + rowspan）→ 产品部位 → 供应商
-      // （子段首行 + rowspan）。两个 rowspan 都按连续段计算，与屏幕同一套行模型；
-      // span=1 时不输出 rowspan 属性（与屏幕同 DOM 口径，回退模式逐行渲染角色格）。
-      if (row.isFirstRoleRow) {
-        const roleSpan = row.roleRowSpan > 1 ? ` rowspan="${row.roleRowSpan}"` : ''
-        tableHtml += `<td${roleSpan}>${escapeHtml(row.roleDisplay)}</td>`
-      }
+      // 列序与屏幕 thead 严格一致：产品部位 → 供应商（子段首行 + rowspan）。
+      // rowspan 按连续段计算，与屏幕同一套行模型。
       tableHtml += `<td>${escapeHtml(row.partDisplay)}</td>`
       if (row.isFirstSupplierRow) {
         tableHtml += `<td rowspan="${row.supplierRowSpan}" style="font-weight:bold;">${escapeHtml(row.supplierName)}</td>`
@@ -247,11 +246,13 @@ function buildDiffBlockHtml(
   storedRows.forEach((r, i) => {
     tableHtml += '<tr>'
     if (i === 0) {
-      tableHtml += `<td colspan="4" rowspan="${storedRows.length}" style="font-weight:bold;background:#fffaf0;color:#7a4a00;">实际下单（含手工调整）</td>`
+      tableHtml += `<td colspan="2" rowspan="${storedRows.length}" style="font-weight:bold;background:#fffaf0;color:#7a4a00;">实际下单（含手工调整）</td>`
     }
-    // 列序与主表一致（角色名称 → 产品部位 → 供应商 → 布料名称…）：供应商格含 rowspan，
-    // 位置不可挪到部位格之前。
+    // 列序与主表一致（角色名称 → 订单数量/备品数量(空) → 产品部位 → 供应商 → 布料名称…）：
+    // 落库明细侧没有订单数量/备品数量两个值，留空格对齐列位（2026-11-08 列序调整）。
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.roleDisplay)}</td>`
+    tableHtml += '<td style="background:#fffaf0;"></td>'
+    tableHtml += '<td style="background:#fffaf0;"></td>'
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.partDisplay)}</td>`
     if (r.isSupplierFirst) {
       tableHtml += `<td rowspan="${r.supplierSpan}" style="background:#fffaf0;">${escapeHtml(r.supplierName)}</td>`
@@ -300,11 +301,21 @@ export function buildFactoryHtml(
               .map((l) => (l.isTotal ? `<strong>${escapeHtml(pick(l))}</strong>` : escapeHtml(pick(l))))
               .join('<br>')
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => l.name)}</td>`
+          // 列序（2026-11-08）：角色名称在订单数量左边——角色格逐行渲染（回退模式无角色段），
+          // 订单数量/备品数量随客户/产品一起按整块 rowspan。
+        }
+        tableHtml += `<td>${escapeHtml(fabric.role_display || '')}</td>`
+        if (globalFabricIdx === 0) {
+          const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
+          const skuLines = buildSkuDisplayLines(group, spareRate)
+          const cell = (pick: (l: SkuDisplayLine) => string) =>
+            skuLines
+              .map((l) => (l.isTotal ? `<strong>${escapeHtml(pick(l))}</strong>` : escapeHtml(pick(l))))
+              .join('<br>')
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.qty))}</td>`
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.spare))}</td>`
         }
-        // 列序与屏幕 thead 严格一致：角色名称 → 产品部位 → 供应商（供应商含 rowspan）。
-        tableHtml += `<td>${escapeHtml(fabric.role_display || '')}</td>`
+        // 列序与屏幕 thead 严格一致：产品部位 → 供应商（供应商含 rowspan）。
         tableHtml += `<td>${escapeHtml(fabric.part_display || fabric.part_name || '')}</td>`
         if (fi === 0) {
           tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`

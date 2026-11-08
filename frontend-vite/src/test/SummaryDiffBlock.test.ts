@@ -34,24 +34,27 @@ describe('SummaryDiffBlock', () => {
     const dataRows = w.findAll('tr.sm-diff-row')
     expect(dataRows).toHaveLength(2)
 
-    // 首行 = 标签(colspan=4，跨全部行) + 角色名称 + 部位 + 供应商 + 布料名 + 规格 + 损耗率 + 数量 + 单位 → 4+1+1+1+5 = 12 列
+    // 首行 = 标签(colspan=2，跨全部行) + 角色名称 + 订单数量(空) + 备品数量(空) + 部位 + 供应商 + 布料名 + 规格 + 损耗率 + 数量 + 单位 → 2+1+1+1+1+1+5 = 12 列
+    // （列序 2026-11-08：角色名称在订单数量左边）
     const first = dataRows[0]!.findAll('td')
-    expect(first).toHaveLength(9)
-    expect(first[0]!.attributes('colspan')).toBe('4')
+    expect(first).toHaveLength(11)
+    expect(first[0]!.attributes('colspan')).toBe('2')
     expect(first[0]!.attributes('rowspan')).toBe('2')
     expect(first[0]!.text()).toContain('实际下单')
-    // 列序与主表一致：角色名称 → 产品部位 → 供应商
+    // 列序与主表一致：角色名称 → 订单数量(空) → 备品数量(空) → 产品部位 → 供应商
     expect(first[1]!.text()).toBe('角色A')
-    expect(first[2]!.text()).toBe('身体')
-    expect(first[3]!.text()).toBe('供应商甲')
-    expect(first[3]!.attributes('rowspan')).toBe('2')
+    expect(first[2]!.text()).toBe('')
+    expect(first[3]!.text()).toBe('')
+    expect(first[4]!.text()).toBe('身体')
+    expect(first[5]!.text()).toBe('供应商甲')
+    expect(first[5]!.attributes('rowspan')).toBe('2')
     // 后 5 格与主表列序一致：布料名称 / 规格型号 / 损耗率 / 数量 / 单位
-    expect(first.slice(4).map((td) => td.text())).toEqual(['共享布', 'S1', '500.0', '98', '米'])
+    expect(first.slice(6).map((td) => td.text())).toEqual(['共享布', 'S1', '500.0', '98', '米'])
 
-    // 次行：标签与供应商被 rowspan 覆盖 → 只剩 角色 + 部位 + 后 5 格
+    // 次行：标签与供应商被 rowspan 覆盖 → 只剩 角色 + 订单(空) + 备品(空) + 部位 + 后 5 格
     const second = dataRows[1]!.findAll('td')
-    expect(second).toHaveLength(7)
-    expect(second.map((td) => td.text())).toEqual(['', '', 'A专有布', 'S2', '10.0', '21', '米'])
+    expect(second).toHaveLength(9)
+    expect(second.map((td) => td.text())).toEqual(['', '', '', '', 'A专有布', 'S2', '10.0', '21', '米'])
 
     // 不一致行才带 data-diff；非差异行不渲染该属性（不留 data-diff="false" 噪声）
     expect(w.findAll('[data-diff="true"]')).toHaveLength(1)

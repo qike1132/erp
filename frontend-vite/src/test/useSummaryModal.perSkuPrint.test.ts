@@ -120,19 +120,22 @@ describe('E2b 打印对照块结构（与屏幕同源）', () => {
     expect(banner.textContent).toContain('60.0')
     expect(banner.textContent).toContain('65.0')
 
-    // 数据行首行：标签 colspan=4（跨本块全部行）+ 角色 + 产品部位 + 供应商(rowspan) + 后 5 格 = 9 格 / 有效 12 列
-    const dataRow = rows.find((tr) => tr.querySelector('td[colspan="4"]'))!
+    // 数据行首行：标签 colspan=2（跨本块全部行）+ 角色 + 订单(空) + 备品(空) + 部位 + 供应商(rowspan) + 后 5 格
+    // = 11 格 / 有效 12 列（列序 2026-11-08：角色名称在订单数量左边）
+    const dataRow = rows.find((tr) => tr.querySelector('td[colspan="2"]'))!
     const cells = Array.from(dataRow.querySelectorAll('td'))
-    expect(cells).toHaveLength(9)
-    expect(cells[0]!.getAttribute('colspan')).toBe('4')
+    expect(cells).toHaveLength(11)
+    expect(cells[0]!.getAttribute('colspan')).toBe('2')
     expect(cells[0]!.textContent).toContain('实际下单')
     expect(cells[0]!.getAttribute('rowspan')).toBe('1')   // 本组仅 1 条落库行
-    // 列序与主表一致：角色（空）→ 产品部位（空）→ 供应商
+    // 列序与主表一致：角色（空）→ 订单数量（空）→ 备品数量（空）→ 产品部位（空）→ 供应商
     expect(cells[1]!.textContent).toBe('')
     expect(cells[2]!.textContent).toBe('')
-    expect(cells[3]!.textContent).toBe('供应商甲')
+    expect(cells[3]!.textContent).toBe('')
+    expect(cells[4]!.textContent).toBe('')
+    expect(cells[5]!.textContent).toBe('供应商甲')
     // 后 5 格列序与主表一致；损耗率=快照率 500（不是传入的实时率 200）、数量=ceil(65×1.5)=98
-    expect(cells.slice(4).map((td) => td.textContent)).toEqual(['共享布', 'S1', '500.0', '98', '米'])
+    expect(cells.slice(6).map((td) => td.textContent)).toEqual(['共享布', 'S1', '500.0', '98', '米'])
   })
 
   it('无差异时不出现「实际下单」', () => {

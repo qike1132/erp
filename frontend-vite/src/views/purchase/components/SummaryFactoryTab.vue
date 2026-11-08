@@ -73,10 +73,10 @@
           <tr class="bg-border-light">
             <th>客户</th>
             <th class="w-[240px]">产品名称</th>
+            <!-- 2026-11-08 用户要求：角色名称在「订单数量」左边；隐藏款标记挂在角色名称上 -->
+            <th>角色名称</th>
             <th>订单数量</th>
             <th>备品数量</th>
-            <!-- 2026-11-08 用户要求：多角色产品加「角色名称」列，位于物料列之前 -->
-            <th>角色名称</th>
             <!-- 2026-11-05 用户要求：产品部位在供应商之前（屏幕 / 打印 / 导出同序） -->
             <th>产品部位</th>
             <th>供应商</th>
@@ -95,19 +95,27 @@
                 {{ item.group.customer_name }}
               </td>
 
-              <!-- 产品名称 / 订单数量 / 备品数量：该 SKU 块首行，rowspan = 该块行数。
+              <!-- 产品名称 / 角色名称 / 订单数量 / 备品数量：该 SKU 块首行，rowspan = 该块行数。
                  cellLines 在 per-SKU 模式恒 1 行；回退模式为逐 SKU 名堆叠（与改动前逐字一致）。
-                 「订单数量/备品数量」列按角色段拆分时（2026-11-08 需求：备品也按角色逐段
-                 算，不合并）：SKU 总量挪到名称格副行（合计 N），数量列在每个角色段渲染
-                 该角色的数量与备品（ceil(该角色数量 × 订单级率‰)，rowspan 与角色格同段）。 -->
+                 列序（2026-11-08 用户要求）：角色名称在「订单数量」左边，隐藏款标记挂在
+                 角色名称格上；「订单数量/备品数量」按角色段拆分时 SKU 总量挪到名称格副行
+                 （合计 N），数量列在每个角色段渲染该角色的数量与备品。 -->
               <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
                 <div v-for="(line, li) in item.row.cellLines" :key="`n-${li}`"
                      :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
                 >{{ line.name }}</div>
                 <div v-if="item.row.hasRoleQtySplit" class="sm-sku-total-sub">合计 {{ formatQty(item.row.cellLines[0]?.qty) }}</div>
               </td>
+              <!-- 角色名称：角色段首行（rowspan=段行数）；隐藏款标记显示在角色名上 -->
+              <td
+                v-if="item.row.isFirstRoleRow"
+                :rowspan="item.row.roleRowSpan > 1 ? item.row.roleRowSpan : undefined"
+              >
+                <div>{{ item.row.roleDisplay }}</div>
+                <div v-if="item.row.roleIsHidden" class="sm-sku-total-sub">（隐藏款）</div>
+              </td>
               <!-- 订单数量：无角色拆分 → SKU 级大格（原样）；有拆分 → 角色段格
-                   （rowspan=roleRowSpan，与角色格同段；隐藏款带标记）。段内行无格（被覆盖）。 -->
+                   （rowspan=roleRowSpan，与角色格同段）。段内行无格（被覆盖）。 -->
               <td
                 v-if="item.row.isFirstSkuRow && !item.row.hasRoleQtySplit"
                 :rowspan="item.row.skuRowSpan"
@@ -119,10 +127,7 @@
               <td
                 v-else-if="item.row.isFirstRoleRow && item.row.roleQuantity != null"
                 :rowspan="item.row.roleRowSpan"
-              >
-                <div>{{ formatQty(item.row.roleQuantity) }}</div>
-                <div v-if="item.row.roleIsHidden" class="sm-sku-total-sub">（隐藏款）</div>
-              </td>
+              >{{ formatQty(item.row.roleQuantity) }}</td>
               <!-- 备品数量：拆分口径与订单数量同构（每角色段一格，ceil(该角色数量×率‰)） -->
               <td
                 v-if="item.row.isFirstSkuRow && !item.row.hasRoleQtySplit"
@@ -137,14 +142,14 @@
                 :rowspan="item.row.roleRowSpan"
               >{{ formatQty(item.row.roleSpare) }}</td>
 
-              <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU） -->
-              <td v-if="item.row.noBom" colspan="8" class="text-text-muted">无 BOM 明细</td>
+              <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU；角色格已渲染空占位，
+                   剩余 部位/供应商/布料/规格/损耗率/数量/单位 = 7 列） -->
+              <td v-if="item.row.noBom" colspan="7" class="text-text-muted">无 BOM 明细</td>
 
               <template v-else>
-                <!-- 列序：角色名称（角色段首行 + rowspan）→ 产品部位（逐行）→ 供应商（子段首行 + rowspan）。
-                     三个 td 的顺序必须与 thead 严格一致，否则「表头换了、值串列」；
-                     两个 rowspan 都按**连续段**计算，跨段的行绝不能被罩住（会错位）。 -->
-                <td v-if="item.row.isFirstRoleRow" :rowspan="item.row.roleRowSpan > 1 ? item.row.roleRowSpan : undefined">{{ item.row.roleDisplay }}</td>
+                <!-- 列序：产品部位（逐行）→ 供应商（子段首行 + rowspan）。
+                     td 顺序必须与 thead 严格一致，否则「表头换了、值串列」；
+                     rowspan 按**连续段**计算，跨段的行绝不能被罩住（会错位）。 -->
                 <td>{{ item.row.partDisplay }}</td>
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
                 <td>{{ item.row.materialName }}</td>
