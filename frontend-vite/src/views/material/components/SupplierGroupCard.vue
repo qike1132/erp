@@ -1,56 +1,116 @@
 <template>
-  <div class="mr-supplier-group" :class="{ 'is-overdue': group.overdue }">
-    <div class="mr-supplier-label" role="button" tabindex="0" :aria-expanded="!collapsed" :aria-label="`${group.supplierName}，${group.items.length} 项物料，进度 ${group.progress}%${group.overdue ? '，逾期' : ''}`" @click="emit('toggle')" @keyup.enter="emit('toggle')">
-      <FontAwesomeIcon icon="truck" />
-      <span class="mr-supplier-name">{{ group.supplierName }}</span>
-      <span v-if="group.overdue" class="mr-overdue-tag">逾期</span>
-      <span class="mr-supplier-mini"><i :class="miniClass" :style="{ width: group.progress + '%' }" /></span>
-      <span class="mr-supplier-pct">{{ group.progress }}%</span>
-      <span class="mr-supplier-count">{{ group.items.length }} 项</span>
-      <span class="mr-expand-icon" aria-hidden="true">{{ collapsed ? '▶' : '▼' }}</span>
+  <section :class="['mr-group', `st-${statusKey}`]">
+    <!-- 供应商层：整行可点，左轨色 + 状态词 + 进度条，与物料行共用列轨道 -->
+    <div
+      class="mr-grp-head"
+      role="button"
+      tabindex="0"
+      :aria-expanded="!collapsed"
+      :aria-label="ariaLabel"
+      @click="emit('toggle')"
+      @keydown.enter.prevent="emit('toggle')"
+      @keydown.space.prevent="emit('toggle')"
+    >
+      <span class="mr-grp-name">
+        <span class="mr-grp-title" :title="group.supplierName">{{ group.supplierName }}</span>
+        <span :class="['mr-chip', `is-${statusKey}`]">{{ statusText }}</span>
+      </span>
+
+      <span class="mr-grp-count">{{ doneCount }}/{{ group.items.length }} 项已到</span>
+
+      <span class="mr-grp-bar" :title="`已到 ${doneCount} / ${group.items.length} 项，数量进度 ${group.progress}%`">
+        <i :style="{ width: clampPct(group.progress) }" />
+      </span>
+
+      <span class="mr-grp-pct">{{ group.progress }}%</span>
+
+      <FontAwesomeIcon
+        :class="['mr-grp-chev', { 'is-collapsed': collapsed }]"
+        icon="chevron-down"
+        aria-hidden="true"
+      />
     </div>
-    <div v-if="!collapsed" class="mr-items-container">
-      <div v-for="i in group.items" :key="i.material_name" class="mr-mat-row">
-        <span class="mr-mat-name" :title="i.material_name">{{ i.material_name }}</span>
-        <span class="mr-mat-qty" :title="`已到货 ${i.received_display} / 采购 ${i.ordered_display} ${i.unit || ''}`">
+
+    <!-- 物料层：名称 · 已到/采购 · 进度条 · 百分比；逾期在名称后带文字徽标 -->
+    <ul v-if="!collapsed" class="mr-mats">
+      <li v-for="i in group.items" :key="i.id + '|' + i.material_name" :class="['mr-mat', { 'is-overdue': i.overdue }]">
+        <span class="mr-mat-name" :title="`${i.material_name}${i.specification ? ' ' + i.specification : ''}`">
+          <span class="mr-mat-text">{{ i.material_name }}</span>
+          <em v-if="i.specification">{{ i.specification }}</em>
+          <span v-if="i.overdue" class="mr-flag">逾期</span>
+        </span>
+
+        <span class="mr-mat-qty" :title="`已到 ${i.received_display} / 采购 ${i.ordered_display} ${i.unit || ''}`">
           <b>{{ i.received_display }}</b> / {{ i.ordered_display }} {{ i.unit || '' }}
         </span>
-        <span :class="['mr-mat-meter', meterClass(i)]" :style="{ '--fill': meterWidth(i) }" />
-        <span class="mr-mat-pct" :class="{ 'is-overdue-txt': i.overdue }">{{ i.progress }}%</span>
-      </div>
-    </div>
-  </div>
+
+        <span class="mr-mat-bar">
+          <i :class="meterClass(i)" :style="{ width: clampPct(i.progress) }" />
+        </span>
+
+        <span :class="['mr-mat-pct', { 'is-danger': i.overdue }]">{{ i.progress }}%</span>
+      </li>
+    </ul>
+  </section>
 </template>
 
 <script setup lang="ts">
 /**
- * SupplierGroupCard.vue — 供应商分组块（方案A改版）
+ * SupplierGroupCard.vue — 供应商分组（订单卡内的一个供应商块）
  *
- * 一个供应商块 = 登记内同一明细级供应商的物料集合（缺省回退登记级 supplier_name）。
- * 默认展开由父级控制：父级记"已收起"集合（collapse 语义反转，未记录即展开）。
- * 状态四色为 dataviz 校验档（对比度 ≥3:1、CVD ΔE 达标），以局部变量落在卡片内：
- *   未动=琥珀棕 / 进行中=蓝 / 已到齐=绿 / 逾期=红；每个状态同时带文字（mini 条旁的
- *   百分比与"逾期"徽标），不依赖颜色单独传达。
+ * 2026-11-08 改版：
+ *  · 供应商行与物料行共用列轨道（名称 / 已到·采购 / 进度条 / 百分比 / 折叠位），
+ *    跨层级纵向对齐，层级只靠 3px 左轨 + 缩进表达，不再套一层带边框的小卡片。
+ *  · 组头不再重复一根 64px 迷你条——与下方物料条同源，重复即噪音。
+ *  · 数量聚合只做「项数」（x/y 项已到）：组内物料单位可能不同，跨单位求和无意义。
+ *  · 四档状态同时给色与词（逾期/已到齐/进行中/未开始），不依赖颜色单独传达。
  */
+import { computed } from 'vue'
 import type { SupplierGroupRow, MergedItem } from '../composables/useMaterialRegistrations'
 
-defineProps<{
-  orderNo: string
+const props = defineProps<{
   group: SupplierGroupRow
   collapsed: boolean
 }>()
 
 const emit = defineEmits<{ toggle: [] }>()
 
-/** 组头部 mini 条色：跟组状态（逾期优先级最高） */
-function miniClass(group: SupplierGroupRow): string {
-  if (group.overdue) return 'fill-overdue'
-  if (group.progress >= 100) return 'fill-done'
-  if (group.progress > 0) return 'fill-ongoing'
-  return 'fill-zero'
-}
+type StatusKey = 'overdue' | 'done' | 'ongoing' | 'pending'
 
-/** 物料 meter 色档：逾期 > 已到齐 > 进行中 > 未动 */
+/** 组状态：逾期 > 已到齐 > 进行中 > 未开始（与订单分段条/物料条同口径） */
+const statusKey = computed<StatusKey>(() => {
+  if (props.group.overdue) return 'overdue'
+  if (props.group.progress >= 100) return 'done'
+  if (props.group.progress > 0) return 'ongoing'
+  return 'pending'
+})
+
+const STATUS_TEXT: Record<StatusKey, string> = {
+  overdue: '逾期',
+  done: '已到齐',
+  ongoing: '进行中',
+  pending: '未开始',
+}
+const statusText = computed(() => STATUS_TEXT[statusKey.value])
+
+/** 已到齐的物料项数（数量全部到货） */
+const doneCount = computed(
+  () => props.group.items.filter((i) => i.received_quantity >= i.ordered_quantity).length,
+)
+
+const ariaLabel = computed(() => {
+  const g = props.group
+  const parts = [
+    g.supplierName,
+    statusText.value,
+    `${doneCount.value} / ${g.items.length} 项已到`,
+    `数量进度 ${g.progress}%`,
+    props.collapsed ? '已收起' : '已展开',
+  ]
+  return parts.join('，')
+})
+
+/** 物料条色档：逾期 > 已到齐 > 进行中 > 未动 */
 function meterClass(i: MergedItem): string {
   if (i.overdue) return 'fill-overdue'
   if (i.progress >= 100 || i.received_quantity >= i.ordered_quantity) return 'fill-done'
@@ -58,117 +118,223 @@ function meterClass(i: MergedItem): string {
   return 'fill-zero'
 }
 
-/** meter 宽度：填充量 = 到货进度（未动时轨道全空但着琥珀色以示"未开始"） */
-function meterWidth(i: MergedItem): string {
-  const pct = Math.min(Math.max(i.progress, 0), 100)
-  return pct + '%'
+function clampPct(n: number): string {
+  return `${Math.min(Math.max(n, 0), 100)}%`
 }
 </script>
 
 <style scoped lang="scss">
-/* === 状态四色（dataviz 六项校验档；仅本模块作用域，不动全局主题） === */
-.mr-supplier-group {
-  --st-ongoing: #3a6bd6;
-  --st-done: #1e9e55;
-  --st-zero: #9a6a00;
-  --st-overdue: #d03b3b;
-  --track: #dce8fb;
-  border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px;
-  background: var(--color-surface, #fafbfe);
-  overflow: hidden;
+/* === 状态四色（dataviz 校验档；仅本模块作用域，不动全局主题） === */
+.mr-group {
+  --st: #3a6bd6;
+  --track: #e9eef6;
+  border-left: 3px solid var(--st);
+  background: white;
 }
-.mr-supplier-group.is-overdue { border-color: rgba(208, 59, 59, 0.35); }
+.mr-group.st-overdue { --st: #d03b3b; }
+.mr-group.st-done { --st: #1e9e55; }
+.mr-group.st-ongoing { --st: #3a6bd6; }
+.mr-group.st-pending { --st: #9a6a00; }
 
-.mr-supplier-label {
-  display: flex;
+.mr-group + .mr-group { border-top: 1px solid var(--color-border-light, #eef2f8); }
+
+/* === 供应商行（与物料行共用列轨道） === */
+.mr-grp-head,
+.mr-mat {
+  display: grid;
+  /* 名称列吃剩余空间，进度条列封顶——否则条会拉成横贯全行的大色块，压掉名称可读性 */
+  grid-template-columns: minmax(0, 1.5fr) minmax(96px, auto) minmax(110px, 180px) 46px 20px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: #f4f7fd;
-  border-bottom: 1px solid var(--color-border-light, #e2e8f0);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text, #1a1a2e);
+  column-gap: 12px;
+}
+
+.mr-grp-head {
+  padding: 8px 14px 8px 11px;
   cursor: pointer;
   user-select: none;
+  transition: background 0.15s;
 }
-.mr-supplier-label:focus-visible { outline: 2px solid var(--st-ongoing); outline-offset: -2px; }
-.mr-supplier-label svg { font-size: 12px; color: var(--st-ongoing); flex-shrink: 0; }
-.mr-supplier-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.mr-grp-head:hover { background: #f8faff; }
+.mr-grp-head:focus-visible { outline: 2px solid var(--st); outline-offset: -2px; }
 
-.mr-overdue-tag {
-  font-size: 12px;
+.mr-grp-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.mr-grp-title {
+  font-size: 13px;
   font-weight: 700;
-  color: white;
-  background: var(--st-overdue);
+  color: var(--color-text, #1a1a2e);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mr-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
   padding: 1px 7px;
   border-radius: 999px;
-  flex-shrink: 0;
+}
+.mr-chip.is-overdue { color: #b3261e; background: #fdeaea; }
+.mr-chip.is-done { color: #157a42; background: #e6f7ee; }
+.mr-chip.is-ongoing { color: #2d5ab8; background: #e8f0fd; }
+.mr-chip.is-pending { color: #8a5f00; background: #fdf3e0; }
+
+.mr-grp-count {
+  font-size: 11.5px;
+  color: var(--color-text-muted, #64748b);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.mr-supplier-mini {
-  width: 64px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--track);
-  overflow: hidden;
-  flex-shrink: 0;
-  display: inline-block;
-}
-.mr-supplier-mini i { display: block; height: 100%; border-radius: 3px; }
-
-.mr-supplier-pct { font-size: 12px; font-weight: 700; color: var(--color-text-secondary, #475569); font-variant-numeric: tabular-nums; flex-shrink: 0; }
-.mr-supplier-count { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--color-text-muted, #94a3b8); flex-shrink: 0; }
-.mr-expand-icon { margin-left: 4px; font-size: 12px; color: var(--color-text-muted, #94a3b8); flex-shrink: 0; }
-
-/* 色档：mini 条与物料 meter 共用 */
-.mr-supplier-mini .fill-ongoing, .mr-mat-meter .fill-ongoing { background: var(--st-ongoing); }
-.mr-supplier-mini .fill-done, .mr-mat-meter .fill-done { background: var(--st-done); }
-.mr-supplier-mini .fill-zero, .mr-mat-meter .fill-zero { background: var(--st-zero); }
-.mr-supplier-mini .fill-overdue, .mr-mat-meter .fill-overdue { background: var(--st-overdue); }
-
-/* === 物料行（默认展开） === */
-.mr-items-container { padding: 6px 12px 8px; display: flex; flex-direction: column; gap: 5px; background: white; }
-
-.mr-mat-row {
-  display: grid;
-  grid-template-columns: minmax(130px, 1.2fr) minmax(120px, auto) minmax(80px, 1fr) 44px;
-  align-items: center;
-  gap: 10px;
-  padding: 3px 4px;
-  border-radius: 6px;
-  font-size: 12px;
-}
-.mr-mat-row:hover { background: #f4f7fd; }
-
-.mr-mat-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mr-mat-qty { text-align: right; color: var(--color-text-secondary, #475569); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.mr-mat-qty b { color: var(--st-done); font-weight: 600; }
-
-.mr-mat-meter {
-  position: relative;
-  height: 8px;
-  border-radius: 0 4px 4px 0;
-  background: var(--track);
-  overflow: hidden;
+.mr-grp-bar,
+.mr-mat-bar {
   display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
 }
-.mr-mat-meter::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: var(--fill, 0%);
+.mr-grp-bar i {
+  display: block;
+  height: 100%;
   border-radius: inherit;
-  background: inherit;
-  opacity: 0; /* 兜底：老浏览器无填充时也保持轨道可见 */
+  background: var(--st);
+  transition: width 0.3s ease;
 }
-/* 填充实现：色档类先铺满整条（表示状态），再由 --fill 以表面色遮罩截断 */
-.mr-mat-meter.fill-ongoing { background: linear-gradient(to right, var(--st-ongoing) var(--fill, 0%), var(--track) var(--fill, 0%)); }
-.mr-mat-meter.fill-done { background: linear-gradient(to right, var(--st-done) var(--fill, 0%), var(--track) var(--fill, 0%)); }
-.mr-mat-meter.fill-zero { background: linear-gradient(to right, var(--st-zero) var(--fill, 0%), var(--track) var(--fill, 0%)); }
-.mr-mat-meter.fill-overdue { background: linear-gradient(to right, var(--st-overdue) var(--fill, 0%), var(--track) var(--fill, 0%)); }
 
-.mr-mat-pct { text-align: right; font-size: 12px; font-weight: 700; color: var(--color-text-secondary, #475569); font-variant-numeric: tabular-nums; }
-.mr-mat-pct.is-overdue-txt { color: var(--st-overdue); }
+.mr-grp-pct,
+.mr-mat-pct {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text, #1a1a2e);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mr-grp-chev {
+  font-size: 10px;
+  color: var(--color-text-placeholder, #94a3b8);
+  justify-self: center;
+  transition: transform 0.18s ease;
+}
+.mr-grp-chev.is-collapsed { transform: rotate(-90deg); }
+
+/* === 物料行 === */
+.mr-mats {
+  list-style: none;
+  margin: 0;
+  padding: 0 14px 8px 11px;
+  display: flex;
+  flex-direction: column;
+}
+
+.mr-mat {
+  padding: 4px 0;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.mr-mat:hover { background: #f8faff; }
+
+.mr-mat-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 14px; /* 首列缩进表达从属关系；其余列与供应商行保持对齐 */
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-secondary, #475569);
+}
+.mr-mat-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mr-mat-name em {
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--color-text-placeholder, #94a3b8);
+}
+
+.mr-flag {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: #b3261e;
+  background: #fdeaea;
+  padding: 0 6px;
+  border-radius: 999px;
+}
+
+.mr-mat-qty {
+  font-size: 12px;
+  color: var(--color-text-muted, #64748b);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.mr-mat-qty b { font-weight: 700; color: var(--color-text-secondary, #475569); }
+
+.mr-mat-bar { height: 6px; }
+.mr-mat-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+.mr-mat-bar i.fill-overdue { background: #d03b3b; }
+.mr-mat-bar i.fill-done { background: #1e9e55; }
+.mr-mat-bar i.fill-ongoing { background: #3a6bd6; }
+.mr-mat-bar i.fill-zero { background: #c9a25e; }
+
+.mr-mat-pct { font-size: 11.5px; }
+.mr-mat-pct.is-danger { color: #b3261e; }
+
+/* === 响应式：≤860px 供应商/物料行降为两行网格，不再依赖横向滚动 === */
+@media (max-width: 860px) {
+  .mr-grp-head {
+    grid-template-columns: minmax(0, 1fr) auto auto 18px;
+    grid-template-areas:
+      'name count pct chev'
+      'bar bar bar bar';
+    row-gap: 6px;
+    padding: 8px 10px 8px 9px;
+  }
+  .mr-grp-name { grid-area: name; }
+  .mr-grp-count { grid-area: count; }
+  .mr-grp-pct { grid-area: pct; }
+  .mr-grp-chev { grid-area: chev; }
+  .mr-grp-bar { grid-area: bar; }
+
+  .mr-mat {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name pct'
+      'bar qty';
+    row-gap: 5px;
+    column-gap: 10px;
+    padding: 6px 0;
+  }
+  .mr-mat-name { grid-area: name; padding-left: 8px; }
+  .mr-mat-pct { grid-area: pct; }
+  .mr-mat-bar { grid-area: bar; }
+  .mr-mat-qty { grid-area: qty; font-size: 11px; }
+
+  .mr-mats { padding: 0 10px 8px 9px; }
+}
+
+/* 手机：项数让位给名称，进度条独占一行 */
+@media (max-width: 520px) {
+  .mr-grp-head {
+    grid-template-columns: minmax(0, 1fr) auto 18px;
+    grid-template-areas:
+      'name pct chev'
+      'bar bar bar';
+  }
+  .mr-grp-count { display: none; }
+}
 </style>
