@@ -181,6 +181,10 @@ async def get_bom(db: AsyncSession, product_id: int) -> dict | None:
         {
             'id': r.id,
             'name': _role_display_name(r),
+            # 隐藏款标记随列表返回，前端页签据此显示徽标并与右键菜单状态保持一致
+            # 严格 `is True`：单元测试用 MagicMock 充当角色行，其属性是 truthy Mock，
+            # 不能当成「已指定隐藏款」。
+            'is_hidden': getattr(r, 'is_hidden', False) is True,
         }
         for r in product.roles
     ]

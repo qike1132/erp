@@ -96,6 +96,7 @@
                   </template>
                   <template v-else>
                     <span class="bom-role-name">{{ role.name }}</span>
+                    <span v-if="role.is_hidden" class="bom-role-hidden-badge" title="隐藏款角色（右键可取消）">隐藏款</span>
                   </template>
                 </div>
                 <!-- 添加角色：与 pattern-room RoleTabs 的「新增角色」同形态
@@ -138,6 +139,10 @@
                   重命名
                 </button>
                 <template v-if="roleMenu.key !== 'default'">
+                  <button type="button" role="menuitem" class="bom-menu-item" @click="onMenuToggleHidden">
+                    <FontAwesomeIcon :icon="roleMenu.key.is_hidden ? 'eye-slash' : 'box-open'" aria-hidden="true" />
+                    {{ roleMenu.key.is_hidden ? '取消隐藏款' : '指定为隐藏款' }}
+                  </button>
                   <div class="bom-menu-divider" />
                   <button type="button" role="menuitem" class="bom-menu-item danger" @click="onMenuRemove">
                     <FontAwesomeIcon icon="trash-alt" aria-hidden="true" />
@@ -289,6 +294,7 @@ const {
   roleMenu, menuItemEl, renamingTarget, renameInput, renameInputRef,
   addingRole, newRoleName, roleAddInputRef,
   closeMenu, onRoleContextMenu, onRoleTabKeydown, onMenuRename, onMenuRemove,
+  onMenuToggleHidden,
   commitRename, cancelRename, startAddRole, commitAddRole, cancelAddRole,
 } = useBomRoleMenu({
   bomRoles, defaultScopeName, selectRole, addRole,

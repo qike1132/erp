@@ -1,4 +1,5 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { showToast } from '@/composables/useToast'
 import type { Role } from './bomTypes'
 
 type TabKey = Role | 'default'
@@ -32,8 +33,9 @@ export function useBomRoleMenu(actions: BomRoleMenuActions) {
   }
 
   async function openRoleMenu(key: TabKey, x: number, y: number, trigger: HTMLElement) {
-    const MENU_WIDTH = 148
-    const MENU_HEIGHT = 82
+    // 菜单现有三项：重命名 / 指定（取消）隐藏款 / 删除角色 —— 高度按三行 + 分隔线留足
+    const MENU_WIDTH = 176
+    const MENU_HEIGHT = 132
     const MARGIN = 8
     menuTriggerEl.value = trigger
     roleMenu.value = {
@@ -88,6 +90,33 @@ export function useBomRoleMenu(actions: BomRoleMenuActions) {
     const key = roleMenu.value?.key
     closeMenu(true)
     if (key && key !== 'default' && actions.bomRoles.value.includes(key)) void actions.removeRole(key)
+  }
+
+  /**
+   * 指定 / 取消隐藏款（本地改，保存 BOM 时随 payload 落库）。
+   *
+   * 每个 SKU 只允许一个隐藏款：指定新角色时先把其余角色的标记清掉，
+   * 并提示被替换的原隐藏款（需求：重复指定需提示或自动替换——两者都做）。
+   */
+  function onMenuToggleHidden() {
+    const key = roleMenu.value?.key
+    closeMenu(true)
+    if (!key || key === 'default') return
+    if (!actions.bomRoles.value.includes(key)) return
+    if (key.is_hidden === true) {
+      key.is_hidden = false
+      showToast(`已取消「${key.name}」的隐藏款标记`, 'success')
+      return
+    }
+    const previous = actions.bomRoles.value.find((role) => role !== key && role.is_hidden === true)
+    actions.bomRoles.value.forEach((role) => { role.is_hidden = false })
+    key.is_hidden = true
+    showToast(
+      previous
+        ? `已将「${key.name}」设为隐藏款，原隐藏款「${previous.name}」已自动取消`
+        : `已将「${key.name}」设为隐藏款`,
+      'success',
+    )
   }
 
   async function commitRename() {
@@ -148,6 +177,7 @@ export function useBomRoleMenu(actions: BomRoleMenuActions) {
     roleMenu, menuItemEl, renamingTarget, renameInput, renameInputRef,
     addingRole, newRoleName, roleAddInputRef,
     closeMenu, onRoleContextMenu, onRoleTabKeydown, onMenuRename, onMenuRemove,
+    onMenuToggleHidden,
     commitRename, cancelRename, startAddRole, commitAddRole, cancelAddRole,
   }
 }

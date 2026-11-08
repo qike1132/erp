@@ -33,14 +33,8 @@
           <input v-model.number="editForm.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" aria-label="请输入产品价格" />
         </div>
       </div>
-      <div class="pd-form-group">
-        <label class="pd-label" for="edit-hidden-carton-ratio">隐藏款随箱配比</label>
-        <div class="pd-input-wrap">
-          <FontAwesomeIcon icon="box-open" class="pd-input-icon" aria-hidden="true" />
-          <input id="edit-hidden-carton-ratio" v-model.number="editForm.hiddenCartonRatio" type="number" class="pd-input" step="1" min="1" max="1000000" placeholder="例如：72" name="edit-hidden-carton-ratio" autocomplete="off" aria-describedby="edit-hidden-carton-ratio-hint" />
-        </div>
-        <small id="edit-hidden-carton-ratio-hint" class="pd-field-hint">每多少个订单数量配 1 个隐藏款（如 72，即 10000÷72≈139 个）；留空则不启用。启用需在 BOM 配置恰好 6 个常规角色 + 1 个名为「隐藏款」的角色。</small>
-      </div>
+      <!-- 盲盒配置：勾选「盲盒」后展开「该 SKU 有隐藏款」与「盲盒隐藏款装箱配比」 -->
+      <ProductBlindBoxFields v-model="blindBox" prefix="edit" compact />
       <div class="pd-form-group">
         <label class="pd-label">工厂</label>
         <div class="pd-input-wrap">
@@ -101,6 +95,8 @@ import { useImagePaste } from '@/composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import ProductCustomerSelect from './ProductCustomerSelect.vue'
+import ProductBlindBoxFields from './ProductBlindBoxFields.vue'
+import { useProductBlindBox } from '../composables/useProductBlindBox'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import type { ProductCustomerRef } from '@/types'
 
@@ -112,6 +108,8 @@ interface Product {
   image: string | null
   factory?: string
   hidden_carton_ratio?: number | null
+  is_blind_box?: boolean
+  has_hidden_role?: boolean
   current_stock?: number
   customers?: ProductCustomerRef[]
 }
@@ -151,9 +149,10 @@ const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
 const editForm = reactive({
   id: 0, name: '', barcode: '', price: 0, factory: '', image: '',
-  hiddenCartonRatio: null as number | null | '', hiddenCartonRatioInitial: null as number | null,
   customerIds: [] as number[],
 })
+/** 盲盒配置：打开时记录基线，配比未改动不提交（避免旧值覆盖别处刚改的配置） */
+const { blindBox, initial: blindBoxInitial, loadFrom, effectiveRatio } = useProductBlindBox()
 const editImageInputRef = ref<HTMLInputElement | null>(null)
 const editDropZoneRef = ref<HTMLElement | null>(null)
 const editDragOver = ref(false)
@@ -185,9 +184,9 @@ function open(row: Product) {
   Object.assign(editForm, {
     id: row.id, name: row.name, barcode: row.barcode, price: row.price,
     factory: row.factory || '', image: row.image || '',
-    hiddenCartonRatio: row.hidden_carton_ratio ?? null,
-    hiddenCartonRatioInitial: row.hidden_carton_ratio ?? null, customerIds: (row.customers ?? []).map((c) => c.id),
+    customerIds: (row.customers ?? []).map((c) => c.id),
   })
+  loadFrom(row)
   editDialogVisible.value = true
 }
 
@@ -215,15 +214,18 @@ function uploadEditImage(file: File) {
 
 async function handleEditSave() {
   if (!editForm.name.trim()) { showToast('请输入产品名称', 'warning'); return }
-  const hiddenCartonRatio = editForm.hiddenCartonRatio === '' ? null : editForm.hiddenCartonRatio
-  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1 || hiddenCartonRatio > 1000000)) { showToast('隐藏款随箱配比必须为正整数（不超过 1000000）', 'warning'); return }
-  // 未改动不提交该字段（后端「未提交 = 不改动」）：避免旧值覆盖别处刚改的配比
+  // 配比只在「盲盒 + 有隐藏款」时生效；其余情况按 null 处理（后端也会归一清空）
+  const hiddenCartonRatio = effectiveRatio()
+  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1 || hiddenCartonRatio > 1000000)) { showToast('盲盒隐藏款装箱配比必须为正整数（不超过 1000000）', 'warning'); return }
+  // 配比未改动不提交该字段（后端「未提交 = 不改动」）：避免旧值覆盖别处刚改的配置
   editSubmitting.value = true
   try {
     await productApi.update(editForm.id, {
       name: editForm.name, barcode: editForm.barcode, price: editForm.price,
       factory: editForm.factory, image: editForm.image, customer_ids: editForm.customerIds,
-      ...(hiddenCartonRatio !== editForm.hiddenCartonRatioInitial ? { hidden_carton_ratio: hiddenCartonRatio } : {}),
+      is_blind_box: blindBox.isBlindBox,
+      has_hidden_role: blindBox.isBlindBox && blindBox.hasHiddenRole,
+      ...(hiddenCartonRatio !== blindBoxInitial.hiddenCartonRatio ? { hidden_carton_ratio: hiddenCartonRatio } : {}),
     })
     showToast('保存成功', 'success')
     editDialogVisible.value = false
@@ -249,7 +251,6 @@ defineExpose({ open })
 .edit-grid :deep(.pcs-field) { min-height: 44px; padding: 8px 34px 8px 14px; border-radius: 12px; }
 .edit-grid :deep(.pcs-placeholder) { font-size: 16px; }
 .pd-form-group { margin-bottom: 0; }
-.pd-field-hint { display: block; margin-top: 6px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
 .pd-label {
   display: block;
   font-size: 14px;

@@ -44,43 +44,63 @@ async def _fetch_prod_name_map(db: AsyncSession, product_ids: list[int]) -> dict
 
 async def _fetch_prod_name_and_ratio(
     db: AsyncSession, product_ids: list[int],
-) -> tuple[dict[int, str], dict[int, int]]:
-    """一次查询取回产品名与陈列样随箱配比：``({pid: name}, {pid: ratio})``。
+) -> tuple[dict[int, str], dict[int, dict]]:
+    """一次查询取回产品名与盲盒口径上下文：``({pid: name}, {pid: entry})``。
 
     合并进原 ``_fetch_prod_name_map`` 的同一次往返（不新增固定查询——工厂汇总有
-    「读查询数 ≤10」护栏，见 test_c12）；只有配比非空的 SKU 才进第二个字典。
+    「读查询数 ≤10」护栏，见 test_c12）。``entry`` 仅包含**盲盒 SKU**：
+    ``{'ratio': P|None, 'has_hidden': bool}``；非盲盒 SKU 不进第二个字典。
     """
     if not product_ids:
         return {}, {}
     prod_result = await db.execute(
-        select(Product.id, Product.name, Product.hidden_carton_ratio)
-        .where(Product.id.in_(product_ids))
+        select(
+            Product.id, Product.name, Product.hidden_carton_ratio,
+            Product.is_blind_box, Product.has_hidden_role,
+        ).where(Product.id.in_(product_ids))
     )
     names: dict[int, str] = {}
-    ratios: dict[int, int] = {}
-    for pid, name, ratio in prod_result.all():
+    blind_ctx: dict[int, dict] = {}
+    for pid, name, ratio, is_blind_box, has_hidden_role in prod_result.all():
         names[pid] = name
-        if ratio:
-            ratios[pid] = int(ratio)
-    return names, ratios
+        if is_blind_box:
+            blind_ctx[pid] = {
+                'ratio': int(ratio) if ratio else None,
+                'has_hidden': bool(has_hidden_role),
+            }
+    return names, blind_ctx
 
 
-async def _fetch_roles_ctx(db: AsyncSession, ratios: dict[int, int]) -> dict[int, dict]:
-    """按配比 SKU 加载角色名：``{pid: {'ratio': int, 'roles': {rid: name}}}``。
+async def _fetch_roles_ctx(db: AsyncSession, blind_ctx: dict[int, dict]) -> dict[int, dict]:
+    """按盲盒 SKU 加载角色名与隐藏款标记。
 
-    只在存在配置配比的 SKU 时查询角色表（存量数据零额外查询，既有 SQLite
-    子集夹具无需补 ``product_role`` 表）。
+    返回 ``{pid: {'ratio', 'has_hidden', 'roles': {rid: name}, 'hidden_role_id'}}``。
+    只在存在盲盒 SKU 时查询角色表（存量数据零额外查询，既有 SQLite 子集夹具
+    无需补 ``product_role`` 表）。
     """
-    if not ratios:
+    if not blind_ctx:
         return {}
     role_result = await db.execute(
-        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
-        .where(ProductRole.product_id.in_(list(ratios)))
+        select(
+            ProductRole.id, ProductRole.product_id,
+            ProductRole.role_name, ProductRole.is_hidden,
+        ).where(ProductRole.product_id.in_(list(blind_ctx)))
     )
     roles: dict[int, dict[int, str]] = {}
-    for rid, pid, role_name in role_result.all():
+    hidden_roles: dict[int, int] = {}
+    for rid, pid, role_name, is_hidden in role_result.all():
         roles.setdefault(pid, {})[rid] = role_name or ''
-    return {pid: {'ratio': ratio, 'roles': roles.get(pid, {})} for pid, ratio in ratios.items()}
+        if is_hidden:
+            hidden_roles[pid] = rid
+    return {
+        pid: {
+            **entry,
+            'roles': roles.get(pid, {}),
+            # 右键指定的隐藏款（优先于名字识别）
+            'hidden_role_id': hidden_roles.get(pid),
+        }
+        for pid, entry in blind_ctx.items()
+    }
 
 
 def _role_name_from_map(role_names: dict[int, str], rid: int) -> str | None:
@@ -99,8 +119,11 @@ def _factory_sku_allocation(ctx_entry: dict, sku_qty: float) -> dict | None:
         return allocate_scope_quantities(
             sku_qty,
             set(role_names) | {None},
-            hidden_carton_ratio=ctx_entry['ratio'],
+            hidden_carton_ratio=ctx_entry.get('ratio'),
             name_of=partial(_role_name_from_map, role_names),
+            hidden_role_id=ctx_entry.get('hidden_role_id'),
+            blind_box=True,
+            has_hidden=bool(ctx_entry.get('has_hidden')),
         )
     except ValueError:
         logger.warning(
@@ -428,7 +451,7 @@ def _sku_material_rows(
 
 def _accumulate_factory_sku_materials(
     group: dict, sku_lines: list, po, bom_data: dict, name_to_pid: dict, *,
-    split_parts: bool = False, hidden_ratio_ctx: dict | None = None,
+    split_parts: bool = False, blind_box_ctx: dict | None = None,
 ) -> None:
     """**逐采购单**累加「按 SKU 的物料明细」，供应商兜底取**本单**的 `po.supplier_name`。
 
@@ -447,17 +470,17 @@ def _accumulate_factory_sku_materials(
        多张单共用同一 SKU 名时数量相加（与既有语义一致）。逐单 `round_qty` 后相加，正好
        复现生成路径「逐单、逐 SKU 舍入后再汇总」的落库真值。绝不改回「按 SKU 名整体赋值」
        ——那会丢掉多单累加（Task-1 曾犯的缺陷）。
-    4. **陈列样随箱配比 SKU**（``hidden_ratio_ctx`` 有该 pid）：同一张采购单内先把各来源行
+    4. **陈列样随箱配比 SKU**（``blind_box_ctx`` 有该 pid）：同一张采购单内先把各来源行
        数量**合并成订单总数量**再分配（常规 6 款均分 / 隐藏款 ``ceil(N/P)``，ceil 只进位
        一次），与生成路径「同客户组同 SKU 先合并再分配」同口径——逐行分配会让隐藏款重复
        进位，前端差异对照块就会把「没差异」误报成手工调整。未配置的 SKU 走原逐行全量路径。
     """
     # 配置了配比的 SKU：先按本单来源行合并数量（生成时同一批来源已合并过一次）
     merged_configured_qty: dict[str, float] = {}
-    if hidden_ratio_ctx:
+    if blind_box_ctx:
         for sku in sku_lines:
             sku_name = _norm_sku_name(sku.get('product_name'))
-            if name_to_pid.get(sku_name) in hidden_ratio_ctx:
+            if name_to_pid.get(sku_name) in blind_box_ctx:
                 merged_configured_qty[sku_name] = (
                     merged_configured_qty.get(sku_name, 0.0) + float(sku.get('order_qty') or 0)
                 )
@@ -468,7 +491,7 @@ def _accumulate_factory_sku_materials(
         sku_pid = name_to_pid.get(sku_name)
         if sku_pid is None:
             continue
-        ctx_entry = (hidden_ratio_ctx or {}).get(sku_pid)
+        ctx_entry = (blind_box_ctx or {}).get(sku_pid)
         if ctx_entry:
             if sku_name in emitted_configured:
                 # 合并口径下该 SKU 的物料已整体产出，跳过后续来源行避免重复累加
@@ -611,7 +634,7 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
 
 def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map,
                              prod_name_map, po_pids_map=None, po_sku_map=None,
-                             items_map_by_part=None, hidden_ratio_ctx=None) -> dict[tuple, dict]:
+                             items_map_by_part=None, blind_box_ctx=None) -> dict[tuple, dict]:
     """构建 (客户, 产品名) → 汇总分组。
 
     ``po_pids_map``（``{po_id: [product_id, ...]}``）给出该采购单覆盖的**全部 SKU**，
@@ -671,7 +694,7 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
         name_to_pid = {name: pid for pid, name in (prod_name_map or {}).items()}
         _accumulate_factory_sku_materials(
             group, sku_lines, po, bom_data, name_to_pid, split_parts=split_parts,
-            hidden_ratio_ctx=hidden_ratio_ctx,
+            blind_box_ctx=blind_box_ctx,
         )
 
         pids = _resolve_po_pids(po_pids_map, po, pid)

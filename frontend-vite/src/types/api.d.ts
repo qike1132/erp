@@ -1963,6 +1963,8 @@ export interface ProductCreate {
   factory?: string | null
   initial_stock?: number
   hidden_carton_ratio?: number | null
+  is_blind_box?: boolean
+  has_hidden_role?: boolean
   customer_ids?: Array<number>
 }
 
@@ -2028,6 +2030,8 @@ export interface ProductResponse {
   initial_stock: number
   current_stock: number
   hidden_carton_ratio?: number | null
+  is_blind_box?: boolean
+  has_hidden_role?: boolean
   create_time?: string | null
   customers?: Array<ProductCustomerBrief>
 }
@@ -2060,6 +2064,8 @@ export interface ProductUpdate {
   factory?: string | null
   initial_stock?: number | null
   hidden_carton_ratio?: number | null
+  is_blind_box?: boolean | null
+  has_hidden_role?: boolean | null
   customer_ids?: Array<number> | null
 }
 
@@ -2521,6 +2527,7 @@ export interface RoleItem {
   role_key?: string | null
   role_name?: string
   name?: string | null
+  is_hidden?: boolean
 }
 
 export interface RoleListResponse {

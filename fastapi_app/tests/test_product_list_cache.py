@@ -43,7 +43,7 @@ def _full_item(id_val: int, name: str) -> dict:
     return {
         'id': id_val, 'name': name, 'barcode': None, 'price': 0.0,
         'image': None, 'factory': None, 'initial_stock': 0, 'current_stock': 0,
-        'hidden_carton_ratio': None,
+        'hidden_carton_ratio': None, 'is_blind_box': False, 'has_hidden_role': False,
         'create_time': None, 'customers': [],
     }
 

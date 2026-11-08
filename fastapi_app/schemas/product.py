@@ -29,7 +29,7 @@ def _reject_bool_hidden_ratio(v: object) -> object:
     数字字符串）仍交给字段类型正常收敛。
     """
     if isinstance(v, bool):
-        raise ValueError('隐藏款随箱配比必须是正整数（不接受布尔值）')
+        raise ValueError('盲盒隐藏款装箱配比必须是正整数（不接受布尔值）')
     return v
 
 
@@ -44,8 +44,10 @@ class ProductCreate(BaseModel):
     initial_stock: int = Field(0, ge=0, le=100000, description='初始库存')
     hidden_carton_ratio: int | None = Field(
         None, gt=0, le=1000000,
-        description='隐藏款随箱配比：每多少个订单数量配 1 个隐藏款；'
-                    '需在 BOM 配置 6 个常规角色 + 1 个「隐藏款」角色；空 = 不启用')
+        description='盲盒隐藏款装箱配比：每多少个订单数量配 1 个隐藏款；'
+                    '需在 BOM 恰有 1 个隐藏款角色；空 = 不启用（隐藏款不额外配）')
+    is_blind_box: bool = Field(False, description='是否盲盒 SKU（开启后订单数量按角色数均分）')
+    has_hidden_role: bool = Field(False, description='该盲盒 SKU 是否有隐藏款')
     customer_ids: list[int] = Field(
         default_factory=list, description='所属客户ID列表；留空 = 所有客户可见')
 
@@ -83,7 +85,10 @@ class ProductUpdate(BaseModel):
     # 提交正整数 = 设置。端点用 model_fields_set 区分「未提交」与「显式 null」。
     hidden_carton_ratio: int | None = Field(
         None, gt=0, le=1000000,
-        description='隐藏款随箱配比；未提交 = 不改动，显式 null = 清空（停用规则）')
+        description='盲盒隐藏款装箱配比；未提交 = 不改动，显式 null = 清空（停用规则）')
+    # 盲盒开关：None = 未提交（不改动），True/False = 设置（旧客户端不传即保持原值）
+    is_blind_box: bool | None = Field(None, description='是否盲盒 SKU；None = 不改动')
+    has_hidden_role: bool | None = Field(None, description='是否有隐藏款；None = 不改动')
     customer_ids: list[int] | None = Field(
         None, description='所属客户ID列表；None = 不改动归属，[] = 清空（回到所有客户可见）')
 
@@ -133,6 +138,8 @@ class ProductResponse(BaseModel):
     initial_stock: int
     current_stock: int
     hidden_carton_ratio: int | None = None
+    is_blind_box: bool = False
+    has_hidden_role: bool = False
     create_time: datetime | str | None = None
     customers: list[ProductCustomerBrief] = Field(default_factory=list)
 

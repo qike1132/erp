@@ -290,6 +290,8 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
                          price: float | None = None,
                          factory: str | None = None,
                          hidden_carton_ratio: int | None = None,
+                         is_blind_box: bool = False,
+                         has_hidden_role: bool = False,
                          customer_ids: list[int] | None = None) -> dict:
     """
     创建产品
@@ -323,6 +325,9 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
         initial_stock=initial_stock,
         current_stock=initial_stock,
         hidden_carton_ratio=hidden_carton_ratio,
+        is_blind_box=is_blind_box,
+        # 非盲盒 SKU 不应带隐藏款标记：入库前归一，避免「有隐藏款但未启用盲盒」的脏状态
+        has_hidden_role=bool(has_hidden_role) if is_blind_box else False,
     )
     db.add(product)
     try:
@@ -356,6 +361,50 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
     return product.to_dict()
 
 
+async def _apply_name_change(
+    db: AsyncSession, product: Product, name: str | None, product_id: int,
+) -> None:
+    """改名（含产品内唯一性检查，排除自身）；未改名直接返回。"""
+    if not (name and name.strip() != product.name):
+        return
+    result = await db.execute(
+        select(Product).where(
+            func.lower(Product.name) == func.lower(name),
+            Product.id != product_id,
+        )
+    )
+    if result.scalar_one_or_none():
+        raise ValueError(f'产品名称"{name}"已存在，每个产品名称必须是唯一的！')
+    product.name = name
+
+
+def _apply_blind_box_fields(
+    product: Product, *,
+    hidden_carton_ratio: int | None,
+    hidden_carton_ratio_provided: bool,
+    is_blind_box: bool | None,
+    has_hidden_role: bool | None,
+) -> None:
+    """更新盲盒三件套并互相归一（关闭盲盒 / 无隐藏款时清空配比）。
+
+    三态约定：``is_blind_box`` / ``has_hidden_role`` 为 None 表示「未提交不改动」；
+    ``hidden_carton_ratio_provided`` 区分「未提交」与「显式 null 清空」。
+    """
+    if hidden_carton_ratio_provided:
+        product.hidden_carton_ratio = hidden_carton_ratio
+    if is_blind_box is not None:
+        product.is_blind_box = is_blind_box
+        if not is_blind_box:
+            # 关闭盲盒时同步清掉隐藏款标记与配比：两者只对盲盒 SKU 有意义
+            product.has_hidden_role = False
+            product.hidden_carton_ratio = None
+    if has_hidden_role is not None:
+        product.has_hidden_role = has_hidden_role and product.is_blind_box
+        if not product.has_hidden_role:
+            # 无隐藏款 → 配比不启用（保留配比会让 UI 与计算口径互相矛盾）
+            product.hidden_carton_ratio = None
+
+
 async def update_product(db: AsyncSession, product_id: int, name: str | None,
                          barcode: str | None, image: str | None,
                          initial_stock: int | None,
@@ -363,6 +412,8 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
                          factory: str | None = None,
                          hidden_carton_ratio: int | None = None,
                          hidden_carton_ratio_provided: bool = False,
+                         is_blind_box: bool | None = None,
+                         has_hidden_role: bool | None = None,
                          customer_ids: list[int] | None = None) -> dict:
     """
     更新产品
@@ -380,17 +431,7 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     if not product:
         raise ValueError('产品不存在')
 
-    if name and name.strip() != product.name:
-        result = await db.execute(
-            select(Product).where(
-                func.lower(Product.name) == func.lower(name),
-                Product.id != product_id
-            )
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
-            raise ValueError(f'产品名称"{name}"已存在，每个产品名称必须是唯一的！')
-        product.name = name
+    await _apply_name_change(db, product, name, product_id)
 
     if barcode is not None:
         product.barcode = barcode
@@ -403,8 +444,13 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
         product.image = strip_upload_signature(image)
     if factory is not None:
         product.factory = factory
-    if hidden_carton_ratio_provided:
-        product.hidden_carton_ratio = hidden_carton_ratio
+    _apply_blind_box_fields(
+        product,
+        hidden_carton_ratio=hidden_carton_ratio,
+        hidden_carton_ratio_provided=hidden_carton_ratio_provided,
+        is_blind_box=is_blind_box,
+        has_hidden_role=has_hidden_role,
+    )
 
     if initial_stock is not None and initial_stock != product.initial_stock:
         stock_change = initial_stock - product.initial_stock

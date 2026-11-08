@@ -122,7 +122,10 @@ async def create_product(data: ProductCreate, db: AsyncSession=Depends(get_async
         await product_service.create_product(
             db, name=data.name, barcode=data.barcode, price=data.price, image=data.image,
             factory=factory, initial_stock=data.initial_stock,
-            hidden_carton_ratio=data.hidden_carton_ratio, customer_ids=data.customer_ids,
+            hidden_carton_ratio=data.hidden_carton_ratio,
+            is_blind_box=data.is_blind_box,
+            has_hidden_role=data.has_hidden_role,
+            customer_ids=data.customer_ids,
         )
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)
     return ProductActionResponse(success=True, message='产品添加成功！')
@@ -173,6 +176,9 @@ async def edit_product(product_id: int, data: ProductUpdate, db: AsyncSession=De
             initial_stock=data.initial_stock,
             hidden_carton_ratio=data.hidden_carton_ratio,
             hidden_carton_ratio_provided='hidden_carton_ratio' in data.model_fields_set,
+            # 盲盒开关：None = 未提交不改动（旧客户端兼容），True/False = 设置
+            is_blind_box=data.is_blind_box,
+            has_hidden_role=data.has_hidden_role,
             customer_ids=data.customer_ids,
         )
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Numeric, String, desc
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, Integer, Numeric, String, desc, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.core.business_time import fmt_business
@@ -40,12 +40,26 @@ class Product(Base):
     initial_stock: Mapped[int] = mapped_column(Integer, default=0, comment='初始库存')
     current_stock: Mapped[int] = mapped_column(Integer, default=0, comment='当前库存')
     default_bom_label: Mapped[str | None] = mapped_column(String(50), comment='默认BOM自定义名称(NULL=显示"默认BOM")')
-    # 陈列样隐藏款随箱配比 P（2026-11-08）：每 P 个订单数量随箱配 1 个「隐藏款」角色，
+    # 盲盒隐藏款装箱配比 P（2026-11-08）：每 P 个订单数量随箱配 1 个「隐藏款」角色，
     # 常规 6 款按订单数量均分。NULL = 不启用该规则，采购生成保持历史口径
     # （每个角色都用完整订单数量）。分配算法唯一实现在 utils/scope_quantities.py。
     hidden_carton_ratio: Mapped[int | None] = mapped_column(
         Integer,
-        comment='隐藏款随箱配比P(每P个订单数量配1个隐藏款;NULL=不启用陈列样角色分摊)',
+        comment='盲盒隐藏款装箱配比P(每P个订单数量配1个隐藏款;NULL=不启用陈列样角色分摊)',
+    )
+    # 盲盒口径（2026-11-08 增量）：
+    # - is_blind_box=False：存量口径，每个角色都用完整订单数量（零行为变化）；
+    # - is_blind_box=True 且 has_hidden_role=False：订单数量按「角色数量」均分，
+    #   不额外配隐藏款；
+    # - is_blind_box=True 且 has_hidden_role=True 且配比非空：常规角色按
+    #   「订单数量 ÷ 常规角色数」均分，隐藏款额外 ceil(N/P)（BOM 须恰有 1 个隐藏款）。
+    is_blind_box: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text('false'),
+        comment='是否盲盒SKU（开启后订单数量按角色数均分；关闭=历史全量口径）',
+    )
+    has_hidden_role: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text('false'),
+        comment='该盲盒SKU是否有隐藏款（有则配比生效、隐藏款额外ceil(N/P)）',
     )
     version: Mapped[int] = mapped_column(Integer, default=0, server_default='0', comment='乐观锁版本号')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
@@ -110,6 +124,8 @@ class Product(Base):
             'initial_stock': self.initial_stock,
             'current_stock': self.current_stock,
             'hidden_carton_ratio': self.hidden_carton_ratio,
+            'is_blind_box': bool(self.is_blind_box),
+            'has_hidden_role': bool(self.has_hidden_role),
             'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None
         }
 

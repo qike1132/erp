@@ -75,7 +75,7 @@ def _mock_execute_result(product):
 
 
 class TestGetBom:
-    """get_bom 返回角色列表（角色产品私有：仅 ``{id, name}``，按 (name, id) 升序）"""
+    """get_bom 返回角色列表（角色产品私有：``{id, name, is_hidden}``，按 (name, id) 升序）"""
 
     async def test_get_bom_returns_roles(self, mock_db):
         product = _mock_product(roles=[_mock_role(11, '白雪公主'), _mock_role(12, '灰姑娘')])
@@ -85,8 +85,8 @@ class TestGetBom:
 
         # 排序键 (name, id)：'灰姑娘'(U+7070) < '白雪公主'(U+767D)
         assert result['roles'] == [
-            {'id': 12, 'name': '灰姑娘'},
-            {'id': 11, 'name': '白雪公主'},
+            {'id': 12, 'name': '灰姑娘', 'is_hidden': False},
+            {'id': 11, 'name': '白雪公主', 'is_hidden': False},
         ]
 
     async def test_get_bom_roles_sorted_by_name_then_id(self, mock_db):
@@ -103,9 +103,9 @@ class TestGetBom:
         # 排序键 (name, id)：'爸爸'(U+7238) < '白雪公主'(U+767D)；
         # 同名 '爸爸' 再按 id 升序（12 先于 13）——验证 id 兜底不依赖插入顺序。
         assert result['roles'] == [
-            {'id': 12, 'name': '爸爸'},
-            {'id': 13, 'name': '爸爸'},
-            {'id': 11, 'name': '白雪公主'},
+            {'id': 12, 'name': '爸爸', 'is_hidden': False},
+            {'id': 13, 'name': '爸爸', 'is_hidden': False},
+            {'id': 11, 'name': '白雪公主', 'is_hidden': False},
         ]
 
     async def test_get_bom_no_roles_returns_empty(self, mock_db):

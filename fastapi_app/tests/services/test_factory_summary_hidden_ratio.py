@@ -31,11 +31,11 @@ from fastapi_app.shared_models import (
 )
 
 REGULAR_NAMES = ['角色A', '角色B', '角色C', '角色D', '角色E', '角色F']
-HIDDEN_NAME = '隐藏款'
+HIDDEN_NAME = '角色G'  # 用右键指定（is_hidden）识别，名字不必是「隐藏款」
 # 10000 = 6×1666 余 4 → 前 4 款各 1667；隐藏 ceil(10000/72)=139
 EXPECTED_BY_ROLE = {
     '角色A': 1667, '角色B': 1667, '角色C': 1667, '角色D': 1667,
-    '角色E': 1666, '角色F': 1666, '隐藏款': 139,
+    '角色E': 1666, '角色F': 1666, '角色G': 139,
 }
 
 
@@ -62,9 +62,15 @@ async def _seed_configured_sku(db: AsyncSession, *, role_names: list[str]) -> in
     采购单明细按生成路径的落库口径预置：每角色一条布料，数量 = 该角色分配值。
     返回采购单 id。
     """
-    db.add(Product(id=201, name='陈列样盲盒', hidden_carton_ratio=72))
+    db.add(Product(
+        id=201, name='陈列样盲盒', hidden_carton_ratio=72,
+        is_blind_box=True, has_hidden_role=True,
+    ))
     for index, role_name in enumerate(role_names, start=1):
-        db.add(ProductRole(id=index, product_id=201, role_name=role_name))
+        db.add(ProductRole(
+            id=index, product_id=201, role_name=role_name,
+            is_hidden=(role_name == HIDDEN_NAME),
+        ))
         db.add(ProductFabric(
             id=index, product_id=201, role_id=index,
             fabric_name=f'{role_name}布', specification='S1', unit='米',

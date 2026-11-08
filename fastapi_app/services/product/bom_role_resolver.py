@@ -37,6 +37,7 @@ class RoleResolution(NamedTuple):
     role_ids: list[int]              # 本产品最终保留/新建的关联行 id（用于删除未提交行）
     temp_role_map: dict[str, int]    # 客户端 role_key -> 关联行 id
     logs: list[dict]                 # 审计日志明细（便于可观测/测试）
+    hidden_role_id: int | None = None  # 归一化后唯一的隐藏款角色 id（未提交该字段时原样保留）
 
 
 def _prepare_items(payload_roles: list) -> list[dict]:
@@ -57,6 +58,7 @@ def _prepare_items(payload_roles: list) -> list[dict]:
             'key': _name_key(name),
             'rid': item.get('id'),
             'role_key': item.get('role_key'),
+            'is_hidden': bool(item.get('is_hidden')),
         })
     return prepared
 
@@ -115,6 +117,10 @@ async def resolve_role_rows(
     role_ids: list[int] = []
     temp_role_map: dict[str, int] = {}
     logs: list[dict] = []
+    # 隐藏款归一化只在该字段**出现在 payload 里**时执行：旧客户端/其他调用方
+    # 不传 is_hidden 时不得清掉已保存的标记。
+    hidden_field_submitted = any('is_hidden' in (item or {}) for item in payload_roles or [])
+    resolved_hidden_candidates: list[tuple[bool, int]] = []
 
     for p in prepared:
         if not p['role_name'] and p['rid'] is None:
@@ -138,6 +144,7 @@ async def resolve_role_rows(
                 ))
                 logs.append({'role_id': assoc.id, 'old_name': old_name, 'new_name': p['role_name']})
             role_ids.append(assoc.id)
+            resolved_hidden_candidates.append((p['is_hidden'], assoc.id))
             if p['role_key']:
                 temp_role_map[p['role_key']] = assoc.id
             continue
@@ -146,9 +153,74 @@ async def resolve_role_rows(
         db.add(new_role)
         await db.flush()
         role_ids.append(new_role.id)
+        resolved_hidden_candidates.append((p['is_hidden'], new_role.id))
         existing_by_id[new_role.id] = new_role
         existing_by_key[p['key']] = new_role
         if p['role_key']:
             temp_role_map[p['role_key']] = new_role.id
 
-    return RoleResolution(role_ids=role_ids, temp_role_map=temp_role_map, logs=logs)
+    hidden_role_id = await _normalize_hidden_flags(
+        db, existing_by_id, resolved_hidden_candidates, logs, username,
+        submitted=hidden_field_submitted,
+    )
+    return RoleResolution(
+        role_ids=role_ids, temp_role_map=temp_role_map, logs=logs,
+        hidden_role_id=hidden_role_id,
+    )
+
+
+async def _normalize_hidden_flags(
+    db: AsyncSession,
+    roles_by_id: dict,
+    candidates: list[tuple[bool, int]],
+    logs: list[dict],
+    username: str,
+    *,
+    submitted: bool,
+) -> int | None:
+    """把「每产品至多一个隐藏款」落到本产品角色行（重复指定 = 后者覆盖前者）。
+
+    ``submitted=False``（payload 完全没带 ``is_hidden``）时**原样返回当前标记**，
+    不写任何行——旧客户端保存 BOM 不得清掉用户已指定的隐藏款。
+
+    两次 flush 是有意为之：先把所有行置 false 并落库，再把目标置 true，
+    避免部分唯一索引（``uq_product_role_hidden_per_product``）在中间态
+    同时看到两个 true 而报唯一冲突。
+    """
+    if not submitted:
+        current = next(
+            (rid for rid, role in roles_by_id.items()
+             if getattr(role, 'is_hidden', False) is True),
+            None,
+        )
+        return current
+
+    target_id = None
+    for wanted, rid in candidates:  # 顺序遍历：最后一个 true 生效
+        if wanted:
+            target_id = rid
+
+    changed = False
+    for rid, role in roles_by_id.items():
+        if getattr(role, 'is_hidden', False) is True and rid != target_id:
+            role.is_hidden = False
+            changed = True
+            db.add(ModificationLog(
+                target_type='role', target_id=rid, field_name='is_hidden',
+                old_value='true', new_value='false', modifier_name=username,
+            ))
+            logs.append({'role_id': rid, 'old_hidden': True, 'new_hidden': False})
+    if changed:
+        await db.flush()
+
+    if target_id is not None:
+        target = roles_by_id.get(target_id)
+        if target is not None and getattr(target, 'is_hidden', False) is not True:
+            target.is_hidden = True
+            db.add(ModificationLog(
+                target_type='role', target_id=target_id, field_name='is_hidden',
+                old_value='false', new_value='true', modifier_name=username,
+            ))
+            logs.append({'role_id': target_id, 'old_hidden': False, 'new_hidden': True})
+            await db.flush()
+    return target_id

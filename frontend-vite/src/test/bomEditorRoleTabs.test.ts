@@ -115,7 +115,8 @@ describe('BomEditor 角色页签：删除入口改为右键菜单（对齐 RoleT
 
     const menu = q('.bom-role-menu')
     expect(menu.attributes('role')).toBe('menu')
-    expect(qa('.bom-menu-item').map((i) => i.text().trim())).toEqual(['重命名', '删除角色'])
+    expect(qa('.bom-menu-item').map((i) => i.text().trim()))
+      .toEqual(['重命名', '指定为隐藏款', '删除角色'])
     expect(q('.bom-menu-item.danger').text()).toContain('删除角色')
   })
 

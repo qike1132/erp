@@ -118,12 +118,14 @@ class TestCrossProductIsolation:
 
 
 class TestGetBomRoleShape:
-    async def test_roles_output_is_id_and_name_only(self, db):
+    async def test_roles_output_is_id_name_and_hidden_flag(self, db):
+        """角色出站形状 = {id, name, is_hidden}（is_hidden 供前端页签显示隐藏款徽标）。"""
         await bom_service.save_bom(db, 1, _save({'roles': [{'role_name': '甲'}]}), 'tester')
         result = await bom_service.get_bom(db, 1)
         assert result is not None
         assert len(result['roles']) == 1
-        assert set(result['roles'][0].keys()) == {'id', 'name'}
+        assert set(result['roles'][0].keys()) == {'id', 'name', 'is_hidden'}
+        assert result['roles'][0]['is_hidden'] is False
         assert result['roles'][0]['name'] == '甲'
 
     async def test_role_materials_keep_role_id_link(self, db):
@@ -142,3 +144,66 @@ class TestGetBomRoleShape:
             select(ProductFabric).where(ProductFabric.product_id == 1)
         )).scalar_one()
         assert fabric.role_id == role.id
+
+
+class TestHiddenRoleDesignation:
+    """右键指定隐藏款：保存 BOM 落库、重复指定自动替换、每产品至多一个。"""
+
+    async def _roles(self, db) -> dict[str, dict]:
+        result = await bom_service.get_bom(db, 1)
+        return {r['name']: r for r in (result or {})['roles']}
+
+    async def test_designate_persists_and_replaces_previous(self, db):
+        await bom_service.save_bom(
+            db, 1, _save({'roles': [{'role_name': '角色A'}, {'role_name': '角色B'}]}), 'tester',
+        )
+        roles = await self._roles(db)
+
+        # 1) 指定 角色A
+        await bom_service.save_bom(db, 1, _save({'roles': [
+            {'id': roles['角色A']['id'], 'role_name': '角色A', 'is_hidden': True},
+            {'id': roles['角色B']['id'], 'role_name': '角色B', 'is_hidden': False},
+        ]}), 'tester')
+        roles = await self._roles(db)
+        assert {name: r['is_hidden'] for name, r in roles.items()} == {
+            '角色A': True, '角色B': False,
+        }
+
+        # 2) 改指定 角色B：自动替换（部分唯一索引不允许出现两个 true）
+        await bom_service.save_bom(db, 1, _save({'roles': [
+            {'id': roles['角色A']['id'], 'role_name': '角色A', 'is_hidden': True},
+            {'id': roles['角色B']['id'], 'role_name': '角色B', 'is_hidden': True},
+        ]}), 'tester')
+        roles = await self._roles(db)
+        assert {name: r['is_hidden'] for name, r in roles.items()} == {
+            '角色A': False, '角色B': True,
+        }
+
+        # 3) DB 层恒只有一个隐藏款，且变更留审计日志
+        hidden_rows = (await db.execute(
+            select(ProductRole).where(
+                ProductRole.product_id == 1, ProductRole.is_hidden.is_(True),
+            )
+        )).scalars().all()
+        assert len(hidden_rows) == 1 and hidden_rows[0].role_name == '角色B'
+        logs = (await db.execute(
+            select(ModificationLog).where(ModificationLog.field_name == 'is_hidden')
+        )).scalars().all()
+        assert len(logs) >= 3  # A 置真、A 置假、B 置真
+
+    async def test_legacy_save_without_field_keeps_designation(self, db):
+        await bom_service.save_bom(db, 1, _save({'roles': [{'role_name': '角色A'}]}), 'tester')
+        roles = await self._roles(db)
+        await bom_service.save_bom(db, 1, _save({'roles': [
+            {'id': roles['角色A']['id'], 'role_name': '角色A', 'is_hidden': True},
+        ]}), 'tester')
+
+        # 旧客户端（不传 is_hidden）只改物料：标记必须保留
+        await bom_service.save_bom(db, 1, _save({
+            'roles': [{'id': roles['角色A']['id'], 'role_name': '角色A'}],
+            'fabrics': [{'fabric_name': '布', 'specification': 's', 'unit': '码',
+                         'quantity': Decimal('1'), 'supplier_name': '',
+                         'role_id': roles['角色A']['id']}],
+        }), 'tester')
+        roles = await self._roles(db)
+        assert roles['角色A']['is_hidden'] is True

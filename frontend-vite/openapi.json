@@ -31033,7 +31033,19 @@
               }
             ],
             "title": "Hidden Carton Ratio",
-            "description": "隐藏款随箱配比：每多少个订单数量配 1 个隐藏款；需在 BOM 配置 6 个常规角色 + 1 个「隐藏款」角色；空 = 不启用"
+            "description": "盲盒隐藏款装箱配比：每多少个订单数量配 1 个隐藏款；需在 BOM 恰有 1 个隐藏款角色；空 = 不启用（隐藏款不额外配）"
+          },
+          "is_blind_box": {
+            "type": "boolean",
+            "title": "Is Blind Box",
+            "description": "是否盲盒 SKU（开启后订单数量按角色数均分）",
+            "default": false
+          },
+          "has_hidden_role": {
+            "type": "boolean",
+            "title": "Has Hidden Role",
+            "description": "该盲盒 SKU 是否有隐藏款",
+            "default": false
           },
           "customer_ids": {
             "items": {
@@ -31393,6 +31405,16 @@
             ],
             "title": "Hidden Carton Ratio"
           },
+          "is_blind_box": {
+            "type": "boolean",
+            "title": "Is Blind Box",
+            "default": false
+          },
+          "has_hidden_role": {
+            "type": "boolean",
+            "title": "Has Hidden Role",
+            "default": false
+          },
           "create_time": {
             "anyOf": [
               {
@@ -31605,7 +31627,31 @@
               }
             ],
             "title": "Hidden Carton Ratio",
-            "description": "隐藏款随箱配比；未提交 = 不改动，显式 null = 清空（停用规则）"
+            "description": "盲盒隐藏款装箱配比；未提交 = 不改动，显式 null = 清空（停用规则）"
+          },
+          "is_blind_box": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Blind Box",
+            "description": "是否盲盒 SKU；None = 不改动"
+          },
+          "has_hidden_role": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Hidden Role",
+            "description": "是否有隐藏款；None = 不改动"
           },
           "customer_ids": {
             "anyOf": [
@@ -34259,6 +34305,11 @@
               }
             ],
             "title": "Name"
+          },
+          "is_hidden": {
+            "type": "boolean",
+            "title": "Is Hidden",
+            "default": false
           }
         },
         "additionalProperties": true,

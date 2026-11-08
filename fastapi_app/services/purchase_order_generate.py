@@ -141,9 +141,14 @@ class _BomContext:
     accessory: dict = field(default_factory=dict)
     scopes_by_pid: dict[int, list] = field(default_factory=dict)
     role_names: dict[tuple[int, int], str] = field(default_factory=dict)
-    # 陈列样隐藏款随箱配比：{product_id: P}。键存在 = 该 SKU 启用
-    # 「6 常规款均分 + 隐藏款 ceil(N/P)」规则；不存在的 SKU 走历史全量口径。
+    # 盲盒隐藏款装箱配比：{product_id: P}。键存在 = 配比非空（有隐藏款时才生效）。
     hidden_ratios: dict[int, int] = field(default_factory=dict)
+    # 右键指定的隐藏款角色：{product_id: role_id}；缺失时回退「名字精确为隐藏款」。
+    hidden_role_ids: dict[int, int] = field(default_factory=dict)
+    # 盲盒 SKU：按角色数均分（无隐藏款）或按常规角色数均分 + 隐藏款 ceil(N/P)。
+    blind_box_pids: set[int] = field(default_factory=set)
+    # 有隐藏款的盲盒 SKU：配比非空时才额外配隐藏款，否则退化为按角色数均分。
+    has_hidden_pids: set[int] = field(default_factory=set)
 
     def scopes_for(self, pid: int) -> list:
         """产品无任何角色 BOM 时回退到 [None]（仅默认BOM），保持旧行为。"""
@@ -190,13 +195,13 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
     重复进位）；该 SKU 的明细按合并口径**整体产出一次**（默认 BOM 仍用完整 N）。
     未配置配比的 SKU 走历史逐行全量路径，行为零变化。
     """
-    # 先把启用规则的 SKU 在本组内的数量合并为「订单总数量」
-    merged_configured_qty: dict[int, float] = {}
-    if ctx.hidden_ratios:
+    # 先把盲盒 SKU 在本组内的数量合并为「订单总数量」（均分必须对总量做一次）
+    merged_blind_qty: dict[int, float] = {}
+    if ctx.blind_box_pids:
         for rec in records:
             for pid, qty in _iter_source_skus(rec):
-                if pid in ctx.hidden_ratios:
-                    merged_configured_qty[pid] = merged_configured_qty.get(pid, 0) + float(qty)
+                if pid in ctx.blind_box_pids:
+                    merged_blind_qty[pid] = merged_blind_qty.get(pid, 0) + float(qty)
 
     result_items: list = []
     emitted_configured: set[int] = set()
@@ -206,17 +211,20 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
             product_name = pid_name_map.get(pid, '未知产品')
             scopes = ctx.scopes_for(pid)
 
-            if pid in ctx.hidden_ratios:
+            if pid in ctx.blind_box_pids:
                 if pid in emitted_configured:
                     # 该 SKU 的明细已在首次遇到时按合并后的订单总数量整体产出，
                     # 跳过后续来源行，避免重复落库。
                     continue
                 emitted_configured.add(pid)
                 allocation = allocate_scope_quantities(
-                    merged_configured_qty.get(pid, 0),
+                    merged_blind_qty.get(pid, 0),
                     scopes,
-                    hidden_carton_ratio=ctx.hidden_ratios[pid],
+                    hidden_carton_ratio=ctx.hidden_ratios.get(pid),
                     name_of=partial(_role_name_lookup, ctx.role_names, pid),
+                    hidden_role_id=ctx.hidden_role_ids.get(pid),
+                    blind_box=True,
+                    has_hidden=pid in ctx.has_hidden_pids,
                 )
                 for role_id in scopes:
                     scope_label = _scope_label(pid, role_id, ctx.role_names)
@@ -347,14 +355,19 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
     from fastapi_app.shared_models import ProductRole
 
     # 角色为产品私有（迁移 088/089）：直接取本行 role_name，不再关联全局角色字典。
+    # is_hidden：BOM 角色页签右键指定的隐藏款（优先于名字识别，见 utils/scope_quantities）。
     role_result = await db.execute(
-        select(ProductRole.id, ProductRole.product_id, ProductRole.role_name)
-        .where(ProductRole.product_id.in_(product_ids))
+        select(
+            ProductRole.id, ProductRole.product_id,
+            ProductRole.role_name, ProductRole.is_hidden,
+        ).where(ProductRole.product_id.in_(product_ids))
     )
     role_ids_by_pid: dict[int, set[int]] = defaultdict(set)
-    for rid, rpid, rname in role_result.all():
+    for rid, rpid, rname, is_hidden in role_result.all():
         ctx.role_names[(rpid, rid)] = rname or ''
         role_ids_by_pid[rpid].add(rid)
+        if is_hidden:
+            ctx.hidden_role_ids[rpid] = rid
 
     for pid in product_ids:
         # 作用域清单 = 物料上出现过的 role_id ∪ 产品实际声明的角色 ∪ {None}。
@@ -377,11 +390,21 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
             name_of=lambda rid, _pid=pid: ctx.role_names.get((_pid, rid)),
         )
 
-    # 陈列样隐藏款随箱配比（第 5 次查询）：只收集非空值，键存在即启用分摊规则。
+    # 盲盒口径（第 5 次查询）：一次取回配比 + 盲盒开关 + 是否有隐藏款。
+    # 盲盒 SKU 才走均分（无隐藏款按角色数、有隐藏款按常规角色数 + ceil(N/P)）；
+    # 非盲盒 SKU 保持历史全量口径。
     ratio_result = await db.execute(
-        select(Product.id, Product.hidden_carton_ratio).where(Product.id.in_(product_ids))
+        select(
+            Product.id, Product.hidden_carton_ratio,
+            Product.is_blind_box, Product.has_hidden_role,
+        ).where(Product.id.in_(product_ids))
     )
-    for p_id, ratio in ratio_result.all():
+    for p_id, ratio, is_blind_box, has_hidden_role in ratio_result.all():
+        if not is_blind_box:
+            continue
+        ctx.blind_box_pids.add(p_id)
+        if has_hidden_role:
+            ctx.has_hidden_pids.add(p_id)
         if ratio:
             ctx.hidden_ratios[p_id] = int(ratio)
     return ctx

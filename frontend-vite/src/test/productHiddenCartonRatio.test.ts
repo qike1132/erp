@@ -1,10 +1,12 @@
 /**
- * 陈列样「隐藏款随箱配比」SKU 主数据字段 —— 新增表单与编辑弹窗的回归测试。
+ * 盲盒配置（产品录入）回归测试：盲盒开关、是否有隐藏款、配比联动与提交。
  *
- * 锁住三件事：
- *   1. 填写正整数（如 72）时随产品一起提交 hidden_carton_ratio；
- *   2. 留空 = 不启用（新增不传 / 编辑显式 null 清空），绝不能把「空」误当 0 提交；
- *   3. 非正整数（0 / 3.5）本地拦截并提示，不发起请求。
+ * 契约：
+ *   1. 未勾选「盲盒」时不展示隐藏款相关录入项，也不提交这些字段；
+ *   2. 勾选「盲盒」后展开「该 SKU 有隐藏款」与「盲盒隐藏款装箱配比」；
+ *   3. 取消「有隐藏款」时配比禁用并清空（无隐藏款的盲盒按角色数均分）；
+ *   4. 配比只在「盲盒 + 有隐藏款」时提交；非法值本地拦截；
+ *   5. 编辑弹窗只提交被改动过的配比（避免旧值覆盖别处刚改的配置）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -12,6 +14,8 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 type ProductPayload = {
   hidden_carton_ratio?: number | null
+  is_blind_box?: boolean
+  has_hidden_role?: boolean
   [key: string]: unknown
 }
 
@@ -64,7 +68,6 @@ function stubs() {
   return {
     FontAwesomeIcon: true,
     ProductCustomerSelect: true,
-    // 弹窗外壳只关心插槽内容，直通渲染即可
     UiDialog: { template: '<div class="dlg-stub"><slot name="title" /><slot /><slot name="footer" /></div>' },
   } as never
 }
@@ -83,85 +86,130 @@ function mountEditDialog() {
   })
 }
 
+const ROW_BLIND = {
+  id: 1, name: '陈列样盲盒', barcode: '', price: 0, factory: '东莞', image: null,
+  hidden_carton_ratio: 72, is_blind_box: true, has_hidden_role: true, customers: [],
+}
+
 beforeEach(() => {
   createMock.mockClear()
   updateMock.mockClear()
   toastMock.mockClear()
 })
 
-describe('ProductBasicForm · 隐藏款随箱配比', () => {
-  it('填 72 时随新增产品提交 hidden_carton_ratio=72', async () => {
+describe('ProductBasicForm · 盲盒配置', () => {
+  it('未勾选盲盒时不展示隐藏款录入项，也不提交相关字段', async () => {
     const wrapper = mountBasicForm()
-    await wrapper.find('input[name="product-name"]').setValue('市集拾趣陈列样')
-    await wrapper.find('input[name="hidden-carton-ratio"]').setValue('72')
+    expect(wrapper.find('input[name="create-hidden-carton-ratio"]').exists()).toBe(false)
+    expect(wrapper.find('input[name="create-has-hidden-role"]').exists()).toBe(false)
 
+    await wrapper.find('input[name="product-name"]').setValue('普通公仔')
     await wrapper.find('button.pd-btn-primary').trigger('click')
     await flushPromises()
 
-    expect(createMock).toHaveBeenCalledTimes(1)
-    expect(createMock.mock.calls[0]![0].hidden_carton_ratio).toBe(72)
-    expect(toastMock).toHaveBeenCalledWith('添加成功', 'success')
+    const payload = createMock.mock.calls[0]![0]
+    expect(payload.is_blind_box).toBe(false)
+    expect(payload.has_hidden_role).toBe(false)
+    expect(payload.hidden_carton_ratio).toBeUndefined()
   })
 
-  it('留空时不提交该字段（undefined），不误传 0', async () => {
+  it('勾选盲盒后展开「有隐藏款」与配比；填 72 提交三个字段', async () => {
     const wrapper = mountBasicForm()
-    await wrapper.find('input[name="product-name"]').setValue('普通公仔')
+    await wrapper.find('input[name="product-name"]').setValue('陈列样盲盒')
+    await wrapper.find('input[name="create-is-blind-box"]').setValue(true)
+    await wrapper.find('input[name="create-has-hidden-role"]').setValue(true)
+    await wrapper.find('input[name="create-hidden-carton-ratio"]').setValue('72')
 
     await wrapper.find('button.pd-btn-primary').trigger('click')
     await flushPromises()
 
-    expect(createMock).toHaveBeenCalledTimes(1)
-    expect(createMock.mock.calls[0]![0].hidden_carton_ratio).toBeUndefined()
+    const payload = createMock.mock.calls[0]![0]
+    expect(payload.is_blind_box).toBe(true)
+    expect(payload.has_hidden_role).toBe(true)
+    expect(payload.hidden_carton_ratio).toBe(72)
+  })
+
+  it('盲盒无隐藏款：配比禁用且提交 has_hidden_role=false、不带配比', async () => {
+    const wrapper = mountBasicForm()
+    await wrapper.find('input[name="product-name"]').setValue('盲盒无隐藏')
+    await wrapper.find('input[name="create-is-blind-box"]').setValue(true)
+
+    const ratio = wrapper.find('input[name="create-hidden-carton-ratio"]')
+    expect(ratio.attributes('disabled')).toBeDefined()
+
+    await wrapper.find('button.pd-btn-primary').trigger('click')
+    await flushPromises()
+
+    const payload = createMock.mock.calls[0]![0]
+    expect(payload.is_blind_box).toBe(true)
+    expect(payload.has_hidden_role).toBe(false)
+    expect(payload.hidden_carton_ratio).toBeUndefined()
+  })
+
+  it('取消「有隐藏款」会清空已填配比', async () => {
+    const wrapper = mountBasicForm()
+    await wrapper.find('input[name="create-is-blind-box"]').setValue(true)
+    await wrapper.find('input[name="create-has-hidden-role"]').setValue(true)
+    await wrapper.find('input[name="create-hidden-carton-ratio"]').setValue('72')
+    await wrapper.find('input[name="create-has-hidden-role"]').setValue(false)
+    await flushPromises()
+
+    const input = wrapper.find('input[name="create-hidden-carton-ratio"]').element as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(input.disabled).toBe(true)
   })
 
   it.each(['0', '-1', '3.5'])('填非法值 %s 本地拦截，不发请求', async (bad) => {
     const wrapper = mountBasicForm()
-    await wrapper.find('input[name="product-name"]').setValue('市集拾趣陈列样')
-    await wrapper.find('input[name="hidden-carton-ratio"]').setValue(bad)
+    await wrapper.find('input[name="product-name"]').setValue('陈列样盲盒')
+    await wrapper.find('input[name="create-is-blind-box"]').setValue(true)
+    await wrapper.find('input[name="create-has-hidden-role"]').setValue(true)
+    await wrapper.find('input[name="create-hidden-carton-ratio"]').setValue(bad)
 
     await wrapper.find('button.pd-btn-primary').trigger('click')
     await flushPromises()
 
     expect(createMock).not.toHaveBeenCalled()
-    expect(toastMock).toHaveBeenCalledWith('隐藏款随箱配比必须为正整数（不超过 1000000）', 'warning')
+    expect(toastMock).toHaveBeenCalledWith('盲盒隐藏款装箱配比必须为正整数（不超过 1000000）', 'warning')
   })
 
-  it('提交成功后配比输入复位为空', async () => {
+  it('提交成功后盲盒配置复位', async () => {
     const wrapper = mountBasicForm()
-    await wrapper.find('input[name="product-name"]').setValue('市集拾趣陈列样')
-    await wrapper.find('input[name="hidden-carton-ratio"]').setValue('72')
+    await wrapper.find('input[name="product-name"]').setValue('陈列样盲盒')
+    await wrapper.find('input[name="create-is-blind-box"]').setValue(true)
+    await wrapper.find('input[name="create-has-hidden-role"]').setValue(true)
+    await wrapper.find('input[name="create-hidden-carton-ratio"]').setValue('72')
     await wrapper.find('button.pd-btn-primary').trigger('click')
     await flushPromises()
 
-    expect((wrapper.find('input[name="hidden-carton-ratio"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.find('input[name="create-is-blind-box"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('input[name="create-hidden-carton-ratio"]').exists()).toBe(false)
   })
 })
 
-describe('ProductEditDialog · 隐藏款随箱配比', () => {
-  it('回显已配置的 72；未修改时保存不提交该字段（避免旧值覆盖丢失更新）', async () => {
+describe('ProductEditDialog · 盲盒配置', () => {
+  it('回显盲盒与配比；未修改时保存不提交配比字段', async () => {
     const wrapper = mountEditDialog()
-    wrapper.vm.open({
-      id: 1, name: '陈列样', barcode: '', price: 0, factory: '东莞', image: null,
-      hidden_carton_ratio: 72, customers: [],
-    })
+    wrapper.vm.open(ROW_BLIND)
     await flushPromises()
 
-    const input = wrapper.find('input[name="edit-hidden-carton-ratio"]').element as HTMLInputElement
-    expect(input.value).toBe('72')
+    expect((wrapper.find('input[name="edit-is-blind-box"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.find('input[name="edit-has-hidden-role"]').element as HTMLInputElement).checked).toBe(true)
+    const ratio = wrapper.find('input[name="edit-hidden-carton-ratio"]').element as HTMLInputElement
+    expect(ratio.value).toBe('72')
 
     await wrapper.find('.bom-btn-save').trigger('click')
     await flushPromises()
 
-    expect(updateMock).toHaveBeenCalledTimes(1)
-    expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBeUndefined()
+    const payload = updateMock.mock.calls[0]![1]
+    expect(payload.is_blind_box).toBe(true)
+    expect(payload.has_hidden_role).toBe(true)
+    expect(payload.hidden_carton_ratio).toBeUndefined()
   })
 
-  it('改成 100 时提交新值', async () => {
+  it('改成 100 时提交新配比', async () => {
     const wrapper = mountEditDialog()
-    wrapper.vm.open({
-      id: 1, name: '陈列样', barcode: '', price: 0, factory: '东莞', image: null,
-      hidden_carton_ratio: 72, customers: [],
-    })
+    wrapper.vm.open(ROW_BLIND)
     await flushPromises()
     await wrapper.find('input[name="edit-hidden-carton-ratio"]').setValue('100')
 
@@ -171,12 +219,9 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBe(100)
   })
 
-  it('原有配比被清空时保存显式提交 null（停用规则），而不是漏字段', async () => {
+  it('清空配比保存时显式提交 null（不额外配隐藏款）', async () => {
     const wrapper = mountEditDialog()
-    wrapper.vm.open({
-      id: 1, name: '陈列样', barcode: '', price: 0, factory: '东莞', image: null,
-      hidden_carton_ratio: 72, customers: [],
-    })
+    wrapper.vm.open(ROW_BLIND)
     await flushPromises()
     await wrapper.find('input[name="edit-hidden-carton-ratio"]').setValue('')
 
@@ -186,7 +231,21 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBeNull()
   })
 
-  it('未配置过的产品未改配比时也不提交该字段（三态与后端 model_fields_set 对齐）', async () => {
+  it('关闭「有隐藏款」后配比清空且按 null 提交', async () => {
+    const wrapper = mountEditDialog()
+    wrapper.vm.open(ROW_BLIND)
+    await flushPromises()
+    await wrapper.find('input[name="edit-has-hidden-role"]').setValue(false)
+
+    await wrapper.find('.bom-btn-save').trigger('click')
+    await flushPromises()
+
+    const payload = updateMock.mock.calls[0]![1]
+    expect(payload.has_hidden_role).toBe(false)
+    expect(payload.hidden_carton_ratio).toBeNull()
+  })
+
+  it('非盲盒产品：不展示配比，保存提交 false/false 且不带配比', async () => {
     const wrapper = mountEditDialog()
     wrapper.vm.open({
       id: 2, name: '普通公仔', barcode: '', price: 0, factory: '东莞', image: null,
@@ -194,18 +253,20 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     })
     await flushPromises()
 
+    expect(wrapper.find('input[name="edit-hidden-carton-ratio"]').exists()).toBe(false)
+
     await wrapper.find('.bom-btn-save').trigger('click')
     await flushPromises()
 
-    expect(updateMock.mock.calls[0]![1].hidden_carton_ratio).toBeUndefined()
+    const payload = updateMock.mock.calls[0]![1]
+    expect(payload.is_blind_box).toBe(false)
+    expect(payload.has_hidden_role).toBe(false)
+    expect(payload.hidden_carton_ratio).toBeUndefined()
   })
 
   it('非法值本地拦截不发请求', async () => {
     const wrapper = mountEditDialog()
-    wrapper.vm.open({
-      id: 1, name: '陈列样', barcode: '', price: 0, factory: '东莞', image: null,
-      hidden_carton_ratio: 72, customers: [],
-    })
+    wrapper.vm.open(ROW_BLIND)
     await flushPromises()
     await wrapper.find('input[name="edit-hidden-carton-ratio"]').setValue('0')
 
@@ -213,6 +274,6 @@ describe('ProductEditDialog · 隐藏款随箱配比', () => {
     await flushPromises()
 
     expect(updateMock).not.toHaveBeenCalled()
-    expect(toastMock).toHaveBeenCalledWith('隐藏款随箱配比必须为正整数（不超过 1000000）', 'warning')
+    expect(toastMock).toHaveBeenCalledWith('盲盒隐藏款装箱配比必须为正整数（不超过 1000000）', 'warning')
   })
 })

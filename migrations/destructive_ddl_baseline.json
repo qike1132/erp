@@ -613,6 +613,14 @@
     "migrations/versions/pg_standalone_113_add_product_hidden_carton_ratio.py": [
       "execute:ALTER TABLE product DROP COLUMN IF EXISTS hidden_carton_ratio"
     ],
+    "migrations/versions/pg_standalone_114_add_product_role_is_hidden.py": [
+      "execute:ALTER TABLE product_role DROP COLUMN IF EXISTS is_hidden",
+      "execute:DROP INDEX IF EXISTS uq_product_role_hidden_per_product"
+    ],
+    "migrations/versions/pg_standalone_115_add_product_blind_box_flags.py": [
+      "execute:ALTER TABLE product DROP COLUMN IF EXISTS has_hidden_role",
+      "execute:ALTER TABLE product DROP COLUMN IF EXISTS is_blind_box"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

@@ -395,6 +395,48 @@ def _lookup_role_name(names: dict[int, str], rid: int) -> str | None:
     return names.get(rid)
 
 
+def _is_blind_box(product: Product) -> bool:
+    """是否盲盒 SKU（``product.is_blind_box``）；严格 ``is True`` 防 MagicMock 误判。"""
+    return getattr(product, 'is_blind_box', False) is True
+
+
+def _has_hidden_role(product: Product) -> bool:
+    """该盲盒 SKU 是否有隐藏款（``product.has_hidden_role``）。"""
+    return getattr(product, 'has_hidden_role', False) is True
+
+
+def _blind_box_allocation(
+    product: Product, quantity: object, name_of: Callable[[int], str | None],
+) -> dict | None:
+    """盲盒 SKU 的作用域数量分配；**非盲盒返回 None**（走历史全量口径）。"""
+    if not _is_blind_box(product):
+        return None
+    return allocate_scope_quantities(
+        quantity,
+        {row.get('role_id') for row in product.get_all_materials()}
+        | _declared_role_ids(product) | {None},
+        hidden_carton_ratio=_configured_hidden_ratio(product),
+        name_of=name_of,
+        hidden_role_id=_hidden_role_from_product(product),
+        blind_box=True,
+        has_hidden=_has_hidden_role(product),
+    )
+
+
+def _hidden_role_from_product(product: Product) -> int | None:
+    """右键指定的隐藏款角色 id（``product_role.is_hidden``）；未指定返回 None。
+
+    用 ``is True`` 严格判断：单元测试里的 MagicMock 角色属性是 truthy Mock，
+    不能当成已指定（否则会误走 flag 分支、把 Mock 当 role_id）。
+    """
+    for pr in getattr(product, 'roles', None) or ():
+        if getattr(pr, 'is_hidden', False) is True:
+            rid = getattr(pr, 'id', None)
+            if isinstance(rid, int):
+                return rid
+    return None
+
+
 def aggregate_materials(orders_data: list, product_map: dict) -> dict:
     """按 (分类, 物料名, 供应商, 规格) 聚合物料用量（**全作用域合并口径**）。
 
@@ -417,17 +459,13 @@ def aggregate_materials(orders_data: list, product_map: dict) -> dict:
         product = product_map.get(product_id)
         if not product or not product.has_bom():
             continue
-        ratio = _configured_hidden_ratio(product)
-        if ratio is None:
-            continue
         names = _role_names_from_product(product)
-        allocations[product_id] = allocate_scope_quantities(
-            merged_qty,
-            {row.get('role_id') for row in product.get_all_materials()}
-            | _declared_role_ids(product) | {None},
-            hidden_carton_ratio=ratio,
-            name_of=partial(_lookup_role_name, names),
+        allocation = _blind_box_allocation(
+            product, merged_qty, partial(_lookup_role_name, names),
         )
+        if allocation is None:
+            continue
+        allocations[product_id] = allocation
 
     emitted: set[int] = set()
     for order_item in orders_data:
@@ -506,16 +544,7 @@ def aggregate_materials_by_scope(
             continue
 
         rows = product.get_all_materials()
-        allocation = None
-        ratio = _configured_hidden_ratio(product)
-        if ratio is not None:
-            allocation = allocate_scope_quantities(
-                quantity,
-                {row.get('role_id') for row in rows}
-                | _declared_role_ids(product) | {None},
-                hidden_carton_ratio=ratio,
-                name_of=partial(name_of, product_id),
-            )
+        allocation = _blind_box_allocation(product, quantity, partial(name_of, product_id))
         scopes = order_scopes(
             {row.get('role_id') for row in rows} | {None},
             # P2-A2 类型收窄：partial 等价于原绑定默认值的 lambda（order_scopes.name_of 只接收 1 个参数）

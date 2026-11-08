@@ -10,6 +10,11 @@ export interface Role {
   /** 新建角色的客户端临时键，保存时经 role_key 归位物料 */
   role_key?: string
   name: string
+  /**
+   * 隐藏款标记（每个 SKU 至多一个）。由角色页签右键「指定为隐藏款」设置，
+   * 随保存 BOM 落库（product_role.is_hidden），分配算法优先按它识别隐藏款。
+   */
+  is_hidden?: boolean
 }
 
 /** BOM 物料项（前端编辑态） */
@@ -101,6 +106,8 @@ export interface RolePayloadItem {
   role_name: string
   /** 兼容字段：与 `role_name` 同值，供后端 `role_name || name` 兜底解析。 */
   name?: string
+  /** 隐藏款标记（每 SKU 至多一个；后端保存时归一化，重复指定保留最后一个）。 */
+  is_hidden: boolean
 }
 
 /**
@@ -117,9 +124,10 @@ export interface RolePayloadItem {
 export function buildRolePayload(roles: Role[]): RolePayloadItem[] {
   return roles.map((role) => {
     const roleName = (role.name || '').trim()
+    const isHidden = role.is_hidden === true
     if (role.id != null) {
-      return { id: role.id, role_name: roleName }
+      return { id: role.id, role_name: roleName, is_hidden: isHidden }
     }
-    return { role_key: role.role_key, role_name: roleName }
+    return { role_key: role.role_key, role_name: roleName, is_hidden: isHidden }
   })
 }

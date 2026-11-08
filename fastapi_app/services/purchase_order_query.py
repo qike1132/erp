@@ -393,15 +393,15 @@ async def get_factory_order_summary(
         _fetch_prod_name_and_ratio,
         _fetch_roles_ctx,
     )
-    prod_name_map, ratio_map = await _fetch_prod_name_and_ratio(db, product_ids)
+    prod_name_map, blind_ctx = await _fetch_prod_name_and_ratio(db, product_ids)
     bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
     items_map, items_by_order, items_map_by_part = await _fetch_po_items_map(db, po_ids)
-    hidden_ratio_ctx = await _fetch_roles_ctx(db, ratio_map)
+    blind_box_ctx = await _fetch_roles_ctx(db, blind_ctx)
 
     group_map = _build_factory_group_map(
         orders, bom_data, items_map, items_by_order, cust_order_map, prod_name_map,
         po_pids_map=po_pids_map, po_sku_map=sku_rows, items_map_by_part=items_map_by_part,
-        hidden_ratio_ctx=hidden_ratio_ctx,
+        blind_box_ctx=blind_box_ctx,
     )
     groups = _serialize_factory_groups(group_map)
 

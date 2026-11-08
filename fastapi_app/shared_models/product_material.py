@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from fastapi_app.core.business_time import fmt_business
@@ -84,6 +84,12 @@ class ProductRole(Base):
     # 过渡残留列：088 改为可空、不再写入；089 删除。见迁移 pg_standalone_088/089。
     global_role_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('role.id', ondelete='RESTRICT'), nullable=True, comment='[过渡] 全局角色ID，088 起可空、089 删除')
     role_name: Mapped[str] = mapped_column(String(100), nullable=False, comment='角色名称（产品私有；写入前 trim）')
+    # 隐藏款标记：每个 SKU 至多一个 True（部分唯一索引兜底），由 BOM 角色页签右键指定。
+    # 分配算法优先按本列识别隐藏款；为兼容历史数据，未指定时回退到「名字精确等于隐藏款」。
+    is_hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text('false'),
+        comment='隐藏款标记（每产品至多一个；右键指定，优先于角色名识别）',
+    )
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
@@ -98,6 +104,11 @@ class ProductRole(Base):
         # 用可移植的 lower()（而非 btrim）：迁移 088 已把存量名 btrim 归一，
         # 应用层写入前也 trim，故索引只需 lower；这样 SQLite 测试库也能建索引。
         Index('uq_product_role_product_name_lower', 'product_id', text('lower(role_name)'), unique=True),
+        # 每产品至多一个隐藏款：部分唯一索引（PG/SQLite 均支持），并发写也不会出现两个。
+        Index(
+            'uq_product_role_hidden_per_product', 'product_id', unique=True,
+            postgresql_where=text('is_hidden'), sqlite_where=text('is_hidden'),
+        ),
     )
 
     def to_dict(self):
@@ -106,6 +117,7 @@ class ProductRole(Base):
             'product_id': self.product_id,
             'role_name': self.role_name,
             'name': self.role_name,
+            'is_hidden': bool(self.is_hidden),
             'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
         }
 

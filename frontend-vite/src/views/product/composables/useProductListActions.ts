@@ -236,6 +236,8 @@ export function useProductListActions(
       bomRoles.value = (res.product?.roles || []).map(r => ({
         id: r.id,
         name: r.name,
+        // 隐藏款标记随列表返回：页签徽标与右键菜单状态都以此为准
+        is_hidden: (r as { is_hidden?: boolean }).is_hidden === true,
       }))
       defaultScopeName.value = res.product?.default_bom_label?.trim() || '默认BOM'
       const materialsList = res.materials || []

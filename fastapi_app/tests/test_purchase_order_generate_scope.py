@@ -88,8 +88,8 @@ class TestLoadBomContext:
             _Result([SimpleNamespace(role_id=7, product_id=1)]),   # filling
             _Result([]),                                           # fabric
             _Result([]),                                           # accessory
-            _Result([(99, 1, '角色A')]),                           # ProductRole
-            _Result([(1, None)]),                                  # Product.hidden_carton_ratio
+            _Result([(99, 1, '角色A', False)]),                    # ProductRole（含 is_hidden）
+            _Result([(1, None, False, False)]),                   # 配比/盲盒/隐藏款
         ]))
 
         ctx = await _load_bom_context(db, [1])
@@ -119,11 +119,13 @@ class TestLoadBomContext:
             _Result([]),        # fabric
             _Result([]),        # accessory
             _Result([]),        # ProductRole
-            _Result([(1, 72), (2, None), (3, 0)]),  # hidden_carton_ratio
+            _Result([(1, 72, True, True), (2, None, True, False), (3, 0, True, False)]),  # 配比/盲盒/隐藏款
         ]))
 
         ctx = await _load_bom_context(db, [1, 2, 3])
         assert ctx.hidden_ratios == {1: 72}
+        assert ctx.blind_box_pids == {1, 2, 3}
+        assert ctx.has_hidden_pids == {1}
 
 
 class TestBomRowsByScope:

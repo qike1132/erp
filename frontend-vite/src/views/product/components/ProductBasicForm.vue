@@ -22,14 +22,8 @@
           <input v-model.number="form.price" type="number" class="pd-input" step="0.01" min="0" placeholder="请输入产品价格" name="price" autocomplete="off" aria-label="请输入产品价格" />
         </div>
       </div>
-      <div class="pd-form-group">
-        <label class="pd-label" for="create-hidden-carton-ratio">隐藏款随箱配比</label>
-        <div class="pd-input-wrap">
-          <FontAwesomeIcon icon="box-open" class="pd-input-icon" aria-hidden="true" />
-          <input id="create-hidden-carton-ratio" v-model.number="form.hiddenCartonRatio" type="number" class="pd-input" step="1" min="1" max="1000000" placeholder="例如：72" name="hidden-carton-ratio" autocomplete="off" aria-describedby="create-hidden-carton-ratio-hint" />
-        </div>
-        <small id="create-hidden-carton-ratio-hint" class="pd-field-hint">每多少个订单数量配 1 个隐藏款（如 72，即 10000÷72≈139 个）；留空则不启用。启用需在 BOM 配置恰好 6 个常规角色 + 1 个名为「隐藏款」的角色。</small>
-      </div>
+      <!-- 盲盒配置：勾选「盲盒」后展开「该 SKU 有隐藏款」与「盲盒隐藏款装箱配比」 -->
+      <ProductBlindBoxFields v-model="blindBox" prefix="create" />
       <div class="pd-form-group">
         <label class="pd-label">工厂</label>
         <div class="pd-input-wrap">
@@ -88,6 +82,8 @@ import { useImagePaste } from '@/composables/useImagePaste'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import ProductCustomerSelect from './ProductCustomerSelect.vue'
+import ProductBlindBoxFields from './ProductBlindBoxFields.vue'
+import { useProductBlindBox } from '../composables/useProductBlindBox'
 
 defineProps<{
   factoryOptions: readonly string[]
@@ -109,9 +105,10 @@ const customerOptions = computed(() => catalogStore.activeCustomerNames)
 const submitting = ref(false)
 const form = reactive({
   name: '', barcode: '', price: 0, factory: '', image: '',
-  hiddenCartonRatio: null as number | null | '',
   customerIds: [] as number[],
 })
+/** 盲盒配置（独立对象便于子组件 v-model，并与产品主字段解耦） */
+const { blindBox, effectiveRatio, reset: resetBlindBox } = useProductBlindBox()
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const imageDropZoneRef = ref<HTMLElement | null>(null)
 const imageDragOver = ref(false)
@@ -162,9 +159,10 @@ function uploadImageFile(file: File) {
 async function handleAdd() {
   const trimmedName = form.name.trim()
   if (!trimmedName) return
-  const hiddenCartonRatio = form.hiddenCartonRatio === '' ? null : form.hiddenCartonRatio
+  // 配比只在「盲盒 + 有隐藏款」时生效；其余情况一律不提交（避免脏数据）
+  const hiddenCartonRatio = effectiveRatio()
   if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1 || hiddenCartonRatio > 1000000)) {
-    showToast('隐藏款随箱配比必须为正整数（不超过 1000000）', 'warning')
+    showToast('盲盒隐藏款装箱配比必须为正整数（不超过 1000000）', 'warning')
     return
   }
   submitting.value = true
@@ -176,13 +174,15 @@ async function handleAdd() {
       factory: form.factory || undefined,
       image: form.image || undefined,
       hidden_carton_ratio: hiddenCartonRatio ?? undefined,
+      is_blind_box: blindBox.isBlindBox,
+      has_hidden_role: blindBox.isBlindBox && blindBox.hasHiddenRole,
       customer_ids: form.customerIds,
     })
     showToast('添加成功', 'success')
     Object.assign(form, {
-      name: '', barcode: '', price: 0, factory: '', image: '',
-      hiddenCartonRatio: null, customerIds: [],
+      name: '', barcode: '', price: 0, factory: '', image: '', customerIds: [],
     })
+    resetBlindBox()
     queryClient.invalidateQueries({ queryKey: ['products-list'] })
   } catch (err: unknown) {
     showToast(getErrorMessage(err, '添加失败'), 'error')

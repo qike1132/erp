@@ -167,6 +167,16 @@
 /* 键盘聚焦时的焦点环（页签可 Tab 聚焦，便于键盘打开右键菜单） */
 .bom-role-tab:focus-visible { outline: 2px solid var(--color-primary-400, #60a5fa); outline-offset: 1px; }
 .bom-role-name { white-space: nowrap; }
+/* 隐藏款徽标：与页签同排的小标签，随右键「指定为隐藏款」出现/消失 */
+.bom-role-hidden-badge {
+  display: inline-flex; align-items: center;
+  padding: 0 6px; height: 18px;
+  border-radius: 9px;
+  background: #fef3c7; color: #92400e;
+  border: 1px solid #fcd34d;
+  font-size: 11px; font-weight: 600; line-height: 1;
+  white-space: nowrap;
+}
 .bom-role-edit-input {
   width: 96px; padding: 2px 8px; border: 1px solid var(--color-primary-400); border-radius: 6px;
   font-size: 14px; font-weight: 600; outline: none; user-select: text;

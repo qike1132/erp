@@ -191,7 +191,7 @@ describe('BomEditor「添加角色」提交契约（接口与字段含义不变�
     expect(saveBom).toHaveBeenCalledTimes(1)
     const [productId, payload] = saveBom.mock.calls[0] as [number, { roles: unknown[] }]
     expect(productId).toBe(1)
-    expect(payload.roles).toEqual([{ role_key: 'rk-1', role_name: '打版' }])
+    expect(payload.roles).toEqual([{ role_key: 'rk-1', role_name: '打版', is_hidden: false }])
   })
 })
 

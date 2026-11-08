@@ -139,6 +139,8 @@ class RoleItem(BaseModel):
     role_key: str | None = None
     role_name: str = ''
     name: str | None = None
+    # 隐藏款标记：每个 SKU 至多一个 True（前端右键指定，重复指定时后端保留最后一个）
+    is_hidden: bool = False
 
 
 class BomSaveRequest(BaseModel):
