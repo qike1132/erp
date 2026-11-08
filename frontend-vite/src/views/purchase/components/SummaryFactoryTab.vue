@@ -125,7 +125,8 @@
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
                 <td>{{ item.row.materialName }}</td>
                 <td>{{ item.row.specification || '' }}</td>
-                <!-- 损耗率：有落库坐标才可编辑；无坐标 → 只读并说明原因 -->
+                <!-- 损耗率：有落库坐标即可显示/编辑（多角色共用物料也显示——一条明细一个率，
+                     与跨 SKU 共用同一套联动语义）；无坐标（BOM 新增物料）→ — 并说明原因 -->
                 <td>
                   <template v-if="rowCoord(item)">
                     <!-- 非编辑态：率输入框 +「不一致」提示同处一支（与改造前逐字一致；提示仅非编辑态显示） -->
@@ -140,18 +141,23 @@
                     </template>
                     <template v-else>{{ formatQty(rowRate(item)) }}</template>
                   </template>
-                  <span v-else class="text-text-muted" :title="item.row.readonlyReason || '该物料不在采购明细中（BOM 生成后新增），无法在此修改'">—</span>
+                  <span v-else class="text-text-muted" title="该物料不在采购明细中（BOM 生成后新增），无法在此修改">—</span>
                 </td>
-                <!-- 数量：编辑态可改（同物料跨 SKU 联动，故给出提示）；否则取派生展示值 -->
+                <!-- 数量：编辑态可改（同物料跨 SKU 联动，故给出提示）；多角色共用行锁编辑
+                     （明细是合并总量，此处只显示该角色的分配量）；否则取派生展示值 -->
                 <td>
                   <input
-                    v-if="rowCoord(item) && editMode"
+                    v-if="rowCoord(item) && editMode && !item.row.readonlyReason"
                     type="number" class="w-20 text-right py-1 px-1.5 text-[14px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                     :value="editRowQty(item)" min="0"
                     :title="sharedMaterialTitle(item)"
                     @change="onRowQtyChange(item, $event)"
                     @focus="($event.target as HTMLInputElement).select()"
                   />
+                  <span
+                    v-else-if="item.row.readonlyReason"
+                    class="text-text-muted" :title="item.row.readonlyReason"
+                  >{{ displayRowQty(item) }}</span>
                   <template v-else>{{ displayRowQty(item) }}</template>
                 </td>
                 <td>{{ item.row.unit || '' }}</td>

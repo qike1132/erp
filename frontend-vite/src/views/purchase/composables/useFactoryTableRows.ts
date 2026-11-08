@@ -266,7 +266,10 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     return shared
   })
 
-  /** 编辑态提示文案：该物料跨 SKU 共用一行 ⇒ 明示改动会影响所有 SKU（spec §4.3 的可见性要求）。 */
+  /**
+   * 编辑态提示文案：该物料键出现多行（跨 SKU 共用 / 同 SKU 多角色共用）⇒ 明示
+   * 改动影响面（spec §4.3 的可见性要求）。率编辑对各共用方是同一份明细状态，联动一致。
+   */
   function sharedMaterialTitle(item: RowItem): string {
     if (item.legacy || item.row.noBom) return ''
     const k = materialKeyOf({
@@ -274,7 +277,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
       specification: item.row.specification, unit: item.row.unit, part_name: item.row.partName,
     })
     return sharedMaterialKeys.value.has(k)
-      ? '该物料各 SKU 共用采购明细中的同一行，改动会影响所有 SKU'
+      ? '该物料被多个 SKU/角色共用采购明细中的同一行，改动会影响全部'
       : ''
   }
 

@@ -167,14 +167,16 @@ export interface PerSkuRow {
   specification: string
   unit: string
   baseQuantity: number
-  /** 该物料在落库明细中的坐标；无对应明细时为 null（只读行） */
+  /** 该物料在落库明细中的坐标；无对应明细时为 null（率/数量退回「—/基准量」展示） */
   coord: { si: number; fi: number } | null
   itemIds: number[]
   /**
-   * 只读原因（空串 = 可编辑）。两种只读：
-   * 1. 无落库坐标（BOM 生成后新增的物料）；
+   * 数量编辑锁定原因（空串 = 可编辑）。锁定的两种：
+   * 1. 无落库坐标（BOM 生成后新增的物料）——无率可显示、无明细可写；
    * 2. **同一 SKU 内多个角色共用同一采购明细行**——按角色分行后每行只是该角色的
-   *    分配量，而明细是合并总量；此时写入会把总量改成某个角色的分量，故禁止编辑。
+   *    分配量，而明细是合并总量；编辑框若预载/写回总量会把「改分量」的意图写成
+   *    「改总量」。**只锁数量编辑**：损耗率与展示走 coord 正常显示（一条明细一个率，
+   *    各角色共用；生产反馈 2026-11-08：「在心里·肚皮」的损耗率显示 — 即此误伤）。
    */
   readonlyReason: string
   /** 该 SKU 无 BOM 明细时的占位行（保留块结构，不隐藏该 SKU） */
@@ -268,8 +270,10 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
       return
     }
     const skuQty = parseFloat(String(sku.order_qty ?? 0)) || 0
-    // 同一 SKU 内同一物料键出现多次（多角色共用同一采购明细行）→ 只读：
-    // 明细存的是**合并总量**，按角色分行后每行只是该角色的分配量，写入会把总量改错。
+    // 同一 SKU 内同一物料键出现多次（多角色共用同一采购明细行）→ 锁**数量编辑**：
+    // 明细存的是**合并总量**，按角色分行后每行只是该角色的分配量，编辑框写入会把
+    // 总量改错。但**不锁显示**：coord 保留，损耗率/加放数量照常展示（生产反馈
+    // 2026-11-08：共用物料的损耗率被显示成 —，用户看不到率）。
     const keyCounts = new Map<string, number>()
     materials.forEach((m) => {
       const k = materialKeyOf(m)
@@ -324,10 +328,11 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         specification: m.specification,
         unit: m.unit,
         baseQuantity: parseFloat(String(m.quantity)) || 0,
-        coord: sharedInSku ? null : (hit?.coord ?? null),
-        itemIds: sharedInSku ? [] : (hit?.itemIds ?? []),
+        // 坐标恢复指向落库明细（率/数量展示的读源）；是否锁数量编辑由 readonlyReason 表达
+        coord: hit?.coord ?? null,
+        itemIds: hit?.itemIds ?? [],
         readonlyReason: sharedInSku
-          ? '该物料被多个角色共用同一采购明细行，此处按角色分行显示分配量；如需调整请在采购明细中改总量'
+          ? '该物料被多个角色共用采购明细中的同一行，此处按角色分行显示分配量；如需调整总量请在采购明细中修改'
           : '',
         noBom: false,
       })

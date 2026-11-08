@@ -15,7 +15,8 @@
  *      出现时**每个子段各有一个供应商格**（不是只在首次出现时渲染）；
  *   R4 屏幕与打印的每一行有效列宽都恰好 12（计入 colspan、跳过被 rowspan
  *      覆盖的列）——任何 rowspan/colspan 算错都会在这里现形；
- *   R5 多角色共用同一物料：按角色分行显示，编辑态只读并说明原因。
+ *   R5 多角色共用同一物料：损耗率照常显示/编辑（一条明细一个率），数量编辑锁定
+ *      并说明原因（明细是合并总量，角色行只显示分配量）。
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -159,10 +160,13 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(r0[6]!.attributes('rowspan')).toBe('2')
     expect(r0[7]!.text()).toBe('红布')
 
-    // 第 2 行（角色A 段内、同供应商子段内）：角色与供应商都被 rowspan 覆盖
+    // 第 2 行（角色A 段内、同供应商子段内）：角色与供应商都被 rowspan 覆盖；
+    // 松紧带被两个角色共用 → 数量编辑锁定（显示该角色分配量），损耗率照常显示（输入框）
     const r1 = rows[1]!.findAll('td')
-        // 松紧带被两个角色共用 → 只读行，损耗率显示 —（原因见 R5）
-    expect(r1.map((td) => td.text())).toEqual(['身体', '松紧带', 'S3', '—', '3', '米'])
+    expect(r1.map((td) => td.text())).toEqual(['身体', '松紧带', 'S3', '', '3', '米'])
+    const r1Rate = r1[3]!.find('input[type="number"]')
+    expect(r1Rate).toBeDefined()
+    expect((r1Rate!.element as HTMLInputElement).value).toBe('0')
 
     // 第 3 行（角色B 段首）：**再次**渲染供应商甲（新的连续子段，跨段不能复用旧格）
     const r2 = rows[2]!.findAll('td')
@@ -173,9 +177,9 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(r2[2]!.attributes('rowspan')).toBe('2')
     expect(r2[3]!.text()).toBe('蓝布')
 
-    // 第 4 行（角色B 段内、同供应商子段）：只剩 部位 + 后 5 格
+    // 第 4 行（角色B 段内、同供应商子段）：只剩 部位 + 后 5 格；率格同上（共用行显示率）
     const r3 = rows[3]!.findAll('td')
-    expect(r3.map((td) => td.text())).toEqual(['头部', '松紧带', 'S3', '—', '2', '米'])
+    expect(r3.map((td) => td.text())).toEqual(['头部', '松紧带', 'S3', '', '2', '米'])
 
     // 第 5 行（供应商乙 子段首）
     const r4 = rows[4]!.findAll('td')
@@ -207,15 +211,32 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(FACTORY_TABLE_HEAD).toContain('<th>角色名称</th><th>产品部位</th><th>供应商</th>')
   })
 
-  it('R5 多角色共用同一物料：编辑态只读并说明原因', () => {
+  it('R5 多角色共用同一物料：损耗率正常显示，数量编辑锁定并说明原因', () => {
+    // 非编辑态：共用行的损耗率是**可编辑输入框**（一条明细一个率，各角色共用），
+    // 数量显示该角色的分配量——2026-11-08 生产反馈「共用物料损耗率显示 —」的回归护栏
+    const view = mountModal(roleGroup(), false)
+    const viewRows = view.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
+    expect(viewRows).toHaveLength(2)
+    for (const tr of viewRows) {
+      const tds = tr.findAll('td')
+      expect(tds[3]!.find('input[type="number"]').exists()).toBe(true)
+    }
+    view.unmount()
+
+    // 编辑态：率显示数值（0.0 = 回退统一率）；数量**无输入框**（明细是合并总量，
+    // 在角色行编辑会把「改分量」写成「改总量」），只显示分配量并给出原因提示
     const wrapper = mountModal(roleGroup(), true)
     const rows = wrapper.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
-    expect(rows).toHaveLength(2)   // 推算侧按角色拆行：角色A 3 米 / 角色B 2 米
+    expect(rows).toHaveLength(2)
+    const qtyTexts: string[] = []
     for (const tr of rows) {
-      const dash = tr.findAll('span').find((el) => el.text() === '—')
-      expect(dash).toBeDefined()
-      expect(dash!.attributes('title')).toContain('多个角色共用')
+      const tds = tr.findAll('td')
+      expect(tds[3]!.text()).toBe('0.0')
+      expect(tds[4]!.find('input').exists()).toBe(false)
+      expect(tds[4]!.find('span').attributes('title')).toContain('多个角色共用')
+      qtyTexts.push(tds[4]!.text())
     }
+    expect(qtyTexts).toEqual(['3', '2'])
     wrapper.unmount()
   })
 })
