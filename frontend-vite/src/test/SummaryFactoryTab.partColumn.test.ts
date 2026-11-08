@@ -186,21 +186,19 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     expect(first[6]!.attributes('rowspan')).toBe('2')
     expect(first[7]!.text()).toBe('起柔')
 
-    // 第 2 行：供应商被上一行 rowspan 覆盖 → 只剩 角色 + 部位 + 布料/规格/损耗率/数量/单位
+    // 第 2 行：角色与供应商都被上一行 rowspan 覆盖 → 只剩 部位 + 布料/规格/损耗率/数量/单位
     const second = rowCells(wrapper, 1)
-    expect(second).toHaveLength(7)
-    expect(second.map((td) => td.text())[0]).toBe('')
-    expect(second.map((td) => td.text())[1]).toBe('头部')
-    expect(second.map((td) => td.text())[2]).toBe('狗狗')
+    expect(second).toHaveLength(6)
+    expect(second.map((td) => td.text())[0]).toBe('头部')
+    expect(second.map((td) => td.text())[1]).toBe('狗狗')
 
-    // 第 3 行：新供应商段首行 → 角色 + 部位 + 供应商(colspan 1) + 布料…
+    // 第 3 行：新供应商子段首行 → 部位 + 供应商(colspan 1) + 布料…（角色格仍被段 rowspan 覆盖）
     const third = rowCells(wrapper, 2)
-    expect(third).toHaveLength(8)
-    expect(third[0]!.text()).toBe('')
-    expect(third[1]!.text()).toBe('身体')
-    expect(third[2]!.text()).toBe('年胜')
-    expect(third[2]!.attributes('rowspan')).toBe('1')
-    expect(third[3]!.text()).toBe('氣綸')
+    expect(third).toHaveLength(7)
+    expect(third[0]!.text()).toBe('身体')
+    expect(third[1]!.text()).toBe('年胜')
+    expect(third[1]!.attributes('rowspan')).toBe('1')
+    expect(third[2]!.text()).toBe('氣綸')
     wrapper.unmount()
   })
 
@@ -246,8 +244,8 @@ describe('P3 不空白：合并模式下产品部位仍能展示', () => {
       return cells.map((td) => td.text())
     })
     expect(shown[0]![5]).toBe('身体/头部')
-    expect(shown[1]![1]).toBe('头部')
-    expect(shown[2]![1]).toBe('身体')
+    expect(shown[1]![0]).toBe('头部')
+    expect(shown[2]![0]).toBe('身体')
     wrapper.unmount()
   })
 

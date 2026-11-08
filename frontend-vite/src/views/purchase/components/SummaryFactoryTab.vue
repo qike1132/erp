@@ -117,9 +117,10 @@
               <td v-if="item.row.noBom" colspan="8" class="text-text-muted">无 BOM 明细</td>
 
               <template v-else>
-                <!-- 列序：角色名称 → 产品部位（逐行渲染）→ 供应商（块内首行 + rowspan）。
-                     三个 td 的顺序必须与 thead 严格一致，否则「表头换了、值串列」。 -->
-                <td>{{ item.row.roleDisplay }}</td>
+                <!-- 列序：角色名称（角色段首行 + rowspan）→ 产品部位（逐行）→ 供应商（子段首行 + rowspan）。
+                     三个 td 的顺序必须与 thead 严格一致，否则「表头换了、值串列」；
+                     两个 rowspan 都按**连续段**计算，跨段的行绝不能被罩住（会错位）。 -->
+                <td v-if="item.row.isFirstRoleRow" :rowspan="item.row.roleRowSpan > 1 ? item.row.roleRowSpan : undefined">{{ item.row.roleDisplay }}</td>
                 <td>{{ item.row.partDisplay }}</td>
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
                 <td>{{ item.row.materialName }}</td>

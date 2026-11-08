@@ -166,8 +166,13 @@ function buildPerSkuGroupHtml(
         tableHtml += '</tr>'
         return
       }
-      // 列序与屏幕 thead 严格一致：角色名称 → 产品部位 → 供应商（供应商含 rowspan）。
-      tableHtml += `<td>${escapeHtml(row.roleDisplay)}</td>`
+      // 列序与屏幕 thead 严格一致：角色名称（角色段首行 + rowspan）→ 产品部位 → 供应商
+      // （子段首行 + rowspan）。两个 rowspan 都按连续段计算，与屏幕同一套行模型；
+      // span=1 时不输出 rowspan 属性（与屏幕同 DOM 口径，回退模式逐行渲染角色格）。
+      if (row.isFirstRoleRow) {
+        const roleSpan = row.roleRowSpan > 1 ? ` rowspan="${row.roleRowSpan}"` : ''
+        tableHtml += `<td${roleSpan}>${escapeHtml(row.roleDisplay)}</td>`
+      }
       tableHtml += `<td>${escapeHtml(row.partDisplay)}</td>`
       if (row.isFirstSupplierRow) {
         tableHtml += `<td rowspan="${row.supplierRowSpan}" style="font-weight:bold;">${escapeHtml(row.supplierName)}</td>`

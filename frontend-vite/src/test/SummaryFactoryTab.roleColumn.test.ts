@@ -1,12 +1,21 @@
 /**
- * 工厂内部订单「角色名称」列（2026-11-08）。
+ * 工厂内部订单「角色名称」列与**表格对齐**（2026-11-08）。
  *
- * 需求：一个产品名称下有多个角色时，表格要能看出每行物料属于哪个角色。
- * 角色归属由后端按 BOM 的 role_id 产出（`role_display`），本测试锁定：
- *   R1 屏幕表头「角色名称」在「产品部位」之前（列序：客户/产品/订单/备品/角色/部位/供应商…）；
- *   R2 屏幕数据行把 `role_display` 渲染在角色格，且不污染部位格；
- *   R3 打印/导出与屏幕同序（FACTORY_TABLE_HEAD 与 buildFactoryHtml 同源）；
- *   R4 多角色共用同一物料时并列展示（`角色A/角色B`）。
+ * 需求：一个产品名称下有多个角色时，表格按角色分类汇总——每个角色一块，
+ * 块内列出该角色的 产品部位/供应商/布料名称/规格型号/损耗率/数量/单位。
+ *
+ * 对齐是本文件的核心断言（生产缺陷回归）：物料按角色排序后，**同一供应商会
+ * 出现在多个角色段里（互不相邻）**。供应商格的 rowspan 若按「全 SKU 计数」，
+ * 会把中间其它供应商的行也罩住 → 表头与数据错位。正确做法是角色段、供应商
+ * 子段都按**连续段**计算 rowspan。
+ *
+ *   R1 屏幕表头 12 列：角色名称在「备品数量」之后、「产品部位」之前；
+ *   R2 角色段首行渲染角色格（rowspan=段行数），段内其余行由 rowspan 覆盖；
+ *   R3 供应商子段首行渲染供应商格（rowspan=子段行数）——同一供应商跨角色段
+ *      出现时**每个子段各有一个供应商格**（不是只在首次出现时渲染）；
+ *   R4 屏幕与打印的每一行有效列宽都恰好 12（计入 colspan、跳过被 rowspan
+ *      覆盖的列）——任何 rowspan/colspan 算错都会在这里现形；
+ *   R5 多角色共用同一物料：按角色分行显示，编辑态只读并说明原因。
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -17,7 +26,12 @@ import {
 } from '@/views/purchase/composables/useSummaryModal'
 import type { FactoryGroup, FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
-/** 一个产品名、两个角色：角色A 用「红布」、角色B 用「蓝布」，另有共用「松紧带」。 */
+/**
+ * 一个产品名、两个角色；供应商**跨角色交错**（对齐缺陷的最小复现）：
+ * - 角色A：红布（供应商甲）、松紧带（供应商甲）
+ * - 角色B：蓝布（供应商甲）、松紧带（供应商甲）、蓝扣（供应商乙）
+ * 供应商甲在角色A、角色B 各出现一次（互不相邻）→ 全 SKU 计数的 rowspan 必错。
+ */
 function roleGroup(): FactoryGroup {
   return {
     customer_name: '客户甲',
@@ -46,8 +60,13 @@ function roleGroup(): FactoryGroup {
           },
           {
             supplier_name: '供应商甲', material_name: '松紧带', part_name: '',
-            part_display: '身体', role_display: '角色B',
+            part_display: '头部', role_display: '角色B',
             specification: 'S3', unit: '米', quantity: 2,
+          },
+          {
+            supplier_name: '供应商乙', material_name: '蓝扣', part_name: '',
+            part_display: '头部', role_display: '角色B',
+            specification: 'S4', unit: '个', quantity: 2,
           },
         ],
       },
@@ -57,8 +76,14 @@ function roleGroup(): FactoryGroup {
         supplier_name: '供应商甲',
         fabrics: [
           { fabric_name: '红布', part_display: '身体', role_display: '角色A', specification: 'S1', unit: '米', quantity: 10, item_ids: [1] },
-          { fabric_name: '蓝布', part_display: '头部', role_display: '角色B', specification: 'S2', unit: '米', quantity: 20, item_ids: [2] },
-          { fabric_name: '松紧带', part_display: '身体', role_display: '角色A/角色B', specification: 'S3', unit: '米', quantity: 5, item_ids: [3] },
+          { fabric_name: '松紧带', part_display: '身体', role_display: '角色A/角色B', specification: 'S3', unit: '米', quantity: 5, item_ids: [2] },
+          { fabric_name: '蓝布', part_display: '头部', role_display: '角色B', specification: 'S2', unit: '米', quantity: 20, item_ids: [3] },
+        ],
+      },
+      {
+        supplier_name: '供应商乙',
+        fabrics: [
+          { fabric_name: '蓝扣', part_display: '头部', role_display: '角色B', specification: 'S4', unit: '个', quantity: 2, item_ids: [4] },
         ],
       },
     ],
@@ -83,8 +108,34 @@ function mountModal(group: FactoryGroup, editMode = false) {
   })
 }
 
-describe('工厂内部订单 · 角色名称列', () => {
-  it('R1 屏幕表头「角色名称」紧跟「备品数量」，且在「产品部位」之前', () => {
+/**
+ * 每行的**有效列宽**：计入 colspan，并跳过被上方 rowspan 覆盖的列。
+ * 与 useSummaryModal.perSkuPrint.test.ts 的 rowWidths 同一算法（DOM 版）。
+ * 任何 rowspan/colspan 算错（罩住别的段、漏渲染格）都会让某行 ≠ 12 而现形。
+ */
+function rowWidthsOf(trs: HTMLTableRowElement[]): number[] {
+  const occupied = new Map<number, number>()
+  return trs.map((tr) => {
+    let col = 0
+    const added: [number, number, number][] = []
+    for (const cell of Array.from(tr.querySelectorAll('td'))) {
+      while ((occupied.get(col) ?? 0) > 0) col++
+      const cs = Number(cell.getAttribute('colspan') ?? 1)
+      const rs = Number(cell.getAttribute('rowspan') ?? 1)
+      if (rs > 1) added.push([col, cs, rs - 1])
+      col += cs
+    }
+    for (const [c, v] of Array.from(occupied)) {
+      if (v - 1 > 0) occupied.set(c, v - 1)
+      else occupied.delete(c)
+    }
+    for (const [c0, cs, rem] of added) for (let k = 0; k < cs; k++) occupied.set(c0 + k, rem)
+    return col
+  })
+}
+
+describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
+  it('R1 屏幕表头 12 列：角色名称在「备品数量」与「产品部位」之间', () => {
     const wrapper = mountModal(roleGroup())
     const headers = wrapper.findAll('thead th').map((th) => th.text())
     expect(headers).toEqual([
@@ -94,51 +145,77 @@ describe('工厂内部订单 · 角色名称列', () => {
     wrapper.unmount()
   })
 
-  it('R2 数据行逐行渲染各自角色名（含并列），部位列不被角色污染', () => {
+  it('R2/R3 角色段与供应商子段都按连续段渲染 rowspan（跨段供应商各有一格）', () => {
     const wrapper = mountModal(roleGroup())
-    // 只取工厂页签主表的数据行（`.smf-scroll` 是工厂表的滚动容器；排除对照块/其它页签）
-    const rows = wrapper.findAll('.smf-scroll tbody tr').filter(
-      (tr) => ['红布', '蓝布', '松紧带'].some((name) => tr.text().includes(name)),
-    )
-    expect(rows).toHaveLength(4)
+    const rows = wrapper.findAll('.smf-scroll tbody tr')
+    expect(rows).toHaveLength(5)
 
-    const cells = (i: number) => rows[i]!.findAll('td').map((td) => td.text())
-    // 角色连续成块：角色A（红布、松紧带）→ 角色B（蓝布、松紧带）
-    expect(cells(0).slice(4, 7)).toEqual(['角色A', '身体', '供应商甲'])
-    expect(cells(1).slice(0, 2)).toEqual(['角色A', '身体'])
-    expect(cells(2).slice(0, 2)).toEqual(['角色B', '头部'])
-    expect(cells(3).slice(0, 2)).toEqual(['角色B', '身体'])
-    // 同一物料（松紧带）按角色分成两行，数量各是各的分配量
-    expect(cells(1)[5]).toBe('3')
-    expect(cells(3)[5]).toBe('2')
+    // 第 1 行：角色A 段首（rowspan=2）+ 供应商甲 子段首（rowspan=2）
+    const r0 = rows[0]!.findAll('td')
+    expect(r0[4]!.text()).toBe('角色A')
+    expect(r0[4]!.attributes('rowspan')).toBe('2')
+    expect(r0[5]!.text()).toBe('身体')
+    expect(r0[6]!.text()).toBe('供应商甲')
+    expect(r0[6]!.attributes('rowspan')).toBe('2')
+    expect(r0[7]!.text()).toBe('红布')
+
+    // 第 2 行（角色A 段内、同供应商子段内）：角色与供应商都被 rowspan 覆盖
+    const r1 = rows[1]!.findAll('td')
+        // 松紧带被两个角色共用 → 只读行，损耗率显示 —（原因见 R5）
+    expect(r1.map((td) => td.text())).toEqual(['身体', '松紧带', 'S3', '—', '3', '米'])
+
+    // 第 3 行（角色B 段首）：**再次**渲染供应商甲（新的连续子段，跨段不能复用旧格）
+    const r2 = rows[2]!.findAll('td')
+    expect(r2[0]!.text()).toBe('角色B')
+    expect(r2[0]!.attributes('rowspan')).toBe('3')
+    expect(r2[1]!.text()).toBe('头部')
+    expect(r2[2]!.text()).toBe('供应商甲')
+    expect(r2[2]!.attributes('rowspan')).toBe('2')
+    expect(r2[3]!.text()).toBe('蓝布')
+
+    // 第 4 行（角色B 段内、同供应商子段）：只剩 部位 + 后 5 格
+    const r3 = rows[3]!.findAll('td')
+    expect(r3.map((td) => td.text())).toEqual(['头部', '松紧带', 'S3', '—', '2', '米'])
+
+    // 第 5 行（供应商乙 子段首）
+    const r4 = rows[4]!.findAll('td')
+    expect(r4[0]!.text()).toBe('头部')
+    expect(r4[1]!.text()).toBe('供应商乙')
+    expect(r4[1]!.attributes('rowspan')).toBe('1')
+    expect(r4[2]!.text()).toBe('蓝扣')
     wrapper.unmount()
   })
 
-  it('R5 多角色共用同一物料：按角色分行显示，编辑态只读并说明原因', () => {
+  it('R4 屏幕：每行有效列宽恰好 12（rowspan/colspan 全对齐）', () => {
+    const wrapper = mountModal(roleGroup())
+    const trs = Array.from(
+      wrapper.element.querySelectorAll('.smf-scroll tbody tr'),
+    ) as HTMLTableRowElement[]
+    const widths = rowWidthsOf(trs)
+    expect(widths).toHaveLength(5)
+    expect(widths.every((w) => w === 12)).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('R4 打印/导出：与屏幕同一套行模型，每行有效列宽恰好 12', () => {
+    const html = buildFactoryHtml(dataOf(roleGroup()), 0)
+    const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
+    const widths = rowWidthsOf(Array.from(doc.querySelectorAll('tbody tr')) as HTMLTableRowElement[])
+    expect(widths.length).toBeGreaterThan(0)
+    expect(widths.every((w) => w === 12)).toBe(true)
+    // 共享常量列序与屏幕一致
+    expect(FACTORY_TABLE_HEAD).toContain('<th>角色名称</th><th>产品部位</th><th>供应商</th>')
+  })
+
+  it('R5 多角色共用同一物料：编辑态只读并说明原因', () => {
     const wrapper = mountModal(roleGroup(), true)
     const rows = wrapper.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(2)   // 推算侧按角色拆行：角色A 3 米 / 角色B 2 米
     for (const tr of rows) {
-      // 无落库坐标 → 损耗率渲染「—」，且 title 说明是「多角色共用同一采购明细行」
       const dash = tr.findAll('span').find((el) => el.text() === '—')
       expect(dash).toBeDefined()
       expect(dash!.attributes('title')).toContain('多个角色共用')
     }
     wrapper.unmount()
-  })
-
-  it('R3 打印/导出表头与屏幕同序（共享常量含角色名称）', () => {
-    expect(FACTORY_TABLE_HEAD).toContain('<th>角色名称</th><th>产品部位</th><th>供应商</th>')
-  })
-
-  it('R4 打印数据行把角色名渲染在部位格之前', () => {
-    const html = buildFactoryHtml(dataOf(roleGroup()), 0)
-    const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
-    const first = [...doc.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent || '')
-    expect(first[4]).toBe('角色A')
-    expect(first[5]).toBe('身体')
-    expect(first[6]).toBe('供应商甲')
-    expect(html).toContain('角色A')
-    expect(html).toContain('角色B')
   })
 })

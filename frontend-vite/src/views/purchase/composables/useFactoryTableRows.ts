@@ -124,6 +124,10 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
               cellLines: lines,
               isFirstSkuRow: index === 0,
               skuRowSpan: totalRows,
+              // 回退模式没有按角色排序的连续段：角色格逐行渲染（span 恒 1），
+              // role_display 是落库侧的并列角色名（合并明细没有单一角色可归属）
+              isFirstRoleRow: true,
+              roleRowSpan: 1,
               isFirstSupplierRow: fi === 0,
               supplierRowSpan: supplier.fabrics?.length || 0,
               supplierName: supplier.supplier_name,

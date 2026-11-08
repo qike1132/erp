@@ -165,9 +165,9 @@ describe('E4 无落库坐标行：打印必须与屏幕同源', () => {
     const newRow = rows.find((tr) => (tr.textContent || '').includes('新加布'))!
     expect(newRow).toBeDefined()
     const cells = Array.from(newRow.querySelectorAll('td'))
-    // 该行非块首行（供应商格已被 rowspan 覆盖）⇒ 恰好后 7 格（角色 + 部位 + 5 格）。
+    // 该行非块首行（角色与供应商格都被 rowspan 覆盖）⇒ 恰好后 6 格（部位 + 5 格）。
     // 无坐标行**不加放**：率 '—'、数量 = 基准量 5。
     // （曾误为回退 lossRate 10 并 ceil(5 × 1.01) = 6 → 屏幕「— / 5」而打印「10 / 6」。）
-    expect(cells.map((td) => td.textContent)).toEqual(['', '', '新加布', 'S9', '—', '5', '米'])
+    expect(cells.map((td) => td.textContent)).toEqual(['', '新加布', 'S9', '—', '5', '米'])
   })
 })

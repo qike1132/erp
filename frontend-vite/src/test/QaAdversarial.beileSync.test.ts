@@ -201,7 +201,8 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
     for (let i = 0; i < 4; i++) {
       expect(row0[i]!.attributes('rowspan')).toBe('3')
     }
-    // 角色名称在第 5 格（逐行渲染）、产品部位在第 6 格（无 rowspan）；供应商在第 7 格：供应商1 有 2 个 fabric → rowspan=2
+    // 角色名称在第 5 格（本文件夹具无 skus → 回退模式，角色格逐行渲染、无 rowspan 属性）、
+    // 产品部位在第 6 格（无 rowspan）；供应商在第 7 格：供应商1 有 2 个 fabric → rowspan=2
     expect(row0[4]!.attributes('rowspan')).toBeUndefined()
     expect(row0[5]!.attributes('rowspan')).toBeUndefined()
     expect(row0[6]!.attributes('rowspan')).toBe('2')
@@ -209,11 +210,11 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
 
     // 第 2 个 fabric 行（同供应商1 的第 2 条）：不应再出现订单级单元格
     const row1 = rows[1]!.findAll('td')
-    expect(row1).toHaveLength(7) // 角色名称/产品部位/布料名称/规格型号/损耗率/数量/单位
+    expect(row1).toHaveLength(7) // 角色名称(逐行)/产品部位/布料名称/规格型号/损耗率/数量/单位（回退模式）
     expect(row1.some((td) => td.attributes('rowspan') !== undefined)).toBe(false)
     expect(row1.map((td) => td.text()).join('|')).not.toContain('客户A')
 
-    // 第 3 个 fabric 行（供应商2 首行）：角色 + 产品部位 + 供应商(rowspan=1) + 布料/规格/损耗率/数量/单位
+    // 第 3 个 fabric 行（供应商2 子段首行）：角色 + 产品部位 + 供应商(rowspan=1) + 布料/规格/损耗率/数量/单位
     const row2 = rows[2]!.findAll('td')
     expect(row2).toHaveLength(8)
     expect(row2[0]!.attributes('rowspan')).toBeUndefined()

@@ -148,7 +148,13 @@ export interface PerSkuRow {
   cellLines: { name: string; qty: number; spare: number; isTotal: boolean }[]
   isFirstSkuRow: boolean
   skuRowSpan: number
+  /** 该行是否为「角色段」首行（角色格只在此行渲染，其余行由 rowspan 覆盖） */
+  isFirstRoleRow: boolean
+  /** 该角色段的行数（角色格 rowspan；角色连续成块，见 buildPerSkuRows 的连续段预计算） */
+  roleRowSpan: number
+  /** 该行是否为「(角色, 供应商) 连续子段」首行（供应商格只在此行渲染） */
   isFirstSupplierRow: boolean
+  /** 该供应商子段的行数（供应商格 rowspan；**不是**全 SKU 计数，见连续段预计算注释） */
   supplierRowSpan: number
   supplierName: string
   materialName: string
@@ -242,6 +248,8 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         cellLines: [{ name: sku.product_name || '', qty: skuQty, spare: calcSpareQuantity(skuQty, groupRate), isTotal: false }],
         isFirstSkuRow: true,
         skuRowSpan: 1,
+        isFirstRoleRow: true,
+        roleRowSpan: 1,
         isFirstSupplierRow: false,
         supplierRowSpan: 0,
         supplierName: '',
@@ -260,9 +268,6 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
       return
     }
     const skuQty = parseFloat(String(sku.order_qty ?? 0)) || 0
-    const supplierCounts = new Map<string, number>()
-    materials.forEach((m) => supplierCounts.set(m.supplier_name, (supplierCounts.get(m.supplier_name) || 0) + 1))
-    const seenSupplier = new Set<string>()
     // 同一 SKU 内同一物料键出现多次（多角色共用同一采购明细行）→ 只读：
     // 明细存的是**合并总量**，按角色分行后每行只是该角色的分配量，写入会把总量改错。
     const keyCounts = new Map<string, number>()
@@ -270,13 +275,31 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
       const k = materialKeyOf(m)
       keyCounts.set(k, (keyCounts.get(k) || 0) + 1)
     })
+    // 连续段预计算（**表格对齐的基础**）：角色段 + 段内「(角色, 供应商)」子段。
+    // 物料按角色排序后，同一供应商会出现在多个角色段里（互不相邻）——供应商格
+    // 的 rowspan 必须按「连续子段」算；按全 SKU 计数会把中间其它供应商的行也
+    // 罩进去，直接造成表头与数据错位（2026-11-08 生产反馈）。
+    const roleRunSpan = new Map<number, number>()      // 段首行号 -> 角色段行数
+    const supplierRunSpan = new Map<number, number>()  // 子段首行号 -> 供应商子段行数
+    for (let i = 0; i < materials.length;) {
+      const roleName = materials[i]!.role_display || ''
+      let j = i
+      while (j < materials.length && (materials[j]!.role_display || '') === roleName) j++
+      roleRunSpan.set(i, j - i)
+      for (let k = i; k < j;) {
+        const sup = materials[k]!.supplier_name
+        let l = k
+        while (l < j && materials[l]!.supplier_name === sup) l++
+        supplierRunSpan.set(k, l - k)
+        k = l
+      }
+      i = j
+    }
 
     materials.forEach((m, i) => {
       const key = materialKeyOf(m)
       const hit = stored.get(key)
       const sharedInSku = (keyCounts.get(key) || 0) > 1
-      const isFirstSupplierRow = !seenSupplier.has(m.supplier_name)
-      seenSupplier.add(m.supplier_name)
       rows.push({
         skuIdx,
         cellLines: [{
@@ -287,8 +310,10 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         }],
         isFirstSkuRow: i === 0,
         skuRowSpan: materials.length,
-        isFirstSupplierRow,
-        supplierRowSpan: supplierCounts.get(m.supplier_name) || 0,
+        isFirstRoleRow: roleRunSpan.has(i),
+        roleRowSpan: roleRunSpan.get(i) || 0,
+        isFirstSupplierRow: supplierRunSpan.has(i),
+        supplierRowSpan: supplierRunSpan.get(i) || 0,
         supplierName: m.supplier_name,
         materialName: m.material_name,
         partName: m.part_name || '',
