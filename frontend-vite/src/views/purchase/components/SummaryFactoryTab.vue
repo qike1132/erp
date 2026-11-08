@@ -75,6 +75,8 @@
             <th class="w-[240px]">产品名称</th>
             <th>订单数量</th>
             <th>备品数量</th>
+            <!-- 2026-11-08 用户要求：多角色产品加「角色名称」列，位于物料列之前 -->
+            <th>角色名称</th>
             <!-- 2026-11-05 用户要求：产品部位在供应商之前（屏幕 / 打印 / 导出同序） -->
             <th>产品部位</th>
             <th>供应商</th>
@@ -112,11 +114,12 @@
               </td>
 
               <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU） -->
-              <td v-if="item.row.noBom" colspan="7" class="text-text-muted">无 BOM 明细</td>
+              <td v-if="item.row.noBom" colspan="8" class="text-text-muted">无 BOM 明细</td>
 
               <template v-else>
-                <!-- 列序：产品部位（逐行渲染）在前，供应商（块内首行 + rowspan）在后。
-                     两个 td 的顺序必须与 thead 严格一致，否则「表头换了、值串列」。 -->
+                <!-- 列序：角色名称 → 产品部位（逐行渲染）→ 供应商（块内首行 + rowspan）。
+                     三个 td 的顺序必须与 thead 严格一致，否则「表头换了、值串列」。 -->
+                <td>{{ item.row.roleDisplay }}</td>
                 <td>{{ item.row.partDisplay }}</td>
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
                 <td>{{ item.row.materialName }}</td>

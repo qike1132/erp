@@ -387,21 +387,29 @@ async def get_factory_order_summary(
     if not product_ids:
         product_ids = list({pid for pid, _, _ in cust_order_map.values() if pid})
 
-    # 产品名与陈列样随箱配比一次取回（不新增固定查询）；配比 SKU 才追加角色表查询。
-    # 按 SKU 推算必须与生成路径同口径，否则差异对照块会误报「手工调整」。
-    from fastapi_app.services.purchase._factory import (
-        _fetch_prod_name_and_ratio,
-        _fetch_roles_ctx,
+    # 产品名 / 盲盒配比 / 角色名一次取回（product LEFT JOIN product_role，**不新增查询**）：
+    # 角色名既服务盲盒分摊，也服务「角色名称」列（所有多角色产品都要）。
+    from fastapi_app.services.purchase._factory import _fetch_prod_name_and_ratio
+
+    prod_name_map, blind_ctx, roles_by_pid, hidden_by_pid = await _fetch_prod_name_and_ratio(
+        db, product_ids,
     )
-    prod_name_map, blind_ctx = await _fetch_prod_name_and_ratio(db, product_ids)
     bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
     items_map, items_by_order, items_map_by_part = await _fetch_po_items_map(db, po_ids)
-    blind_box_ctx = await _fetch_roles_ctx(db, blind_ctx)
+    blind_box_ctx = {
+        pid: {
+            **entry,
+            'roles': roles_by_pid.get(pid, {}),
+            # 右键指定的隐藏款（优先于名字识别）
+            'hidden_role_id': hidden_by_pid.get(pid),
+        }
+        for pid, entry in blind_ctx.items()
+    }
 
     group_map = _build_factory_group_map(
         orders, bom_data, items_map, items_by_order, cust_order_map, prod_name_map,
         po_pids_map=po_pids_map, po_sku_map=sku_rows, items_map_by_part=items_map_by_part,
-        blind_box_ctx=blind_box_ctx,
+        blind_box_ctx=blind_box_ctx, role_names_by_pid=roles_by_pid,
     )
     groups = _serialize_factory_groups(group_map)
 
@@ -433,8 +441,73 @@ async def get_factory_order_summary(
     }
 
 
+async def build_bom_display_maps(
+    db: AsyncSession, orders,
+) -> tuple[dict[tuple[str, str, str, str], list[str]], dict[tuple[str, str, str, str], str]]:
+    """打印件用的 BOM 展示映射：**一次取数**同时产出「产品部位」与「角色名称」。
+
+    两张映射同键 ``(产品名, 物料, 规格, 单位)``：打印件只拿采购明细，而部位与角色
+    都来自 BOM（明细没有角色列），故必须在这里补齐，避免「屏幕有、打印空/错位」。
+
+    角色名取**当前 BOM**（与屏幕按 SKU 推算同源）：BOM 事后改角色会让历史单的打印件
+    跟着变——这与屏幕口径一致，属于既有取舍（差异对照块同样用当前 BOM 推算）。
+
+    Returns:
+        ``(part_map, role_map)``：``part_map`` 为 ``{key: [部位, ...]}``（去重保序、
+        跳过填充物与无部位行）；``role_map`` 为 ``{key: '角色A/角色B'}``（同一物料被
+        多个角色共用时并列，与屏幕 `role_display` 同分隔符）。
+    """
+    from fastapi_app.services.purchase._common import (
+        _resolve_pids_from_sku_lines,
+        fetch_po_sku_pids_map,
+    )
+    from fastapi_app.services.purchase._factory import ROLE_DISPLAY_SEP, _fetch_prod_name_and_ratio
+    from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
+
+    po_ids = [o.id for o in orders]
+    if not po_ids:
+        return {}, {}
+
+    pids_map = await fetch_po_sku_pids_map(db, orders)
+    # 与工厂汇总 / 撤销路径同款：备货来源的采购单主表没有 source_order_ids，
+    # 必须用快照产品名反查，否则这类单的 BOM 拿不到（部位会退回空白）。
+    await _resolve_pids_from_sku_lines(db, pids_map, await fetch_po_sku_map(db, po_ids))
+    product_ids = list({pid for pids in pids_map.values() for pid in pids if pid})
+    if not product_ids:
+        return {}, {}
+
+    # 产品名 + 角色名同一次 LEFT JOIN 取回（不额外增加打印路径的查询数）
+    prod_name_map, _blind_ctx, roles_by_pid, _hidden_by_pid = await _fetch_prod_name_and_ratio(
+        db, product_ids,
+    )
+    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
+
+    part_map: dict[tuple[str, str, str, str], list[str]] = {}
+    role_map: dict[tuple[str, str, str, str], str] = {}
+    for product_id, boms in bom_data.items():
+        product_name = prod_name_map.get(product_id) or ''
+        roles = roles_by_pid.get(product_id) or {}
+        for bom in boms:
+            if _is_filling_category(bom.get('category')):
+                continue
+            key = (product_name, bom['material_name'], bom['specification'], bom['unit'])
+            part = (bom.get('part_name') or '').strip()
+            if part:
+                parts = part_map.setdefault(key, [])
+                if part not in parts:
+                    parts.append(part)
+            role_id = bom.get('role_id')
+            role_name = (roles.get(role_id) if isinstance(role_id, int) else '') or ''
+            if role_name:
+                existing_roles = [r for r in role_map.get(key, '').split(ROLE_DISPLAY_SEP) if r]
+                if role_name not in existing_roles:
+                    existing_roles.append(role_name)
+                    role_map[key] = ROLE_DISPLAY_SEP.join(existing_roles)
+    return part_map, role_map
+
+
 async def build_bom_part_display_map(db: AsyncSession, orders) -> dict[tuple[str, str, str, str], list[str]]:
-    """选中采购单所涉产品的 BOM 部位映射，供**后端打印件**与屏幕同口径展示「产品部位」。
+    """「产品部位」映射（向后兼容入口，内部委托 :func:`build_bom_display_maps`）。
 
     **为什么打印件需要它**：后端打印只拿采购明细（``purchase_order_item``），而部位在
     合并模式下来自 BOM —— 明细的 ``part_name`` 为空时，光凭明细只能印空白，出现
@@ -450,41 +523,8 @@ async def build_bom_part_display_map(db: AsyncSession, orders) -> dict[tuple[str
         ``{(product_name, material_name, specification, unit): [部位, ...]}``，
         部位去重保序（BOM 行顺序）、跳过填充物；无部位的行不进映射（不知道就不编造）。
     """
-    from fastapi_app.services.purchase._common import (
-        _resolve_pids_from_sku_lines,
-        fetch_po_sku_pids_map,
-    )
-    from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
-
-    po_ids = [o.id for o in orders]
-    if not po_ids:
-        return {}
-
-    pids_map = await fetch_po_sku_pids_map(db, orders)
-    # 与工厂汇总 / 撤销路径同款：备货来源的采购单主表没有 source_order_ids，
-    # 必须用快照产品名反查，否则这类单的 BOM 拿不到（部位会退回空白）。
-    await _resolve_pids_from_sku_lines(db, pids_map, await fetch_po_sku_map(db, po_ids))
-    product_ids = list({pid for pids in pids_map.values() for pid in pids if pid})
-    if not product_ids:
-        return {}
-
-    prod_name_map = await _fetch_prod_name_map(db, product_ids)
-    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
-
-    result: dict[tuple[str, str, str, str], list[str]] = {}
-    for product_id, boms in bom_data.items():
-        product_name = prod_name_map.get(product_id) or ''
-        for bom in boms:
-            if _is_filling_category(bom.get('category')):
-                continue
-            part = (bom.get('part_name') or '').strip()
-            if not part:
-                continue
-            key = (product_name, bom['material_name'], bom['specification'], bom['unit'])
-            parts = result.setdefault(key, [])
-            if part not in parts:
-                parts.append(part)
-    return result
+    parts, _roles = await build_bom_display_maps(db, orders)
+    return parts
 
 
 async def export_completed_orders(

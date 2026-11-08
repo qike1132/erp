@@ -10,8 +10,8 @@ import SummaryDiffBlock from '@/views/purchase/components/SummaryDiffBlock.vue'
 
 /** 落库真值行（率/数量已由 composable 按主表口径算好）：共享布 65 @500‰ → ceil(97.5)=98；A专有布 20 @10‰ → ceil(20.2)=21 */
 const storedRows = [
-  { supplierName: '供应商甲', fabricName: '共享布', partName: '身体', partDisplay: '身体', specification: 'S1', unit: '米', rate: 500, displayQuantity: 98, isSupplierFirst: true, supplierSpan: 2 },
-  { supplierName: '供应商甲', fabricName: 'A专有布', partName: '', partDisplay: '', specification: 'S2', unit: '米', rate: 10, displayQuantity: 21, isSupplierFirst: false, supplierSpan: 2 },
+  { supplierName: '供应商甲', fabricName: '共享布', partName: '身体', partDisplay: '身体', roleDisplay: '角色A', specification: 'S1', unit: '米', rate: 500, displayQuantity: 98, isSupplierFirst: true, supplierSpan: 2 },
+  { supplierName: '供应商甲', fabricName: 'A专有布', partName: '', partDisplay: '', roleDisplay: '', specification: 'S2', unit: '米', rate: 10, displayQuantity: 21, isSupplierFirst: false, supplierSpan: 2 },
 ]
 
 describe('SummaryDiffBlock', () => {
@@ -34,23 +34,24 @@ describe('SummaryDiffBlock', () => {
     const dataRows = w.findAll('tr.sm-diff-row')
     expect(dataRows).toHaveLength(2)
 
-    // 首行 = 标签(colspan=4，跨全部行) + 部位 + 供应商 + 布料名 + 规格 + 损耗率 + 数量 + 单位 → 4+1+1+5 = 11 列
+    // 首行 = 标签(colspan=4，跨全部行) + 角色名称 + 部位 + 供应商 + 布料名 + 规格 + 损耗率 + 数量 + 单位 → 4+1+1+1+5 = 12 列
     const first = dataRows[0]!.findAll('td')
-    expect(first).toHaveLength(8)
+    expect(first).toHaveLength(9)
     expect(first[0]!.attributes('colspan')).toBe('4')
     expect(first[0]!.attributes('rowspan')).toBe('2')
     expect(first[0]!.text()).toContain('实际下单')
-    // 列序与主表一致：产品部位在供应商之前
-    expect(first[1]!.text()).toBe('身体')
-    expect(first[2]!.text()).toBe('供应商甲')
-    expect(first[2]!.attributes('rowspan')).toBe('2')
+    // 列序与主表一致：角色名称 → 产品部位 → 供应商
+    expect(first[1]!.text()).toBe('角色A')
+    expect(first[2]!.text()).toBe('身体')
+    expect(first[3]!.text()).toBe('供应商甲')
+    expect(first[3]!.attributes('rowspan')).toBe('2')
     // 后 5 格与主表列序一致：布料名称 / 规格型号 / 损耗率 / 数量 / 单位
-    expect(first.slice(3).map((td) => td.text())).toEqual(['共享布', 'S1', '500.0', '98', '米'])
+    expect(first.slice(4).map((td) => td.text())).toEqual(['共享布', 'S1', '500.0', '98', '米'])
 
-    // 次行：标签与供应商被 rowspan 覆盖 → 只剩 部位 + 后 5 格
+    // 次行：标签与供应商被 rowspan 覆盖 → 只剩 角色 + 部位 + 后 5 格
     const second = dataRows[1]!.findAll('td')
-    expect(second).toHaveLength(6)
-    expect(second.map((td) => td.text())).toEqual(['', 'A专有布', 'S2', '10.0', '21', '米'])
+    expect(second).toHaveLength(7)
+    expect(second.map((td) => td.text())).toEqual(['', '', 'A专有布', 'S2', '10.0', '21', '米'])
 
     // 不一致行才带 data-diff；非差异行不渲染该属性（不留 data-diff="false" 噪声）
     expect(w.findAll('[data-diff="true"]')).toHaveLength(1)

@@ -121,6 +121,15 @@ def _stored_by_name(group) -> dict[str, float]:
     }
 
 
+def _roles_by_name(group) -> dict[str, str]:
+    """物料名 → 「角色名称」列展示文本（按 SKU 推算侧与落库侧都要有）。"""
+    return {
+        row['material_name']: row['role_display']
+        for sku in group['skus']
+        for row in sku['materials']
+    }
+
+
 async def test_h1_configured_sku_projection_matches_stored(db):
     """H1+H2：推算 == 落库；多来源行合并后分配（隐藏款 139，不是 84+56=140）。"""
     po_id = await _seed_configured_sku(db, role_names=[*REGULAR_NAMES, HIDDEN_NAME])
@@ -132,6 +141,16 @@ async def test_h1_configured_sku_projection_matches_stored(db):
 
     assert projected == {f'{name}布': qty for name, qty in EXPECTED_BY_ROLE.items()}
     assert stored == projected, '未编辑过的单：按 SKU 推算必须与落库真值逐行相等'
+    # 「角色名称」列：每个角色自己的物料行必须标出自己的角色名（多角色产品分行展示）
+    assert _roles_by_name(group) == {
+        f'{name}布': name for name in EXPECTED_BY_ROLE
+    }
+    # 落库侧（suppliers[].fabrics[]）同样带角色名——差异对照块与回退模式共用这份数据
+    assert {
+        fabric['fabric_name']: fabric['role_display']
+        for supplier in group['suppliers']
+        for fabric in supplier['fabrics']
+    } == {f'{name}布': name for name in EXPECTED_BY_ROLE}
     # 多来源行展示数量合并为订单总数量
     assert group['skus'][0]['order_qty'] == 10000
 

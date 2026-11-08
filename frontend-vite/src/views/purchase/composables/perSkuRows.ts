@@ -35,6 +35,11 @@ export interface SkuMaterial {
   specification: string
   unit: string
   quantity: number
+  /**
+   * 「角色名称」列展示文本（后端按 BOM 的 role_id 归属产出，多角色共用同一物料时
+   * 用 `/` 并列，如 `角色A/角色B`；默认 BOM 或无角色为空串）。
+   */
+  role_display?: string
 }
 
 /**
@@ -151,6 +156,8 @@ export interface PerSkuRow {
   partName: string
   /** 「产品部位」列展示文本（可能多部位）；与 `partName` **刻意分离**，避免污染物料键 */
   partDisplay: string
+  /** 「角色名称」列展示文本（多角色共用同一物料时并列，默认 BOM 为空串） */
+  roleDisplay: string
   specification: string
   unit: string
   baseQuantity: number
@@ -234,6 +241,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         materialName: '',
         partName: '',
         partDisplay: '',
+        roleDisplay: '',
         specification: '',
         unit: '',
         baseQuantity: 0,
@@ -271,6 +279,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         // 展示取后端拼好的文本：合并模式下 `part_name` 恒为空（那是聚合键），
         // 若这里回退到 `part_name` 整列就会空白（2026-11-05 生产缺陷）。
         partDisplay: m.part_display || m.part_name || '',
+        roleDisplay: m.role_display || '',
         specification: m.specification,
         unit: m.unit,
         baseQuantity: parseFloat(String(m.quantity)) || 0,
@@ -361,6 +370,8 @@ export interface StoredRow {
   partName: string
   /** 「产品部位」列展示文本（可能多部位，见 `SkuMaterial.part_display`） */
   partDisplay: string
+  /** 「角色名称」列展示文本（与主表同源；旧后端不返回该字段时为空串） */
+  roleDisplay: string
   specification: string
   unit: string
   /** 该落库行的损耗率（快照率优先，缺省回退 `rateOf`） */
@@ -391,6 +402,7 @@ export function buildStoredRows(
         fabricName: f.fabric_name,
         partName: f.part_name || '',
         partDisplay: f.part_display || f.part_name || '',
+        roleDisplay: f.role_display || '',
         specification: f.specification || '',
         unit: f.unit || '',
         rate,

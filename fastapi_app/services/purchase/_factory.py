@@ -44,63 +44,44 @@ async def _fetch_prod_name_map(db: AsyncSession, product_ids: list[int]) -> dict
 
 async def _fetch_prod_name_and_ratio(
     db: AsyncSession, product_ids: list[int],
-) -> tuple[dict[int, str], dict[int, dict]]:
-    """一次查询取回产品名与盲盒口径上下文：``({pid: name}, {pid: entry})``。
+) -> tuple[dict[int, str], dict[int, dict], dict[int, dict[int, str]], dict[int, int]]:
+    """一次查询取回产品名、盲盒口径上下文与角色名：``(names, blind_ctx, roles, hidden)``。
 
-    合并进原 ``_fetch_prod_name_map`` 的同一次往返（不新增固定查询——工厂汇总有
-    「读查询数 ≤10」护栏，见 test_c12）。``entry`` 仅包含**盲盒 SKU**：
-    ``{'ratio': P|None, 'has_hidden': bool}``；非盲盒 SKU 不进第二个字典。
+    **角色名并入同一次往返**（``product LEFT JOIN product_role``）：工厂汇总有
+    「读查询数 ≤10」护栏（见 test_c12），而「角色名称」列需要**所有**产品的角色名
+    （不只是盲盒 SKU）——独立再查一次角色表会让配置 SKU 的请求变成 11 条查询。
+    LEFT JOIN 让无角色的产品也返回一行（role 列为 NULL），聚合时跳过即可。
+
+    ``blind_ctx`` 仅包含**盲盒 SKU**：``{'ratio': P|None, 'has_hidden': bool}``。
     """
     if not product_ids:
-        return {}, {}
+        return {}, {}, {}, {}
     prod_result = await db.execute(
         select(
             Product.id, Product.name, Product.hidden_carton_ratio,
             Product.is_blind_box, Product.has_hidden_role,
-        ).where(Product.id.in_(product_ids))
+            ProductRole.id, ProductRole.role_name, ProductRole.is_hidden,
+        ).select_from(Product)
+        .outerjoin(ProductRole, ProductRole.product_id == Product.id)
+        .where(Product.id.in_(product_ids))
     )
     names: dict[int, str] = {}
     blind_ctx: dict[int, dict] = {}
-    for pid, name, ratio, is_blind_box, has_hidden_role in prod_result.all():
+    roles: dict[int, dict[int, str]] = {}
+    hidden_roles: dict[int, int] = {}
+    for pid, name, ratio, is_blind_box, has_hidden_role, rid, role_name, is_hidden in prod_result.all():
         names[pid] = name
         if is_blind_box:
             blind_ctx[pid] = {
                 'ratio': int(ratio) if ratio else None,
                 'has_hidden': bool(has_hidden_role),
             }
-    return names, blind_ctx
-
-
-async def _fetch_roles_ctx(db: AsyncSession, blind_ctx: dict[int, dict]) -> dict[int, dict]:
-    """按盲盒 SKU 加载角色名与隐藏款标记。
-
-    返回 ``{pid: {'ratio', 'has_hidden', 'roles': {rid: name}, 'hidden_role_id'}}``。
-    只在存在盲盒 SKU 时查询角色表（存量数据零额外查询，既有 SQLite 子集夹具
-    无需补 ``product_role`` 表）。
-    """
-    if not blind_ctx:
-        return {}
-    role_result = await db.execute(
-        select(
-            ProductRole.id, ProductRole.product_id,
-            ProductRole.role_name, ProductRole.is_hidden,
-        ).where(ProductRole.product_id.in_(list(blind_ctx)))
-    )
-    roles: dict[int, dict[int, str]] = {}
-    hidden_roles: dict[int, int] = {}
-    for rid, pid, role_name, is_hidden in role_result.all():
+        if rid is None:
+            continue
         roles.setdefault(pid, {})[rid] = role_name or ''
         if is_hidden:
             hidden_roles[pid] = rid
-    return {
-        pid: {
-            **entry,
-            'roles': roles.get(pid, {}),
-            # 右键指定的隐藏款（优先于名字识别）
-            'hidden_role_id': hidden_roles.get(pid),
-        }
-        for pid, entry in blind_ctx.items()
-    }
+    return names, blind_ctx, roles, hidden_roles
 
 
 def _role_name_from_map(role_names: dict[int, str], rid: int) -> str | None:
@@ -237,7 +218,45 @@ def _finalize_part_display(row: dict) -> dict:
     return row
 
 
-def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate):
+# 角色名称展示用的固定分隔符（屏幕 / 前端打印 / 后端打印三处共用同一套词汇）。
+ROLE_DISPLAY_SEP = '/'
+
+
+def _new_role_tracking() -> dict:
+    """角色展示用的内部记账字段（**不进接口**：定稿时换成 ``role_display``）。
+
+    与部位记账同构：同一聚合行可能由多个角色共同贡献（同一物料被多个角色使用），
+    此时把角色名全部列出——既不像「只取第一个角色」那样撒谎，也不用拆行（拆行会
+    让同一落库明细被多行共享，编辑一个角色就改写整行数量）。
+    """
+    return {'_role_names': []}
+
+
+def _record_role(row: dict, role_name: str) -> None:
+    """登记某聚合行覆盖的一个角色；空名（默认 BOM / 无角色）不登记。"""
+    if not role_name:
+        return
+    names = row.setdefault('_role_names', [])
+    if role_name not in names:
+        names.append(role_name)
+
+
+def _merge_role_tracking(target: dict, source: dict) -> None:
+    """把 ``source`` 的角色记账并入 ``target``（跨单累加同一聚合键时用）。"""
+    for role_name in source.get('_role_names') or []:
+        _record_role(target, role_name)
+
+
+def _finalize_role_display(row: dict) -> dict:
+    """把角色记账字段压成 ``role_display``；与部位定稿同样**幂等**。返回入参本身。"""
+    if '_role_names' not in row:
+        row.setdefault('role_display', '')
+        return row
+    row['role_display'] = ROLE_DISPLAY_SEP.join(row.pop('_role_names', []))
+    return row
+
+
+def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: str = ''):
     """定位（必要时创建）该 BOM 行对应的聚合行，并登记它的展示部位。
 
     **行定位逻辑只有这一份**：跨 SKU 的只登记分支与正常累加分支共用本函数，
@@ -285,11 +304,14 @@ def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate):
             'unit': bom['unit'],
             'item_ids': [],
             **_new_part_tracking(),
+            **_new_role_tracking(),
         }
     # **必须先登记部位再判重**：合并模式下同一物料的多条 BOM 行（身体/头部）共享同一个
     # 聚合键，第二条会命中 `_stored_seen` 提前返回；若把登记放在判重之后，
     # 第二条的部位就永远进不了展示文本（生产缺陷的同一根因，换个位置复发）。
+    # 角色同理：同一物料可能被多个角色共用，角色列必须并列而不是只留首个。
     _record_part(existing, bom_part)
+    _record_role(existing, role_name)
     return existing, sup, fkey, part_key
 
 
@@ -305,7 +327,8 @@ def _matching_po_items(po, bom, items_map, items_map_by_part, *, split_parts, pa
 
 
 def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
-                            items_map_by_part=None, split_parts=False, accumulate=True):
+                            items_map_by_part=None, split_parts=False, accumulate=True,
+                            role_name: str = ''):
     """把一条 BOM 行并入「(供应商, 物料, 规格, 单位, 部位)」聚合行。
 
     ``accumulate=False`` = **只登记展示部位、不碰数量**：跨 SKU 去重（
@@ -318,6 +341,7 @@ def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
     """
     existing, sup, fkey, part_key = _ensure_fabric_row(
         group, po, bom, split_parts=split_parts, accumulate=accumulate,
+        role_name=role_name,
     )
     if existing is None:
         return
@@ -386,7 +410,7 @@ def _norm_sku_name(value) -> str:
 
 def _sku_material_rows(
     bom_rows: list, sku_qty: float, supplier_fallback: str, split_parts: bool = False,
-    allocation: dict | None = None,
+    allocation: dict | None = None, role_names: dict[int, str] | None = None,
 ) -> list[dict]:
     """把某个 SKU 的 BOM 行展开为「该 SKU 自己的物料行」（口径 A）。
 
@@ -426,6 +450,9 @@ def _sku_material_rows(
         key = (sup, bom['material_name'], bom['specification'], bom['unit'], part_key)
         row_qty = sku_qty if allocation is None else allocation.get(bom.get('role_id'), sku_qty)
         amount = round_qty(float(bom.get('quantity') or 0) * float(row_qty or 0))
+        # 角色名（「角色名称」列的唯一来源）：默认 BOM（role_id=None）不登记，
+        # 同一物料被多个角色共用时在展示文本里并列（见 _record_role 注释）。
+        role_name = (role_names or {}).get(bom.get('role_id')) or ''
         if key in buckets:
             buckets[key]['quantity'] += amount
         else:
@@ -437,9 +464,11 @@ def _sku_material_rows(
                 'unit': bom['unit'],
                 'quantity': amount,
                 **_new_part_tracking(),
+                **_new_role_tracking(),
             }
         # 展示部位在这里登记（合并模式下同一物料的多条 BOM 行会落到同一桶）。
         _record_part(buckets[key], bom_part)
+        _record_role(buckets[key], role_name)
     # 稳定顺序：供应商 → 部位 → 物料名 → 规格 → 单位
     return sorted(
         buckets.values(),
@@ -452,6 +481,7 @@ def _sku_material_rows(
 def _accumulate_factory_sku_materials(
     group: dict, sku_lines: list, po, bom_data: dict, name_to_pid: dict, *,
     split_parts: bool = False, blind_box_ctx: dict | None = None,
+    role_names_by_pid: dict | None = None,
 ) -> None:
     """**逐采购单**累加「按 SKU 的物料明细」，供应商兜底取**本单**的 `po.supplier_name`。
 
@@ -507,6 +537,7 @@ def _accumulate_factory_sku_materials(
         for row in _sku_material_rows(
             bom_data.get(sku_pid) or [], sku_qty, supplier_fallback,
             split_parts=split_parts, allocation=allocation,
+            role_names=(role_names_by_pid or {}).get(sku_pid),
         ):
             key = (
                 row['supplier_name'], row['material_name'],
@@ -517,6 +548,8 @@ def _accumulate_factory_sku_materials(
                 # 跨单累加同一聚合键：部位记账必须一起并入（合并模式下不同单的 BOM
                 # 可能各覆盖一部分部位，丢掉任一侧都会让展示文本少列部位）。
                 _merge_part_tracking(bucket[key], row)
+                # 角色同理：不同单可能由不同角色产生同一物料，角色列要并列而不是只留首个。
+                _merge_role_tracking(bucket[key], row)
             else:
                 bucket[key] = row
 
@@ -543,7 +576,7 @@ def _finalize_factory_sku_materials(group_map: dict) -> None:
         for name, buckets in group['_sku_materials'].items():
             rows = list(buckets.values()) if isinstance(buckets, dict) else list(buckets)
             finalized[name] = sorted(
-                (_finalize_part_display(dict(row)) for row in rows),
+                (_finalize_role_display(_finalize_part_display(dict(row))) for row in rows),
                 key=lambda r: (
                     r['supplier_name'], r.get('part_name') or '',
                     r['material_name'], r['specification'], r['unit'],
@@ -584,7 +617,8 @@ def _resolve_po_pids(po_pids_map, po, pid) -> list:
 
 
 def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
-                            items_map_by_part=None, split_parts=False) -> bool:
+                            items_map_by_part=None, split_parts=False,
+                            role_names_by_pid=None) -> bool:
     """把该采购单覆盖的**全部 SKU** 的 BOM 行并入分组。
 
     Returns:
@@ -594,11 +628,13 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
     has_bom = False
     for idx, sku_pid in enumerate(pids):
         bom_list = bom_data.get(sku_pid, [])
+        role_names = (role_names_by_pid or {}).get(sku_pid) or {}
         if bom_list:
             has_bom = True
         for bom in bom_list:
             if _is_filling_category(bom.get('category')):
                 continue
+            role_name = role_names.get(bom.get('role_id')) or ''
             part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
             skey = (
                 bom['supplier_name'] or po.supplier_name or '未指定供应商',
@@ -621,20 +657,22 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
                 _accumulate_factory_bom(
                     group, po, bom, items_map, order_qty,
                     items_map_by_part=items_map_by_part, split_parts=split_parts,
-                    accumulate=False,
+                    accumulate=False, role_name=role_name,
                 )
                 continue
             seen_materials.add(skey)
             _accumulate_factory_bom(
                 group, po, bom, items_map, order_qty,
                 items_map_by_part=items_map_by_part, split_parts=split_parts,
+                role_name=role_name,
             )
     return has_bom
 
 
 def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_order_map,
                              prod_name_map, po_pids_map=None, po_sku_map=None,
-                             items_map_by_part=None, blind_box_ctx=None) -> dict[tuple, dict]:
+                             items_map_by_part=None, blind_box_ctx=None,
+                             role_names_by_pid=None) -> dict[tuple, dict]:
     """构建 (客户, 产品名) → 汇总分组。
 
     ``po_pids_map``（``{po_id: [product_id, ...]}``）给出该采购单覆盖的**全部 SKU**，
@@ -694,13 +732,14 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
         name_to_pid = {name: pid for pid, name in (prod_name_map or {}).items()}
         _accumulate_factory_sku_materials(
             group, sku_lines, po, bom_data, name_to_pid, split_parts=split_parts,
-            blind_box_ctx=blind_box_ctx,
+            blind_box_ctx=blind_box_ctx, role_names_by_pid=role_names_by_pid,
         )
 
         pids = _resolve_po_pids(po_pids_map, po, pid)
         if not _accumulate_po_bom_rows(
             group, po, pids, bom_data, items_map, order_qty,
             items_map_by_part=items_map_by_part, split_parts=split_parts,
+            role_names_by_pid=role_names_by_pid,
         ):
             # BOM 完全不可用（所选 SKU 均未配 BOM）时的既有回退
             _accumulate_factory_po_items(group, po, items_by_order)
@@ -717,7 +756,8 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
         for skey in sorted(group['_supplier_map'].keys()):
             supplier = group['_supplier_map'][skey]
             fabrics = sorted(
-                (_finalize_part_display(dict(f)) for f in supplier['_fabric_map'].values()),
+                (_finalize_role_display(_finalize_part_display(dict(f)))
+                 for f in supplier['_fabric_map'].values()),
                 key=lambda x: (x.get('part_name') or '', x['fabric_name']),
             )
             suppliers.append({'supplier_name': supplier['supplier_name'], 'fabrics': fabrics})

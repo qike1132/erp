@@ -1,16 +1,16 @@
 <template>
   <template v-if="diffs.length > 0">
-    <!-- 差异横幅：说明「实际下单含手工调整」并点名不一致的物料（跨满 11 列） -->
+    <!-- 差异横幅：说明「实际下单含手工调整」并点名不一致的物料（跨满 12 列） -->
     <tr class="sm-diff-banner">
-      <td :colspan="11">
+      <td :colspan="12">
         ⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：
         <span v-for="(d, i) in diffs" :key="`${d.partName}-${d.materialName}`">{{ i > 0 ? '、' : '' }}{{ d.partName ? d.partName + '·' : '' }}{{ d.materialName }}（推算 {{ formatQty(d.perSku) }} / 实际 {{ formatQty(d.stored) }}）</span>
       </td>
     </tr>
     <!--
       落库真值：该组全部物料（与采购单明细一致）。
-      列序与主表后 7 格对齐：标签(客户/产品/订单数量/备品数量) | 产品部位 | 供应商 | 布料名称 | 规格型号 | 损耗率 | 数量 | 单位。
-      标签与供应商用 rowspan 跨行，故每行合计仍为 11 列（4 + 1 + 1 + 5）。
+      列序与主表后 8 格对齐：标签(客户/产品/订单数量/备品数量) | 角色名称 | 产品部位 | 供应商 | 布料名称 | 规格型号 | 损耗率 | 数量 | 单位。
+      标签与供应商用 rowspan 跨行，故每行合计仍为 12 列（4 + 1 + 1 + 1 + 5）。
       率与数量由 composable 按主表同源口径算好，组件只做展示。
     -->
     <tr
@@ -20,6 +20,7 @@
       :data-diff="isDiff(r) ? 'true' : undefined"
     >
       <td v-if="i === 0" :rowspan="storedRows.length" colspan="4" class="sm-diff-label">实际下单（含手工调整）</td>
+      <td>{{ r.roleDisplay }}</td>
       <td>{{ r.partDisplay }}</td>
       <td v-if="r.isSupplierFirst" :rowspan="r.supplierSpan">{{ r.supplierName }}</td>
       <td>{{ r.fabricName }}</td>
@@ -39,7 +40,7 @@
  * 「自定义编辑」手改过数量，各 SKU 之和会与库里存的合并真值对不上。此处把差异
  * **显式化**：横幅点名不一致的物料与两个数值，其下列出该组全部落库行并对不一致者描红。
  *
- * 数据行**与主表 11 列对齐**（标签跨 4 列 + 产品部位 + 供应商 + 布料名称/规格型号/损耗率/数量/单位），
+ * 数据行**与主表 12 列对齐**（标签跨 4 列 + 角色名称 + 产品部位 + 供应商 + 布料名称/规格型号/损耗率/数量/单位），
  * 且「损耗率」「数量」两格由 composable 按主表同源口径算好（快照率、加放后派生值），
  * 避免同一张表里两个「数量」口径不一致。本组件纯展示，无计算。
  *

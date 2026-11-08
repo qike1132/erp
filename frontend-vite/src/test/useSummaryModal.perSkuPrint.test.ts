@@ -100,38 +100,39 @@ describe('E2 差异 → 对照块同源输出', () => {
 })
 
 describe('E2b 打印对照块结构（与屏幕同源）', () => {
-  it('数据行恰好 11 列；率取快照率、数量为加放派生值', () => {
+  it('数据行恰好 12 列；率取快照率、数量为加放派生值', () => {
     const g = perSkuGroup()
     g.suppliers![0]!.fabrics[0]!.quantity = 65      // 落库 65 ≠ 推算 60 → 有差异
     g.suppliers![0]!.fabrics[0]!.loss_rate = 500    // 快照率 500‰（传入的实时率是 200‰）
     const html = buildFactoryHtml(dataOf(g), 10, [[[200]]], [10])
     const rows = tbodyRows(html)
 
-    // 每行（按 SKU 块 / 横幅 / 对照块数据行）有效列数都必须恰好 11，无一错位
-    expect(rowWidths(rows)).toEqual(rows.map(() => 11))
+    // 每行（按 SKU 块 / 横幅 / 对照块数据行）有效列数都必须恰好 12，无一错位
+    expect(rowWidths(rows)).toEqual(rows.map(() => 12))
 
     // 横幅：单格跨 11 列，点名物料与两个数值（文案与数字格式须与屏幕逐字一致：
     // 屏幕是「…与上方按 BOM 推算**的明细**不一致」，数字走 formatQty ⇒ '60.0' / '65.0'）
     const banner = rows.find((tr) => (tr.textContent || '').includes('不一致'))!
     expect(banner).toBeDefined()
-    expect(banner.querySelector('td')!.getAttribute('colspan')).toBe('11')
+    expect(banner.querySelector('td')!.getAttribute('colspan')).toBe('12')
     expect(banner.textContent).toContain('与上方按 BOM 推算的明细不一致')
     expect(banner.textContent).toContain('共享布')
     expect(banner.textContent).toContain('60.0')
     expect(banner.textContent).toContain('65.0')
 
-    // 数据行首行：标签 colspan=4（跨本块全部行）+ 产品部位 + 供应商(rowspan) + 后 5 格 = 8 格 / 有效 11 列
+    // 数据行首行：标签 colspan=4（跨本块全部行）+ 角色 + 产品部位 + 供应商(rowspan) + 后 5 格 = 9 格 / 有效 12 列
     const dataRow = rows.find((tr) => tr.querySelector('td[colspan="4"]'))!
     const cells = Array.from(dataRow.querySelectorAll('td'))
-    expect(cells).toHaveLength(8)
+    expect(cells).toHaveLength(9)
     expect(cells[0]!.getAttribute('colspan')).toBe('4')
     expect(cells[0]!.textContent).toContain('实际下单')
     expect(cells[0]!.getAttribute('rowspan')).toBe('1')   // 本组仅 1 条落库行
-    // 列序与主表一致：产品部位（空）在供应商之前
+    // 列序与主表一致：角色（空）→ 产品部位（空）→ 供应商
     expect(cells[1]!.textContent).toBe('')
-    expect(cells[2]!.textContent).toBe('供应商甲')
+    expect(cells[2]!.textContent).toBe('')
+    expect(cells[3]!.textContent).toBe('供应商甲')
     // 后 5 格列序与主表一致；损耗率=快照率 500（不是传入的实时率 200）、数量=ceil(65×1.5)=98
-    expect(cells.slice(3).map((td) => td.textContent)).toEqual(['共享布', 'S1', '500.0', '98', '米'])
+    expect(cells.slice(4).map((td) => td.textContent)).toEqual(['共享布', 'S1', '500.0', '98', '米'])
   })
 
   it('无差异时不出现「实际下单」', () => {
@@ -164,9 +165,9 @@ describe('E4 无落库坐标行：打印必须与屏幕同源', () => {
     const newRow = rows.find((tr) => (tr.textContent || '').includes('新加布'))!
     expect(newRow).toBeDefined()
     const cells = Array.from(newRow.querySelectorAll('td'))
-    // 该行非块首行（供应商格已被 rowspan 覆盖）⇒ 恰好后 6 格。
+    // 该行非块首行（供应商格已被 rowspan 覆盖）⇒ 恰好后 7 格（角色 + 部位 + 5 格）。
     // 无坐标行**不加放**：率 '—'、数量 = 基准量 5。
     // （曾误为回退 lossRate 10 并 ceil(5 × 1.01) = 6 → 屏幕「— / 5」而打印「10 / 6」。）
-    expect(cells.map((td) => td.textContent)).toEqual(['', '新加布', 'S9', '—', '5', '米'])
+    expect(cells.map((td) => td.textContent)).toEqual(['', '', '新加布', 'S9', '—', '5', '米'])
   })
 })

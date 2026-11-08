@@ -35,7 +35,7 @@ import type { FactoryGroup, FactorySummaryData } from '@/views/purchase/composab
 
 /** 屏幕列序的期望值（唯一真值，屏幕与打印都必须与它一致） */
 const EXPECTED_HEADERS = [
-  '客户', '产品名称', '订单数量', '备品数量', '产品部位', '供应商',
+  '客户', '产品名称', '订单数量', '备品数量', '角色名称', '产品部位', '供应商',
   '布料名称', '规格型号', '损耗率', '数量', '单位',
 ]
 
@@ -176,28 +176,31 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     const rows = dataRows(wrapper)
     expect(rows).toHaveLength(3)
 
-    // 第 1 行：客户/产品名称/订单数量/备品数量 4 格（rowspan=3）+ 部位 + 供应商(rowspan=2) + 布料…
+    // 第 1 行：客户/产品名称/订单数量/备品数量 4 格（rowspan=3）+ 角色 + 部位 + 供应商(rowspan=2) + 布料…
     const first = rowCells(wrapper, 0)
-    expect(first).toHaveLength(11)
-    expect(first[4]!.text()).toBe('身体/头部')
-    expect(first[4]!.attributes('rowspan')).toBeUndefined()
-    expect(first[5]!.text()).toBe('坤成')
-    expect(first[5]!.attributes('rowspan')).toBe('2')
-    expect(first[6]!.text()).toBe('起柔')
+    expect(first).toHaveLength(12)
+    expect(first[4]!.text()).toBe('')
+    expect(first[5]!.text()).toBe('身体/头部')
+    expect(first[5]!.attributes('rowspan')).toBeUndefined()
+    expect(first[6]!.text()).toBe('坤成')
+    expect(first[6]!.attributes('rowspan')).toBe('2')
+    expect(first[7]!.text()).toBe('起柔')
 
-    // 第 2 行：供应商被上一行 rowspan 覆盖 → 只剩 部位 + 布料/规格/损耗率/数量/单位
+    // 第 2 行：供应商被上一行 rowspan 覆盖 → 只剩 角色 + 部位 + 布料/规格/损耗率/数量/单位
     const second = rowCells(wrapper, 1)
-    expect(second).toHaveLength(6)
-    expect(second.map((td) => td.text())[0]).toBe('头部')
-    expect(second.map((td) => td.text())[1]).toBe('狗狗')
+    expect(second).toHaveLength(7)
+    expect(second.map((td) => td.text())[0]).toBe('')
+    expect(second.map((td) => td.text())[1]).toBe('头部')
+    expect(second.map((td) => td.text())[2]).toBe('狗狗')
 
-    // 第 3 行：新供应商段首行 → 部位 + 供应商(colspan 1) + 布料…
+    // 第 3 行：新供应商段首行 → 角色 + 部位 + 供应商(colspan 1) + 布料…
     const third = rowCells(wrapper, 2)
-    expect(third).toHaveLength(7)
-    expect(third[0]!.text()).toBe('身体')
-    expect(third[1]!.text()).toBe('年胜')
-    expect(third[1]!.attributes('rowspan')).toBe('1')
-    expect(third[2]!.text()).toBe('氣綸')
+    expect(third).toHaveLength(8)
+    expect(third[0]!.text()).toBe('')
+    expect(third[1]!.text()).toBe('身体')
+    expect(third[2]!.text()).toBe('年胜')
+    expect(third[2]!.attributes('rowspan')).toBe('1')
+    expect(third[3]!.text()).toBe('氣綸')
     wrapper.unmount()
   })
 
@@ -207,19 +210,19 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     expect(rows).toHaveLength(3)
 
     const first = rowCells(wrapper, 0)
-    expect(first).toHaveLength(11)
-    expect(first[4]!.text()).toBe('身体/头部')
-    expect(first[5]!.text()).toBe('坤成')
-    expect(first[5]!.attributes('rowspan')).toBe('2')
+    expect(first).toHaveLength(12)
+    expect(first[5]!.text()).toBe('身体/头部')
+    expect(first[6]!.text()).toBe('坤成')
+    expect(first[6]!.attributes('rowspan')).toBe('2')
 
     const second = rowCells(wrapper, 1)
-    expect(second).toHaveLength(6)
-    expect(second[0]!.text()).toBe('头部')
-    expect(second[1]!.text()).toBe('狗狗')
+    expect(second).toHaveLength(7)
+    expect(second[1]!.text()).toBe('头部')
+    expect(second[2]!.text()).toBe('狗狗')
 
     const third = rowCells(wrapper, 2)
-    expect(third[0]!.text()).toBe('身体')
-    expect(third[1]!.text()).toBe('美利达')
+    expect(third[1]!.text()).toBe('身体')
+    expect(third[2]!.text()).toBe('美利达')
     wrapper.unmount()
   })
 
@@ -227,9 +230,10 @@ describe('P2 不串列：值必须落在对调后的正确列上', () => {
     const html = buildFactoryHtml(dataOf(mergedGroup()), 0)
     const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
     const first = [...doc.querySelectorAll('tbody tr:first-child td')].map((td) => td.textContent || '')
-    expect(first[4]).toBe('身体/头部')
-    expect(first[5]).toBe('坤成')
-    expect(first[6]).toBe('起柔')
+    expect(first[4]).toBe('')
+    expect(first[5]).toBe('身体/头部')
+    expect(first[6]).toBe('坤成')
+    expect(first[7]).toBe('起柔')
   })
 })
 
@@ -238,12 +242,12 @@ describe('P3 不空白：合并模式下产品部位仍能展示', () => {
     const wrapper = mountModal(mergedGroup())
     const shown = dataRows(wrapper).map((tr) => {
       const cells = tr.findAll('td')
-      // 行内第 5 列（或供应商 rowspan 覆盖时行首）就是部位格
+      // 行内第 6 列（或供应商 rowspan 覆盖时行首第 2 格）就是部位格
       return cells.map((td) => td.text())
     })
-    expect(shown[0]![4]).toBe('身体/头部')
-    expect(shown[1]![0]).toBe('头部')
-    expect(shown[2]![0]).toBe('身体')
+    expect(shown[0]![5]).toBe('身体/头部')
+    expect(shown[1]![1]).toBe('头部')
+    expect(shown[2]![1]).toBe('身体')
     wrapper.unmount()
   })
 

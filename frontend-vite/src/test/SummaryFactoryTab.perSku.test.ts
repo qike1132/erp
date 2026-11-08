@@ -211,16 +211,16 @@ describe('P9 编辑态预载落库真值（共享行），非编辑态仍显示�
     const editA = (editRows[0]!.find('input[type="number"]').element as HTMLInputElement).value
     const editB = (editRows[2]!.find('input[type="number"]').element as HTMLInputElement).value
     // 非编辑态数量列为纯文本：A 块 ceil(20 × 1.005) = 21；B 块 ceil(40 × 1.005) = 41
-    expect(viewRows[0]!.findAll('td')[9]!.text()).toBe('21')
-    expect(viewRows[2]!.findAll('td')[8]!.text()).toBe('41')
+    expect(viewRows[0]!.findAll('td')[10]!.text()).toBe('21')
+    expect(viewRows[2]!.findAll('td')[9]!.text()).toBe('41')
     expect(editA).not.toBe('21')
     expect(editB).not.toBe('41')
   })
 
   it('非编辑态：两块「共享布」仍各显示本 SKU 的推算值（21 / 41），特性不得丢失', () => {
     const rows = bodyRows(mountTab(group()))
-    expect(rows[0]!.findAll('td')[9]!.text()).toBe('21')   // A 块：BOM 推算 20 加放取整
-    expect(rows[2]!.findAll('td')[8]!.text()).toBe('41')   // B 块：BOM 推算 40 加放取整
+    expect(rows[0]!.findAll('td')[10]!.text()).toBe('21')   // A 块：BOM 推算 20 加放取整
+    expect(rows[2]!.findAll('td')[9]!.text()).toBe('41')   // B 块：BOM 推算 40 加放取整
   })
 })
 
@@ -240,19 +240,20 @@ describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
     // 数据行：该组 3 条落库物料（同一供应商段）→ 3 行
     const diffRows = w.findAll('tbody tr.sm-diff-row')
     expect(diffRows).toHaveLength(3)
-    // 首行 = 标签(colspan=4，跨全部对照行) + 产品部位(1) + 供应商(1) + 后 5 格 = 11 列，与主表表头逐列对齐
+    // 首行 = 标签(colspan=4，跨全部对照行) + 角色(1) + 产品部位(1) + 供应商(1) + 后 5 格 = 12 列，与主表表头逐列对齐
     const first = diffRows[0]!.findAll('td')
-    expect(first).toHaveLength(8)
+    expect(first).toHaveLength(9)
     expect(first[0]!.attributes('colspan')).toBe('4')
     expect(first[0]!.attributes('rowspan')).toBe('3')
-    // 列序与主表一致：产品部位在供应商之前（本 fixture 部位为空）
+    // 列序与主表一致：角色名称 → 产品部位 → 供应商（本 fixture 两者为空）
     expect(first[1]!.text()).toBe('')
-    expect(first[2]!.text()).toBe('供应商甲')
-    expect(first[2]!.attributes('rowspan')).toBe('3')
-    // 标签 4 列 + 产品部位 1 列 + 供应商 1 列 + 后 5 列 = 11 列（回归时会拦住列错位）
-    expect(Number(first[0]!.attributes('colspan')) + 2 + (first.length - 3)).toBe(11)
+    expect(first[2]!.text()).toBe('')
+    expect(first[3]!.text()).toBe('供应商甲')
+    expect(first[3]!.attributes('rowspan')).toBe('3')
+    // 标签 4 列 + 角色 1 列 + 产品部位 1 列 + 供应商 1 列 + 后 5 列 = 12 列（回归时会拦住列错位）
+    expect(Number(first[0]!.attributes('colspan')) + 3 + (first.length - 4)).toBe(12)
     // 其余行由 rowspan 覆盖 → 只剩 部位 + 后 5 格；非差异行不带 data-diff
-    expect(diffRows[1]!.findAll('td')).toHaveLength(6)
+    expect(diffRows[1]!.findAll('td')).toHaveLength(7)
     expect(diffRows[1]!.attributes('data-diff')).toBeUndefined()
   })
 

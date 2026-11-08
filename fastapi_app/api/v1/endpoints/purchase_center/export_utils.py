@@ -153,13 +153,16 @@ def _resolve_factory_cp_key(order, source_order_map):
     return (customer_name, product_name), source_order
 
 
-def generate_factory_summary_print(orders, order_items_map, source_orders=None, bom_part_map=None):
+def generate_factory_summary_print(
+    orders, order_items_map, source_orders=None, bom_part_map=None, bom_role_map=None,
+):
     """生成工厂内部汇总格式打印HTML。
 
-    ``bom_part_map``（``{(产品名, 物料, 规格, 单位): [部位, ...]}``）由
-    :func:`fastapi_app.services.purchase_order_query.build_bom_part_display_map` 产出。
-    **必须传**：合并模式下采购明细的 ``part_name`` 恒为空，只凭明细打印件印不出部位，
-    会出现「屏幕有部位、打印空白」。缺省 ``None`` 时退回纯明细口径（旧调用方零变化）。
+    ``bom_part_map``（``{(产品名, 物料, 规格, 单位): [部位, ...]}``）与
+    ``bom_role_map``（同键 → ``'角色A/角色B'``）由
+    :func:`fastapi_app.services.purchase_order_query.build_bom_display_maps` 一次产出。
+    **必须传**：采购明细没有部位与角色，只凭明细打印件印不出这两列，会出现
+    「屏幕有、打印空白」。缺省 ``None`` 时退回纯明细口径（旧调用方零变化）。
     """
     source_orders = source_orders or []
     source_order_map = {o.id: o for o in source_orders}
@@ -208,6 +211,11 @@ def generate_factory_summary_print(orders, order_items_map, source_orders=None, 
                     # 展示部位单独记账：合并模式下 part_name 被清空（聚合键需要），
                     # 但「这条明细属于哪个部位」的事实仍要展示出来（与工厂汇总屏幕同口径）。
                     '_part_names': [], '_part_unknown': False,
+                    # 角色名称同样来自 BOM（明细无角色列），按 (产品, 物料, 规格, 单位) 取；
+                    # 同一物料被多个角色共用时后端已拼成「角色A/角色B」（与屏幕同分隔符）。
+                    'role_display': (bom_role_map or {}).get(
+                        (cp_key[1], fabric_name, fabric_spec, item.unit or ''), '',
+                    ),
                 }
             else:
                 existing = grouped_data[cp_key][supplier_name][fabric_key]
@@ -253,7 +261,7 @@ th,td{border:1.0pt solid #000000;padding:1px;text-align:center;vertical-align:mi
 th{background:#E6E6E6;font-weight:bold}
 .total-row{background-color:#F0F0F0;font-weight:bold}"""
     body_parts = ['<div class="header"><h1>东莞市滨发玩具有限公司</h1><h2>工厂内部采购订单汇总</h2></div>']
-    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
+    body_parts.append('<table><thead><tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>角色名称</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>数量</th></tr></thead><tbody>')
 
     grand_total: float = 0
     for (customer_name, product_name), suppliers in sorted(sorted_groups.items()):
@@ -267,8 +275,9 @@ th{background:#E6E6E6;font-weight:bold}
                     body_parts.append(f'<td rowspan="{total_fabric_rows}" style="font-weight:bold">{_h(customer_name)}</td>')
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{_h(product_name)}</td>')
                     body_parts.append(f'<td rowspan="{total_fabric_rows}">{float(order_info["product_quantity"]) if order_info["product_quantity"] else 0:g}</td>')
-                # 列序（2026-11-05 用户要求）：产品部位在供应商之前；
-                # 供应商跨行合并的 rowspan 仍挂在供应商格上，部位格逐行渲染。
+                # 列序（2026-11-08 用户要求）：角色名称在部位之前，两者都在供应商之前；
+                # 供应商跨行合并的 rowspan 仍挂在供应商格上，角色/部位格逐行渲染。
+                body_parts.append(f'<td style="text-align:left">{_h(fabric.get("role_display", ""))}</td>')
                 body_parts.append(f'<td style="text-align:left">{_h(fabric.get("part_display", ""))}</td>')
                 if idx == 0:
                     body_parts.append(f'<td rowspan="{len(supplier["fabrics"])}">{_h(supplier["supplier_name"])}</td>')
@@ -279,7 +288,8 @@ th{background:#E6E6E6;font-weight:bold}
                 grand_total += float(fabric["quantity"]) if fabric["quantity"] else 0
                 global_fabric_idx += 1
 
-    body_parts.append(f'<tfoot><tr class="total-row"><td colspan="4">合计</td><td></td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>')
+    # 合计行必须与表头同宽（9 列）：colspan 4（客户/产品/订单/角色）+ 4 空格 + 数量
+    body_parts.append(f'<tfoot><tr class="total-row"><td colspan="4">合计</td><td></td><td></td><td></td><td></td><td style="text-align:right">{grand_total}</td></tr></tfoot>')
     body_parts.append('</table>')
     return build_print_html("工厂内部采购订单汇总", ''.join(body_parts), extra_css)
 

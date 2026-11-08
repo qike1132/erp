@@ -20,6 +20,7 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
+    ProductRole,
     PurchaseOrder,
     PurchaseOrderItem,
     PurchaseOrderSku,
@@ -37,6 +38,8 @@ async def db():
         PurchaseOrder.__table__, PurchaseOrderItem.__table__, PurchaseOrderSku.__table__,
         Order.__table__, OrderItem.__table__, Product.__table__,
         ProductFabric.__table__, ProductAccessory.__table__, ProductMaterial.__table__,
+        # 角色名并入产品查询（LEFT JOIN product_role）——「角色名称」列的数据源
+        ProductRole.__table__,
     ]
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
@@ -424,7 +427,7 @@ def _row_widths(page: str) -> list[int]:
 
 
 def test_backend_factory_print_all_rows_width_equals_header():
-    """表头 8 列：客户/产品名称/订单数量/产品部位/供应商/布料名称/规格型号/数量+单位。"""
+    """表头 9 列：客户/产品名称/订单数量/角色名称/产品部位/供应商/布料名称/规格型号/数量+单位。"""
     from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
         generate_factory_summary_print,
     )
@@ -447,7 +450,7 @@ def test_backend_factory_print_all_rows_width_equals_header():
     html = generate_factory_summary_print([order], {1: items})
 
     header_width = html.count('<th>')
-    assert header_width == 8
+    assert header_width == 9
     widths = _row_widths(html)
     assert widths, '打印页必须至少有一行数据'
     assert set(widths) == {header_width}, f'列数不齐：{widths} != {header_width}'

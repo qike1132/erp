@@ -123,7 +123,7 @@ const SUMMARY_PRINT_STYLE = `
  */
 export const FACTORY_TABLE_HEAD =
   '<tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th>' +
-  '<th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
+  '<th>角色名称</th><th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
 
 /**
  * 「按 SKU 展开」的组渲染：每 SKU 一块物料行，组末附差异对照块。
@@ -161,12 +161,13 @@ function buildPerSkuGroupHtml(
         tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
       }
       if (row.noBom) {
-        // 占位行：供应商 + 之后 6 列 = 7 列（左侧三列已在上方补齐）
-        tableHtml += '<td colspan="7" style="color:#8e8e93;">无 BOM 明细</td>'
+        // 占位行：角色名称 + 供应商 + 之后 6 列 = 8 列（左侧三列已在上方补齐）
+        tableHtml += '<td colspan="8" style="color:#8e8e93;">无 BOM 明细</td>'
         tableHtml += '</tr>'
         return
       }
-      // 列序与屏幕 thead 严格一致：产品部位在前、供应商在后（供应商含 rowspan）。
+      // 列序与屏幕 thead 严格一致：角色名称 → 产品部位 → 供应商（供应商含 rowspan）。
+      tableHtml += `<td>${escapeHtml(row.roleDisplay)}</td>`
       tableHtml += `<td>${escapeHtml(row.partDisplay)}</td>`
       if (row.isFirstSupplierRow) {
         tableHtml += `<td rowspan="${row.supplierRowSpan}" style="font-weight:bold;">${escapeHtml(row.supplierName)}</td>`
@@ -198,8 +199,8 @@ function buildPerSkuGroupHtml(
 /**
  * 差异对照块（打印/导出版，结构镜像屏幕 `SummaryDiffBlock.vue`）。
  *
- * 列数必须仍是 **11**：标签跨「客户/产品名称/订单数量/备品数量」4 列（`colspan=4`，
- * 跨本块全部行）+ 产品部位 + 供应商（段内 rowspan）+ 布料名称/规格型号/损耗率/数量/单位 5 格。
+ * 列数必须仍是 **12**：标签跨「客户/产品名称/订单数量/备品数量」4 列（`colspan=4`，
+ * 跨本块全部行）+ 角色名称 + 产品部位 + 供应商（段内 rowspan）+ 布料名称/规格型号/损耗率/数量/单位 5 格。
  * 行数据来自 `buildStoredRows` —— 与屏幕**同一个纯函数**，故两边天然同构：
  * 损耗率取该落库行快照率、数量为按该率加放派生值。无差异时返回空串（不渲染）。
  */
@@ -212,7 +213,7 @@ function buildDiffBlockHtml(
   const detail = diffs
     .map((d) => `${d.partName ? d.partName + '·' : ''}${d.materialName}（推算 ${fmtQty(d.perSku)} / 实际 ${fmtQty(d.stored)}）`)
     .join('、')
-  let tableHtml = `<tr><td colspan="11" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：${escapeHtml(detail)}</td></tr>`
+  let tableHtml = `<tr><td colspan="12" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：${escapeHtml(detail)}</td></tr>`
 
   const storedRows = buildStoredRows(group, () => spareRate)
   storedRows.forEach((r, i) => {
@@ -220,7 +221,9 @@ function buildDiffBlockHtml(
     if (i === 0) {
       tableHtml += `<td colspan="4" rowspan="${storedRows.length}" style="font-weight:bold;background:#fffaf0;color:#7a4a00;">实际下单（含手工调整）</td>`
     }
-    // 列序与主表一致（产品部位 → 供应商 → 布料名称…）：供应商格含 rowspan，位置不可挪到部位格之前。
+    // 列序与主表一致（角色名称 → 产品部位 → 供应商 → 布料名称…）：供应商格含 rowspan，
+    // 位置不可挪到部位格之前。
+    tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.roleDisplay)}</td>`
     tableHtml += `<td style="background:#fffaf0;">${escapeHtml(r.partDisplay)}</td>`
     if (r.isSupplierFirst) {
       tableHtml += `<td rowspan="${r.supplierSpan}" style="background:#fffaf0;">${escapeHtml(r.supplierName)}</td>`
@@ -272,7 +275,8 @@ export function buildFactoryHtml(
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.qty))}</td>`
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.spare))}</td>`
         }
-        // 列序与屏幕 thead 严格一致：产品部位在前、供应商在后（供应商含 rowspan）。
+        // 列序与屏幕 thead 严格一致：角色名称 → 产品部位 → 供应商（供应商含 rowspan）。
+        tableHtml += `<td>${escapeHtml(fabric.role_display || '')}</td>`
         tableHtml += `<td>${escapeHtml(fabric.part_display || fabric.part_name || '')}</td>`
         if (fi === 0) {
           tableHtml += `<td rowspan="${fabricCount}" style="font-weight:bold;">${escapeHtml(supplier.supplier_name)}</td>`
@@ -328,6 +332,8 @@ export interface FabricItem {
   part_name?: string
   /** 「产品部位」列展示文本（合并模式可能是 `身体/头部` 或带 `未标注` 标记） */
   part_display?: string
+  /** 「角色名称」列展示文本（多角色共用同一物料时并列，如 `角色A/角色B`） */
+  role_display?: string
   specification?: string
   quantity: number
   unit?: string
@@ -355,6 +361,8 @@ export interface SkuLine {
    */
   materials?: {
     supplier_name: string; material_name: string; part_name?: string; part_display?: string;
+    /** 「角色名称」列展示文本（多角色共用同一物料时并列，如 `角色A/角色B`） */
+    role_display?: string;
     specification: string; unit: string; quantity: number;
   }[]
 }

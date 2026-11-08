@@ -41,6 +41,7 @@ from fastapi_app.shared_models import (
     ProductAccessory,
     ProductFabric,
     ProductMaterial,
+    ProductRole,
     PurchaseOrder,
     PurchaseOrderItem,
     PurchaseOrderSku,
@@ -64,6 +65,8 @@ async def db():
         PurchaseOrder.__table__, PurchaseOrderItem.__table__, PurchaseOrderSku.__table__,
         Order.__table__, OrderItem.__table__, Product.__table__,
         ProductFabric.__table__, ProductAccessory.__table__, ProductMaterial.__table__,
+        # 角色名并入产品查询（LEFT JOIN product_role）——「角色名称」列的数据源
+        ProductRole.__table__,
     ]
     async with engine.begin() as conn:
         await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
