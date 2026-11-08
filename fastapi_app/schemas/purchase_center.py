@@ -139,8 +139,13 @@ class RoleItem(BaseModel):
     role_key: str | None = None
     role_name: str = ''
     name: str | None = None
-    # 隐藏款标记：每个 SKU 至多一个 True（前端右键指定，重复指定时后端保留最后一个）
-    is_hidden: bool = False
+    # 隐藏款标记：每个 SKU 至多一个 True（前端右键指定，重复指定时后端保留最后一个）。
+    # 三态：None = 客户端**未提交**该字段（旧客户端/脚本只发 {id, role_name}）→
+    # 保留库中原标记；True/False = 显式指定/取消。
+    # 不能用 bool 默认 False：Pydantic v2 的 model_dump() 会把默认值一并输出，
+    # 端点序列化后每个角色都带 is_hidden=False，等于让「未提交」永远无法表达，
+    # 旧客户端一保存 BOM 就会静默清掉已指定的隐藏款（OCR 评审 H1）。
+    is_hidden: bool | None = None
 
 
 class BomSaveRequest(BaseModel):

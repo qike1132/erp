@@ -442,7 +442,7 @@ export interface Product {
   specification?: string
   /** 所属工厂：东莞/湖北 */
   factory?: string
-  /** 盲盒隐藏款装箱配比：每多少订单数量配 1 个隐藏款；null/缺省 = 不启用陈列样分配 */
+  /** 盲盒隐藏款装箱配比：每多少订单数量配 1 个隐藏款；null/缺省 = 不额外配隐藏款 */
   hidden_carton_ratio?: number | null
   /** 是否盲盒 SKU（开启后订单数量按角色数均分；关闭=历史全量口径） */
   is_blind_box?: boolean

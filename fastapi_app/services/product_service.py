@@ -324,7 +324,9 @@ async def create_product(db: AsyncSession, name: str, barcode: str | None,
         factory=factory or '',
         initial_stock=initial_stock,
         current_stock=initial_stock,
-        hidden_carton_ratio=hidden_carton_ratio,
+        # 配比只在「盲盒 + 有隐藏款」时才有意义（OCR M4）：否则入库即为永不生效
+        # 的休眠值，将来一旦打开开关会突然生效，属于隐蔽脏数据。
+        hidden_carton_ratio=hidden_carton_ratio if (is_blind_box and has_hidden_role) else None,
         is_blind_box=is_blind_box,
         # 非盲盒 SKU 不应带隐藏款标记：入库前归一，避免「有隐藏款但未启用盲盒」的脏状态
         has_hidden_role=bool(has_hidden_role) if is_blind_box else False,
@@ -403,6 +405,11 @@ def _apply_blind_box_fields(
         if not product.has_hidden_role:
             # 无隐藏款 → 配比不启用（保留配比会让 UI 与计算口径互相矛盾）
             product.hidden_carton_ratio = None
+    # 最终归一（OCR M5）：只提交配比、两个开关都未提交时，配比可能落到
+    # 「非盲盒 / 无隐藏款」的产品上——该状态下配比永远不生效，却会在以后
+    # 有人打开开关时突然变成有效值，属于隐蔽脏数据，一律清掉。
+    if not (product.is_blind_box and product.has_hidden_role):
+        product.hidden_carton_ratio = None
 
 
 async def update_product(db: AsyncSession, product_id: int, name: str | None,

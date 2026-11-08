@@ -83,7 +83,7 @@ import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import ProductCustomerSelect from './ProductCustomerSelect.vue'
 import ProductBlindBoxFields from './ProductBlindBoxFields.vue'
-import { useProductBlindBox } from '../composables/useProductBlindBox'
+import { HIDDEN_CARTON_RATIO_INVALID, isValidHiddenCartonRatio, useProductBlindBox } from '../composables/useProductBlindBox'
 
 defineProps<{
   factoryOptions: readonly string[]
@@ -161,8 +161,8 @@ async function handleAdd() {
   if (!trimmedName) return
   // 配比只在「盲盒 + 有隐藏款」时生效；其余情况一律不提交（避免脏数据）
   const hiddenCartonRatio = effectiveRatio()
-  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1 || hiddenCartonRatio > 1000000)) {
-    showToast('盲盒隐藏款装箱配比必须为正整数（不超过 1000000）', 'warning')
+  if (!isValidHiddenCartonRatio(hiddenCartonRatio)) {
+    showToast(HIDDEN_CARTON_RATIO_INVALID, 'warning')
     return
   }
   submitting.value = true
@@ -209,13 +209,6 @@ async function handleAdd() {
 }
 .pd-input-wrap {
   position: relative;
-}
-.pd-field-hint {
-  display: block;
-  margin-top: 6px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
 }
 .pd-input-icon {
   position: absolute;

@@ -96,7 +96,7 @@ import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import ProductCustomerSelect from './ProductCustomerSelect.vue'
 import ProductBlindBoxFields from './ProductBlindBoxFields.vue'
-import { useProductBlindBox } from '../composables/useProductBlindBox'
+import { HIDDEN_CARTON_RATIO_INVALID, isValidHiddenCartonRatio, useProductBlindBox } from '../composables/useProductBlindBox'
 import UiDialog from '@/components/ui/UiDialog.vue'
 import type { ProductCustomerRef } from '@/types'
 
@@ -151,8 +151,8 @@ const editForm = reactive({
   id: 0, name: '', barcode: '', price: 0, factory: '', image: '',
   customerIds: [] as number[],
 })
-/** 盲盒配置：打开时记录基线，配比未改动不提交（避免旧值覆盖别处刚改的配置） */
-const { blindBox, initial: blindBoxInitial, loadFrom, effectiveRatio } = useProductBlindBox()
+/** 盲盒配置：打开时记录基线，只有改动过的字段才提交（避免旧值覆盖别处刚改的配置） */
+const { blindBox, loadFrom, effectiveRatio, changedPayload } = useProductBlindBox()
 const editImageInputRef = ref<HTMLInputElement | null>(null)
 const editDropZoneRef = ref<HTMLElement | null>(null)
 const editDragOver = ref(false)
@@ -216,16 +216,15 @@ async function handleEditSave() {
   if (!editForm.name.trim()) { showToast('请输入产品名称', 'warning'); return }
   // 配比只在「盲盒 + 有隐藏款」时生效；其余情况按 null 处理（后端也会归一清空）
   const hiddenCartonRatio = effectiveRatio()
-  if (hiddenCartonRatio !== null && (!Number.isInteger(hiddenCartonRatio) || hiddenCartonRatio < 1 || hiddenCartonRatio > 1000000)) { showToast('盲盒隐藏款装箱配比必须为正整数（不超过 1000000）', 'warning'); return }
-  // 配比未改动不提交该字段（后端「未提交 = 不改动」）：避免旧值覆盖别处刚改的配置
+  if (!isValidHiddenCartonRatio(hiddenCartonRatio)) { showToast(HIDDEN_CARTON_RATIO_INVALID, 'warning'); return }
   editSubmitting.value = true
   try {
     await productApi.update(editForm.id, {
       name: editForm.name, barcode: editForm.barcode, price: editForm.price,
       factory: editForm.factory, image: editForm.image, customer_ids: editForm.customerIds,
-      is_blind_box: blindBox.isBlindBox,
-      has_hidden_role: blindBox.isBlindBox && blindBox.hasHiddenRole,
-      ...(hiddenCartonRatio !== blindBoxInitial.hiddenCartonRatio ? { hidden_carton_ratio: hiddenCartonRatio } : {}),
+      // 三个盲盒字段都只在改动时提交（后端「未提交 = 不改动」）：
+      // 无条件提交会把别处刚改的开关/配比回滚（OCR M3）
+      ...changedPayload(),
     })
     showToast('保存成功', 'success')
     editDialogVisible.value = false

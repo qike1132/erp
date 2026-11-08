@@ -48,6 +48,8 @@ import BomEditor from '@/views/product/components/BomEditor.vue'
 
 interface ExposedEditor {
   open: (p: { id: number; name: string }) => Promise<void>
+  /** 是否有未保存的 BOM 修改（关闭时据此弹「放弃修改」确认） */
+  bomDirty: boolean
 }
 
 let wrapper: VueWrapper | null = null
@@ -133,6 +135,22 @@ describe('BOM 角色隐藏款指定', () => {
 
     expect(badgeOf('角色B')).toBeNull()
     expect(toastMock).toHaveBeenCalledWith('已取消「角色B」的隐藏款标记', 'success')
+  })
+
+  it('右键指定隐藏款后 bomDirty 变为 true（关闭弹窗会先确认，不会静默丢弃）', async () => {
+    const w = await mountOpened()
+    const vm = w.vm as unknown as ExposedEditor
+    expect(vm.bomDirty).toBe(false)
+
+    await openMenu('角色A')
+    const item = Array.from(document.querySelectorAll<HTMLElement>('.bom-menu-item'))
+      .find((el) => (el.textContent || '').trim() === '指定为隐藏款')!
+    item.click()
+    await nextTick()
+
+    // 指定结果在保存前只是本地状态：必须计入「未保存修改」，
+    // 否则关闭 BOM 弹窗不弹确认、用户以为已保存（OCR M2）
+    expect(vm.bomDirty).toBe(true)
   })
 
   it('保存 BOM 时把 is_hidden 随角色负载一起提交（仅一个为 true）', async () => {

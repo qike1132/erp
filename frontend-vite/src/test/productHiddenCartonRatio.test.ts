@@ -188,7 +188,7 @@ describe('ProductBasicForm · 盲盒配置', () => {
 })
 
 describe('ProductEditDialog · 盲盒配置', () => {
-  it('回显盲盒与配比；未修改时保存不提交配比字段', async () => {
+  it('回显盲盒与配比；未修改时保存不提交任何盲盒字段（避免覆盖别处改动）', async () => {
     const wrapper = mountEditDialog()
     wrapper.vm.open(ROW_BLIND)
     await flushPromises()
@@ -201,9 +201,10 @@ describe('ProductEditDialog · 盲盒配置', () => {
     await wrapper.find('.bom-btn-save').trigger('click')
     await flushPromises()
 
+    // 后端「未提交 = 不改动」：三个字段都没改，一个都不发
     const payload = updateMock.mock.calls[0]![1]
-    expect(payload.is_blind_box).toBe(true)
-    expect(payload.has_hidden_role).toBe(true)
+    expect(payload.is_blind_box).toBeUndefined()
+    expect(payload.has_hidden_role).toBeUndefined()
     expect(payload.hidden_carton_ratio).toBeUndefined()
   })
 
@@ -245,7 +246,7 @@ describe('ProductEditDialog · 盲盒配置', () => {
     expect(payload.hidden_carton_ratio).toBeNull()
   })
 
-  it('非盲盒产品：不展示配比，保存提交 false/false 且不带配比', async () => {
+  it('非盲盒产品：不展示配比，未改动时保存不提交盲盒字段', async () => {
     const wrapper = mountEditDialog()
     wrapper.vm.open({
       id: 2, name: '普通公仔', barcode: '', price: 0, factory: '东莞', image: null,
@@ -259,8 +260,27 @@ describe('ProductEditDialog · 盲盒配置', () => {
     await flushPromises()
 
     const payload = updateMock.mock.calls[0]![1]
-    expect(payload.is_blind_box).toBe(false)
-    expect(payload.has_hidden_role).toBe(false)
+    expect(payload.is_blind_box).toBeUndefined()
+    expect(payload.has_hidden_role).toBeUndefined()
+    expect(payload.hidden_carton_ratio).toBeUndefined()
+  })
+
+  it('把普通产品勾成盲盒：只提交改动过的开关', async () => {
+    const wrapper = mountEditDialog()
+    wrapper.vm.open({
+      id: 3, name: '普通公仔2', barcode: '', price: 0, factory: '东莞', image: null,
+      customers: [],
+    })
+    await flushPromises()
+
+    await wrapper.find('input[name="edit-is-blind-box"]').setValue(true)
+    await wrapper.find('.bom-btn-save').trigger('click')
+    await flushPromises()
+
+    const payload = updateMock.mock.calls[0]![1]
+    expect(payload.is_blind_box).toBe(true)
+    // 「有隐藏款」未改动（false → false）不提交
+    expect(payload.has_hidden_role).toBeUndefined()
     expect(payload.hidden_carton_ratio).toBeUndefined()
   })
 

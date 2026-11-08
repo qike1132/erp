@@ -2527,7 +2527,7 @@ export interface RoleItem {
   role_key?: string | null
   role_name?: string
   name?: string | null
-  is_hidden?: boolean
+  is_hidden?: boolean | null
 }
 
 export interface RoleListResponse {

@@ -34307,9 +34307,15 @@
             "title": "Name"
           },
           "is_hidden": {
-            "type": "boolean",
-            "title": "Is Hidden",
-            "default": false
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Hidden"
           }
         },
         "additionalProperties": true,

@@ -157,7 +157,11 @@ export function useProductListActions(
       return [key, norm(scope.fabric), norm(scope.filling), norm(scope.accessory)]
     })
     return JSON.stringify({
-      roles: bomRoles.value.map(r => [r.id ?? null, r.role_key ?? null, r.name]),
+      // is_hidden 必须进签名：右键「指定/取消隐藏款」只改本地角色对象，
+      // 漏了它 bomDirty 恒为 false，关闭弹窗不会确认、指定结果静默丢失（OCR M2）。
+      roles: bomRoles.value.map(r => [
+        r.id ?? null, r.role_key ?? null, r.name, r.is_hidden === true,
+      ]),
       defaultName: defaultScopeName.value,
       scopes,
     })
@@ -223,7 +227,10 @@ export function useProductListActions(
     try {
       const res = (await productApi.loadBom(productId)) as {
         success: boolean
-        product?: { roles?: { id: number; name: string }[]; default_bom_label?: string | null }
+        product?: {
+          roles?: { id: number; name: string; is_hidden?: boolean }[]
+          default_bom_label?: string | null
+        }
         materials?: BomMaterialRecord[]
       }
       if (seq !== bomLoadSeq) return // 已被更新的加载取代，丢弃旧响应
@@ -237,7 +244,7 @@ export function useProductListActions(
         id: r.id,
         name: r.name,
         // 隐藏款标记随列表返回：页签徽标与右键菜单状态都以此为准
-        is_hidden: (r as { is_hidden?: boolean }).is_hidden === true,
+        is_hidden: r.is_hidden === true,
       }))
       defaultScopeName.value = res.product?.default_bom_label?.trim() || '默认BOM'
       const materialsList = res.materials || []

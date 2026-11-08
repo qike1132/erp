@@ -91,3 +91,46 @@ class TestHiddenRolePersistence:
         ])
         assert result.hidden_role_id == 101
         assert result.temp_role_map == {'rk-1': 101}
+
+
+class TestEndpointSerializationKeepsLegacySemantics:
+    """端点序列化路径的回归（OCR H1）。
+
+    ``api_save_product_bom`` 用 ``BomSaveRequest.model_dump()`` 交给解析器，
+    Pydantic v2 会把**默认值**一并输出——``is_hidden`` 若是 ``bool = False``，
+    每个角色字典都带 ``is_hidden: False``，「客户端是否提交」就永远无法表达，
+    旧客户端一保存 BOM 就把已指定的隐藏款清掉。因此该字段必须是三态
+    （None = 未提交），且判定口径为「非 None」而非「键存在」。
+    """
+
+    def test_omitted_field_dumps_as_none_not_false(self):
+        from fastapi_app.schemas.purchase_center import BomSaveRequest
+
+        dumped = BomSaveRequest(roles=[{'id': 1, 'role_name': '角色A'}]).model_dump()
+        # 键存在（model_dump 输出默认值）但值为 None —— 语义是「未提交」
+        assert 'is_hidden' in dumped['roles'][0]
+        assert dumped['roles'][0]['is_hidden'] is None
+
+    @pytest.mark.asyncio
+    async def test_model_dump_roundtrip_preserves_existing_flag(self):
+        """旧客户端经端点（model_dump）保存：已指定的隐藏款必须保留。"""
+        from fastapi_app.schemas.purchase_center import BomSaveRequest
+
+        a = _role(1, '角色A', hidden=True)
+        payload = BomSaveRequest(roles=[{'id': 1, 'role_name': '角色A'}]).model_dump()['roles']
+        result = await _resolve([a], payload)
+        assert a.is_hidden is True
+        assert result.hidden_role_id == 1
+
+    @pytest.mark.asyncio
+    async def test_explicit_false_still_clears(self):
+        """显式 false 仍然是「取消隐藏款」，不能被三态放宽成「不改动」。"""
+        from fastapi_app.schemas.purchase_center import BomSaveRequest
+
+        a = _role(1, '角色A', hidden=True)
+        payload = BomSaveRequest(roles=[
+            {'id': 1, 'role_name': '角色A', 'is_hidden': False},
+        ]).model_dump()['roles']
+        result = await _resolve([a], payload)
+        assert a.is_hidden is False
+        assert result.hidden_role_id is None

@@ -117,9 +117,14 @@ async def resolve_role_rows(
     role_ids: list[int] = []
     temp_role_map: dict[str, int] = {}
     logs: list[dict] = []
-    # 隐藏款归一化只在该字段**出现在 payload 里**时执行：旧客户端/其他调用方
+    # 隐藏款归一化只在该字段**真正被提交**时执行：旧客户端/其他调用方
     # 不传 is_hidden 时不得清掉已保存的标记。
-    hidden_field_submitted = any('is_hidden' in (item or {}) for item in payload_roles or [])
+    # 判定口径必须是「非 None」而不是「键存在」：RoleItem.is_hidden 是三态，
+    # 端点用 model_dump() 序列化后键恒在（未提交时为 None），用键存在判断会让
+    # 旧客户端的保存也走归一化分支、清掉已保存的标记（OCR 评审 H1）。
+    hidden_field_submitted = any(
+        (item or {}).get('is_hidden') is not None for item in payload_roles or []
+    )
     resolved_hidden_candidates: list[tuple[bool, int]] = []
 
     for p in prepared:

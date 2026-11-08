@@ -558,6 +558,56 @@ class TestProductBlindBoxMasterData:
         assert product.has_hidden_role is False
         assert product.hidden_carton_ratio is None
 
+    @pytest.mark.asyncio
+    async def test_ratio_only_update_on_disabled_product_is_cleared(self, monkeypatch):
+        """只提交配比、开关都未提交：非「盲盒 + 有隐藏款」时配比不得留存（OCR M5）。
+
+        否则会存下一个永不生效的休眠值，将来有人打开开关时突然变成有效配置。
+        """
+        product = MagicMock()
+        product.name = '普通公仔'
+        product.initial_stock = 0
+        product.current_stock = 0
+        product.hidden_carton_ratio = None
+        product.is_blind_box = False
+        product.has_hidden_role = False
+        product.to_dict.return_value = {'id': 2}
+        db = MagicMock()
+        db.info = {}
+        db.flush = AsyncMock()
+        db.refresh = AsyncMock()
+        monkeypatch.setattr(
+            product_service, 'get_product_for_update', AsyncMock(return_value=product),
+        )
+        monkeypatch.setattr(product_service.cache_mgr, 'invalidate', AsyncMock())
+
+        await product_service.update_product(
+            db, 2, name=None, barcode=None, image=None, initial_stock=None,
+            hidden_carton_ratio=72, hidden_carton_ratio_provided=True,
+        )
+        assert product.hidden_carton_ratio is None
+
+    @pytest.mark.asyncio
+    async def test_create_drops_ratio_when_not_enabled(self, monkeypatch):
+        """新建时非「盲盒 + 有隐藏款」不得把配比入库（OCR M4）。"""
+        db = MagicMock()
+        db.info = {}
+        db.flush = AsyncMock()
+        db.refresh = AsyncMock()
+        db.add = MagicMock()
+        empty = MagicMock()
+        empty.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=empty)
+        monkeypatch.setattr(product_service.cache_mgr, 'invalidate', AsyncMock())
+
+        await product_service.create_product(
+            db, name='普通公仔', barcode=None, image=None, initial_stock=0,
+            hidden_carton_ratio=72, is_blind_box=False, has_hidden_role=False,
+        )
+        created = db.add.call_args.args[0]
+        assert created.hidden_carton_ratio is None
+        assert created.is_blind_box is False and created.has_hidden_role is False
+
 
 class _Tx:
     async def __aenter__(self):
