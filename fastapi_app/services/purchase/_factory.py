@@ -14,7 +14,7 @@ from fastapi_app.services.purchase._list import _is_filling_category
 from fastapi_app.services.purchase_order_sku import merge_sku_lines
 from fastapi_app.shared_models import Product, ProductRole
 from fastapi_app.shared_models.order import Order
-from fastapi_app.utils.scope_quantities import allocate_scope_quantities
+from fastapi_app.utils.scope_quantities import HIDDEN_ROLE_NAME, allocate_scope_quantities
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +112,32 @@ def _factory_sku_allocation(ctx_entry: dict, sku_qty: float) -> dict | None:
             sku_qty, exc_info=True,
         )
         return None
+
+def _record_sku_role_quantities(group, sku_name, ctx_entry, allocation, bom_role_ids) -> None:
+    """把该 SKU 的「按角色数量」记账到分组，供前端把「订单数量」列按角色段拆格。
+
+    与物料行的 ``allocation`` **同一次调用产出**（见 ``_accumulate_factory_sku_materials``），
+    保证「角色数量」与「数量」列的推算口径一致——工厂据此核对「每个角色做多少个」。
+    只记 ``bom_role_ids``（BOM 物料行实际出现的角色，含 ``None``=默认 BOM 行）：
+    屏幕按物料段显示，配了角色但无物料行的角色没有段、无从展示数量；``allocation``
+    恒含 ``None: total``，默认 BOM 行不存在时同样跳过。排序与物料行一致
+    （默认 BOM 最前，其后 role_id 升序）。
+    """
+    role_names = ctx_entry.get('roles') or {}
+    hidden_rid = ctx_entry.get('hidden_role_id')
+    entries = []
+    for rid in sorted(allocation, key=_role_sort_key):
+        if rid not in bom_role_ids:
+            continue
+        name = role_names.get(rid) or ''
+        entries.append({
+            'role_id': rid,
+            'role_name': name,
+            'quantity': allocation[rid],
+            'is_hidden': rid is not None and (rid == hidden_rid or name == HIDDEN_ROLE_NAME),
+        })
+    group.setdefault('_sku_role_quantities', {})[sku_name] = entries
+
 
 def _resolve_factory_source_info(po, cust_order_map, cust, order_qty):
     sids = _parse_source_order_ids(po)
@@ -545,6 +571,14 @@ def _accumulate_factory_sku_materials(
             emitted_configured.add(sku_name)
             sku_qty = merged_configured_qty.get(sku_name, float(sku.get('order_qty') or 0))
             allocation = _factory_sku_allocation(ctx_entry, sku_qty)
+            if allocation is not None:
+                bom_role_ids = {
+                    bom.get('role_id') for bom in (bom_data.get(sku_pid) or [])
+                    if not _is_filling_category(bom.get('category'))
+                }
+                _record_sku_role_quantities(
+                    group, sku_name, ctx_entry, allocation, bom_role_ids,
+                )
         else:
             sku_qty = float(sku.get('order_qty') or 0)
             allocation = None
@@ -794,6 +828,12 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
                 {
                     **line,
                     'materials': (group.get('_sku_materials') or {}).get(
+                        _norm_sku_name(line.get('product_name'))
+                    ) or [],
+                    # 按角色数量（与 materials 的 allocation 同源）：前端把「订单数量」列
+                    # 按角色段拆格用；空数组 = 无拆分数据（非盲盒 / 推算回退），前端保持
+                    # SKU 级大格，零行为变化。
+                    'role_quantities': (group.get('_sku_role_quantities') or {}).get(
                         _norm_sku_name(line.get('product_name'))
                     ) or [],
                 }

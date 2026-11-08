@@ -16,7 +16,10 @@
  *   R4 屏幕与打印的每一行有效列宽都恰好 12（计入 colspan、跳过被 rowspan
  *      覆盖的列）——任何 rowspan/colspan 算错都会在这里现形；
  *   R5 多角色共用同一物料：损耗率照常显示/编辑（一条明细一个率），数量编辑锁定
- *      并说明原因（明细是合并总量，角色行只显示分配量）。
+ *      并说明原因（明细是合并总量，角色行只显示分配量）；
+ *   R6/R7 「订单数量」列按角色段拆格（role_quantities，与物料分配同源）：各角色
+ *      数量格 rowspan=角色段行数、SKU 总量挪名称格副行（合计 N）、隐藏款带标记；
+ *      每行有效列宽仍恒 12（数量列从块级 rowspan 变段级后的核心对齐防线）。
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -88,6 +91,30 @@ function roleGroup(): FactoryGroup {
         ],
       },
     ],
+  }
+}
+
+/**
+ * 带按角色数量（role_quantities）的夹具：R6/R7 验证「订单数量」列按角色段拆格。
+ * 角色A（常规，60）+ 角色B（隐藏款，40）；物料行按 role_display 绑 role_id，
+ * 与后端「materials.role_id ↔ role_quantities.role_id 同源匹配」的口径一致。
+ */
+function roleQtyGroup(): FactoryGroup {
+  const base = roleGroup()
+  const sku = base.skus![0]!
+  return {
+    ...base,
+    skus: [{
+      ...sku,
+      role_quantities: [
+        { role_id: 1, role_name: '角色A', quantity: 60, is_hidden: false },
+        { role_id: 2, role_name: '角色B', quantity: 40, is_hidden: true },
+      ],
+      materials: (sku.materials || []).map((m) => ({
+        ...m,
+        role_id: m.role_display === '角色A' ? 1 : 2,
+      })),
+    }],
   }
 }
 
@@ -238,5 +265,49 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     }
     expect(qtyTexts).toEqual(['3', '2'])
     wrapper.unmount()
+  })
+
+  it('R6 订单数量按角色段拆格：各角色数量 + 名称格合计副行 + 隐藏款标记；列宽恒 12', () => {
+    const wrapper = mountModal(roleQtyGroup())
+    const rows = wrapper.findAll('.smf-scroll tbody tr')
+    expect(rows).toHaveLength(5)
+
+    // 首行：名称格（SKU 名 + 合计副行）+ 角色A 数量格（60.0，rowspan=2=角色段行数）+ 备品大格
+    const r0 = rows[0]!.findAll('td')
+    expect(r0[1]!.text()).toContain('合计 100.0')
+    expect(r0[2]!.text()).toBe('60.0')
+    expect(r0[2]!.attributes('rowspan')).toBe('2')
+
+    // 第 2 行（角色A 段内）：数量格被段 rowspan 覆盖（无订单数量格）
+    const r1 = rows[1]!.findAll('td')
+    expect(r1.map((td) => td.text()).slice(0, 2)).toEqual(['身体', '松紧带'])
+
+    // 第 3 行（角色B 段首）：数量格 40.0 + （隐藏款）标记，rowspan=3
+    const r2 = rows[2]!.findAll('td')
+    expect(r2[0]!.text()).toContain('40.0')
+    expect(r2[0]!.text()).toContain('（隐藏款）')
+    expect(r2[0]!.attributes('rowspan')).toBe('3')
+    expect(r2[1]!.text()).toBe('角色B')
+
+    // 对齐护栏：每行有效列宽恰好 12（数量列从块级 rowspan 变段级后的核心回归防线）
+    const trs = Array.from(
+      wrapper.element.querySelectorAll('.smf-scroll tbody tr'),
+    ) as HTMLTableRowElement[]
+    const widths = rowWidthsOf(trs)
+    expect(widths).toHaveLength(5)
+    expect(widths.every((w) => w === 12)).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('R7 打印/导出与屏幕同一套拆分：列宽恒 12，合计与隐藏款标记齐全', () => {
+    const html = buildFactoryHtml(dataOf(roleQtyGroup()), 0)
+    const doc = new DOMParser().parseFromString(`<table><tbody>${html}</tbody></table>`, 'text/html')
+    const widths = rowWidthsOf(Array.from(doc.querySelectorAll('tbody tr')) as HTMLTableRowElement[])
+    expect(widths.length).toBeGreaterThan(0)
+    expect(widths.every((w) => w === 12)).toBe(true)
+    expect(html).toContain('合计')
+    expect(html).toContain('（隐藏款）')
+    expect(html).toContain('60.0')
+    expect(html).toContain('40.0')
   })
 })

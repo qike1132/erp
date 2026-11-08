@@ -144,6 +144,10 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
               coord: { si, fi },
               itemIds: fabric.item_ids || (fabric.item_id ? [fabric.item_id] : []),
               readonlyReason: '',
+              // 回退模式（订单级单块）没有 role_quantities：订单数量保持大格
+              hasRoleQtySplit: false,
+              roleQuantity: null,
+              roleIsHidden: false,
               noBom: false,
             },
           })

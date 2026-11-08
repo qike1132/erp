@@ -153,10 +153,23 @@ async def test_h1_configured_sku_projection_matches_stored(db):
     } == {f'{name}布': name for name in EXPECTED_BY_ROLE}
     # 多来源行展示数量合并为订单总数量
     assert group['skus'][0]['order_qty'] == 10000
+    # 「按角色数量」（2026-11-08 需求）：与物料分配同源——常规均分 + 隐藏款 ceil(N/P)，
+    # 前端把「订单数量」列按角色段拆格；排序默认 BOM（无）→ role_id 升序
+    role_quantities = group['skus'][0]['role_quantities']
+    assert {r['role_name']: r['quantity'] for r in role_quantities} == EXPECTED_BY_ROLE
+    assert [r['role_id'] for r in role_quantities] == sorted(r['role_id'] for r in role_quantities)
+    # 隐藏款标记：右键指定的角色G（名字不是「隐藏款」）也必须标出
+    assert {r['role_name']: r['is_hidden'] for r in role_quantities} == {
+        **dict.fromkeys(REGULAR_NAMES, False), HIDDEN_NAME: True,
+    }
 
 
 async def test_h3_invalid_role_structure_falls_back_without_500(db):
-    """H3：配了 P 但角色不足 6+1 —— 推算回退全量（页面不炸，落库真值不受影响）。"""
+    """H3：配了 P 但角色不足 6+1 —— 推算回退全量（页面不炸，落库真值不受影响）。
+
+    回退全量时**不产出** role_quantities（前端「订单数量」列保持 SKU 级大格），
+    与物料行的回退口径一致。
+    """
     po_id = await _seed_configured_sku(
         db, role_names=['角色A', '角色B', '角色C', '角色D', '角色E'],
     )
@@ -167,3 +180,4 @@ async def test_h3_invalid_role_structure_falls_back_without_500(db):
     # 回退全量：每个已配角色的布料 = 1（单件用量）× 10000（合并数量）
     assert set(projected) == {f'角色{chr(ord("A") + i)}布' for i in range(5)}
     assert all(qty == 10000 for qty in projected.values())
+    assert group['skus'][0]['role_quantities'] == []

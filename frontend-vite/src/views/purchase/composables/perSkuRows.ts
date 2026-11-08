@@ -40,6 +40,8 @@ export interface SkuMaterial {
    * 用 `/` 并列，如 `角色A/角色B`；默认 BOM 或无角色为空串）。
    */
   role_display?: string
+  /** 该行所属角色 id（后端聚合键成员，role_quantities 按它匹配；默认 BOM/旧后端为空） */
+  role_id?: number | null
 }
 
 /**
@@ -179,6 +181,17 @@ export interface PerSkuRow {
    *    各角色共用；生产反馈 2026-11-08：「在心里·肚皮」的损耗率显示 — 即此误伤）。
    */
   readonlyReason: string
+  /**
+   * 「订单数量」列按角色段拆分（2026-11-08 需求）：true = 该 SKU 带后端
+   * role_quantities（与物料分配同源），「订单数量」列在每个角色段渲染该角色的
+   * 数量格（rowspan=roleRowSpan），SKU 总量挪到「产品名称」格副行显示；
+   * false（非盲盒 / 旧数据 / 无 BOM 占位行）= 保持 SKU 级大格，零行为变化。
+   */
+  hasRoleQtySplit: boolean
+  /** 该角色段的数量（hasRoleQtySplit 时恒非 null；null = 不拆分走大格） */
+  roleQuantity: number | null
+  /** 该角色是否隐藏款（数量格里加标记，便于工厂区分常规/随箱配比） */
+  roleIsHidden: boolean
   /** 该 SKU 无 BOM 明细时的占位行（保留块结构，不隐藏该 SKU） */
   noBom: boolean
 }
@@ -265,6 +278,10 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         coord: null,
         itemIds: [],
         readonlyReason: '',
+        // 占位行没有物料段，无从按角色拆分数量——保持 SKU 级大格（总量在数量格里）
+        hasRoleQtySplit: false,
+        roleQuantity: null,
+        roleIsHidden: false,
         noBom: true,
       })
       return
@@ -298,6 +315,29 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         k = l
       }
       i = j
+    }
+
+    // 「订单数量」按角色段拆分（2026-11-08 需求）：role_quantities 与物料分配
+    // 同源（后端同一次 allocate 产出）。键用 role_id（null=默认 BOM 段）；
+    // 匹配不到时兜底 0（同源下不会发生，宁可显示 0 也不能让该段缺数量格——缺格
+    // 会让后续整行错位）。
+    const roleQtyList = sku.role_quantities || []
+    const hasRoleQtySplit = roleQtyList.length > 0
+    const roleQtyMap = new Map<string, { qty: number; hidden: boolean }>()
+    roleQtyList.forEach((r) => {
+      roleQtyMap.set(String(r.role_id ?? 'null'), {
+        qty: parseFloat(String(r.quantity)) || 0,
+        hidden: !!r.is_hidden,
+      })
+    })
+    const roleQtyOf = (rid: number | null | undefined): number | null => {
+      if (!hasRoleQtySplit) return null
+      const hit = roleQtyMap.get(String(rid ?? 'null'))
+      return hit ? hit.qty : 0
+    }
+    const roleHiddenOf = (rid: number | null | undefined): boolean => {
+      if (!hasRoleQtySplit) return false
+      return roleQtyMap.get(String(rid ?? 'null'))?.hidden || false
     }
 
     materials.forEach((m, i) => {
@@ -334,6 +374,9 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         readonlyReason: sharedInSku
           ? '该物料被多个角色共用采购明细中的同一行，此处按角色分行显示分配量；如需调整总量请在采购明细中修改'
           : '',
+        hasRoleQtySplit,
+        roleQuantity: roleQtyOf(m.role_id),
+        roleIsHidden: roleHiddenOf(m.role_id),
         noBom: false,
       })
     })

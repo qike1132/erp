@@ -156,9 +156,30 @@ function buildPerSkuGroupHtml(
           tableHtml += `<td rowspan="${perSkuRows.length}" style="font-weight:bold;">${escapeHtml(group.customer_name)}</td>`
         }
         const line = row.cellLines[0]
-        tableHtml += `<td rowspan="${block.length}">${escapeHtml(line?.name || '')}</td>`
-        tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.qty ?? 0))}</td>`
-        tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
+        // 名称格：按角色拆分数量时，SKU 总量挪到名称格副行（合计 N）——总量信息不丢
+        const totalSub = row.hasRoleQtySplit
+          ? `<div style="font-size:10px;color:#8e8e93;">合计 ${escapeHtml(fmtQty(line?.qty ?? 0))}</div>`
+          : ''
+        tableHtml += `<td rowspan="${block.length}">${escapeHtml(line?.name || '')}${totalSub}</td>`
+        if (row.hasRoleQtySplit) {
+          // 按角色拆分：首行必为首个角色段段首——先渲染该角色段数量格（rowspan=段行数，
+          // 隐藏款带标记），再渲染备品大格。列序 = 名称 | 订单数量 | 备品数量，不可乱序。
+          const hiddenMark = row.roleIsHidden
+            ? '<div style="font-size:10px;color:#8e8e93;">（隐藏款）</div>'
+            : ''
+          tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}${hiddenMark}</td>`
+          tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
+        } else {
+          tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.qty ?? 0))}</td>`
+          tableHtml += `<td rowspan="${block.length}">${escapeHtml(fmtQty(line?.spare ?? 0))}</td>`
+        }
+      } else if (row.hasRoleQtySplit && row.isFirstRoleRow) {
+        // 后续角色段首行：名称/备品被块级 rowspan 覆盖，只渲染该角色段的数量格
+        // （列序仍在角色格之前；rowspan=roleRowSpan 与屏幕同一套行模型）
+        const hiddenMark = row.roleIsHidden
+          ? '<div style="font-size:10px;color:#8e8e93;">（隐藏款）</div>'
+          : ''
+        tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleQuantity ?? 0))}${hiddenMark}</td>`
       }
       if (row.noBom) {
         // 占位行：角色名称 + 供应商 + 之后 6 列 = 8 列（左侧三列已在上方补齐）
@@ -368,7 +389,21 @@ export interface SkuLine {
     supplier_name: string; material_name: string; part_name?: string; part_display?: string;
     /** 「角色名称」列展示文本（多角色共用同一物料时并列，如 `角色A/角色B`） */
     role_display?: string;
+    /** 该行的角色 id（后端聚合键成员；默认 BOM / 旧数据为空） */
+    role_id?: number | null;
     specification: string; unit: string; quantity: number;
+  }[]
+  /**
+   * 按角色数量（2026-11-08 需求）：与 materials 的分配**同源**（同一次
+   * allocate_scope_quantities 产出），「订单数量」列按角色段拆格用。
+   * 空数组 = 无拆分数据（非盲盒 / 推算回退）→ 前端保持 SKU 级大格。
+   */
+  role_quantities?: {
+    /** 角色 id；null = 默认 BOM 段（按全量口径） */
+    role_id: number | null
+    role_name: string
+    quantity: number
+    is_hidden?: boolean
   }[]
 }
 

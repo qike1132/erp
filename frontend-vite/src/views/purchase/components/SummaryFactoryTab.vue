@@ -96,16 +96,31 @@
               </td>
 
               <!-- 产品名称 / 订单数量 / 备品数量：该 SKU 块首行，rowspan = 该块行数。
-                 cellLines 在 per-SKU 模式恒 1 行；回退模式为逐 SKU 名堆叠（与改动前逐字一致）。 -->
+                 cellLines 在 per-SKU 模式恒 1 行；回退模式为逐 SKU 名堆叠（与改动前逐字一致）。
+                 「订单数量」列按角色段拆分时：SKU 总量挪到名称格副行（合计 N），
+                 数量列在每个角色段渲染该角色的数量（2026-11-08 需求：盲盒按角色核对生产量）。 -->
               <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
                 <div v-for="(line, li) in item.row.cellLines" :key="`n-${li}`"
                      :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
                 >{{ line.name }}</div>
+                <div v-if="item.row.hasRoleQtySplit" class="sm-sku-total-sub">合计 {{ formatQty(item.row.cellLines[0]?.qty) }}</div>
               </td>
-              <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
+              <!-- 订单数量：无角色拆分 → SKU 级大格（原样）；有拆分 → 角色段格
+                   （rowspan=roleRowSpan，与角色格同段；隐藏款带标记）。段内行无格（被覆盖）。 -->
+              <td
+                v-if="item.row.isFirstSkuRow && !item.row.hasRoleQtySplit"
+                :rowspan="item.row.skuRowSpan"
+              >
                 <div v-for="(line, li) in item.row.cellLines" :key="`q-${li}`"
                      :class="['sm-sku-line', { 'sm-sku-line--total': line.isTotal }]"
                 >{{ formatQty(line.qty) }}</div>
+              </td>
+              <td
+                v-else-if="item.row.isFirstRoleRow && item.row.roleQuantity != null"
+                :rowspan="item.row.roleRowSpan"
+              >
+                <div>{{ formatQty(item.row.roleQuantity) }}</div>
+                <div v-if="item.row.roleIsHidden" class="sm-sku-total-sub">（隐藏款）</div>
               </td>
               <td v-if="item.row.isFirstSkuRow" :rowspan="item.row.skuRowSpan">
                 <div v-for="(line, li) in item.row.cellLines" :key="`sp-${li}`"
@@ -261,5 +276,11 @@ const {
 }
 .sm-sku-line--total {
   font-weight: bold;
+}
+/* 名称格的「合计 N」副行 / 角色数量格的「（隐藏款）」标记：小字弱化，不抢主数据 */
+.sm-sku-total-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 </style>
