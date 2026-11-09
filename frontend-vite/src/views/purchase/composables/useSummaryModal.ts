@@ -405,10 +405,20 @@ function buildSupplierHtml(groups: { supplierName: string; materials: MaterialIt
       tableHtml += `<td>${escapeHtml(m.specification || '')}</td>`
       tableHtml += `<td>${escapeHtml(qtyDisplayText(m.total_quantity))}</td>`
       tableHtml += `<td>${escapeHtml(m.unit || '')}</td>`
+      tableHtml += `<td>${supplierOrderBreakdownHtml(m)}</td>`
       tableHtml += '</tr>'
     })
   })
   return tableHtml
+}
+
+/** 打印预览「来源订单」格：逐单「单号×数量」，无明细显示 —。 */
+function supplierOrderBreakdownHtml(m: MaterialItem): string {
+  const orders = m.orders || []
+  if (orders.length === 0) return '—'
+  return orders
+    .map((o) => `${escapeHtml(o.order_no)}×${escapeHtml(qtyDisplayText(o.quantity))}`)
+    .join('<br>')
 }
 
 function downloadAsXls(html: string, filename: string) {
@@ -573,6 +583,11 @@ export interface MaterialItem {
   total_quantity: number
   unit?: string
   supplier_name?: string
+  /**
+   * 来源订单逐单数量（原始口径，跨单合并时每张采购单一条）。
+   * 后端未返回（旧版本）时为空 → 页面「来源订单」列显示 —。
+   */
+  orders?: { order_no: string; quantity: number }[] | null
 }
 
 /** 供应商采购汇总响应（/purchase/supplier-summary） */
@@ -1295,7 +1310,7 @@ export function useSummaryModal() {
     const tableHtml = buildSupplierHtml(supplierGroups.value)
     printHtml(
       '供应商采购订单汇总',
-      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th><th>单位</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
+      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th><th>单位</th><th>来源订单</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
       SUMMARY_PRINT_STYLE,
     )
   }

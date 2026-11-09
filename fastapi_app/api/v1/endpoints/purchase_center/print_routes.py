@@ -101,6 +101,18 @@ def rebuild_supplier_groups_from_page(supplier_groups: list[dict], rows) -> list
     source_by_supplier = {
         _normalize_supplier_name(group.get('supplier_name')): group for group in supplier_groups
     }
+    # 来源订单明细按 (供应商, 物料, 规格, 单位) 从原分组继承：
+    # 页面行只带展示数量，逐单贡献量只有数据库分组里有。
+    source_items = {
+        (
+            _normalize_supplier_name(group.get('supplier_name')),
+            item.get('material_name'),
+            item.get('specification') or '',
+            item.get('unit') or '',
+        ): item
+        for group in supplier_groups
+        for item in (group.get('items') or [])
+    }
     supplier_order: list[str] = []
     items_by_supplier: dict[str, list[dict]] = {}
     for row in rows:
@@ -108,12 +120,19 @@ def rebuild_supplier_groups_from_page(supplier_groups: list[dict], rows) -> list
         if supplier_name not in items_by_supplier:
             items_by_supplier[supplier_name] = []
             supplier_order.append(supplier_name)
-        items_by_supplier[supplier_name].append({
+        source_item = source_items.get((
+            supplier_name, row.material_name, row.specification or '', row.unit or '',
+        )) or {}
+        item = {
             'material_name': row.material_name,
             'specification': row.specification or '',
             'unit': row.unit or '',
             'quantity': row.quantity,
-        })
+        }
+        # 只在确有明细时附加，保持旧结构的逐字兼容（页面行在库里找不到对应物料）
+        if source_item.get('order_breakdown'):
+            item['order_breakdown'] = source_item['order_breakdown']
+        items_by_supplier[supplier_name].append(item)
     rebuilt = []
     for supplier_name in supplier_order:
         source = source_by_supplier.get(supplier_name) or {}

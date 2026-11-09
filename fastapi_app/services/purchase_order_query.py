@@ -213,21 +213,11 @@ async def get_supplier_order_summary(db: AsyncSession, order_ids: list | None = 
     return {'materials': materials, 'order_count': len(orders)}
 
 
-async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
-    """按供应商归并采购订单明细，供「供应商采购订单汇总」Excel 导出使用。
+def _aggregate_supplier_groups(orders) -> tuple[dict[str, dict], dict[str, dict]]:
+    """按 (供应商, 物料, 规格, 单位) 归并明细，并累计逐单贡献量。
 
-    归并口径（与历史实现一致）：以**明细级** supplier_name（回退订单级）为键分组，
-    同一供应商下「物料名称 + 规格 + 单位」相同的明细合并数量、跨订单累加；
-    供应商联系信息优先取 Supplier 主数据，缺失时回退采购订单冗余字段。
-
-    ``orders`` 必须已预加载 ``items``（见 get_purchase_orders_with_items）。
-
-    Returns:
-        list[dict]: 每个供应商一项，含 supplier_name / items / orders /
-            order_count / contact_person / phone / address；每个 item 含
-            material_name / specification / unit / quantity / order_count。
-            （形状必须与 ``schemas.purchase_center.SupplierSummary`` 一致，
-            否则响应模型校验会 500 —— 2026-10-30 审计 A-M2。）
+    返回 ``(groups, redundant)``：``groups`` 按供应商名分组，``redundant`` 存
+    采购订单上的联系人冗余字段（Supplier 主数据缺失时回退）。
     """
     groups: dict[str, dict] = {}
     redundant: dict[str, dict] = {}
@@ -252,11 +242,38 @@ async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
                     'unit': item.unit or '',
                     'quantity': float(item.quantity or 0),
                     'orders': {order.order_no},
+                    # 逐单贡献量：同一张单内同物料多条明细按单号合并
+                    'order_quantities': {order.order_no: float(item.quantity or 0)},
                 }
             else:
                 entry['quantity'] += float(item.quantity or 0)
                 entry['orders'].add(order.order_no)
+                entry['order_quantities'][order.order_no] = (
+                    entry['order_quantities'].get(order.order_no, 0.0)
+                    + float(item.quantity or 0)
+                )
             group['orders'].add(order.order_no)
+    return groups, redundant
+
+
+async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
+    """按供应商归并采购订单明细，供「供应商采购订单汇总」Excel 导出使用。
+
+    归并口径（与历史实现一致）：以**明细级** supplier_name（回退订单级）为键分组，
+    同一供应商下「物料名称 + 规格 + 单位」相同的明细合并数量、跨订单累加；
+    供应商联系信息优先取 Supplier 主数据，缺失时回退采购订单冗余字段。
+
+    ``orders`` 必须已预加载 ``items``（见 get_purchase_orders_with_items）。
+
+    Returns:
+        list[dict]: 每个供应商一项，含 supplier_name / items / orders /
+            order_count / contact_person / phone / address；每个 item 含
+            material_name / specification / unit / quantity / order_count /
+            order_breakdown（逐单 ``{order_no, quantity}``，同单多明细已合并）。
+            （形状必须与 ``schemas.purchase_center.SupplierSummary`` 一致，
+            否则响应模型校验会 500 —— 2026-10-30 审计 A-M2。）
+    """
+    groups, redundant = _aggregate_supplier_groups(orders)
 
     supplier_names = [name for name in groups if name != '未指定供应商']
     supplier_map = {}
@@ -282,8 +299,13 @@ async def build_supplier_export_groups(db: AsyncSession, orders: list) -> list:
             # 汇总打印/供应商汇总端点需要 items+orders+order_count；
             # 此前只返回 items，导致 print 路径 KeyError、响应模型校验 500（A-M2）。
             'items': [
-                {**{k: v for k, v in item.items() if k != 'orders'},
-                 'order_count': len(item['orders'])}
+                {**{k: v for k, v in item.items() if k not in ('orders', 'order_quantities')},
+                 'order_count': len(item['orders']),
+                 # 来源订单逐单明细（导出「备注」/ 打印「关联订单」列）
+                 'order_breakdown': [
+                     {'order_no': order_no, 'quantity': quantity}
+                     for order_no, quantity in item['order_quantities'].items()
+                 ]}
                 for item in group['items'].values()
             ],
             'orders': sorted(group['orders']),

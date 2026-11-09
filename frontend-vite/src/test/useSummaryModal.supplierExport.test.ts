@@ -18,8 +18,15 @@ vi.mock('@/api', () => ({
   },
 }))
 
+// 打印预览：捕获生成的 HTML，不真的开窗口
+vi.mock('@/utils/print', () => ({
+  escapeHtml: (v: string) => v,
+  printHtml: vi.fn(),
+}))
+
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import { purchaseApi } from '@/api'
+import { printHtml } from '@/utils/print'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 const FACTORY: FactorySummaryData = {
@@ -43,7 +50,13 @@ const FACTORY: FactorySummaryData = {
 const SUPPLIER: SupplierSummaryData = {
   success: true,
   materials: [
-    { material_name: '布料A', specification: 'S1', total_quantity: 20, unit: '米', supplier_name: '供应商1' },
+    {
+      material_name: '布料A', specification: 'S1', total_quantity: 20, unit: '米', supplier_name: '供应商1',
+      orders: [
+        { order_no: 'PO-20261108-0001', quantity: 12 },
+        { order_no: 'PO-20261108-0005', quantity: 8 },
+      ],
+    },
     // 工厂侧无对应行 → 页面走「原始值 × 统一损耗率」回退派生
     { material_name: '布料C', specification: 'S3', total_quantity: 20, unit: '米', supplier_name: '供应商2' },
   ],
@@ -121,5 +134,21 @@ describe('导出供应商汇总 Excel：数量与页面一致', () => {
     await m.exportSupplier()
 
     expect(purchaseApi.supplierSummaryExport).not.toHaveBeenCalled()
+  })
+})
+
+describe('打印预览：来源订单列', () => {
+  it('表头含「来源订单」，逐单输出单号×数量；无明细显示 —', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+
+    m.printSupplier()
+
+    expect(printHtml).toHaveBeenCalledTimes(1)
+    const html = vi.mocked(printHtml).mock.calls[0]![1] as string
+    expect(html).toContain('来源订单')
+    expect(html).toContain('PO-20261108-0001×12')
+    expect(html).toContain('PO-20261108-0005×8')
+    expect(html).toContain('—')
   })
 })

@@ -82,6 +82,19 @@ def _resolve_po_qty_and_pid(po, cust_order_map: dict[int, tuple[int, float]]) ->
             break
     return order_qty, pid
 
+def _append_order_quantity(row: dict, order_no: str, quantity: float) -> None:
+    """记录某张采购单对该物料行的贡献量。
+
+    同一张单内同一物料可能拆成多条明细（或 BOM 回退路径逐条遍历），
+    必须按单号合并，否则「来源订单」列会出现重复单号。
+    """
+    for entry in row['orders']:
+        if entry['order_no'] == order_no:
+            entry['quantity'] += quantity
+            return
+    row['orders'].append({'order_no': order_no, 'quantity': quantity})
+
+
 def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_order_map,
                             po_pids_map=None) -> dict[tuple, dict]:
     """构建 (供应商, 物料, 规格, 单位) → 汇总物料行。
@@ -121,6 +134,7 @@ def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_or
                 total_qty = sum(float(it.quantity or 0) for it in matching_items) if matching_items else bom['quantity'] * order_qty
                 if key in mat_map:
                     mat_map[key]['total_quantity'] += total_qty
+                    _append_order_quantity(mat_map[key], po.order_no, total_qty)
                 else:
                     mat_map[key] = {
                         'material_name': bom['material_name'],
@@ -128,6 +142,9 @@ def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_or
                         'total_quantity': total_qty,
                         'unit': bom['unit'],
                         'supplier_name': sup,
+                        # 来源订单逐单数量（页面「来源订单」列）：同一物料跨单合并时，
+                        # 每张采购单各记一条，供用户回溯「这行来自哪几个订单」。
+                        'orders': [{'order_no': po.order_no, 'quantity': total_qty}],
                     }
 
         if not has_bom:
@@ -140,6 +157,7 @@ def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_or
                 total_qty = float(item.quantity or 0)
                 if key in mat_map:
                     mat_map[key]['total_quantity'] += total_qty
+                    _append_order_quantity(mat_map[key], po.order_no, total_qty)
                 else:
                     mat_map[key] = {
                         'material_name': item.material_name,
@@ -147,5 +165,6 @@ def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_or
                         'total_quantity': total_qty,
                         'unit': item.unit or '',
                         'supplier_name': sup,
+                        'orders': [{'order_no': po.order_no, 'quantity': total_qty}],
                     }
     return mat_map

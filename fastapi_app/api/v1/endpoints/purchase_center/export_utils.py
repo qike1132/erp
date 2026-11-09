@@ -324,6 +324,17 @@ th{background:#E6E6E6;font-weight:bold}
     return build_print_html("工厂内部采购订单汇总", ''.join(body_parts), extra_css)
 
 
+def _order_breakdown_html(item: dict) -> str:
+    """「关联订单」单元格：优先逐单明细，缺省回退旧的「共 N 单」。"""
+    parts = item.get('order_breakdown') or []
+    if not parts:
+        return f'共{item.get("order_count", 0)}单'
+    return '<br>'.join(
+        f'{_h(part["order_no"])}×{_qty_display_text(part["quantity"])}'
+        for part in parts
+    )
+
+
 def generate_supplier_summary_print(supplier_groups, orders):
     """生成供应商汇总打印HTML"""
     extra_css = """@media print{@page{size:A4;margin:15mm}.no-print{display:none!important}}
@@ -347,7 +358,7 @@ th{background:#e8e8e8;font-weight:bold;text-align:center}
         body_parts.append(f'<div class="supplier-info"><strong>关联订单：</strong>{_h(", ".join(supplier["orders"]))} | <strong>物料种类：</strong>{len(supplier["items"])} 种</div>')
         body_parts.append('<table><thead><tr><th>序号</th><th>商品名称</th><th>规格型号</th><th>单位</th><th>数量</th><th>物料分类</th><th>关联订单</th></tr></thead><tbody>')
         for item_idx, item in enumerate(supplier['items'], 1):
-            body_parts.append(f'<tr><td style="text-align:center">{item_idx}</td><td>{_h(item["material_name"])}</td><td>{_h(item["specification"] or "-")}</td><td style="text-align:center">{_h(item["unit"] or "-")}</td><td style="text-align:right">{float(item["quantity"]):,.2f}</td><td style="text-align:center">{_h(item["material_category"] or "-")}</td><td>共{item["order_count"]}单</td></tr>')
+            body_parts.append(f'<tr><td style="text-align:center">{item_idx}</td><td>{_h(item["material_name"])}</td><td>{_h(item["specification"] or "-")}</td><td style="text-align:center">{_h(item["unit"] or "-")}</td><td style="text-align:right">{float(item["quantity"]):,.2f}</td><td style="text-align:center">{_h(item["material_category"] or "-")}</td><td>{_order_breakdown_html(item)}</td></tr>')
         body_parts.append(f'<tfoot><tr class="total-row"><td colspan="4" style="text-align:right">合计：</td><td style="text-align:right">{total_qty:,.2f}</td><td colspan="2"></td></tr></tfoot></table></div>')
     return build_print_html("供应商采购订单汇总", ''.join(body_parts), extra_css)
 
@@ -362,6 +373,15 @@ def _qty_display_text(value) -> str:
     if rounded == int(rounded):
         return str(int(rounded))
     return f'{rounded:.2f}'.rstrip('0').rstrip('.')
+
+
+def _order_breakdown_text(item: dict) -> str:
+    """Excel「备注」列用的逐单明细文本：``PO-001×10；PO-002×5``。"""
+    parts = item.get('order_breakdown') or []
+    return '；'.join(
+        f'{part["order_no"]}×{_qty_display_text(part["quantity"])}'
+        for part in parts
+    )
 
 
 def _insert_supplier_data_rows(ws, extra_rows: int) -> None:
@@ -506,7 +526,9 @@ def create_supplier_workbook(supplier: dict) -> Workbook:
             _fill_cell(ws, row, 26, '含')
             _fill_cell(ws, row, 30, f'=N{row}*V{row}', number_format='#,##0.00')
             _fill_cell(ws, row, 34, None)
-            _fill_cell(ws, row, 37, None)
+            # AK 列（模板「备注」）承载来源订单逐单明细；无明细（旧结构）保持空白
+            note = _order_breakdown_text(item)
+            _fill_cell(ws, row, 37, _sanitize_excel_value(note) if note else None)
         else:
             _fill_cell(ws, row, 1, idx + 1)
             _fill_cell(ws, row, 3, None)

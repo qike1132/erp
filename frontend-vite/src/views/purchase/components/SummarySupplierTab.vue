@@ -15,7 +15,7 @@
     <div class="sms-scroll">
       <!-- 2026-10-31 用户反馈：不铺满、但也不要太小——取 72% 宽度居中，
            比例适中；窄屏由 min-w 兜底（容器内可横向滚动）。 -->
-      <table class="w-[72%] min-w-[680px] mx-auto border-collapse font-sans text-[14px] bg-white">
+      <table class="w-[72%] min-w-[860px] mx-auto border-collapse font-sans text-[14px] bg-white">
         <thead>
           <tr class="bg-border-light">
             <th>供应商</th>
@@ -23,6 +23,7 @@
             <th>规格型号</th>
             <th>数量</th>
             <th>单位</th>
+            <th class="w-[200px]">来源订单</th>
           </tr>
         </thead>
         <tbody>
@@ -35,6 +36,16 @@
               <td>{{ m.specification || '' }}</td>
               <td>{{ qtyDisplayText(m.total_quantity) }}</td>
               <td>{{ m.unit || '' }}</td>
+              <!-- 来源订单：逐单平铺「采购单号 + 该单数量」，不折叠 -->
+              <td class="src-orders">
+                <template v-if="orderLines(m).length">
+                  <div v-for="o in orderLines(m)" :key="o.order_no" class="src-line">
+                    <span class="src-no">{{ o.order_no }}</span>
+                    <span class="src-qty">{{ qtyDisplayText(o.quantity) }}{{ m.unit ? ` ${m.unit}` : '' }}</span>
+                  </div>
+                </template>
+                <span v-else class="src-empty">—</span>
+              </td>
             </tr>
           </template>
         </tbody>
@@ -56,6 +67,11 @@ defineProps<{
   orderCount: number
   supplierGroups: { supplierName: string; materials: MaterialItem[] }[]
 }>()
+
+/** 来源订单逐单明细（旧后端不返回 orders 时为空数组 → 显示 —）。 */
+function orderLines(m: MaterialItem): { order_no: string; quantity: number }[] {
+  return m.orders || []
+}
 </script>
 
 <style scoped lang="scss">
@@ -85,5 +101,31 @@ defineProps<{
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+/* 来源订单列：单号加粗蓝、数量浅灰，行内平铺；间距 12px 与效果图一致 */
+.src-orders {
+  text-align: left;
+}
+.src-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.src-no {
+  color: var(--color-primary-600);
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.src-qty {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.src-empty {
+  color: var(--color-text-muted);
 }
 </style>
