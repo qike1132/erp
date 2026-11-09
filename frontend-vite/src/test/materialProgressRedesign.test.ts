@@ -229,13 +229,30 @@ function multiGroupRows(): ProgressOrderRow[] {
   })], NOW)
 }
 
+/** 多角色 SKU：角色名来自明细备注「来源BOM：<角色名>」 */
+function roleRows(): ProgressOrderRow[] {
+  return buildProgressOrderRows([reg({
+    purchase_order_no: 'PO-ROLE',
+    customer_name: '蛋仔派对',
+    product_name: '《蛋仔派对》市集拾趣系列-陈列样',
+    product_quantity: 600,
+    supplier_name: '三虎',
+    registration_date: '2026-09-01',
+    items: [
+      { id: 1, material_name: '棉花', specification: 'A', material_category: 'main', ordered_quantity: 100, received_quantity: 30, remaining_quantity: 70, progress: 30, unit: 'kg', supplier_name: '三虎', remark: '来源BOM：蛋仔' },
+      { id: 2, material_name: '棉花', specification: 'A', material_category: 'main', ordered_quantity: 200, received_quantity: 0, remaining_quantity: 200, progress: 0, unit: 'kg', supplier_name: '三虎', remark: '来源BOM：派对' },
+      { id: 3, material_name: '拉链', specification: '', material_category: 'main', ordered_quantity: 50, received_quantity: 0, remaining_quantity: 50, progress: 0, unit: '条', supplier_name: '三虎', remark: '来源BOM：默认BOM' },
+    ],
+  })], NOW)
+}
+
 describe('MaterialProgressGrid —— 列与合并单元格', () => {
-  it('表头 12 列：订单号/时间 · 客户 · 产品名称 · 订单数量 · 供应商 · 物料名称 · 规格型号 · 已到数量 · 采购数量 · 单位 · 进度 · 操作', () => {
+  it('表头 13 列：订单号/时间 · 客户 · 产品名称 · 订单数量 · 角色 · 供应商 · 物料名称 · 规格型号 · 采购数量 · 已到数量 · 单位 · 进度 · 操作', () => {
     const heads = mountGrid(multiGroupRows()).findAll('th').map((th) => th.text())
 
     expect(heads).toEqual([
-      '订单号 / 时间', '客户', '产品名称', '订单数量', '供应商', '物料名称',
-      '规格型号', '已到数量', '采购数量', '单位', '进度', '操作',
+      '订单号 / 时间', '客户', '产品名称', '订单数量', '角色', '供应商', '物料名称',
+      '规格型号', '采购数量', '已到数量', '单位', '进度', '操作',
     ])
   })
 
@@ -262,11 +279,11 @@ describe('MaterialProgressGrid —— 列与合并单元格', () => {
     expect(w.emitted('view-supplier')?.[0]).toEqual(['美利达', 'PO-G'])
   })
 
-  it('登记日期显示在供应商单元格副行（现有数据只有登记级日期）', () => {
+  it('供应商单元格不显示登记日期', () => {
     const w = mountGrid(multiGroupRows())
 
     expect(w.find('td.mp-supplier').text()).toContain('三虎')
-    expect(w.find('td.mp-supplier').text()).toContain('2026-09-01')
+    expect(w.find('td.mp-supplier').text()).not.toContain('2026-09-01')
   })
 
   it('订单数量 / 已到 / 采购千分位与单位分列展示', () => {
@@ -293,6 +310,21 @@ describe('MaterialProgressGrid —— 列与合并单元格', () => {
     const product = w.find('td.mp-product')
     expect(product.findAll('div').map((d) => d.text())).toEqual(['产品甲', '产品乙'])
   })
+
+  it('多角色 SKU：同供应商同物料按角色分行，不跨角色合并', () => {
+    const groups = roleRows()[0]!.groups
+
+    expect(groups.map((g) => g.roleName)).toEqual(['蛋仔', '派对', ''])
+    expect(groups[0]?.items[0]?.ordered_quantity).toBe(100)
+    expect(groups[1]?.items[0]?.ordered_quantity).toBe(200)
+  })
+
+  it('角色列按分组合并并显示角色名；默认BOM 行留空', () => {
+    const w = mountGrid(roleRows())
+
+    expect(w.findAll('td.mp-role').map((td) => td.text())).toEqual(['蛋仔', '派对', ''])
+    expect(w.findAll('td.mp-supplier')).toHaveLength(3)
+  })
 })
 
 describe('MaterialProgressGrid —— 进度列口径', () => {
@@ -308,10 +340,11 @@ describe('MaterialProgressGrid —— 进度列口径', () => {
     })], NOW)
   }
 
-  it('0% → 未到；部分 → 百分比；100% → 到齐', () => {
+  it('0% 显示「0%」（不再用「未到」文案）；部分 → 百分比；100% → 到齐', () => {
     const cells = mountGrid(progressRows()).findAll('td.mp-pct').map((td) => td.text())
 
-    expect(cells[0]).toContain('未到')
+    expect(cells[0]).toContain('0%')
+    expect(cells[0]).not.toContain('未到')
     expect(cells[1]).toContain('30%')
     expect(cells[2]).toContain('到齐')
   })

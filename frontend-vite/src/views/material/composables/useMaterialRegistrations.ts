@@ -27,8 +27,10 @@ export interface MergedItem extends RegItem {
   overdue: boolean
 }
 
-// 按供应商分组的物料行（= 登记内同一供应商的物料集合；条目带明细级 supplier_name）
+// 按「角色 + 供应商」分组的物料行
 export interface SupplierGroupRow {
+  /** 角色名（来自明细备注「来源BOM：<角色名>」；无角色/默认BOM 为空） */
+  roleName: string
   supplierName: string
   items: MergedItem[]
   /** 组状态：pending 未动 / partial 部分到货（收齐的登记不会出现在进度页） */
@@ -73,6 +75,16 @@ function parseUtcDate(s: string | undefined): Date | null {
 }
 
 /**
+ * 角色名来自明细备注「来源BOM：<角色名>」（采购单生成时写入、登记建单时复制）。
+ * 「默认BOM」与无备注都返回空串——默认 BOM 行不属于任何角色，与工厂汇总同口径。
+ */
+function parseRoleName(remark: string | undefined): string {
+  const matched = /^来源BOM：(.*)$/.exec((remark || '').trim())
+  const name = matched?.[1]?.trim() || ''
+  return name === '默认BOM' ? '' : name
+}
+
+/**
  * 预处理来料进度行：过滤 filling、同单合并、按登记级供应商分组、
  * 同名物料合并、逾期标记、预格式化数量。
  * 纯函数（now 仅用于测试固定时间）。
@@ -95,15 +107,24 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
     const regDate = parseUtcDate(r.registration_date)
     const regOverdue = !!regDate && regDate < cutoff
 
-    // 登记内先按明细级供应商分桶，再在桶内按物料名合并
-    const supplierBuckets = new Map<string, Map<string, MergedItem>>()
+    // 登记内先按「角色 + 明细级供应商」分桶，再在桶内按物料名合并。
+    // 角色名来自采购明细备注「来源BOM：<角色名>」；多角色 SKU 必须分行展示，
+    // 不能跨角色合并同一物料（各角色分摊数量与供应商可能不同）。
+    const groupBuckets = new Map<string, {
+      roleName: string
+      supplierName: string
+      items: Map<string, MergedItem>
+    }>()
     for (const i of items) {
+      const roleName = parseRoleName(i.remark)
       const supName = i.supplier_name || r.supplier_name || '未指定'
-      let mergedMap = supplierBuckets.get(supName)
-      if (!mergedMap) {
-        mergedMap = new Map<string, MergedItem>()
-        supplierBuckets.set(supName, mergedMap)
+      const bucketKey = `${roleName}\u0000${supName}`
+      let bucket = groupBuckets.get(bucketKey)
+      if (!bucket) {
+        bucket = { roleName, supplierName: supName, items: new Map<string, MergedItem>() }
+        groupBuckets.set(bucketKey, bucket)
       }
+      const mergedMap = bucket.items
       const ordered = parseFloat(String(i.ordered_quantity || 0))
       const received = parseFloat(String(i.received_quantity || 0))
       const existing = mergedMap.get(i.material_name)
@@ -145,16 +166,17 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
       orderMap.set(key, order)
     }
 
-    // 一条登记可产出多个供应商块；无明细时保留一个空块（旧行为）
-    const buckets = supplierBuckets.size
-      ? Array.from(supplierBuckets, ([supplierName, mergedMap]) => [supplierName, mergedMap] as const)
-      : [[r.supplier_name || '未指定', new Map<string, MergedItem>()] as const]
-    for (const [supplierName, mergedMap] of buckets) {
-      const mergedItems = Array.from(mergedMap.values())
+    // 一条登记可产出多个「角色 + 供应商」块；无明细时保留一个空块（旧行为）
+    const buckets = groupBuckets.size
+      ? Array.from(groupBuckets.values())
+      : [{ roleName: '', supplierName: r.supplier_name || '未指定', items: new Map<string, MergedItem>() }]
+    for (const bucket of buckets) {
+      const mergedItems = Array.from(bucket.items.values())
       const gOrdered = mergedItems.reduce((s, i) => s + i.ordered_quantity, 0)
       const gReceived = mergedItems.reduce((s, i) => s + i.received_quantity, 0)
       order.groups.push({
-        supplierName,
+        roleName: bucket.roleName,
+        supplierName: bucket.supplierName,
         items: mergedItems,
         status: gReceived > 0 ? 'partial' : 'pending',
         progress: gOrdered > 0 ? Math.round((gReceived / gOrdered) * 100) : 0,

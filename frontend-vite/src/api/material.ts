@@ -13,6 +13,8 @@ export interface RegItem {
   progress: number
   unit: string
   supplier_name?: string
+  /** 明细备注；采购单生成时写入「来源BOM：<角色名>」，登记建单时复制 */
+  remark?: string
 }
 
 /** SKU 明细（多 SKU 订单时按 SKU 分行显示） */
