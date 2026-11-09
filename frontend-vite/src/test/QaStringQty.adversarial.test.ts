@@ -177,8 +177,10 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
 
     const rows = wrapper.findAll('tbody tr')
     const qtyOf = (row: (typeof rows)[number]) => {
+      // 每行末三格恒为 [数量, 单位, 来源订单]（2026-11-09 新增来源订单列；
+      // rowspan 压缩只会减少行首单元格，不影响行尾顺序）
       const tds = row.findAll('td')
-      return tds[tds.length - 2]!.text()
+      return tds[tds.length - 3]!.text()
     }
     expect(rows).toHaveLength(2) // 布料A + 布料C（表格内已无「合计」行）
     // 与工厂数量同源的 11（布料A）+ 回退派生的 20.1（布料C）
