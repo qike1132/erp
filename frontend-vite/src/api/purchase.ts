@@ -27,6 +27,8 @@ export interface SupplierExportQuantity {
   specification: string
   unit: string
   quantity: number
+  /** 来源订单逐单展示数量（与行合计对齐）；缺省时后端回退原始逐单量 */
+  order_breakdown?: { order_no: string; quantity: number }[]
 }
 
 /**

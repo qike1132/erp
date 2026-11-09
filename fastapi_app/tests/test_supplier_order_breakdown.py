@@ -21,6 +21,10 @@ from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
     generate_supplier_summary_print,
 )
 from fastapi_app.api.v1.endpoints.purchase_center.print_routes import rebuild_supplier_groups_from_page
+from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
+    SupplierExportOrderQuantity,
+    SupplierExportQuantityItem,
+)
 from fastapi_app.services.purchase._supplier import _build_supplier_mat_map
 from fastapi_app.services.purchase_order_query import build_supplier_export_groups
 
@@ -189,6 +193,36 @@ class TestRebuildFromPageKeepsBreakdown:
         assert item['order_breakdown'] == [
             {'order_no': 'PO-001', 'quantity': 10.0},
             {'order_no': 'PO-002', 'quantity': 5.0},
+        ]
+
+    def test_page_breakdown_takes_precedence_over_raw_db_breakdown(self):
+        """页面已把合计分配成整数：导出必须用页面值，不能回退数据库原始小数。"""
+        db_groups = [{
+            'supplier_name': '供应商1',
+            'items': [{
+                'material_name': '布料A', 'specification': 'S1', 'unit': '米',
+                'quantity': 15.0,
+                'order_breakdown': [
+                    {'order_no': 'PO-001', 'quantity': 10.0},
+                    {'order_no': 'PO-002', 'quantity': 5.0},
+                ],
+            }],
+            'contact_person': '', 'phone': '', 'address': '',
+        }]
+        page_row = SupplierExportQuantityItem(
+            supplier_name='供应商1', material_name='布料A', specification='S1', unit='米',
+            quantity=15.0,
+            order_breakdown=[
+                SupplierExportOrderQuantity(order_no='PO-001', quantity=8),
+                SupplierExportOrderQuantity(order_no='PO-002', quantity=7),
+            ],
+        )
+
+        item = rebuild_supplier_groups_from_page(db_groups, [page_row])[0]['items'][0]
+
+        assert item['order_breakdown'] == [
+            {'order_no': 'PO-001', 'quantity': 8.0},
+            {'order_no': 'PO-002', 'quantity': 7.0},
         ]
 
 

@@ -129,8 +129,15 @@ def rebuild_supplier_groups_from_page(supplier_groups: list[dict], rows) -> list
             'unit': row.unit or '',
             'quantity': row.quantity,
         }
-        # 只在确有明细时附加，保持旧结构的逐字兼容（页面行在库里找不到对应物料）
-        if source_item.get('order_breakdown'):
+        # 页面已按「主行合计」分配好逐单展示数量（整数），优先使用；
+        # 缺省（旧客户端 / 页面行无来源）时回退数据库分组的原始逐单量。
+        page_breakdown = [
+            {'order_no': entry.order_no, 'quantity': entry.quantity}
+            for entry in (getattr(row, 'order_breakdown', None) or [])
+        ]
+        if page_breakdown:
+            item['order_breakdown'] = page_breakdown
+        elif source_item.get('order_breakdown'):
             item['order_breakdown'] = source_item['order_breakdown']
         items_by_supplier[supplier_name].append(item)
     rebuilt = []

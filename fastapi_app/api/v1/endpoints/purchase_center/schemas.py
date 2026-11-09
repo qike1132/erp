@@ -22,6 +22,12 @@ class OrderIdsRequest(BaseModel):
     """订单ID列表请求"""
     ids: list[int] = Field(..., min_length=1, max_length=500, description="订单ID列表")
 
+class SupplierExportOrderQuantity(BaseModel):
+    """来源订单逐单展示数量（页面「来源订单」列，已与行合计对齐）。"""
+    order_no: str = Field(..., max_length=100, description="采购单号")
+    quantity: float = Field(..., ge=0, le=9999999999.99, description="该单展示数量（整数或 2 位小数）")
+
+
 class SupplierExportQuantityItem(BaseModel):
     """供应商导出数量覆盖行（页面「供应商采购订单」逐行同源）。
 
@@ -33,6 +39,10 @@ class SupplierExportQuantityItem(BaseModel):
     specification: str = Field('', max_length=200, description="规格型号")
     unit: str = Field('', max_length=50, description="单位")
     quantity: float = Field(..., ge=0, le=9999999999.99, description="页面展示数量（已按损耗率加放）；下限/上限与落库列 Numeric(12,2) 一致，越界应在入口拦成 422 而非 flush 期 500")
+    order_breakdown: list[SupplierExportOrderQuantity] = Field(
+        default_factory=list, max_length=500,
+        description="来源订单逐单展示数量；缺省时回退数据库分组的原始逐单量（旧客户端）",
+    )
 
 class SupplierSummaryExportRequest(OrderIdsRequest):
     """供应商汇总导出请求。

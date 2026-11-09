@@ -2,7 +2,7 @@ import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
-import { calcSpareQuantity, summaryMaterialKey, magnifyByLossRate, ceilMagnifiedByLossRate, buildPerSkuRows, computeQuantityDiff, buildStoredRows } from './perSkuRows'
+import { calcSpareQuantity, summaryMaterialKey, magnifyByLossRate, ceilMagnifiedByLossRate, buildPerSkuRows, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities } from './perSkuRows'
 import type { PerSkuRow } from './perSkuRows'
 
 // 这些纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
@@ -412,11 +412,11 @@ function buildSupplierHtml(groups: { supplierName: string; materials: MaterialIt
   return tableHtml
 }
 
-/** 打印预览「来源订单」格：逐单「单号×数量」，无明细显示 —。 */
+/** 打印预览「来源订单」格：逐单「单号×展示数量」（与主行合计对齐），无明细显示 —。 */
 function supplierOrderBreakdownHtml(m: MaterialItem): string {
-  const orders = m.orders || []
-  if (orders.length === 0) return '—'
-  return orders
+  const lines = allocateOrderDisplayQuantities(m.total_quantity, m.orders || [])
+  if (lines.length === 0) return '—'
+  return lines
     .map((o) => `${escapeHtml(o.order_no)}×${escapeHtml(qtyDisplayText(o.quantity))}`)
     .join('<br>')
 }
@@ -1326,17 +1326,22 @@ export function useSummaryModal() {
 
   /**
    * 导出用数量行：直接取供应商页签**当前展示**的数量（与工厂页数量同源派生），
-   * 随导出请求发给后端覆盖 Excel 数量，保证「导出 = 页面所见」。
+   * 随导出请求发给后端覆盖 Excel 数量；`order_breakdown` 同样取页面分配后的
+   * 逐单展示数量，保证 Excel「备注」与屏幕「来源订单」列逐字一致。
    */
   function buildSupplierExportQuantities() {
     return supplierGroups.value.flatMap((g) =>
-      g.materials.map((m) => ({
-        supplier_name: g.supplierName,
-        material_name: m.material_name,
-        specification: m.specification || '',
-        unit: m.unit || '',
-        quantity: parseFloat(String(m.total_quantity)) || 0,
-      })),
+      g.materials.map((m) => {
+        const quantity = parseFloat(String(m.total_quantity)) || 0
+        return {
+          supplier_name: g.supplierName,
+          material_name: m.material_name,
+          specification: m.specification || '',
+          unit: m.unit || '',
+          quantity,
+          order_breakdown: allocateOrderDisplayQuantities(quantity, m.orders || []),
+        }
+      }),
     )
   }
 

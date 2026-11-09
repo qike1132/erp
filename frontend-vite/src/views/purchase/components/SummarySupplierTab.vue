@@ -60,6 +60,7 @@
 /* 2026-10-31 整页化第二轮：导出/打印/返回按钮移到 SummaryPanel 头部，
    本页签不再有操作条，也无自有事件（原 close/exportSupplier/printSupplier 已删）。 */
 import { qtyDisplayText } from '../composables/useSummaryModal'
+import { allocateOrderDisplayQuantities } from '../composables/perSkuRows'
 import type { MaterialItem, SupplierSummaryData } from '../composables/useSummaryModal'
 
 defineProps<{
@@ -68,9 +69,9 @@ defineProps<{
   supplierGroups: { supplierName: string; materials: MaterialItem[] }[]
 }>()
 
-/** 来源订单逐单明细（旧后端不返回 orders 时为空数组 → 显示 —）。 */
+/** 来源订单逐单展示数量：按主行合计分配为整数，保证明细相加 = 主行数量。 */
 function orderLines(m: MaterialItem): { order_no: string; quantity: number }[] {
-  return m.orders || []
+  return allocateOrderDisplayQuantities(m.total_quantity, m.orders || [])
 }
 </script>
 

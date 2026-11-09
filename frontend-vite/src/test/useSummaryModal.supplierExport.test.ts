@@ -88,8 +88,17 @@ describe('导出供应商汇总 Excel：数量与页面一致', () => {
     expect(ids).toEqual([7, 8])
     expect(supplierCount).toBe(2)
     expect(lastExportQuantities()).toEqual([
-      { supplier_name: '供应商1', material_name: '布料A', specification: 'S1', unit: '米', quantity: 20 },
-      { supplier_name: '供应商2', material_name: '布料C', specification: 'S3', unit: '米', quantity: 20 },
+      {
+        supplier_name: '供应商1', material_name: '布料A', specification: 'S1', unit: '米', quantity: 20,
+        order_breakdown: [
+          { order_no: 'PO-20261108-0001', quantity: 12 },
+          { order_no: 'PO-20261108-0005', quantity: 8 },
+        ],
+      },
+      {
+        supplier_name: '供应商2', material_name: '布料C', specification: 'S3', unit: '米', quantity: 20,
+        order_breakdown: [],
+      },
     ])
   })
 
@@ -100,9 +109,15 @@ describe('导出供应商汇总 Excel：数量与页面一致', () => {
 
     await m.exportSupplier()
 
-    const quantities = lastExportQuantities()
-    // 与供应商页签展示值逐字一致
-    expect(quantities).toEqual(
+    const quantities = lastExportQuantities()!
+    // 逐单明细由主行合计分配而来，单独校验数量列即可（明细另有专门用例）
+    expect(quantities.map((q) => ({
+      supplier_name: q.supplier_name,
+      material_name: q.material_name,
+      specification: q.specification,
+      unit: q.unit,
+      quantity: q.quantity,
+    }))).toEqual(
       m.supplierGroups.flatMap((g) =>
         g.materials.map((mat) => ({
           supplier_name: g.supplierName,
@@ -134,6 +149,42 @@ describe('导出供应商汇总 Excel：数量与页面一致', () => {
     await m.exportSupplier()
 
     expect(purchaseApi.supplierSummaryExport).not.toHaveBeenCalled()
+  })
+
+  it('来源订单逐单数量与主行一致：原始 8.33 导出为 9', async () => {
+    const factory = {
+      success: true,
+      order_count: 1,
+      spare_rate: 0,
+      groups: [{
+        customer_name: '客户', product_name: '产品', product_quantity: 1,
+        suppliers: [{
+          supplier_name: '供应商1',
+          fabrics: [{ fabric_name: '布料X', specification: '', quantity: 8.33, unit: '码' }],
+        }],
+      }],
+    }
+    const supplier = {
+      success: true,
+      order_count: 1,
+      materials: [{
+        material_name: '布料X', specification: '', total_quantity: 8.33,
+        unit: '码', supplier_name: '供应商1',
+        orders: [{ order_no: 'PO-2611-003', quantity: 8.33 }],
+      }],
+    }
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factory as never)
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue(supplier as never)
+
+    const m = useSummaryModal()
+    await m.openSummary([1])
+    await m.exportSupplier()
+
+    const quantities = lastExportQuantities()!
+    expect(quantities[0]!.quantity).toBe(9)
+    expect(quantities[0]!.order_breakdown).toEqual([
+      { order_no: 'PO-2611-003', quantity: 9 },
+    ])
   })
 })
 

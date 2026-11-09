@@ -96,4 +96,24 @@ describe('供应商采购订单：来源订单列', () => {
     expect(row.find('.src-empty').text()).toBe('—')
     w.unmount()
   })
+
+  it('逐单数量按主行合计显示为整数（8.33 → 9），不露出原始小数', () => {
+    const material: MaterialItem = {
+      material_name: '布料X', specification: '', total_quantity: 9,
+      unit: '码', supplier_name: '供应商X',
+      orders: [{ order_no: 'PO-2611-003', quantity: 8.33 }],
+    }
+    const w = mount(SummarySupplierTab, {
+      props: {
+        supplierData: { success: true, order_count: 1, materials: [material] },
+        orderCount: 1,
+        supplierGroups: [{ supplierName: '供应商X', materials: [material] }],
+      },
+    })
+
+    expect(w.text()).toContain('PO-2611-003')
+    expect(w.text()).toContain('9 码')
+    expect(w.text()).not.toContain('8.33')
+    w.unmount()
+  })
 })

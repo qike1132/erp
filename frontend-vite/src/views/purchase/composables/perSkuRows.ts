@@ -110,6 +110,44 @@ export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
 }
 
 /**
+ * 「来源订单」逐单展示数量：把物料行的展示合计按各单原始数量占比分配为整数。
+ *
+ * 主行「数量」是损耗率加放后向上取整的采购量（与工厂内部订单同源）；来源明细若直接
+ * 展示后端原始数量，会出现 8.33 这类小数、且与主行合计对不上。本函数用最大余数法
+ * 把合计拆回各单：合计为整数时每单也是整数，且 Σ 明细 === 合计；
+ * 合计带小数（BOM 回退等异常行）时按分（0.01）分配，仍保证相等。
+ *
+ * 纯展示派生，不回写任何落库数量。
+ */
+export function allocateOrderDisplayQuantities(
+  displayTotal: number,
+  orders: { order_no: string; quantity: number }[],
+): { order_no: string; quantity: number }[] {
+  if (orders.length === 0) return []
+  const total = Number.isFinite(displayTotal) ? displayTotal : 0
+  // 整数合计按「个」分配，保证输出是整数；非整数合计按「分」分配，保住 2 位精度
+  const scale = Math.abs(total - Math.round(total)) < 1e-9 ? 1 : 100
+  const units = Math.max(0, Math.round(total * scale))
+  const weights = orders.map((o) => (Number.isFinite(o.quantity) && o.quantity > 0 ? o.quantity : 0))
+  const weightTotal = weights.reduce((sum, w) => sum + w, 0)
+  const shares = weightTotal > 0
+    ? weights.map((w) => (units * w) / weightTotal)
+    : weights.map(() => units / orders.length)
+
+  const allocated = shares.map((v) => Math.floor(v))
+  let remaining = units - allocated.reduce((sum, v) => sum + v, 0)
+  // 余数按小数部分从大到小分配；并列时保持原顺序，保证展示稳定
+  const byRemainder = shares
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  for (let k = 0; k < byRemainder.length && remaining > 0; k++, remaining--) {
+    const idx = byRemainder[k]!.i
+    allocated[idx] = (allocated[idx] ?? 0) + 1
+  }
+  return orders.map((o, i) => ({ order_no: o.order_no, quantity: (allocated[i] ?? 0) / scale }))
+}
+
+/**
  * 损耗率归一化：与后端 `fastapi_app/services/purchase_utils.py::normalize_spare_rate` 同源。
  *
  * - `null` / `undefined` → `null`（语义为「没有值」，由调用方决定是否回退）；
