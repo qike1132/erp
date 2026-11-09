@@ -6,7 +6,7 @@ PostgreSQL 不做正则蕴含推断：查询谓词与 ``idx_*_no_date_seq`` 索�
 任一处漂移立即红。
 
 覆盖面：
-1. 取号 ``read_daily_max`` 编译出的 SQL；
+1. 取号 ``read_period_max`` 编译出的 SQL；
 2. 巡检 ``numbering_audit_task`` 的当日 max / 违规计数模板；
 3. 对账 ``numbering_reconcile`` 的水位回填模板；
 4. 9 张编号表模型的 ``postgresql_where`` 谓词；
@@ -75,7 +75,7 @@ class TestModelIndexPredicates:
 
 
 class TestQueryTextPredicates:
-    def test_read_daily_max_compiles_constant(self) -> None:
+    def test_read_period_max_compiles_constant(self) -> None:
         """取号过滤器编译产物的绑定参数携带常量（ORM 参数化，SQL 文本无字面量）。"""
         from sqlalchemy import BigInteger, cast, func, select
         from sqlalchemy.dialects import postgresql as pg_dialect

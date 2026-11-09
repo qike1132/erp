@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from fastapi_app.services.numbering import generate_number_async
-from fastapi_app.services.numbering_sequence import allocate_sequence, business_date_str
+from fastapi_app.services.numbering_sequence import allocate_sequence, business_period_str
 from fastapi_app.shared_models import Base, Order
 
 pytestmark = pytest.mark.integration
@@ -78,7 +78,7 @@ async def test_concurrent_allocation_unique(db_and_factory):
 
     # 期望日期段与被测实现同源：UTC 与北京业务日在本地 00:00–08:00 窗口
     # 必差一天（0b2b124f 统一北京口径），用 UTC 推导会假红。
-    date_str = business_date_str()
+    date_str = business_period_str()
     seqs = await asyncio.gather(*[
         allocate_sequence(prefix, date_str, seed=0) for _ in range(50)
     ])
@@ -94,7 +94,7 @@ async def test_generate_number_async_batch_unique_and_continuous(db_and_factory)
 
     # 同 test_concurrent_allocation_unique：期望日期段与产品同源
     # （UTC 与北京业务日在本地 00:00–08:00 窗口必差一天，0b2b124f 统一北京口径）。
-    date_str = business_date_str()
+    date_str = business_period_str()
     numbers = [
         await generate_number_async(prefix, Order, 'order_no', db)
         for _ in range(5)

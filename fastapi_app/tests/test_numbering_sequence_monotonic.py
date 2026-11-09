@@ -27,7 +27,7 @@ from fastapi_app.services.numbering import generate_number_async
 from fastapi_app.services.numbering_sequence import (
     allocate_sequence,
     allocate_sequence_range,
-    business_date_str,
+    business_period_str,
 )
 from fastapi_app.shared_models import Base, Order
 
@@ -199,7 +199,7 @@ async def test_mixed_single_and_range_stay_unique_and_increasing(factory):
 async def test_formatted_number_keeps_prefix_period_and_padding(factory):
     """走完整取号路径：前缀、北京口径期间段（YYMM）、zfill(3) 格式均不变。"""
     prefix = 'MONOF'
-    date_str = business_date_str()
+    date_str = business_period_str()
     await _set_counter(factory, prefix, 100, date_str)
     async with factory() as db:
         first = await generate_number_async(prefix, Order, 'order_no', db)

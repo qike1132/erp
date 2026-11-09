@@ -41,7 +41,7 @@ class StockOut(Base):
 
     __table_args__ = (
     # 2026-11-01 编号查询族表达式索引（P3，体检报告 §4）：
-    # 取号 read_daily_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
+    # 取号 read_period_max / 巡检 numbering_audit_task / 对账 numbering_reconcile
     # 均按「日期段等值 + 序号段取 MAX」访问编号列。正则谓词与
     # NUMBERED_ENTITIES 白名单（numbering_reconcile.py）的格式约定强耦合——
     # 编号格式变更时必须同步重建本索引。

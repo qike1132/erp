@@ -17,7 +17,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from fastapi_app.services.numbering_sequence import read_daily_max
+from fastapi_app.services.numbering_sequence import read_period_max
 from fastapi_app.shared_models import Base, Case, CaseMovement, Order
 
 pytestmark = pytest.mark.integration
@@ -67,7 +67,7 @@ async def db(db_and_factory):
 
 
 @pytest.mark.asyncio
-async def test_read_daily_max_numeric_order_beats_lexicographic(db):
+async def test_read_period_max_numeric_order_beats_lexicographic(db):
     # 同日 9999 与 10000 并存：字符串降序取 '9999'，数值 max 必须取 10000
     db.add_all([
         Order(order_no='PO-20260929-9999', customer='c', quantity=1,
@@ -76,11 +76,11 @@ async def test_read_daily_max_numeric_order_beats_lexicographic(db):
               order_date=datetime(2026, 9, 29, tzinfo=UTC)),
     ])
     await db.flush()
-    assert await read_daily_max(db, Order, 'order_no', '20260929') == 10000
+    assert await read_period_max(db, Order, 'order_no', '20260929') == 10000
 
 
 @pytest.mark.asyncio
-async def test_read_daily_max_filters_by_number_date_segment(db):
+async def test_read_period_max_filters_by_number_date_segment(db):
     # 种子只看编号自身的日期段，与日期列的时区口径无关
     db.add_all([
         Order(order_no='PO-20260929-0001', customer='c', quantity=1,
@@ -89,12 +89,12 @@ async def test_read_daily_max_filters_by_number_date_segment(db):
               order_date=datetime(2026, 9, 29, 5, 0, tzinfo=UTC)),  # 北京 09-29 下午
     ])
     await db.flush()
-    assert await read_daily_max(db, Order, 'order_no', '20260929') == 1
-    assert await read_daily_max(db, Order, 'order_no', '20260928') == 5
+    assert await read_period_max(db, Order, 'order_no', '20260929') == 1
+    assert await read_period_max(db, Order, 'order_no', '20260928') == 5
 
 
 @pytest.mark.asyncio
-async def test_read_daily_max_three_char_prefix_cso(db):
+async def test_read_period_max_three_char_prefix_cso(db):
     # 三位前缀 CSO：split_part 不受前缀长度影响（substring 按位截取会错位）
     case = Case(name='测试皮套')
     db.add(case)
@@ -102,11 +102,11 @@ async def test_read_daily_max_three_char_prefix_cso(db):
     db.add(CaseMovement(case_id=case.id, direction='out', movement_no='CSO-20260929-0007',
                         quantity=1, movement_date=datetime(2026, 9, 29, tzinfo=UTC)))
     await db.flush()
-    assert await read_daily_max(db, CaseMovement, 'movement_no', '20260929') == 7
+    assert await read_period_max(db, CaseMovement, 'movement_no', '20260929') == 7
 
 
 @pytest.mark.asyncio
-async def test_read_daily_max_malformed_rows_are_guards_not_crashes(db):
+async def test_read_period_max_malformed_rows_are_guards_not_crashes(db):
     # 脏行（序号段非数字）必须被正则守卫过滤，cast 不抛 invalid input syntax
     db.add_all([
         Order(order_no='PO-20260929-0002', customer='c', quantity=1,
@@ -115,12 +115,12 @@ async def test_read_daily_max_malformed_rows_are_guards_not_crashes(db):
               order_date=datetime(2026, 9, 29, tzinfo=UTC)),
     ])
     await db.flush()
-    assert await read_daily_max(db, Order, 'order_no', '20260929') == 2
+    assert await read_period_max(db, Order, 'order_no', '20260929') == 2
 
 
 @pytest.mark.asyncio
-async def test_read_daily_max_empty_returns_zero(db):
-    assert await read_daily_max(db, Order, 'order_no', '20991231') == 0
+async def test_read_period_max_empty_returns_zero(db):
+    assert await read_period_max(db, Order, 'order_no', '20991231') == 0
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@
 同款，不依赖 root conftest 的 session 级 test_engine（避免 ScopeMismatch），
 并 monkeypatch _AsyncSessionLocal 指向测试库引擎，全程不触碰生产库。
 
-日期口径：compute_audit 按 business_date_str()（北京今天）过滤当日编号段。测试
+日期口径：compute_audit 按 business_period_str()（北京当期 YYMM）过滤当期编号段。测试
 把该函数钉死为一个**其他用例与生产路径都不会产生的远期日期段** `_TODAY`，于是
 date-scoped 扫描（data_max / counter）只命中本文件自己插入的行——这些断言因此
 不受共享测试库中其他用例残留数据的影响。

@@ -82,7 +82,7 @@ async def generate_number_batch(
 
     Args:
         prefix: 编号前缀，如 ``'PO'``。
-        model: 目标模型类（用于读取当日最大编号作连续性种子）。
+        model: 目标模型类（用于读取当期（本月）最大编号作连续性种子）。
         number_field: 编号字段名。
         db: 调用方会话（种子读取要能看到本事务内未提交的编号，保证批内连续）。
         count: 需要几个号。
@@ -98,13 +98,13 @@ async def generate_number_batch(
     if count <= 0:
         return []
 
-    date_str = business_period_str()
+    period_str = business_period_str()
 
     async with _allocate_lock:
-        db_max = await read_period_max(db, model, number_field, date_str)
-        start = await allocate_sequence_range(prefix, date_str, count=count, seed=db_max)
+        db_max = await read_period_max(db, model, number_field, period_str)
+        start = await allocate_sequence_range(prefix, period_str, count=count, seed=db_max)
 
-    return ['-'.join((prefix, date_str, str(start + i).zfill(3))) for i in range(count)]
+    return ['-'.join((prefix, period_str, str(start + i).zfill(3))) for i in range(count)]
 
 
 async def generate_stockin_number(db: AsyncSession) -> str:

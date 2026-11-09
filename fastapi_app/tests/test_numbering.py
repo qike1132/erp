@@ -1,6 +1,7 @@
 """
 编号生成规则测试
 """
+import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,6 +12,7 @@ from fastapi_app.services.numbering import (
     generate_purchase_order_number,
     generate_stockin_number,
 )
+from fastapi_app.services.numbering_sequence import business_date_str, read_daily_max
 
 
 class TestNumberingFormat:
@@ -64,3 +66,19 @@ class TestNumberingFormat:
         assert len(number) == 11  # PO-YYMM-NNN
         assert number.split('-')[-1].isdigit()
         assert int(number.split('-')[-1]) == 1
+
+
+class TestDeprecatedAliases:
+    """旧名必须"吵"：``pytest.ini`` 只 ``ignore`` 了 UserWarning 与
+    DeprecationWarning，FutureWarning 会落到 ``error`` 上，所以残留调用会直接
+    抛异常而不是静默通过。这两条钉住"废弃别名不能变回静默别名"。
+    """
+
+    def test_business_date_str_is_loud(self):
+        with pytest.raises(FutureWarning):
+            business_date_str()
+
+    def test_read_daily_max_is_loud(self):
+        # 告警在函数体第一行就抛，不会真正触库；参数只求满足签名
+        with pytest.raises(FutureWarning):
+            asyncio.run(read_daily_max(MagicMock(), None, 'order_no', '2611'))

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from fastapi_app.services.numbering_reconcile import reconcile_numbering_counters
-from fastapi_app.services.numbering_sequence import business_date_str
+from fastapi_app.services.numbering_sequence import business_period_str
 from fastapi_app.shared_models import Base, NumberingCounter, Order
 
 pytestmark = pytest.mark.integration
@@ -109,10 +109,10 @@ async def test_reconcile_raises_when_counter_behind_data(db):
     从不写 ``numbering_counter``，水位行落后；对账须把水位抬到数据 max，否则
     后续 ``allocate_sequence`` 返回 ``last_seq+1`` 会与既有数据重号。
 
-    日期段取自 ``business_date_str()``（与编号数据同源），不硬编码字面日期 ——
+    日期段取自 ``business_period_str()``（与编号数据同源），不硬编码字面日期 ——
     与 ``tests/test_numbering_audit.py`` 同一纪律，任何墙钟日期运行都成立。
     """
-    segment = business_date_str()
+    segment = business_period_str()
     db.add(NumberingCounter(prefix='PO', number_date=segment, last_seq=3))
     for seq in (5, 6, 7):  # 数据 max = 7 > 水位 3
         db.add(Order(order_no=f'PO-{segment}-{seq:04d}', customer='c', quantity=1,
