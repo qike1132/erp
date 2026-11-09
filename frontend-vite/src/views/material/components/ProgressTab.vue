@@ -13,7 +13,9 @@
           <span class="lg-note">进度 = 已到数量 / 采购数量</span>
         </div>
 
-        <div v-if="!filteredRows.length" class="mr-empty">
+        <div v-if="pIsLoading && !progressOrderRows.length" class="mr-loading">加载中…</div>
+
+        <div v-else-if="!filteredRows.length" class="mr-empty">
           <FontAwesomeIcon icon="inbox" />
           <span>{{ showSearchEmpty ? '当前页无匹配的来料登记（搜索仅作用于当前页，可翻页或清空搜索）' : '暂无进行中的来料登记' }}</span>
         </div>
@@ -108,6 +110,14 @@ function onPageSize(rows: number) {
 .mr-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary, #475569); }
 .mr-legend .sw { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 .mr-legend .lg-note { font-size: 12px; color: var(--color-text-muted, #64748b); margin-left: auto; }
+
+/* === Loading === */
+.mr-loading {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--color-text-muted, #64748b);
+  font-size: 14px;
+}
 
 /* === Empty State === */
 .mr-empty {

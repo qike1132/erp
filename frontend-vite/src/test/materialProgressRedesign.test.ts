@@ -316,6 +316,12 @@ describe('MaterialProgressGrid —— 进度列口径', () => {
     expect(cells[2]).toContain('到齐')
   })
 
+  it('未逾期的进行中百分比用蓝色（与图例「进行中」一致）', () => {
+    const w = mountGrid(buildProgressOrderRows([REG_FRESH], NOW))
+
+    expect(w.find('td.mp-pct').classes()).toContain('is-ongoing')
+  })
+
   it('逾期物料带「逾期」文字标记与 is-overdue 类（不依赖颜色单独传达）', () => {
     const w = mountGrid(progressRows())
     const overdueCells = w.findAll('td.mp-pct.is-overdue')
@@ -369,6 +375,25 @@ describe('ProgressTab —— 网格表容器', () => {
     expect(w.text()).toContain('当前页无匹配')
   })
 
+  it('首屏加载中显示加载态，不闪「暂无数据」空态', () => {
+    const w = mount(ProgressTab, {
+      props: {
+        filteredRows: [],
+        progressOrderRows: [],
+        pIsLoading: true,
+        pIsFetching: false,
+        pPerPage: 20,
+        pPages: 1,
+        pCount: 0,
+        pPage: 1,
+        showSearchEmpty: false,
+      },
+    })
+
+    expect(w.text()).toContain('加载中')
+    expect(w.text()).not.toContain('暂无进行中的来料登记')
+  })
+
   it('翻页事件沿用 0 基契约：点下一页 emit { page: 1, rows: 20 }', async () => {
     const w = mountTab(buildProgressOrderRows([REG_FRESH], NOW))
     await w.setProps({ pPages: 2 })
@@ -392,13 +417,13 @@ function mountToolbar(over: Record<string, unknown> = {}) {
 }
 
 describe('MaterialToolbar —— 单行工具条', () => {
-  it('四格 KPI：进行中登记 / 待收货登记 / 逾期物料 / 总到货率', () => {
+  it('四格 KPI：进行中登记 / 待收货登记 / 超 30 天未收齐 / 总到货率', () => {
     const w = mountToolbar()
     const text = w.text()
 
     expect(text).toContain('进行中登记')
     expect(text).toContain('待收货登记')
-    expect(text).toContain('逾期物料')
+    expect(text).toContain('超 30 天未收齐')
     expect(text).toContain('总到货率')
     expect(text).toContain('54%')
   })

@@ -17,18 +17,18 @@
       </colgroup>
       <thead>
         <tr>
-          <th>订单号 / 时间</th>
-          <th>客户</th>
-          <th>产品名称</th>
-          <th>订单数量</th>
-          <th>供应商</th>
-          <th>物料名称</th>
-          <th>规格型号</th>
-          <th>已到数量</th>
-          <th>采购数量</th>
-          <th>单位</th>
-          <th>进度</th>
-          <th>操作</th>
+          <th scope="col">订单号 / 时间</th>
+          <th scope="col">客户</th>
+          <th scope="col">产品名称</th>
+          <th scope="col">订单数量</th>
+          <th scope="col">供应商</th>
+          <th scope="col">物料名称</th>
+          <th scope="col">规格型号</th>
+          <th scope="col">已到数量</th>
+          <th scope="col">采购数量</th>
+          <th scope="col">单位</th>
+          <th scope="col">进度</th>
+          <th scope="col">操作</th>
         </tr>
       </thead>
       <tbody>
@@ -133,7 +133,7 @@ function pctClass(item: MergedItem): string {
   if (item.overdue) return 'is-overdue'
   if (isDone(item)) return 'is-done'
   if (item.received_quantity <= 0) return 'is-zero'
-  return ''
+  return 'is-ongoing'
 }
 
 /** 0% 写「未到」、100% 写「到齐」——用词替代纯数字 */
@@ -257,6 +257,7 @@ const orders = computed<OrderBlock[]>(() =>
   font-weight: 700;
   white-space: nowrap;
 }
+.mp-pct.is-ongoing { color: #3a6bd6; }
 .mp-pct.is-done { color: #1e9e55; }
 .mp-pct.is-zero { color: #9a6a00; }
 .mp-pct.is-overdue { color: #c0392b; }
