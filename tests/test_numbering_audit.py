@@ -32,7 +32,7 @@ from fastapi_app.tasks.numbering_audit_task import compute_audit
 _TODAY = '29991231'
 
 # 合规编号模式：与生产巡检同一口径，但在本文件内独立书写，用于直查复核。
-_NUMBER_PATTERN = r'^[A-Z]+-[0-9]{8}-[0-9]+$'
+_NUMBER_PATTERN = r'^[A-Z]+-(?:[0-9]{4}|[0-9]{8})-[0-9]+$'
 
 
 def _test_db_url() -> str:
@@ -53,7 +53,7 @@ def _test_db_url() -> str:
 @pytest.fixture(autouse=True)
 def _pin_business_date(monkeypatch):
     """把 compute_audit 的"今天"钉死为 _TODAY（远期唯一段），隔离共享测试库污染。"""
-    monkeypatch.setattr(audit_task_module, 'business_date_str', lambda: _TODAY)
+    monkeypatch.setattr(audit_task_module, 'business_period_str', lambda: _TODAY)
 
 
 @pytest_asyncio.fixture

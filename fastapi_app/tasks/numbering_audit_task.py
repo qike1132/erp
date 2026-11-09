@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import require_async_session_local
 from fastapi_app.services.numbering_reconcile import NUMBERED_ENTITIES
-from fastapi_app.services.numbering_sequence import business_date_str
+from fastapi_app.services.numbering_sequence import business_period_str
 from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import NumberingAudit, NumberingCounter
 
@@ -31,10 +31,11 @@ _ENTITY_MAX_SQL = (
     'SELECT COALESCE(MAX(CAST(split_part("{column}", \'-\', 3) AS BIGINT)), 0) '
     'FROM "{table}" '
     'WHERE "{column}" ~ \'' + NUMBERING_FORMAT_REGEX + '\' '
-    'AND split_part("{column}", \'-\', 2) = :today'
+    'AND split_part("{column}", \'-\', 2) = :period'
 )
 
-# 单实体格式违规计数：不符合 `^[A-Z]+-YYYYMMDD-N$` 的编号行数。
+# 单实体格式违规计数：不符合 `<前缀>-（YYMM|YYYYMMDD）-N` 的编号行数。
+# 8 位日期是 2026-11 之前的历史形态，仍属合规（存量单号不可重写）。
 _ENTITY_VIOLATION_SQL = (
     'SELECT COUNT(*) FROM "{table}" '
     'WHERE "{column}" !~ \'' + NUMBERING_FORMAT_REGEX + '\''
@@ -42,23 +43,23 @@ _ENTITY_VIOLATION_SQL = (
 
 
 async def _audit_entity(
-    db: AsyncSession, prefix: str, table: str, column: str, today: str,
+    db: AsyncSession, prefix: str, table: str, column: str, period: str,
 ) -> tuple[dict, dict | None]:
     """巡检单个实体：返回 (前缀记录, 违规记录或 None)。
 
     两个查询都是集合式单语句；help 函数化以便 compute_audit 的循环体不含
     逐行查询（通过 N+1 静态扫描）。
     """
-    # 模板渲染用 replace（NUMBERING_FORMAT_REGEX 的 {8} 与 str.format 冲突）
+    # 模板渲染用 replace（NUMBERING_FORMAT_REGEX 里的 {4}/{8} 与 str.format 冲突）
     max_sql = _ENTITY_MAX_SQL.replace('{column}', column).replace('{table}', table)
     data_max = int((await db.execute(
         text(max_sql),  # nosec B608 - 白名单常量
-        {'today': today},
+        {'period': period},
     )).scalar() or 0)
     counter = (await db.execute(
         select(NumberingCounter.last_seq).where(
             NumberingCounter.prefix == prefix,
-            NumberingCounter.number_date == today)
+            NumberingCounter.number_date == period)
     )).scalar()
     # 缺行（counter is None）不算 behind：新键首用前计数行不存在是正常态。
     behind = counter is not None and data_max > counter
@@ -75,11 +76,11 @@ async def _audit_entity(
 
 async def compute_audit(db: AsyncSession) -> dict:
     """计算一轮巡检结果（不写库、不 commit；测试直接调用）。"""
-    today = business_date_str()
+    period = business_period_str()
     prefixes: list[dict] = []
     violations: list[dict] = []
     for prefix, table, column in NUMBERED_ENTITIES:
-        record, violation = await _audit_entity(db, prefix, table, column, today)
+        record, violation = await _audit_entity(db, prefix, table, column, period)
         prefixes.append(record)
         if violation is not None:
             violations.append(violation)

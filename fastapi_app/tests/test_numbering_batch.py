@@ -28,11 +28,11 @@ def stubbed_numbering(monkeypatch):
         calls.append((prefix, date_str, count, seed))
         return state['start']
 
-    async def fake_daily_max(db, model, number_field, date_str):
+    async def fake_period_max(db, model, number_field, period_str):
         return state['seed']
 
     monkeypatch.setattr(nb, 'allocate_sequence_range', fake_range)
-    monkeypatch.setattr(nb, 'read_daily_max', fake_daily_max)
+    monkeypatch.setattr(nb, 'read_period_max', fake_period_max)
     return calls, state
 
 
@@ -50,17 +50,18 @@ async def _batch(
 async def test_returns_contiguous_numbers(stubbed_numbering):
     numbers = await _batch(4)
     assert len(numbers) == 4
-    assert [n.rsplit('-', 1)[1] for n in numbers] == ['0901', '0902', '0903', '0904']
+    assert [n.rsplit('-', 1)[1] for n in numbers] == ['901', '902', '903', '904']
 
 
 @pytest.mark.asyncio
-async def test_number_format_is_prefix_date_seq(stubbed_numbering):
+async def test_number_format_is_prefix_period_seq(stubbed_numbering):
     numbers = await _batch(2, prefix='BH', number_field='stockin_no')
     for raw in numbers:
-        prefix, date_str, seq = raw.split('-')
+        prefix, period_str, seq = raw.split('-')
         assert prefix == 'BH'
-        assert len(date_str) == 8 and date_str.isdigit()
-        assert len(seq) == 4
+        # 新格式：4 位年月（YYMM）；存量 8 位日期仍被正则接受，但新号只发 4 位
+        assert len(period_str) == 4 and period_str.isdigit()
+        assert len(seq) == 3
 
 
 @pytest.mark.asyncio
@@ -71,7 +72,7 @@ async def test_count_and_prefix_are_forwarded_to_allocator(stubbed_numbering):
     prefix, _date_str, count, seed = calls[0]
     assert prefix == 'SO'
     assert count == 7
-    assert seed == 900            # 透传 read_daily_max 的结果，保证与历史编号连续
+    assert seed == 900            # 透传 read_period_max 的结果，保证与历史编号连续
 
 
 @pytest.mark.asyncio

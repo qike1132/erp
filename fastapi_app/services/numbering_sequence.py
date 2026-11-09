@@ -26,9 +26,18 @@ from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 logger = logging.getLogger(__name__)
 
 
-def business_date_str() -> str:
-    """业务口径（北京时间）的 YYYYMMDD —— 编号日期段的唯一来源（spec §4.1）。"""
-    return datetime.now(_BUSINESS_TZ).strftime('%Y%m%d')
+def business_period_str() -> str:
+    """业务口径（北京时间）的 YYMM —— 编号期间段的唯一来源。
+
+    2026-11 起单号改为**月流水**（``PO-2611-001``），期间段是"年月"而非"日"。
+    存量单号的 8 位日期段不受影响：``read_period_max`` 按编号自身分段过滤，
+    ``'2611'`` 永远不会命中 ``'20261109'``，两个键空间互不覆盖。
+    """
+    return datetime.now(_BUSINESS_TZ).strftime('%y%m')
+
+
+# 兼容旧名：返回值语义已从"日期"变为"期间"，新代码一律用 business_period_str。
+business_date_str = business_period_str
 
 # 常量 SQL：表名/列名为字面量，全部值经绑定参数传递（无用户输入拼接）
 _ALLOCATE_SQL = text(
@@ -124,16 +133,18 @@ async def allocate_sequence_range(prefix: str, date_str: str, count: int, seed: 
     return end_seq - count + 1
 
 
-async def read_daily_max(db: AsyncSession, model, number_field: str, date_str: str) -> int:
-    """当日已落库的最大序号（按数值排序，无锁读，仅作连续性种子）。
+async def read_period_max(db: AsyncSession, model, number_field: str, period_str: str) -> int:
+    """当期（本月）已落库的最大序号（按数值排序，无锁读，仅作连续性种子）。
 
-    以编号自身的日期段过滤（split_part 第 2 段），与日期列的时区口径无关；
+    以编号自身的期间段过滤（split_part 第 2 段），与日期列的时区口径无关；
     正则守卫保证进入 cast 的序号段必为数字（脏行不抛 invalid input syntax）。
 
     2026-11-01（P3）：过滤器从「动态日期正则」改为「静态格式正则 +
-    split_part 日期段等值」——语义等价，但静态谓词与各编号表的
-    ``idx_*_no_date_seq`` 部分表达式索引（迁移 pg_standalone_107）逐字匹配：
+    split_part 期间段等值」——语义等价，但静态谓词与各编号表的
+    ``idx_*_no_date_seq`` 部分表达式索引（迁移 pg_standalone_116 重建）逐字匹配：
     PG 不做正则蕴含推断，动态日期正则永远用不上该索引（体检报告 §4-P3）。
+    2026-11 起期间段由 8 位日期改为 4 位年月（YYMM），函数名随之从
+    ``read_daily_max`` 改为 ``read_period_max``（旧名保留为别名）。
 
     使用调用方会话：同一业务事务内连续生成编号时能看到未提交行，批内连续。
     """
@@ -142,7 +153,11 @@ async def read_daily_max(db: AsyncSession, model, number_field: str, date_str: s
     result = await db.execute(
         select(func.max(seq)).where(
             col.op('~')(NUMBERING_FORMAT_REGEX),
-            func.split_part(col, '-', 2) == date_str,
+            func.split_part(col, '-', 2) == period_str,
         )
     )
     return int(result.scalar() or 0)
+
+
+# 兼容旧名：语义已从"当日"变为"当期"，新代码一律用 read_period_max。
+read_daily_max = read_period_max

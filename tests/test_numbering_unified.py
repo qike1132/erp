@@ -124,7 +124,7 @@ async def test_read_daily_max_empty_returns_zero(db):
 
 
 @pytest.mark.asyncio
-async def test_business_date_str_beijing_boundary(monkeypatch):
+async def test_business_period_str_beijing_boundary(monkeypatch):
     # UTC 16:30 = 北京 00:30（次日）——冻结时钟验证口径
     from datetime import datetime as _dt
 
@@ -137,7 +137,7 @@ async def test_business_date_str_beijing_boundary(monkeypatch):
             return base.astimezone(tz) if tz else base.replace(tzinfo=None)
 
     monkeypatch.setattr(ns, 'datetime', _Frozen)
-    assert ns.business_date_str() == '20260930'  # 北京已过午夜
+    assert ns.business_period_str() == '2609'  # 北京已过午夜，仍属 2026-09 期间
 
 
 @pytest.mark.asyncio
@@ -146,10 +146,10 @@ async def test_generated_number_uses_beijing_date_segment(db, monkeypatch):
 
     from fastapi_app.services import numbering
 
-    async def _no_seed(db_, model, field, date_str):
+    async def _no_seed(db_, model, field, period_str):
         return 0
 
-    monkeypatch.setattr(numbering, 'read_daily_max', _no_seed)
+    monkeypatch.setattr(numbering, 'read_period_max', _no_seed)
     monkeypatch.setattr(numbering, 'allocate_sequence', mock.AsyncMock(return_value=1))
     number = await numbering.generate_number_async('PO', Order, 'order_no', db)
-    assert number.startswith('PO-2026') and number.endswith('-0001')
+    assert number.startswith('PO-26') and number.endswith('-001')

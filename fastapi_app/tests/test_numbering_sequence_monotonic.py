@@ -196,13 +196,13 @@ async def test_mixed_single_and_range_stay_unique_and_increasing(factory):
 
 # ---------------- 格式/前缀不变 ----------------
 
-async def test_formatted_number_keeps_prefix_date_and_padding(factory):
-    """走完整取号路径：前缀、北京口径日期段、zfill(4) 格式均不变。"""
+async def test_formatted_number_keeps_prefix_period_and_padding(factory):
+    """走完整取号路径：前缀、北京口径期间段（YYMM）、zfill(3) 格式均不变。"""
     prefix = 'MONOF'
     date_str = business_date_str()
     await _set_counter(factory, prefix, 100, date_str)
     async with factory() as db:
         first = await generate_number_async(prefix, Order, 'order_no', db)
         second = await generate_number_async(prefix, Order, 'order_no', db)
-    assert first == f'{prefix}-{date_str}-0101'
-    assert second == f'{prefix}-{date_str}-0102'
+    assert first == f'{prefix}-{date_str}-101'
+    assert second == f'{prefix}-{date_str}-102'

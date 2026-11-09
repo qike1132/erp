@@ -3,12 +3,12 @@
 
 从 batch_service.py 提取的编号生成逻辑，消除 order_service ↔ batch_service 的循环依赖。
 
-本模块是全系统统一的编号生成内核：日期段采用**北京口径**（business_date_str），
-序号由 numbering_counter 表原子递增分配（见 numbering_sequence），是全系统唯一
-水位源。单号（generate_number_async）与批量（generate_number_batch）共用同一张
-表、同一套冲突语义与同一把进程内锁，混用也不重号。
+本模块是全系统统一的编号生成内核：期间段采用**北京口径**（business_period_str，
+YYMM 月流水），序号由 numbering_counter 表原子递增分配（见 numbering_sequence），
+是全系统唯一水位源。单号（generate_number_async）与批量（generate_number_batch）
+共用同一张表、同一套冲突语义与同一把进程内锁，混用也不重号。
 
-所有取号以当日已落库最大编号为种子（read_daily_max，按编号自身日期段过滤），
+所有取号以当期（本月）已落库最大编号为种子（read_period_max，按编号自身期间段过滤），
 计数独立短事务提交——业务事务回滚仅产生跳号、不回收序号。
 """
 import asyncio
@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.services.numbering_sequence import (
     allocate_sequence,
     allocate_sequence_range,
-    business_date_str,
-    read_daily_max,
+    business_period_str,
+    read_period_max,
 )
 from fastapi_app.shared_models import Order, PurchaseOrder, StockIn, StockOut
 
@@ -39,7 +39,7 @@ async def generate_number_async(prefix: str, model, number_field: str, db: Async
 
     生成策略：
     1. 协程内 asyncio.Lock 串行化同进程调用，降低计数表争用
-    2. 以当日已落库最大编号为种子（无锁读，仅保证首日连续性），通过
+    2. 以当期（本月）已落库最大编号为种子（无锁读，仅保证首月连续性），通过
        numbering_counter 表原子递增分配序号，多 worker 下无重号
     3. 计数独立短事务提交，业务事务回滚仅产生跳号（见 numbering_sequence）
 
@@ -50,18 +50,18 @@ async def generate_number_async(prefix: str, model, number_field: str, db: Async
         db: 异步数据库会话（用于种子读取，可见本事务内未提交编号）
 
     Returns:
-        str: 生成的编号,格式: PREFIX-YYYYMMDD-XXXX（YYYYMMDD 为北京口径）
+        str: 生成的编号，格式 ``PREFIX-YYMM-NNN``（YYMM 为北京口径，如 PO-2611-001）
     """
-    date_str = business_date_str()
+    period_str = business_period_str()
 
     async with _allocate_lock:
-        db_max = await read_daily_max(db, model, number_field, date_str)
-        current_seq = await allocate_sequence(prefix, date_str, seed=db_max)
-        return '-'.join((prefix, date_str, str(current_seq).zfill(4)))
+        db_max = await read_period_max(db, model, number_field, period_str)
+        current_seq = await allocate_sequence(prefix, period_str, seed=db_max)
+        return '-'.join((prefix, period_str, str(current_seq).zfill(3)))
 
 
 async def generate_order_number(db: AsyncSession) -> str:
-    """生成订单编号 PO-YYYYMMDD-XXXX"""
+    """生成订单编号 PO-YYMM-NNN"""
     return await generate_number_async('PO', Order, 'order_no', db)
 
 
@@ -88,38 +88,39 @@ async def generate_number_batch(
         count: 需要几个号。
 
     Returns:
-        编号列表，格式 ``PREFIX-YYYYMMDD-XXXX``，**按序连续**。
+        编号列表，格式 ``PREFIX-YYMM-NNN``，**按序连续**。
 
     Note:
-        序号用 ``zfill(4)`` 补齐但不截断：当日超过 9999 条时会出现 5 位，
-        编号仍唯一，只是字符串长度变长。
+        序号用 ``zfill(3)`` 补齐但不截断：当月超过 999 条时会出现 4 位
+        （``PO-2611-1000``），编号仍唯一，只是字符串长度变长；按单号排序的
+        场景必须用 ``CAST(split_part(...,3) AS BIGINT)`` 而不是字符串排序。
     """
     if count <= 0:
         return []
 
-    date_str = business_date_str()
+    date_str = business_period_str()
 
     async with _allocate_lock:
-        db_max = await read_daily_max(db, model, number_field, date_str)
+        db_max = await read_period_max(db, model, number_field, date_str)
         start = await allocate_sequence_range(prefix, date_str, count=count, seed=db_max)
 
-    return ['-'.join((prefix, date_str, str(start + i).zfill(4))) for i in range(count)]
+    return ['-'.join((prefix, date_str, str(start + i).zfill(3))) for i in range(count)]
 
 
 async def generate_stockin_number(db: AsyncSession) -> str:
-    """生成备货编号 BH-YYYYMMDD-XXXX"""
+    """生成备货编号 BH-YYMM-NNN"""
     return await generate_number_async('BH', StockIn, 'stockin_no', db)
 
 
 async def generate_stockout_number(db: AsyncSession) -> str:
-    """生成出货编号 SO-YYYYMMDD-XXXX"""
+    """生成出货编号 SO-YYMM-NNN"""
     return await generate_number_async('SO', StockOut, 'stockout_no', db)
 
 
 async def generate_case_movement_number(db: AsyncSession, direction: str) -> str:
-    """生成皮套出入库编号（入库 CSI- / 出库 CSO-，格式 YYYYMMDD-XXXX）。
+    """生成皮套出入库编号（入库 CSI- / 出库 CSO-，格式 YYMM-NNN）。
 
-    两个前缀共写 CaseMovement.movement_no（列唯一）；read_daily_max 按日期段
+    两个前缀共写 CaseMovement.movement_no（列唯一）；read_period_max 按期间段
     过滤、前缀无关，故混用不重号。
     """
     from fastapi_app.shared_models import CaseMovement
@@ -128,17 +129,17 @@ async def generate_case_movement_number(db: AsyncSession, direction: str) -> str
 
 
 async def generate_case_stockout_number(db: AsyncSession) -> str:
-    """生成皮套出库编号 CSO-YYYYMMDD-XXXX"""
+    """生成皮套出库编号 CSO-YYMM-NNN"""
     return await generate_case_movement_number(db, 'out')
 
 
 async def generate_case_stockin_number(db: AsyncSession) -> str:
-    """生成皮套入库编号 CSI-YYYYMMDD-XXXX"""
+    """生成皮套入库编号 CSI-YYMM-NNN"""
     return await generate_case_movement_number(db, 'in')
 
 
 async def generate_purchase_order_number(db: AsyncSession) -> str:
-    """生成采购订单编号 PO-YYYYMMDD-XXXX。
+    """生成采购订单编号 PO-YYMM-NNN。
 
     与客户订单（``generate_order_number``）共用 ``PO`` 前缀 ⇒ 共用
     ``numbering_counter`` 的 ``(PO, 日期)`` 水位，故两类单据不会重号；代价是
@@ -149,12 +150,12 @@ async def generate_purchase_order_number(db: AsyncSession) -> str:
 
 
 async def generate_customer_sampling_number(db: AsyncSession) -> str:
-    """生成按客户分类打样项目序列号 CS-YYYYMMDD-XXXX
+    """生成按客户分类打样项目序列号 CS-YYMM-NNN
 
     格式约定（design.md 2.3.4）：
     - CS：Customer Sampling 前缀
-    - YYYYMMDD：北京口径日期（business_date_str）
-    - XXXX：当日序号，zfill(4)，从 0001 开始
+    - YYMM：北京口径期间（business_period_str），如 2611
+    - NNN：月内序号，zfill(3)，从 001 开始
 
     唯一性由 DB 唯一索引 + numbering 服务的 advisory lock + FOR UPDATE 跨进程保证。
     """
@@ -163,9 +164,9 @@ async def generate_customer_sampling_number(db: AsyncSession) -> str:
 
 
 async def generate_shipment_number(db: AsyncSession) -> str:
-    """生成外发发货单编号 FH-YYYYMMDD-XXXX
+    """生成外发发货单编号 FH-YYMM-NNN
 
-    格式与订单/备货编号一致（PREFIX-YYYYMMDD-XXXX），前缀 FH = 发货（FaHuo）。
+    格式与订单/备货编号一致（PREFIX-YYMM-NNN），前缀 FH = 发货（FaHuo）。
     唯一性由 numbering 服务的 advisory lock + 计数表原子递增跨进程保证。
     """
     from fastapi_app.shared_models import OutsourceShipment
