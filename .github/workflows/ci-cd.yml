@@ -12,8 +12,21 @@ permissions:
   contents: read
 
 jobs:
+  # ── runner 镜像固定 ubuntu-24.04（noble），**不要**用 ubuntu-latest ──────────
+  # ubuntu-latest 自 2026-10-19 起迁往 Ubuntu 26.04（resolute），而 frontend-vite 钉的
+  # Playwright 1.60.0 没有 ubuntu26.04-x64 的 Chromium 构建，安装浏览器那一步直接 abort：
+  #   ERROR: Playwright does not support chromium on ubuntu26.04-x64
+  # （run 42557016138 实测：test job step 14、frontend job step 9 同一条错误。）
+  # 代价不是「少跑一条用例」，而是**该步骤之后的门禁全部变 skipped**：test job 的
+  # step 15-22（全栈浏览器冒烟、OpenAPI 端点对齐、prod_audit 自检、junit 上传、
+  # bandit、pip-audit、覆盖率判定），frontend job 的 step 10-11（浏览器 E2E、跨端
+  # 四件套 check:api / api:pc / routes / dto / types）都没跑，build job 整体 skipped，
+  # 而失败的只是一个与业务无关的「装浏览器」步骤。
+  # 解除条件：Playwright 发布带 26.04 构建的版本 → 升 playwright（含 package-lock）
+  # 并在本地跑通 `npm run test:e2e` 后，四个 job **一起**改回 ubuntu-latest。
+  # 不要逐 job 改：只固定用到浏览器的两个，会让 lint/build 在下次镜像迁移时单独变红。
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 全量 pytest（5124 条）+ 隔离 API E2E + 契约 + 全栈浏览器冒烟已超过 10 分钟；
     # 基线 job 恰好在 10:00 完成，新增用例后会被 job 超时截断（表现为无失败步骤的 failure）。
     timeout-minutes: 25
@@ -81,9 +94,10 @@ jobs:
     # PGDG 官方源，否则 `E: Unable to locate package postgresql-client-18`
     # （2026-10-12 CI run 38218718141 实测）。装 18 客户端即可（postgresql-common 的
     # pg_wrapper 默认取最新版）；末行把版本打进日志，日后回归时一眼能看出。
-    # Ubuntu 26.04 (resolute) 同理：ubuntu-latest 自 2026-10-19 起迁往 26.04，而
-    # apt.postgresql.org 已发布 resolute-pgdg 且含 postgresql-client-18（2026-10-12 实测），
-    # 故 ${VERSION_CODENAME} 替换在 24.04 / 26.04 上都能解析到正确仓库，无需按 codename 分支。
+    # 仓库地址用 ${VERSION_CODENAME} 推导、不写死 noble：本工作流当前把 job 固定
+    # 在 ubuntu-24.04（原因见 jobs 顶部注释），但解除固定后该替换在 24.04 / 26.04
+    # 上都成立——apt.postgresql.org 已有 resolute-pgdg 且含 postgresql-client-18
+    # （2026-10-12 实测），无需按 codename 分支。
     - name: Install PostgreSQL 18 client (must match the service major)
       run: |
         sudo apt-get update
@@ -356,7 +370,7 @@ jobs:
         python -c "import os; import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); coverage = float(root.attrib['line-rate']) * 100; print(f'Coverage: {coverage:.2f}%'); threshold = float(os.getenv('COVERAGE_MIN', '20')); (print(f'Coverage below threshold: {coverage:.2f}% < {threshold:.2f}%') or exit(1)) if coverage < threshold else None"
     
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -458,7 +472,7 @@ jobs:
         fi
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     defaults:
       run:
@@ -544,7 +558,7 @@ jobs:
 
   build:
     needs: [test, lint, frontend]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
