@@ -246,6 +246,24 @@ function roleRows(): ProgressOrderRow[] {
   })], NOW)
 }
 
+/** 两个角色 × 两家供应商交替出现：验证「按供应商」聚块排序 */
+function interleavedRoleRows(): ProgressOrderRow[] {
+  return buildProgressOrderRows([reg({
+    purchase_order_no: 'PO-MIX',
+    customer_name: '蛋仔派对',
+    product_name: '《蛋仔派对》市集拾趣系列-陈列样',
+    product_quantity: 600,
+    supplier_name: '三虎',
+    registration_date: '2026-09-01',
+    items: [
+      { id: 1, material_name: '棉花', specification: 'A', material_category: 'main', ordered_quantity: 100, received_quantity: 30, remaining_quantity: 70, progress: 30, unit: 'kg', supplier_name: '三虎', remark: '来源BOM：蛋仔' },
+      { id: 2, material_name: '1.0超柔', specification: 'A126#', material_category: 'main', ordered_quantity: 51, received_quantity: 0, remaining_quantity: 51, progress: 0, unit: '码', supplier_name: '美利达', remark: '来源BOM：蛋仔' },
+      { id: 3, material_name: '棉花', specification: 'A', material_category: 'main', ordered_quantity: 200, received_quantity: 0, remaining_quantity: 200, progress: 0, unit: 'kg', supplier_name: '三虎', remark: '来源BOM：派对' },
+      { id: 4, material_name: '1.0超柔', specification: 'A126#', material_category: 'main', ordered_quantity: 11, received_quantity: 0, remaining_quantity: 11, progress: 0, unit: '码', supplier_name: '美利达', remark: '来源BOM：派对' },
+    ],
+  })], NOW)
+}
+
 describe('MaterialProgressGrid —— 列与合并单元格', () => {
   it('表头 13 列：订单号/时间 · 客户 · 产品名称 · 订单数量 · 角色 · 供应商 · 物料名称 · 规格型号 · 采购数量 · 已到数量 · 单位 · 进度 · 操作', () => {
     const heads = mountGrid(multiGroupRows()).findAll('th').map((th) => th.text())
@@ -323,7 +341,20 @@ describe('MaterialProgressGrid —— 列与合并单元格', () => {
     const w = mountGrid(roleRows())
 
     expect(w.findAll('td.mp-role').map((td) => td.text())).toEqual(['蛋仔', '派对', ''])
-    expect(w.findAll('td.mp-supplier')).toHaveLength(3)
+    // 同一供应商跨 3 个角色分段 → 供应商格只出现一次
+    expect(w.findAll('td.mp-supplier')).toHaveLength(1)
+  })
+
+  it('按供应商分组：同供应商的角色分段连续，供应商格跨角色 rowspan', () => {
+    const w = mountGrid(interleavedRoleRows())
+
+    // 输入顺序是三虎/美利达交替，排序后必须按供应商聚块
+    expect(w.findAll('td.mp-supplier').map((td) => td.text())).toEqual(['三虎', '美利达'])
+    expect(w.findAll('td.mp-supplier')[0]?.attributes('rowspan')).toBe('2')
+    expect(w.findAll('td.mp-supplier')[1]?.attributes('rowspan')).toBe('2')
+    expect(w.findAll('td.mp-role').map((td) => td.text())).toEqual(['蛋仔', '派对', '蛋仔', '派对'])
+    // 「明细」按供应商一个入口
+    expect(w.findAll('button.mp-detail')).toHaveLength(2)
   })
 })
 

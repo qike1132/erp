@@ -48,9 +48,9 @@
               <td class="mp-qty" :rowspan="order.rows.length">{{ order.quantity }}</td>
             </template>
 
-            <td v-if="row.groupFirst" class="mp-role" :rowspan="row.groupSpan">{{ row.roleName }}</td>
+            <td v-if="row.roleFirst" class="mp-role" :rowspan="row.roleSpan">{{ row.roleName }}</td>
 
-            <td v-if="row.groupFirst" class="mp-supplier" :rowspan="row.groupSpan">
+            <td v-if="row.supplierFirst" class="mp-supplier" :rowspan="row.supplierSpan">
               <b>{{ row.supplierName }}</b>
             </td>
 
@@ -63,7 +63,7 @@
               {{ row.progressLabel }}<span v-if="row.overdue" class="mp-overdue-tag">逾期</span>
             </td>
 
-            <td v-if="row.groupFirst" :rowspan="row.groupSpan">
+            <td v-if="row.supplierFirst" :rowspan="row.supplierSpan">
               <button
                 type="button"
                 class="mp-detail"
@@ -86,7 +86,8 @@
  *
  * 用户 2026-11-09 定稿：外观与合并方式对齐 /purchase「工厂汇总」表。
  *  · 一行 = 一项物料；订单号/客户/产品名称/订单数量 按整单 rowspan
- *  · 角色 + 供应商按分组合并 rowspan（多角色 SKU 按角色分行），「明细」每组一个入口
+ *  · 分组（2026-11-09 用户定案）：供应商为一级分组，同供应商的角色分段连续；
+ *    供应商格跨其全部角色行 rowspan，角色格只覆盖自己的分段，「明细」每供应商一个入口
  *  · 进度：100% → 到齐，其余 → 百分比；逾期带文字标记，不依赖颜色
  */
 import { computed } from 'vue'
@@ -101,8 +102,12 @@ const emit = defineEmits<{
 
 interface FlatRow {
   key: string
-  groupFirst: boolean
-  groupSpan: number
+  /** 供应商块的第一个物料行（供应商格与明细按钮只渲染一次） */
+  supplierFirst: boolean
+  supplierSpan: number
+  /** 角色分段的第一个物料行 */
+  roleFirst: boolean
+  roleSpan: number
   roleName: string
   supplierName: string
   materialName: string
@@ -151,24 +156,41 @@ const orders = computed<OrderBlock[]>(() =>
       : [order.productName || '—']
 
     const rows: FlatRow[] = []
-    for (const group of order.groups) {
-      group.items.forEach((item, i) => {
-        rows.push({
-          key: `${group.roleName}|${group.supplierName}|${item.material_name}|${i}`,
-          groupFirst: i === 0,
-          groupSpan: group.items.length,
-          roleName: group.roleName,
-          supplierName: group.supplierName,
-          materialName: item.material_name,
-          specification: item.specification || '',
-          receivedDisplay: item.received_display,
-          orderedDisplay: item.ordered_display,
-          unit: item.unit || '',
-          progressLabel: progressLabel(item),
-          pctClass: pctClass(item),
-          overdue: item.overdue,
+    // 方案 A：供应商为一级分组——同供应商的角色分段连续排列，
+    // 供应商格跨其全部角色行 rowspan；角色格只覆盖自己的分段。
+    let gi = 0
+    while (gi < order.groups.length) {
+      const supplierName = order.groups[gi]!.supplierName
+      let supplierSpan = 0
+      let end = gi
+      while (end < order.groups.length && order.groups[end]!.supplierName === supplierName) {
+        supplierSpan += order.groups[end]!.items.length
+        end++
+      }
+      let supplierFirst = true
+      for (; gi < end; gi++) {
+        const group = order.groups[gi]!
+        group.items.forEach((item, i) => {
+          rows.push({
+            key: `${group.supplierName}|${group.roleName}|${item.material_name}|${i}`,
+            supplierFirst: supplierFirst && i === 0,
+            supplierSpan,
+            roleFirst: i === 0,
+            roleSpan: group.items.length,
+            roleName: group.roleName,
+            supplierName: group.supplierName,
+            materialName: item.material_name,
+            specification: item.specification || '',
+            receivedDisplay: item.received_display,
+            orderedDisplay: item.ordered_display,
+            unit: item.unit || '',
+            progressLabel: progressLabel(item),
+            pctClass: pctClass(item),
+            overdue: item.overdue,
+          })
         })
-      })
+        supplierFirst = false
+      }
     }
 
     return {

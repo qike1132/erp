@@ -100,6 +100,9 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
     skuItems: ProgressOrderRow['skuItems']
     productQuantity: number
     groups: SupplierGroupRow[]
+    /** 供应商/角色首次出现顺序：用于「按供应商分组」排序（方案 A） */
+    supplierSeq: Map<string, number>
+    roleSeq: Map<string, number>
   }>()
 
   for (const r of rows) {
@@ -162,6 +165,8 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
         skuItems: r.sku_items || [],
         productQuantity: 0,
         groups: [],
+        supplierSeq: new Map<string, number>(),
+        roleSeq: new Map<string, number>(),
       }
       orderMap.set(key, order)
     }
@@ -174,6 +179,13 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
       const mergedItems = Array.from(bucket.items.values())
       const gOrdered = mergedItems.reduce((s, i) => s + i.ordered_quantity, 0)
       const gReceived = mergedItems.reduce((s, i) => s + i.received_quantity, 0)
+      if (!order.supplierSeq.has(bucket.supplierName)) {
+        order.supplierSeq.set(bucket.supplierName, order.supplierSeq.size)
+      }
+      const roleKey = `${bucket.supplierName}\u0000${bucket.roleName}`
+      if (!order.roleSeq.has(roleKey)) {
+        order.roleSeq.set(roleKey, order.roleSeq.size)
+      }
       order.groups.push({
         roleName: bucket.roleName,
         supplierName: bucket.supplierName,
@@ -188,14 +200,24 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
   }
 
   return Array.from(orderMap, ([orderNo, o]) => {
-    const ordered = o.groups.reduce((s, g) => s + g.items.reduce((x, i) => x + i.ordered_quantity, 0), 0)
-    const received = o.groups.reduce((s, g) => s + g.items.reduce((x, i) => x + i.received_quantity, 0), 0)
+    // 方案 A：供应商为一级分组（跨角色连续），角色为供应商块内的分段。
+    // 稳定排序：同一供应商/角色跨登记的多个块保持原有先后。
+    const groups = [...o.groups].sort((a, b) => {
+      const sa = o.supplierSeq.get(a.supplierName) ?? 0
+      const sb = o.supplierSeq.get(b.supplierName) ?? 0
+      if (sa !== sb) return sa - sb
+      const ra = o.roleSeq.get(`${a.supplierName}\u0000${a.roleName}`) ?? 0
+      const rb = o.roleSeq.get(`${b.supplierName}\u0000${b.roleName}`) ?? 0
+      return ra - rb
+    })
+    const ordered = groups.reduce((s, g) => s + g.items.reduce((x, i) => x + i.ordered_quantity, 0), 0)
+    const received = groups.reduce((s, g) => s + g.items.reduce((x, i) => x + i.received_quantity, 0), 0)
     const searchText = [
       orderNo,
       o.customerName,
       o.productName,
-      ...o.groups.map((g) => g.supplierName),
-      ...o.groups.flatMap((g) => g.items.map((i) => i.material_name)),
+      ...groups.map((g) => g.supplierName),
+      ...groups.flatMap((g) => g.items.map((i) => i.material_name)),
     ].join(' ').toLowerCase()
     return {
       orderNo,
@@ -204,9 +226,9 @@ export function buildProgressOrderRows(rows: Registration[], now: Date = new Dat
       productName: o.productName,
       skuItems: o.skuItems,
       productQuantity: o.skuItems.length ? o.skuItems.reduce((s, k) => s + (k.quantity || 0), 0) : (o.productQuantity || null),
-      groups: o.groups,
+      groups,
       progress: ordered > 0 ? Math.round((received / ordered) * 100) : 0,
-      hasOverdue: o.groups.some((g) => g.overdue),
+      hasOverdue: groups.some((g) => g.overdue),
       searchText,
     }
   })
