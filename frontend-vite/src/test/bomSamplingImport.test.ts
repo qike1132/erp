@@ -58,19 +58,20 @@ function role(id: number, roleName: string): RoleBrief {
   }
 }
 
-function project(id: number, sequenceNo: string): ProjectSummary {
+function project(id: number, sequenceNo: string, overrides: Partial<ProjectSummary> = {}): ProjectSummary {
   return {
     id,
     sequence_no: sequenceNo,
     product_name: '测试产品',
     status: 'in_progress',
     current_version: 'T2',
-    product_image_url: null,
-    product_image_thumbnail_url: null,
+    product_image_url: `https://img.test/original-${id}.jpg`,
+    product_image_thumbnail_url: `https://img.test/thumb-${id}.jpg`,
     product_image_blur_url: null,
     completed_at: null,
     parts_count: 2,
-    updated_at: '2026-11-07',
+    updated_at: '2026-11-07 09:05:00',
+    ...overrides,
   }
 }
 
@@ -179,21 +180,23 @@ describe('BomEditor 从打样单导入完整链路', () => {
     vi.clearAllMocks()
   })
 
-  it('列出同名打样单，复用 final_only，冲突/映射/角色/保存回显均正确', async () => {
+  it('打开即列出全部打样单（含产品图），点卡片预览，冲突/映射/角色/保存回显均正确', async () => {
     const w = await openEditor()
     if (!document.querySelector('.bom-btn-import-v2')) throw new Error(`BOM 弹窗未渲染：${document.body.innerHTML.slice(0, 1200)}`)
     await q('.bom-btn-import-v2').trigger('click')
-    expect((q('#sampling-product-keyword').element as HTMLInputElement).value).toBe('测试产品')
-    await q('.sampling-search-line button').trigger('click')
     await flushPromises()
     await nextTick()
 
-    expect(mocks.listProjects).toHaveBeenCalledWith({ keyword: '测试产品', status: 'all', page: 1, per_page: 100 })
-    expect(qa('.sampling-project-table tbody tr')).toHaveLength(2)
-    expect(q('.sampling-project-table').text()).toContain('DY-001')
-    expect(q('.sampling-project-table').text()).toContain('DY-002')
+    // 打开弹窗即自动加载全部打样单，不需要先输入产品名搜索。
+    expect((q('#sampling-product-keyword').element as HTMLInputElement).value).toBe('')
+    expect(mocks.listProjects).toHaveBeenCalledWith({ status: 'all', page: 1, per_page: 100 })
+    expect(mocks.listRoles).not.toHaveBeenCalled()
+    expect(qa('.sampling-project-card')).toHaveLength(2)
+    expect(q('.sampling-cards').text()).toContain('DY-001')
+    expect(q('.sampling-cards').text()).toContain('DY-002')
+    expect((qa('.sampling-project-card img')[0]!.element as HTMLImageElement).src).toBe('https://img.test/thumb-11.jpg')
 
-    await qa('.sampling-project-table tbody tr')[0]!.find('button').trigger('click')
+    await qa('.sampling-project-card')[0]!.trigger('click')
     await flushPromises()
     await nextTick()
     expect(mocks.getPartsByVersion).toHaveBeenCalledWith(11, 100, true)
@@ -288,11 +291,53 @@ describe('BomEditor 从打样单导入完整链路', () => {
     mocks.listProjects.mockRejectedValue({ response: { status: 403 } })
     await openEditor()
     await q('.bom-btn-import-v2').trigger('click')
-    await q('.sampling-search-line button').trigger('click')
     await flushPromises()
     await nextTick()
 
     expect(q('[role="alert"]').text()).toContain('customer_sampling_view')
     expect(q('[role="alert"]').text()).toContain('customer_sampling_manage')
+  })
+
+  it('状态筛选只过滤已加载列表，切回全部恢复三张', async () => {
+    mocks.listProjects.mockResolvedValue({
+      success: true,
+      items: [
+        project(11, 'DY-001'),
+        project(12, 'DY-002', { status: 'completed' }),
+        project(13, 'DY-003', { status: 'cancelled' }),
+      ],
+      total: 3,
+    })
+    await openEditor()
+    await q('.bom-btn-import-v2').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(qa('.sampling-project-card')).toHaveLength(3)
+    const chips = qa('.sampling-chip')
+    expect(chips.map((chip) => chip.text())).toEqual(['全部', '进行中', '已完成'])
+
+    await chips[1]!.trigger('click')
+    expect(qa('.sampling-project-card')).toHaveLength(1)
+    expect(q('.sampling-cards').text()).toContain('DY-001')
+
+    await chips[2]!.trigger('click')
+    expect(qa('.sampling-project-card')).toHaveLength(1)
+    expect(q('.sampling-cards').text()).toContain('DY-002')
+
+    await chips[0]!.trigger('click')
+    expect(qa('.sampling-project-card')).toHaveLength(3)
+    expect(mocks.listRoles).not.toHaveBeenCalled()
+  })
+
+  it('搜索框只作为可选过滤：输入关键词后按关键词重新加载', async () => {
+    await openEditor()
+    await q('.bom-btn-import-v2').trigger('click')
+    await flushPromises()
+    await q('#sampling-product-keyword').setValue('蛋仔')
+    await q('.sampling-search-line button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.listProjects).toHaveBeenLastCalledWith({ keyword: '蛋仔', status: 'all', page: 1, per_page: 100 })
   })
 })

@@ -536,7 +536,6 @@ export function useProductListActions(
 
   // ===== 从打样单导入（只写编辑态；仍由 saveBom 唯一保存通道落库） =====
   const samplingImport = useBomSamplingImport({
-    productName: bomProductName,
     bomRoles,
     supplierOptions: bomSupplierOptions,
     getFabricItems: role => ensureScope(scopeKeyOf(role)).fabric,

@@ -231,6 +231,8 @@
     v-model:open="samplingImportVisible"
     v-model:search-keyword="samplingSearchKeyword"
     :projects="samplingProjects"
+    :visible-projects="samplingVisibleProjects"
+    :status-filter="samplingStatusFilter"
     :selected-project-id="samplingSelectedProjectId"
     :rows="samplingImportRows"
     :selected-count="samplingSelectedRows.length"
@@ -241,6 +243,7 @@
     :has-conflict="samplingHasConflict"
     :error="samplingError"
     @search="searchSamplingProjects"
+    @filter-status="samplingStatusFilter = $event"
     @select-project="selectSamplingProject"
     @confirm="confirmSamplingImport"
   />
@@ -282,7 +285,8 @@ const {
   copyBomDialogVisible, copyBomSearchKeyword, copyBomProducts,
   copyBomSourceProductId, copyBomPreview, copyBomOverwrite, copyBomProgress,
   searchProductForCopy, selectCopyBomProduct, confirmCopyBom,
-  samplingImportVisible, samplingSearchKeyword, samplingProjects, samplingSearched,
+  samplingImportVisible, samplingSearchKeyword, samplingProjects, samplingVisibleProjects,
+  samplingStatusFilter, samplingSearched,
   samplingSearching, samplingLoadingParts, samplingError, samplingSelectedProjectId,
   samplingImportRows, samplingSelectedRows, samplingHasRoles, samplingHasConflict,
   openSamplingImport, searchSamplingProjects, selectSamplingProject, confirmSamplingImport,

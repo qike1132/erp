@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>「从打样单导入」弹窗改版对比</title>
+<style>
+  :root {
+    --primary: #2d5ab8; --primary-50: #eef3fc; --primary-100: #dce7fb;
+    --text: #1a1a2e; --text-2: #475569; --muted: #64748b;
+    --border: #e2e8f0; --border-light: #f0f2f5; --surface: #f4f6fc;
+    --success-bg: #e8f6ee; --success-fg: #1e7e46;
+    --warning-bg: #fff4e0; --warning-fg: #9a6a00;
+    --danger-bg: #fdeaea; --danger-fg: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef1f6; font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; color: var(--text); }
+  .page { max-width: 1380px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; line-height: 1.7; }
+  .rec { background: #f0f7ff; border: 1px solid #cfe0ff; border-radius: 10px; padding: 12px 16px; font-size: 13px; line-height: 1.7; margin-bottom: 22px; }
+  .rec b { color: var(--primary); }
+  .ver { margin-bottom: 30px; }
+  .ver-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .badge { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: #dfe8fb; color: var(--primary); }
+  .badge.alt { background: #f1f2f6; color: var(--text-2); }
+  .ver-head h2 { font-size: 15px; margin: 0; }
+  .desc { color: var(--text-2); font-size: 12.5px; line-height: 1.65; margin: 4px 0 10px; }
+  .pros { font-size: 12px; color: var(--muted); margin: 0 0 10px; padding-left: 18px; line-height: 1.7; }
+  .screen { background: #fff; border: 1px solid #dde4ef; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(20,38,70,.06); }
+
+  /* ---------- 弹窗骨架 ---------- */
+  .dlg { display: flex; flex-direction: column; height: 760px; }
+  .dlg-head { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-bottom: 1px solid var(--border-light); }
+  .dlg-head .ttl { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .dlg-head .ttl i { width: 18px; height: 18px; border-radius: 4px; background: var(--primary); display: inline-block; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2' stroke='black' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2' stroke='black' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat; }
+  .dlg-head .x { margin-left: auto; width: 28px; height: 28px; border: 0; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
+  .dlg-body { flex: 1; min-height: 0; display: flex; background: var(--surface); }
+  .dlg-foot { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border-light); background: #fff; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); cursor: pointer; white-space: nowrap; font-size: 13px; }
+  .btn-primary { border-color: var(--primary); background: var(--primary); color: #fff; font-weight: 600; }
+  .btn-ghost { color: var(--primary); border-color: var(--primary-100); background: var(--primary-50); }
+  .foot-count { margin-right: auto; color: var(--muted); font-size: 13px; }
+
+  /* ---------- 左侧打样单列表 ---------- */
+  .side { width: 470px; display: flex; flex-direction: column; border-right: 1px solid var(--border-light); background: #fff; }
+  .side-toolbar { padding: 12px 14px 10px; border-bottom: 1px solid var(--border-light); }
+  .search-line { display: flex; gap: 8px; }
+  .search-line input { flex: 1; min-width: 0; padding: 8px 11px; border: 1px solid #8592a3; border-radius: 8px; font-size: 13px; }
+  .side-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; color: var(--muted); font-size: 12px; }
+  .side-meta b { color: var(--text-2); }
+  .chips { display: flex; gap: 6px; }
+  .chip { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); font-size: 11.5px; background: #fff; }
+  .chip.on { border-color: var(--primary); color: var(--primary); background: var(--primary-50); font-weight: 600; }
+  .cards { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; }
+  .pcard { border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden; cursor: pointer; text-align: left; padding: 0; }
+  .pcard:hover { border-color: #b9cdf0; }
+  .pcard.sel { border: 2px solid var(--primary); box-shadow: 0 0 0 2px var(--primary-100); }
+  .pcard .thumb { position: relative; height: 104px; background: linear-gradient(135deg, #eef2f9, #dfe7f4); display: flex; align-items: center; justify-content: center; }
+  .pcard .thumb svg { width: 64px; height: 64px; opacity: .55; }
+  .pcard .thumb .st { position: absolute; top: 7px; left: 7px; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .st-progress { background: var(--primary-50); color: var(--primary); }
+  .st-done { background: var(--success-bg); color: var(--success-fg); }
+  .st-cancel { background: #f1f2f6; color: var(--muted); }
+  .pcard .body { padding: 8px 10px 9px; }
+  .pcard .name { font-size: 13px; font-weight: 700; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 35px; }
+  .pcard .no { margin-top: 4px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .pcard .time { margin-top: 2px; font-size: 11px; color: #94a3b8; }
+  .pcard .selflag { margin-top: 5px; font-size: 11px; font-weight: 700; color: var(--primary); display: none; }
+  .pcard.sel .selflag { display: block; }
+
+  /* ---------- 右侧预览 ---------- */
+  .main { flex: 1; min-width: 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  .panel { background: #fff; border: 1px solid var(--border-light); border-radius: 12px; padding: 12px 14px; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .panel-head h3 { margin: 0; font-size: 14px; }
+  .panel-head span { color: var(--muted); font-size: 12px; }
+  .alert-warn { display: flex; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--warning-bg); color: var(--warning-fg); font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
+  table.grid { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .grid th { padding: 7px 8px; background: var(--surface); text-align: left; white-space: nowrap; color: var(--text); font-weight: 600; }
+  .grid td { padding: 7px 8px; border-top: 1px solid var(--border-light); vertical-align: top; }
+  .grid .tbl-wrap { max-height: 390px; overflow: auto; }
+  .row-new { background: #fff; }
+  .row-overwrite { background: #fffaf0; }
+  .row-conflict { background: #fdf3f3; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-weight: 700; font-size: 11px; white-space: nowrap; }
+  .tag-new { background: var(--success-bg); color: var(--success-fg); }
+  .tag-overwrite { background: var(--warning-bg); color: var(--warning-fg); }
+  .tag-conflict { background: var(--danger-bg); color: var(--danger-fg); }
+  .qty { display: inline-block; padding: 1px 7px; border-radius: 6px; background: #fef3c7; color: #92400e; white-space: nowrap; font-size: 11.5px; }
+  .empty { min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); text-align: center; font-size: 13px; }
+  .empty .big { width: 56px; height: 56px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; color: #9fb0c8; font-size: 24px; }
+  .note { color: var(--muted); font-size: 11.5px; line-height: 1.6; margin: 8px 0 0; }
+
+  /* ---------- 方案 B 全宽卡片 ---------- */
+  .full-body { flex: 1; min-height: 0; background: var(--surface); padding: 14px 16px; overflow: hidden; display: flex; flex-direction: column; gap: 10px; }
+  .full-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; overflow-y: auto; align-content: start; }
+  .full-grid .pcard .thumb { height: 128px; }
+  .full-grid .pcard .thumb svg { width: 76px; height: 76px; }
+  .backline { display: flex; align-items: center; gap: 10px; }
+  .backline .back { border: 0; background: transparent; color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; padding: 0; }
+  .backline .crumb { color: var(--muted); font-size: 12.5px; }
+  .detail-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: #fff; border: 1px solid var(--border-light); border-radius: 10px; }
+  .detail-head img, .detail-head .ph { width: 54px; height: 54px; border-radius: 8px; background: #e8edf6; display: flex; align-items: center; justify-content: center; }
+  .detail-head .ph svg { width: 32px; height: 32px; opacity: .5; }
+  .detail-head .t { font-size: 14px; font-weight: 700; }
+  .detail-head .m { color: var(--muted); font-size: 12px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>「从打样单导入」弹窗改版对比</h1>
+  <p class="sub">入口：采购页 / 产品页 → BOM 配置 → 「从打样单导入」。现状是必须先按产品名搜索才会出结果；改版目标：打开即自动列出打样间全部打样单（含产品图片），用户直接点选。生产库当前共 46 张（进行中 40 / 已完成 3 / 已取消 3，43 张有图），可一次性全量加载。</p>
+
+  <div class="rec">
+    <b>建议：方案 A（左卡片列表 + 右部位预览）。</b>打样单选完就能在同一屏勾选要导入的部位，不用来回切换；左侧两列卡片保证图片可辨认，46 张滚动两屏内看完。搜索框保留为可选过滤，不再是必经步骤。
+  </div>
+
+  <!-- ======================= 方案 A ======================= -->
+  <section class="ver">
+    <div class="ver-head">
+      <span class="badge">方案 A · 推荐</span>
+      <h2>打开即全量列出：左侧图片卡片，右侧部位预览</h2>
+    </div>
+    <p class="desc">弹窗打开后自动请求全部打样单（按更新时间倒序），无需输入关键词；点卡片立即读取该单最终版本部位，右侧勾选后一键导入。</p>
+    <ul class="pros">
+      <li>选单与勾部位同屏，少一次「预览 → 返回」往返</li>
+      <li>卡片带产品图 + 状态徽标，扫一眼就能认出目标打样单</li>
+      <li>搜索框保留：46 张时不是必需，数量增长后仍可快速过滤</li>
+    </ul>
+    <div class="screen">
+      <div class="dlg">
+        <div class="dlg-head">
+          <div class="ttl"><i></i>从打样单导入</div>
+          <button class="x">×</button>
+        </div>
+        <div class="dlg-body">
+          <aside class="side">
+            <div class="side-toolbar">
+              <div class="search-line">
+                <input value="" placeholder="搜索产品名称或打样单号（可留空）">
+                <button class="btn">搜索</button>
+              </div>
+              <div class="side-meta">
+                <span><b>全部 46 张</b> · 按更新时间倒序</span>
+                <span class="chips"><span class="chip on">全部</span><span class="chip">进行中</span><span class="chip">已完成</span></span>
+              </div>
+            </div>
+            <div class="cards">
+              <!-- 卡片 1：选中态 -->
+              <button class="pcard sel">
+                <div class="thumb">
+                  <svg viewBox="0 0 64 64" fill="none" stroke="#5b7fb8" stroke-width="2.2"><path d="M20 8l12 7 12-7 8 9-9 8v31H21V25l-9-8 8-9z"/></svg>
+                  <span class="st st-progress">进行中</span>
+                </div>
+                <div class="body">
+                  <div class="name">蛋仔派对·市集拾趣系列毛绒公仔</div>
+                  <div class="no">DY-202611-031 · T3</div>
+                  <div class="time">更新 11-08 14:20</div>
+                  <div class="selflag">✓ 当前选择</div>
+                </div>
+              </button>
+              <!-- 卡片 2 -->
+              <button class="pcard">
+                <div class="thumb">
+                  <svg viewBox="0 0 64 64" fill="none" stroke="#7d8fb0" stroke-width="2.2"><circle cx="32" cy="22" r="11"/><path d="M13 56c2-12 9-18 19-18s17 6 19 18"/></svg>
+                  <span class="st st-progress">进行中</span>
+                </div>
+                <div class="body">
+                  <div class="name">MINISO 墩墩系列 40cm 抱枕</div>
+                  <div class="no">DY-202611-030 · T2</div>
+                  <div class="time">更新 11-08 10:02</div>
+                  <div class="selflag">✓ 当前选择</div>
+                </div>
+              </button>
+              <!-- 卡片 3 -->
+              <button class="pcard">
+                <div class="thumb">
+                  <svg viewBox="0 0 64 64" fill="none" stroke="#7488a8" stroke-width="2.2"><rect x="14" y="14" width="36" height="40" rx="5"/><path d="M24 14v-4h16v4M22 28h20M22 36h20M22 44h12"/></svg>
+                  <span class="st st-progress">进行中</span>
+                </div>
+                <div class="body">
+                  <div class="name">库洛米联名款收纳袋</div>
+                  <div class="no">DY-202610-029 · T1</div>
+                  <div class="time">更新 11-07 16:45</div>
+                  <div class="selflag">✓ 当前选择</div>
+                </div>
+              </button>
+              <!-- 卡片 4 -->
+              <button class="pcard">
+                <div class="thumb">
+                  <svg viewBox="0 0 64 64" fill="none" stroke="#8393ae" stroke-width="2.2"><path d="M22 12h20l6 10-8 6v24H24V28l-8-6 6-10z"/><path d="M27 12c0 3 2 5 5 5s5-2 5-5"/></svg>
+                  <span class="st st-progress">进行中</span>
+                </div>
+                <div class="body">
+                  <div class="name">小黄鸭泡芙坐垫</div>
+                  <div class="no">DY-202610-028 · T2</div>
+                  <div class="time">更新 11-07 09:31</div>
+                  <div class="selflag">✓ 当前选择</div>
+                </div>
+              </button>
+              <!-- 卡片 5 完成 -->
+              <button class="pcard">
+                <div class="thumb">
+                  <svg viewBox="0 0 64 64" fill="none" stroke="#7d8fb0" stroke-width="2.2"><path d="M16 20h32v26a4 4 0 01-4 4H20a4 4 0 01-4-4V20z"/><path d="M16 20c0-4 3-7 7-7h18c4 0 7 3 7 7"/></svg>
+                  <span class="st st-done">已完成</span>
+                </div>
+                <div class="body">
+                  <div class="name">迪士尼米奇系列斜挎包</div>
+                  <div class="no">DY-202610-021 · T4</div>
+                  <div class="time">更新 11-05 11:18</div>
+                  <div class="selflag">✓ 当前选择</div>
+                </div>
+              </button>
+              <!-- 卡片 6 无图 -->
+              <button class="pcard">
+                <div class="thumb">
+                  <svg viewBox="0 0 64 64" fill="none" stroke="#9aa8bd" stroke-width="2.2"><path d="M20 12l12 8 12-8 8 10-8 6v24H20V28l-8-6 8-10z"/></svg>
+                  <span class="st st-progress">进行中</span>
+                </div>
+                <div class="body">
+                  <div class="name">（无产品图）小熊挂件</div>
+                  <div class="no">DY-202610-019 · T1</div>
+                  <div class="time">更新 11-04 15:07</div>
+                  <div class="selflag">✓ 当前选择</div>
+                </div>
+              </button>
+            </div>
+          </aside>
+
+          <main class="main">
+            <section class="panel" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+              <div class="panel-head">
+                <h3>最终版本部位预览</h3>
+                <span>默认全部勾选，可取消不需要的行</span>
+              </div>
+              <div class="alert-warn">⚠ 同一部位出现在多个角色中，已标为「冲突」。请逐行勾选需要保留的角色数据。</div>
+              <div class="tbl-wrap" style="flex:1;">
+                <table class="grid">
+                  <thead><tr><th>导入</th><th>部位名</th><th>布料名</th><th>规格型号</th><th>供应商</th><th>来源角色</th><th>状态</th><th>数量</th></tr></thead>
+                  <tbody>
+                    <tr class="row-conflict"><td><input type="checkbox" checked></td><td><b>身体</b></td><td>水晶超柔</td><td>红-01</td><td>恒泰纺织</td><td>蛋仔</td><td><span class="tag tag-conflict">冲突</span></td><td><span class="qty">0 · 数量待补</span></td></tr>
+                    <tr class="row-overwrite"><td><input type="checkbox" checked></td><td><b>耳朵</b></td><td>短毛绒</td><td>M-32</td><td>恒泰纺织</td><td>蛋仔</td><td><span class="tag tag-overwrite">覆盖</span></td><td><span class="qty">0 · 数量待补</span></td></tr>
+                    <tr class="row-new"><td><input type="checkbox" checked></td><td><b>手脚</b></td><td>抓绒</td><td>G-08</td><td>美利达</td><td>蛋仔</td><td><span class="tag tag-new">新增</span></td><td><span class="qty">0 · 数量待补</span></td></tr>
+                    <tr class="row-conflict"><td><input type="checkbox" checked></td><td><b>身体</b></td><td>水晶超柔</td><td>蓝-03</td><td>美利达</td><td>派对</td><td><span class="tag tag-conflict">冲突</span></td><td><span class="qty">0 · 数量待补</span></td></tr>
+                    <tr class="row-new"><td><input type="checkbox" checked></td><td><b>帽子</b></td><td>摇粒绒</td><td>Y-12</td><td>恒泰纺织</td><td>派对</td><td><span class="tag tag-new">新增</span></td><td><span class="qty">0 · 数量待补</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="note">打样色号将进入 BOM 规格型号（无色号时使用布料规格），原备注保持不变；数量统一填 0 并标黄，请补录后保存。以下字段未导入：单价、交期、联系人、联系电话（BOM 无对应列）。</p>
+            </section>
+          </main>
+        </div>
+        <div class="dlg-foot">
+          <span class="foot-count">已选 5 / 5 条</span>
+          <button class="btn">取消</button>
+          <button class="btn btn-primary">导入到 BOM 编辑态</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 方案 B ======================= -->
+  <section class="ver">
+    <div class="ver-head">
+      <span class="badge alt">方案 B</span>
+      <h2>全宽图片卡片墙：点卡片进入部位预览（多一步返回）</h2>
+    </div>
+    <p class="desc">弹窗打开即铺满产品图卡片（5 列）。点某张卡片后，整块区域切换为该打样单的部位预览，左上角「返回全部打样单」。</p>
+    <ul class="pros">
+      <li>图片最大，找款最快，最接近打样间页面的观感</li>
+      <li>但要「选单 → 返回 → 再选另一单」才能比较，属两步操作</li>
+    </ul>
+    <div class="screen">
+      <div class="dlg">
+        <div class="dlg-head">
+          <div class="ttl"><i></i>从打样单导入</div>
+          <button class="x">×</button>
+        </div>
+        <div class="full-body">
+          <div class="search-line" style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:10px 12px;">
+            <input value="" placeholder="搜索产品名称或打样单号（可留空）">
+            <button class="btn">搜索</button>
+          </div>
+          <div class="side-meta" style="margin:0;">
+            <span><b>全部 46 张</b> · 按更新时间倒序</span>
+            <span class="chips"><span class="chip on">全部</span><span class="chip">进行中</span><span class="chip">已完成</span></span>
+          </div>
+          <div class="full-grid">
+            <button class="pcard sel">
+              <div class="thumb"><svg viewBox="0 0 64 64" fill="none" stroke="#5b7fb8" stroke-width="2.2"><path d="M20 8l12 7 12-7 8 9-9 8v31H21V25l-9-8 8-9z"/></svg><span class="st st-progress">进行中</span></div>
+              <div class="body"><div class="name">蛋仔派对·市集拾趣系列毛绒公仔</div><div class="no">DY-202611-031 · T3</div><div class="time">更新 11-08 14:20</div><div class="selflag">✓ 当前选择</div></div>
+            </button>
+            <button class="pcard">
+              <div class="thumb"><svg viewBox="0 0 64 64" fill="none" stroke="#7d8fb0" stroke-width="2.2"><circle cx="32" cy="22" r="11"/><path d="M13 56c2-12 9-18 19-18s17 6 19 18"/></svg><span class="st st-progress">进行中</span></div>
+              <div class="body"><div class="name">MINISO 墩墩系列 40cm 抱枕</div><div class="no">DY-202611-030 · T2</div><div class="time">更新 11-08 10:02</div><div class="selflag">✓ 当前选择</div></div>
+            </button>
+            <button class="pcard">
+              <div class="thumb"><svg viewBox="0 0 64 64" fill="none" stroke="#7488a8" stroke-width="2.2"><rect x="14" y="14" width="36" height="40" rx="5"/><path d="M24 14v-4h16v4M22 28h20M22 36h20M22 44h12"/></svg><span class="st st-progress">进行中</span></div>
+              <div class="body"><div class="name">库洛米联名款收纳袋</div><div class="no">DY-202610-029 · T1</div><div class="time">更新 11-07 16:45</div><div class="selflag">✓ 当前选择</div></div>
+            </button>
+            <button class="pcard">
+              <div class="thumb"><svg viewBox="0 0 64 64" fill="none" stroke="#8393ae" stroke-width="2.2"><path d="M22 12h20l6 10-8 6v24H24V28l-8-6 6-10z"/><path d="M27 12c0 3 2 5 5 5s5-2 5-5"/></svg><span class="st st-progress">进行中</span></div>
+              <div class="body"><div class="name">小黄鸭泡芙坐垫</div><div class="no">DY-202610-028 · T2</div><div class="time">更新 11-07 09:31</div><div class="selflag">✓ 当前选择</div></div>
+            </button>
+            <button class="pcard">
+              <div class="thumb"><svg viewBox="0 0 64 64" fill="none" stroke="#7d8fb0" stroke-width="2.2"><path d="M16 20h32v26a4 4 0 01-4 4H20a4 4 0 01-4-4V20z"/><path d="M16 20c0-4 3-7 7-7h18c4 0 7 3 7 7"/></svg><span class="st st-done">已完成</span></div>
+              <div class="body"><div class="name">迪士尼米奇系列斜挎包</div><div class="no">DY-202610-021 · T4</div><div class="time">更新 11-05 11:18</div><div class="selflag">✓ 当前选择</div></div>
+            </button>
+          </div>
+        </div>
+        <div class="dlg-foot">
+          <span class="foot-count">点选一张打样单后预览部位</span>
+          <button class="btn">取消</button>
+          <button class="btn btn-primary" disabled style="opacity:.5;">导入到 BOM 编辑态</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 方案 C ======================= -->
+  <section class="ver">
+    <div class="ver-head">
+      <span class="badge alt">方案 C</span>
+      <h2>保留表格，仅加缩略图列并自动加载全部</h2>
+    </div>
+    <p class="desc">改动最小：打开即自动列出全部打样单，表格每行加 48px 缩略图；点「预览部位」后在下方展开预览。</p>
+    <ul class="pros">
+      <li>改动量最小，与现状差异最少</li>
+      <li>图片太小，找款仍主要靠文字；与「包括产品图片」的期望有距离</li>
+    </ul>
+    <div class="screen">
+      <div class="dlg" style="height:460px;">
+        <div class="dlg-head">
+          <div class="ttl"><i></i>从打样单导入</div>
+          <button class="x">×</button>
+        </div>
+        <div class="dlg-body" style="flex-direction:column; padding:14px 16px; overflow:auto;">
+          <div class="search-line" style="background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:10px 12px;">
+            <input value="" placeholder="搜索产品名称或打样单号（可留空）">
+            <button class="btn">搜索</button>
+          </div>
+          <div class="panel" style="margin-top:2px;">
+            <table class="grid">
+              <thead><tr><th></th><th>打样单号</th><th>产品名称</th><th>状态</th><th>当前版本</th><th>更新时间</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr><td><div style="width:44px;height:36px;border-radius:6px;background:#e8edf6;"></div></td><td><b>DY-202611-031</b></td><td>蛋仔派对·市集拾趣系列毛绒公仔</td><td><span class="tag tag-new">进行中</span></td><td>T3</td><td>11-08 14:20</td><td><button class="btn btn-ghost" style="padding:3px 9px;">预览部位</button></td></tr>
+                <tr><td><div style="width:44px;height:36px;border-radius:6px;background:#e8edf6;"></div></td><td><b>DY-202611-030</b></td><td>MINISO 墩墩系列 40cm 抱枕</td><td><span class="tag tag-new">进行中</span></td><td>T2</td><td>11-08 10:02</td><td><button class="btn btn-ghost" style="padding:3px 9px;">预览部位</button></td></tr>
+                <tr><td><div style="width:44px;height:36px;border-radius:6px;background:#e8edf6;"></div></td><td><b>DY-202610-029</b></td><td>库洛米联名款收纳袋</td><td><span class="tag tag-new">进行中</span></td><td>T1</td><td>11-07 16:45</td><td><button class="btn btn-ghost" style="padding:3px 9px;">预览部位</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="dlg-foot">
+          <span class="foot-count">全部 46 张</span>
+          <button class="btn">取消</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { computed, ref, type Ref } from 'vue'
-import { patternRoomApi, type PartDetail, type ProjectSummary, type RoleBrief } from '@/api/patternRoom'
+import { patternRoomApi, type PartDetail, type ProjectStatus, type ProjectSummary, type RoleBrief } from '@/api/patternRoom'
 import { showToast } from '@/composables/useToast'
 import type { BomItem, Role } from './bomTypes'
 import {
@@ -9,13 +9,9 @@ import {
   type SamplingImportSourceGroup,
 } from './bomSamplingImport'
 
-export interface SamplingProjectOption {
-  project: ProjectSummary
-  roleCount: number
-}
+type StatusFilter = 'all' | Extract<ProjectStatus, 'in_progress' | 'completed'>
 
 interface UseBomSamplingImportOptions {
-  productName: Ref<string>
   bomRoles: Ref<Role[]>
   supplierOptions: Ref<{ id: number; name: string }[]>
   getFabricItems: (role: Role) => BomItem[]
@@ -36,7 +32,8 @@ function requestErrorMessage(error: unknown, fallback: string): string {
 export function useBomSamplingImport(options: UseBomSamplingImportOptions) {
   const samplingImportVisible = ref(false)
   const samplingSearchKeyword = ref('')
-  const samplingProjects = ref<SamplingProjectOption[]>([])
+  const samplingProjects = ref<ProjectSummary[]>([])
+  const samplingStatusFilter = ref<StatusFilter>('all')
   const samplingSearched = ref(false)
   const samplingSearching = ref(false)
   const samplingLoadingParts = ref(false)
@@ -50,18 +47,25 @@ export function useBomSamplingImport(options: UseBomSamplingImportOptions) {
 
   const samplingSelectedRows = computed(() => samplingImportRows.value.filter((row) => row.selected))
   const samplingHasConflict = computed(() => samplingImportRows.value.some((row) => row.status === 'conflict'))
+  const samplingVisibleProjects = computed(() => {
+    if (samplingStatusFilter.value === 'all') return samplingProjects.value
+    return samplingProjects.value.filter((project) => project.status === samplingStatusFilter.value)
+  })
 
   function openSamplingImport() {
     previewSeq += 1
     samplingImportVisible.value = true
-    samplingSearchKeyword.value = options.productName.value
+    samplingSearchKeyword.value = ''
     samplingProjects.value = []
+    samplingStatusFilter.value = 'all'
     samplingSearched.value = false
     samplingError.value = ''
     samplingSelectedProjectId.value = null
     samplingImportRows.value = []
     samplingHasRoles.value = true
     rolesCache.clear()
+    // 打开即列出全部打样单，用户无需先输入产品名搜索。
+    void searchSamplingProjects()
   }
 
   async function fetchProjectRoles(projectId: number): Promise<RoleBrief[]> {
@@ -75,10 +79,6 @@ export function useBomSamplingImport(options: UseBomSamplingImportOptions) {
 
   async function searchSamplingProjects() {
     const keyword = samplingSearchKeyword.value.trim()
-    if (!keyword) {
-      samplingError.value = '请输入产品名称'
-      return
-    }
     const seq = ++searchSeq
     previewSeq += 1
     samplingSearching.value = true
@@ -92,7 +92,12 @@ export function useBomSamplingImport(options: UseBomSamplingImportOptions) {
       let page = 1
       let total = 0
       do {
-        const response = await patternRoomApi.listProjects({ keyword, status: 'all', page, per_page: 100 })
+        const response = await patternRoomApi.listProjects({
+          ...(keyword ? { keyword } : {}),
+          status: 'all',
+          page,
+          per_page: 100,
+        })
         for (const project of response.items ?? []) {
           if (!seen.has(project.id)) {
             seen.add(project.id)
@@ -102,27 +107,22 @@ export function useBomSamplingImport(options: UseBomSamplingImportOptions) {
         total = response.total ?? projects.length
         page += 1
       } while (projects.length < total)
-      // 列表契约没有 role_count；复用角色读接口取数，选择项目时直接命中缓存。
-      const withRoleCounts = await Promise.all(projects.map(async (project) => ({
-        project,
-        roleCount: (await fetchProjectRoles(project.id)).length,
-      })))
       if (seq !== searchSeq) return
-      samplingProjects.value = withRoleCounts
+      samplingProjects.value = projects
       samplingSearched.value = true
     } catch (error) {
       if (seq !== searchSeq) return
       samplingProjects.value = []
       samplingSearched.value = true
-      samplingError.value = requestErrorMessage(error, '打样单搜索失败，请稍后重试')
+      samplingError.value = requestErrorMessage(error, '打样单加载失败，请稍后重试')
     } finally {
       if (seq === searchSeq) samplingSearching.value = false
     }
   }
 
-  async function selectSamplingProject(option: SamplingProjectOption) {
+  async function selectSamplingProject(project: ProjectSummary) {
     const seq = ++previewSeq
-    const projectId = option.project.id
+    const projectId = project.id
     samplingSelectedProjectId.value = projectId
     samplingImportRows.value = []
     samplingHasRoles.value = true
@@ -187,6 +187,8 @@ export function useBomSamplingImport(options: UseBomSamplingImportOptions) {
     samplingImportVisible,
     samplingSearchKeyword,
     samplingProjects,
+    samplingVisibleProjects,
+    samplingStatusFilter,
     samplingSearched,
     samplingSearching,
     samplingLoadingParts,
