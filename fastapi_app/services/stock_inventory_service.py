@@ -728,6 +728,13 @@ SELECT f.product_id, f.customer, f.product_name, f.product_barcode,
 FROM filtered f
 WHERE (:stock_status <> 'zero' OR f.inventory_balance <= 0)
   AND (:stock_status <> 'active' OR f.inventory_balance > 0)
+  -- 默认视图隐藏「纯包装生产、无订单/备货、结余为 0」的行：
+  -- 表格不展示生产列，这类行在页面上四列全空（2026-11-10 用户报障：
+  -- 《蛋仔派对》…陈列样 生产 1000 已全部出完，删掉订单/备货后仍占一行）。
+  -- 结余 > 0 的纯生产行仍可见；显式 zero/active 筛选保持原语义。
+  AND (:stock_status <> '' OR NOT (
+      f.has_packaging_production AND NOT f.has_stockin AND NOT f.has_order
+      AND f.inventory_balance = 0))
 ORDER BY f.customer, f.product_name
 LIMIT :limit OFFSET :offset
 """)  # nosec B608 - clauses 为模块级常量，值通过绑定参数传递

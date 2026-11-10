@@ -153,6 +153,46 @@ async def test_zero_total_row_hidden_when_all_customers(db, monkeypatch):
     assert rows == [], '客户=全部 不得显示订单/备货/总订单全为 0 的行'
 
 
+async def test_zero_balance_packaging_only_row_hidden(db, monkeypatch):
+    """纯包装生产、结余 0 且无订单/备货的行，默认视图不展示。
+
+    2026-11-10 生产报障：陈列样生产 1000 已全部出完、订单/备货删除后，
+    /stock 仍显示该 SKU 且可展示的四列全为空。显式 stock_status=zero
+    仍应能查到（保留筛选语义）。
+    """
+    product = Product(
+        name='零结余纯生产产品', barcode='INV-BAL-007', current_stock=0, initial_stock=0,
+    )
+    db.add(product)
+    await db.flush()
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=product.id,
+        product_name=product.name, barcode='INV-BAL-007',
+        quantity=1000, production_date=datetime.now(UTC).date(),
+    ))
+    # 生产 1000 已全部出完 → 结余 0
+    db.add(InventoryLog(
+        product_id=product.id, product_name=product.name, product_barcode='INV-BAL-007',
+        change_type='出库', change_quantity=-1000,
+    ))
+    await db.flush()
+
+    monkeypatch.setattr(svc, '_get_all_customers', svc._get_all_customers.__wrapped__)
+    default = await svc.get_inventory_paginated.__wrapped__(
+        db, search_product=product.name, page=1, per_page=50,
+    )
+    assert [
+        r for r in default['inventory_data'] if r['product_name'] == product.name
+    ] == [], '默认视图不得显示纯生产且结余为 0 的空行'
+
+    zero = await svc.get_inventory_paginated.__wrapped__(
+        db, search_product=product.name, stock_status='zero', page=1, per_page=50,
+    )
+    assert [
+        r for r in zero['inventory_data'] if r['product_name'] == product.name
+    ], '显式零库存筛选不应隐藏该行'
+
+
 async def test_inventory_balance_excludes_deduction_types(db, monkeypatch):
     """抵扣三型不进结余（Round16 口径修正）。
 
