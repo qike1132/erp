@@ -2977,12 +2977,18 @@ export interface SupplierDetailSubItem {
   received: number
 }
 
+export interface SupplierExportOrderQuantity {
+  order_no: string
+  quantity: number
+}
+
 export interface SupplierExportQuantityItem {
   supplier_name?: string
   material_name: string
   specification?: string
   unit?: string
   quantity: number
+  order_breakdown?: Array<SupplierExportOrderQuantity>
 }
 
 export interface SupplierListResponse {

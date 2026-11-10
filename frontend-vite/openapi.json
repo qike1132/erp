@@ -36737,6 +36737,30 @@
         ],
         "title": "SupplierDetailSubItem"
       },
+      "SupplierExportOrderQuantity": {
+        "properties": {
+          "order_no": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Order No",
+            "description": "采购单号"
+          },
+          "quantity": {
+            "type": "number",
+            "maximum": 9999999999.99,
+            "minimum": 0.0,
+            "title": "Quantity",
+            "description": "该单展示数量（整数或 2 位小数）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_no",
+          "quantity"
+        ],
+        "title": "SupplierExportOrderQuantity",
+        "description": "来源订单逐单展示数量（页面「来源订单」列，已与行合计对齐）。"
+      },
       "SupplierExportQuantityItem": {
         "properties": {
           "supplier_name": {
@@ -36772,6 +36796,15 @@
             "minimum": 0.0,
             "title": "Quantity",
             "description": "页面展示数量（已按损耗率加放）；下限/上限与落库列 Numeric(12,2) 一致，越界应在入口拦成 422 而非 flush 期 500"
+          },
+          "order_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/SupplierExportOrderQuantity"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Order Breakdown",
+            "description": "来源订单逐单展示数量；缺省时回退数据库分组的原始逐单量（旧客户端）"
           }
         },
         "type": "object",
