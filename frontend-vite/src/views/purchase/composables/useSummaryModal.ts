@@ -703,6 +703,26 @@ export function useSummaryModal() {
   const factoryQtyByMaterialKey = computed(() => {
     const map = new Map<string, number>()
     factoryData.value?.groups?.forEach((group, gi) => {
+      // 按 SKU 展开模式：工厂页签「数量」列显示的是**逐 SKU 的 BOM 推算值**
+      // （displayRowQty = ceil(基准量 × 行损耗率)）。供应商页签必须取同一批行，
+      // 否则会取到落库明细（手工调整后的值），两页数字不一致
+      // （生产反馈 2026-11-10：宝乐绒工厂 207 / 供应商 52）。
+      const perSku = buildPerSkuRows(group, lossRate.value)
+      if (perSku.some((row) => !row.noBom)) {
+        perSku.forEach((row) => {
+          if (row.noBom) return
+          const key = summaryMaterialKey(
+            row.supplierName, row.materialName, row.specification, row.unit,
+          )
+          // 与工厂表 displayRowQty 同口径：有落库坐标才读逐行率，无坐标（BOM 新增物料）
+          // 加放率为 0；同一物料跨 SKU/角色多行按显示值累加。
+          const rate = row.coord ? rateForFabric(gi, row.coord.si, row.coord.fi) : 0
+          const qty = factoryQtyDisplayValue(row.baseQuantity, rate, editMode.value)
+          map.set(key, Math.round(((map.get(key) || 0) + qty) * 100) / 100)
+        })
+        return
+      }
+      // 回退模式（旧后端 / 无 BOM 明细）：沿用落库布料行的派生口径
       ;(group.suppliers || []).forEach((supplier, si) => {
         ;(supplier.fabrics || []).forEach((fabric, fi) => {
           const key = summaryMaterialKey(supplier.supplier_name, fabric.fabric_name, fabric.specification, fabric.unit)
