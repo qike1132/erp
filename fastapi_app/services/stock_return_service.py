@@ -24,9 +24,8 @@ from sqlalchemy.orm import joinedload
 from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
-from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.sanitizer import escape_like
-from fastapi_app.services.notification_service import StockEvent
+from fastapi_app.services.notification_service import schedule_stock_changed
 from fastapi_app.services.numbering import generate_number_async
 from fastapi_app.services.numbering_sequence import _BUSINESS_TZ
 from fastapi_app.services.stock_common import _parse_date_preserve_time, business_now
@@ -243,7 +242,7 @@ async def create_stockreturn(db: AsyncSession, stockout_id: int, quantity: int,
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockreturn.product_id)
     if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockreturn.product_id, 'product_name': product.name, 'change_type': '退货', 'quantity': quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="退货事件发布")
+        await schedule_stock_changed(db, {'product_id': stockreturn.product_id, 'product_name': product.name, 'change_type': '退货', 'quantity': quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="退货事件发布", publish_func=stock_service.publish_stock_event)
 
     # 领域事件总线：退货创建 → 发布 STOCK_RETURN_CREATED 事件，触发采购计划重算（异步）
     # 退货会减少已出货量，触发采购计划重算；客户/单号来自所选出货单
@@ -285,7 +284,7 @@ async def cancel_stockreturn(db: AsyncSession, stockreturn_id: int, operator_id:
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, product_id)
     if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '退货取消', 'quantity': -cancelled_quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="退货取消事件发布")
+        await schedule_stock_changed(db, {'product_id': product_id, 'product_name': product.name, 'change_type': '退货取消', 'quantity': -cancelled_quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="退货取消事件发布", publish_func=stock_service.publish_stock_event)
 
     # 领域事件总线：退货取消 → 发布 STOCK_RETURN_CANCELLED 事件，触发采购计划重算（异步）
     # 取消退货会恢复已出货量，复用 recalc_plans_after_stockout_delete 逻辑（语义：回滚退货扣减）

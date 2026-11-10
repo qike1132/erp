@@ -23,9 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
-from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.services.business_time import fmt_business
-from fastapi_app.services.notification_service import StockEvent
+from fastapi_app.services.notification_service import schedule_stock_changed
 from fastapi_app.services.stock_common import (
     _BUSINESS_TZ,
     _parse_date_preserve_time,
@@ -248,7 +247,7 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, product_id)
     if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="出库事件发布")
+        await schedule_stock_changed(db, {'product_id': product_id, 'product_name': product.name, 'change_type': '出库', 'quantity': quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="出库事件发布", publish_func=stock_service.publish_stock_event)
 
     await _publish_shipment_completed_events(shipment_completed_orders)
 
@@ -305,7 +304,7 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockout_obj.product_id)
     if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库编辑', 'quantity': new_quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="出库编辑事件发布")
+        await schedule_stock_changed(db, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库编辑', 'quantity': new_quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="出库编辑事件发布", publish_func=stock_service.publish_stock_event)
     if completed_shipments:
         await _publish_shipment_completed_events(completed_shipments)
 
@@ -356,7 +355,7 @@ async def delete_stockout(db: AsyncSession, stockout_id: int, operator_id: int |
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     product = await db.get(Product, stockout_obj.product_id)
     if product is not None:
-        await safe_publish_event(stock_service.publish_stock_event, StockEvent.STOCK_CHANGED, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="出库删除事件发布")
+        await schedule_stock_changed(db, {'product_id': stockout_obj.product_id, 'product_name': product.name, 'change_type': '出库删除', 'quantity': -deleted_quantity, 'current_stock': product.current_stock, 'factory': getattr(product, 'factory', None)}, context="出库删除事件发布", publish_func=stock_service.publish_stock_event)
 
     # 领域事件总线：出库单删除 → 发布 STOCK_OUT_DELETED 事件，触发采购计划重算与缓存失效（异步）
     # 提交后发布（同 create_stockout：订阅者用独立 session 读库）

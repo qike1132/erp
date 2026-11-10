@@ -20,12 +20,11 @@ from sqlalchemy.sql.expression import Join
 from fastapi_app.core.business_rules import MAX_QUANTITY
 from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
-from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
-from fastapi_app.services.notification_service import StockEvent
+from fastapi_app.services.notification_service import schedule_stock_changed
 from fastapi_app.services.xlsx_budget import run_sync_with_timeout
 from fastapi_app.shared.stock_concurrency import (
     apply_stock_delta_locked,
@@ -128,8 +127,9 @@ async def _apply_production_stock(
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
     # 生产即入库也会改变库存视图（库存查询页的生产入库/结余列）——发库存变更事件，
     # 让已接 WebSocket 的页面实时刷新（与入库/出库/退货三条写路径同款）。
-    await safe_publish_event(
-        stock_service.publish_stock_event, StockEvent.STOCK_CHANGED,
+    # 事件必须等事务提交后再发：提交前发布会让页面在写入可见之前重取旧库存。
+    await schedule_stock_changed(
+        db,
         {
             'product_id': pid,
             'product_name': product.name,
@@ -139,6 +139,7 @@ async def _apply_production_stock(
             'factory': getattr(product, 'factory', None),
         },
         context="生产事件发布",
+        publish_func=stock_service.publish_stock_event,
     )
 
 

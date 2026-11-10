@@ -142,7 +142,7 @@ async def test_update_stockout_recalcs_old_and_new_orders(monkeypatch) -> None:
     monkeypatch.setattr(stock_out_service, 'recalc_order_status_after_return', recalc)
     monkeypatch.setattr(stock_out_service.cache_mgr, 'invalidate_stock_and_order', AsyncMock())
     monkeypatch.setattr(stock_out_service, 'schedule_post_commit_invalidation', lambda *a, **k: None)
-    monkeypatch.setattr(stock_out_service, 'safe_publish_event', AsyncMock())
+    monkeypatch.setattr(stock_out_service, 'schedule_stock_changed', AsyncMock())
     monkeypatch.setattr(stock_out_service, 'schedule_post_commit_domain_event', lambda *a, **k: None)
     monkeypatch.setattr(stock_out_service, '_publish_shipment_completed_events', AsyncMock())
 

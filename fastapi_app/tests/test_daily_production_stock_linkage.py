@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from fastapi_app.core.exceptions import run_post_commit_callbacks
 from fastapi_app.services.daily_production_service import (
     _resolve_customer_name,
     create_record,
@@ -202,6 +203,9 @@ async def test_create_publishes_stock_changed_event():
             barcode='BC11', unit_price=7, quantity=8888,
             production_date_str='2026-10-06', created_by='张三',
         )
+    # 事件必须等提交后才发：服务体内不得发布
+    mock_pub.assert_not_awaited()
+    await run_post_commit_callbacks(db)
     mock_pub.assert_awaited()
     event_type, payload = mock_pub.call_args.args
     assert event_type == 'stock_changed'
@@ -221,6 +225,9 @@ async def test_delete_publishes_stock_changed_event():
          patch('fastapi_app.services.stock_service.publish_stock_event',
                new_callable=AsyncMock) as mock_pub:
         await delete_record(db, 7, operator='李四')
+    # 事件必须等提交后才发：服务体内不得发布
+    mock_pub.assert_not_awaited()
+    await run_post_commit_callbacks(db)
     mock_pub.assert_awaited()
     event_type, payload = mock_pub.call_args.args
     assert event_type == 'stock_changed'

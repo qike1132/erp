@@ -60,7 +60,7 @@ async def test_plan_month_uses_each_row_stockout_date():
                new=AsyncMock(return_value=res)), \
          patch.object(auxiliary_service, 'cache_mgr', cache), \
          patch.object(auxiliary_service, 'publish_domain_event', new=AsyncMock()) as m_event, \
-         patch.object(auxiliary_service, 'safe_publish_event', new=AsyncMock()):
+         patch.object(auxiliary_service, 'schedule_stock_changed', new=AsyncMock()):
         await auxiliary_service.orchestrate_batch_stockouts(db, rows)
 
     payloads = [c.args[0].payload for c in m_event.await_args_list]
@@ -81,7 +81,7 @@ async def test_plan_month_falls_back_to_current_month():
                new=AsyncMock(return_value=res)), \
          patch.object(auxiliary_service, 'cache_mgr', cache), \
          patch.object(auxiliary_service, 'publish_domain_event', new=AsyncMock()) as m_event, \
-         patch.object(auxiliary_service, 'safe_publish_event', new=AsyncMock()):
+         patch.object(auxiliary_service, 'schedule_stock_changed', new=AsyncMock()):
         await auxiliary_service.orchestrate_batch_stockouts(db, rows)
 
     payload = m_event.await_args_list[0].args[0].payload
@@ -104,7 +104,7 @@ async def test_failed_rows_do_not_publish_events():
                new=AsyncMock(return_value=res)), \
          patch.object(auxiliary_service, 'cache_mgr', cache), \
          patch.object(auxiliary_service, 'publish_domain_event', new=AsyncMock()) as m_event, \
-         patch.object(auxiliary_service, 'safe_publish_event', new=AsyncMock()):
+         patch.object(auxiliary_service, 'schedule_stock_changed', new=AsyncMock()):
         await auxiliary_service.orchestrate_batch_stockouts(db, rows)
 
     payloads = [c.args[0].payload for c in m_event.await_args_list]

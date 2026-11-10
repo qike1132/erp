@@ -18,7 +18,8 @@ from sqlalchemy import Row, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
+from fastapi_app.core.domain_events import schedule_post_commit_callback
+from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS, safe_publish_event
 from fastapi_app.core.redis_client import (
     get_async_redis_client,
     reset_async_redis_client,
@@ -170,6 +171,35 @@ async def publish_stock_event(event_type: str, data: dict, redis_client=None):
         logger.debug("事件已发布: %s", event_type)
     except INFRA_EXCEPTIONS as e:
         logger.warning("事件发布失败: %s", e)
+
+
+async def schedule_stock_changed(
+    session: Any,
+    data: dict,
+    *,
+    context: str = '库存事件发布',
+    publish_func=None,
+) -> None:
+    """发布 ``stock_changed``：有事务会话时**推迟到 commit 成功后**，否则立即发布。
+
+    提交前发布会让订阅端（前端 WebSocket → 失效派生查询 → 重取）在写入可见之前
+    读到旧库存，客户端会把旧值缓存下来（2026-11-09：删除 5000 备货后 /stock
+    仍显示 5000，正是该竞态叠加 30s 客户端缓存）。
+
+    ``data`` 必须在调用前整理为标量字典：commit 后 session expire，回调里不能再
+    访问 ORM 属性。测试桩 / 无 ``info`` 的会话退化为立即发布，与旧行为一致，
+    避免事件在非 UoW 路径静默丢失。
+    """
+    async def _publish() -> None:
+        await safe_publish_event(
+            publish_func or publish_stock_event,
+            StockEvent.STOCK_CHANGED, data, context=context,
+        )
+
+    if isinstance(getattr(session, 'info', None), dict):
+        schedule_post_commit_callback(session, _publish)
+    else:
+        await _publish()
 
 
 async def publish_event(

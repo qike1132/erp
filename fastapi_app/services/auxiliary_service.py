@@ -19,9 +19,8 @@ from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType
 from fastapi_app.core.domain_events import publish as publish_domain_event
-from fastapi_app.core.exception_handler import safe_publish_event
 from fastapi_app.core.exceptions import BusinessError, NotFoundError, db_transaction
-from fastapi_app.services.notification_service import StockEvent, publish_stock_event
+from fastapi_app.services.notification_service import StockEvent, publish_stock_event, schedule_stock_changed
 from fastapi_app.shared_models import (
     InventoryLog,
     Product,
@@ -161,8 +160,8 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                         if item['product_id'] == product_id
                         and result['results'][idx].get('success')
                     )
-                    await safe_publish_event(
-                        publish_stock_event, StockEvent.STOCK_CHANGED,
+                    await schedule_stock_changed(
+                        db,
                         {
                             'product_id': product_id,
                             'product_name': product.name,
@@ -172,6 +171,7 @@ async def orchestrate_batch_stockouts(db: AsyncSession, stockouts_data: list[dic
                             'factory': getattr(product, 'factory', None),
                         },
                         context="批量出库事件发布",
+                        publish_func=publish_stock_event,
                     )
     except Exception as e:  # defensive: 出库后置操作失败不应影响出库结果
         logger.warning(f"出库后置操作部分失败（不影响出库结果）: {e}", exc_info=True)
