@@ -342,7 +342,10 @@ async def get_parts_by_version(
     if role_id is None:
         role_id = await _get_primary_role_id(db, project_id)
         if role_id is None:
-            return {'success': True, 'items': [], 'versions': [], 'final_version': 'T1'}
+            return {
+                'success': True, 'items': [], 'versions': [],
+                'final_version': 'T1', 'final_versions': {},
+            }
     else:
         await _ensure_role_belongs_to_project(db, role_id, project_id)
 

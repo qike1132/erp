@@ -1280,6 +1280,32 @@ class TestServiceIntegration:
         )
         assert {p['part_name']: p['version_no'] for p in printed['items']} == {'主料': 'T1'}
 
+    async def test_delete_last_part_row_clears_dangling_override(self, cs_db):
+        """部位已无任何版本行时，指向快照版本的覆盖键不得残留"""
+        r = await create_project(cs_db, product_name='悬空覆盖清理')
+        await cs_db.flush()
+        role = (await list_roles(cs_db, r['id']))['items'][0]
+
+        await create_part(cs_db, r['id'], part_name='身体', role_id=role['id'])
+        await cs_db.flush()
+        await _seed_fabric_version(
+            cs_db, r['id'], 'T2', snapshot_data=[{'part_name': '身体'}],
+            role_id=role['id'],
+        )
+        # 默认改回 T1：覆盖 T2 只能来自部位级选择（T2 只有快照、没有 part 行）
+        await update_role(cs_db, role['id'], current_version='T1', version=role['version'])
+        await set_part_final_version(
+            cs_db, r['id'], role_id=role['id'], part_name='身体', version_no='T2',
+        )
+        await cs_db.flush()
+
+        parts = (await list_parts(cs_db, r['id'], role_id=role['id']))['items']
+        await delete_part(cs_db, parts[0]['id'])
+        await cs_db.flush()
+
+        view = await get_parts_by_version(cs_db, r['id'], role_id=role['id'])
+        assert '身体' not in view['final_versions']
+
     async def test_set_part_final_version_accepts_snapshot_only_version(self, cs_db):
         """旧「创建新版本」只落快照不复制 part 行时，该版本仍可被选为最终版本并用于打印"""
         r = await create_project(cs_db, product_name='快照版本选最终')

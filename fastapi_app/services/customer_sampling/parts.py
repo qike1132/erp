@@ -225,24 +225,39 @@ async def delete_part(
         raise NotFoundError('部位不存在')
 
     project_id = part.project_id
+    role_id = part.role_id
     part_name = part.part_name
     version_no = part.version_no
 
     # 被删行正是该部位的最终版本时，清掉部位级覆盖（回退角色默认/最新有数据版本）
     role_result = await db.execute(
         select(CustomerSamplingRole)
-        .where(CustomerSamplingRole.id == part.role_id)
+        .where(CustomerSamplingRole.id == role_id)
         .with_for_update()
     )
     role = role_result.scalar_one_or_none()
     overrides = dict(role.final_versions or {}) if role is not None else {}
     if overrides.get(part_name) == version_no:
         overrides.pop(part_name, None)
-        if role is not None:
-            role.final_versions = overrides
 
     await db.delete(part)
     await db.flush()
+
+    # 部位已无任何版本行时，覆盖键已成悬空数据（例如覆盖指向仅存在于快照的版本），一并清除
+    if part_name in overrides:
+        remaining = (await db.execute(
+            select(CustomerSamplingPart.id).where(
+                CustomerSamplingPart.project_id == project_id,
+                CustomerSamplingPart.role_id == role_id,
+                CustomerSamplingPart.part_name == part_name,
+            ).limit(1)
+        )).scalar_one_or_none()
+        if remaining is None:
+            overrides.pop(part_name, None)
+
+    if role is not None and overrides != (role.final_versions or {}):
+        role.final_versions = overrides
+        await db.flush()
 
     # 写审计日志
     operator_name = await _get_user_name(db, user_id)
