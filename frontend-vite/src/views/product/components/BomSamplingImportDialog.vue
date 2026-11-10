@@ -243,10 +243,12 @@ function omittedFieldValues(part: PartDetail): string {
 .sampling-chip { padding: 2px 9px; border: 1px solid var(--color-border-light); border-radius: 999px; background: #fff; color: var(--color-text-secondary); font-size: 11.5px; cursor: pointer; white-space: nowrap; }
 .sampling-chip.on { border-color: var(--color-primary-700); background: var(--color-primary-50); color: var(--color-primary-700); font-weight: 600; }
 .sampling-cards { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; }
-.sampling-project-card { display: flex; flex-direction: column; padding: 0; border: 1px solid var(--color-border-light); border-radius: 10px; overflow: hidden; background: #fff; text-align: left; cursor: pointer; }
+/* 卡片不能加 overflow:hidden：<button> 作为 Grid 自动行高项时会塌成一行高（实测 13px），
+   圆角裁剪改由 .sampling-card-thumb 自己承担。 */
+.sampling-project-card { display: flex; flex-direction: column; padding: 0; border: 1px solid var(--color-border-light); border-radius: 10px; background: #fff; text-align: left; cursor: pointer; }
 .sampling-project-card:hover { border-color: var(--color-primary-300); }
 .sampling-project-card.selected { border-color: var(--color-primary-700); box-shadow: 0 0 0 2px var(--color-primary-100); }
-.sampling-card-thumb { position: relative; display: flex; align-items: center; justify-content: center; height: 104px; background: linear-gradient(135deg, #eef2f9, #dfe7f4); }
+.sampling-card-thumb { position: relative; display: flex; align-items: center; justify-content: center; height: 104px; overflow: hidden; border-radius: 9px 9px 0 0; background: linear-gradient(135deg, #eef2f9, #dfe7f4); }
 .sampling-card-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .sampling-card-placeholder { font-size: 34px; color: #9fb0c8; }
 .sampling-card-status { position: absolute; top: 7px; left: 7px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
