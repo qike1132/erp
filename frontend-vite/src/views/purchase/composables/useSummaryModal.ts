@@ -707,7 +707,10 @@ export function useSummaryModal() {
       // （displayRowQty = ceil(基准量 × 行损耗率)）。供应商页签必须取同一批行，
       // 否则会取到落库明细（手工调整后的值），两页数字不一致
       // （生产反馈 2026-11-10：宝乐绒工厂 207 / 供应商 52）。
-      const perSku = buildPerSkuRows(group, lossRate.value)
+      // 编辑态例外：输入框承载的是**落库真值**（editRowQty），而同一物料跨 SKU/角色
+      // 共用同一采购明细行——若仍逐行累加，同一条明细会被重复算 N 倍。
+      // 故编辑态走落库行派生（下面 fabrics 分支），一条明细只算一次。
+      const perSku = editMode.value ? [] : buildPerSkuRows(group, lossRate.value)
       if (perSku.some((row) => !row.noBom)) {
         perSku.forEach((row) => {
           if (row.noBom) return
@@ -717,19 +720,12 @@ export function useSummaryModal() {
           // 与工厂表 displayRowQty 同口径：有落库坐标才读逐行率，无坐标（BOM 新增物料）
           // 加放率为 0；同一物料跨 SKU/角色多行按显示值累加。
           const rate = row.coord ? rateForFabric(gi, row.coord.si, row.coord.fi) : 0
-          // 编辑态工厂输入框显示的是**落库真值**（editRowQty），供应商页签必须跟它一致，
-          // 否则编辑期间两页又不同步；非编辑态跟工厂展示列（BOM 推算值）。
-          let baseQty = row.baseQuantity
-          if (editMode.value && row.coord) {
-            const fabric = group.suppliers?.[row.coord.si]?.fabrics?.[row.coord.fi]
-            if (fabric) baseQty = parseFloat(String(fabric.quantity)) || 0
-          }
-          const qty = factoryQtyDisplayValue(baseQty, rate, editMode.value)
+          const qty = factoryQtyDisplayValue(row.baseQuantity, rate, false)
           map.set(key, Math.round(((map.get(key) || 0) + qty) * 100) / 100)
         })
         return
       }
-      // 回退模式（旧后端 / 无 BOM 明细）：沿用落库布料行的派生口径
+      // 落库布料行派生（编辑态恒走此分支；非编辑态用于旧后端 / 无 BOM 明细回退）
       ;(group.suppliers || []).forEach((supplier, si) => {
         ;(supplier.fabrics || []).forEach((fabric, fi) => {
           const key = summaryMaterialKey(supplier.supplier_name, fabric.fabric_name, fabric.specification, fabric.unit)

@@ -156,3 +156,136 @@ describe('供应商页签数量与工厂页签同源', () => {
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(30000)
   })
 })
+
+describe('工厂/供应商两页数量一致性（模拟数据）', () => {
+  function fabric(name: string, qty: number, extra: Record<string, unknown> = {}) {
+    return {
+      fabric_name: name, specification: 'S1', unit: '米', quantity: qty,
+      item_ids: [1], loss_rate: null, ...extra,
+    }
+  }
+  function skuMaterial(name: string, qty: number, supplier = '供应商1') {
+    return {
+      supplier_name: supplier, material_name: name, specification: 'S1',
+      unit: '米', quantity: qty, part_name: '',
+    }
+  }
+
+  function mockFactory(groups: unknown[]) {
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue({
+      success: true, order_count: 1, spare_rate: 30, groups,
+    } as never)
+  }
+  function mockSupplier(materials: unknown[]) {
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({
+      success: true, materials,
+    } as never)
+  }
+
+  it('非编辑态：共享物料 = Σ 各 SKU 可见行（逐行加放后累加）', async () => {
+    mockFactory([{
+      customer_name: '客户', product_name: '产品', product_quantity: 200,
+      suppliers: [{
+        supplier_name: '供应商1',
+        fabrics: [fabric('共享布', 60, { item_ids: [2] }), fabric('A布', 10, { item_ids: [1] })],
+      }],
+      skus: [
+        { product_name: 'SKU-1', order_qty: 100, materials: [skuMaterial('共享布', 60), skuMaterial('A布', 10)] },
+        { product_name: 'SKU-2', order_qty: 100, materials: [skuMaterial('共享布', 60)] },
+      ],
+    }])
+    mockSupplier([
+      { material_name: '共享布', specification: 'S1', unit: '米', total_quantity: 60, supplier_name: '供应商1' },
+      { material_name: 'A布', specification: 'S1', unit: '米', total_quantity: 10, supplier_name: '供应商1' },
+    ])
+
+    const m = useSummaryModal()
+    await m.openSummary([1])
+
+    const qty = Object.fromEntries(
+      m.supplierGroups[0]!.materials.map((x) => [x.material_name, x.total_quantity]),
+    )
+    // 共享布：两个 SKU 各一路可见行（60 × 1.03 → ceil 62）→ 合计 124
+    expect(qty['共享布']).toBe(124)
+    // A布：一路 10 × 1.03 → 11
+    expect(qty['A布']).toBe(11)
+  })
+
+  it('多分组（客户×产品）同物料：供应商 = 各组工厂可见行之和', async () => {
+    mockFactory([
+      {
+        customer_name: '客户A', product_name: '产品1', product_quantity: 100,
+        suppliers: [{ supplier_name: '供应商1', fabrics: [fabric('A布', 10)] }],
+        skus: [{ product_name: 'SKU-A', order_qty: 100, materials: [skuMaterial('A布', 10)] }],
+      },
+      {
+        customer_name: '客户B', product_name: '产品2', product_quantity: 200,
+        suppliers: [{ supplier_name: '供应商1', fabrics: [fabric('A布', 20)] }],
+        skus: [{ product_name: 'SKU-B', order_qty: 200, materials: [skuMaterial('A布', 20)] }],
+      },
+    ])
+    mockSupplier([
+      { material_name: 'A布', specification: 'S1', unit: '米', total_quantity: 30, supplier_name: '供应商1' },
+    ])
+
+    const m = useSummaryModal()
+    await m.openSummary([1])
+
+    // 10×1.03→11、20×1.03→21，合计 32（与工厂两行可见值之和一致）
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(32)
+  })
+
+  it('后台有、工厂页无对应行的物料：回退为落库量 × 统一率', async () => {
+    mockFactory([{
+      customer_name: '客户', product_name: '产品', product_quantity: 100,
+      suppliers: [{ supplier_name: '供应商1', fabrics: [fabric('A布', 10)] }],
+      skus: [{ product_name: 'SKU-A', order_qty: 100, materials: [skuMaterial('A布', 10)] }],
+    }])
+    mockSupplier([
+      { material_name: 'A布', specification: 'S1', unit: '米', total_quantity: 10, supplier_name: '供应商1' },
+      { material_name: '手工加布', specification: 'S9', unit: '米', total_quantity: 20, supplier_name: '供应商1' },
+    ])
+
+    const m = useSummaryModal()
+    await m.openSummary([1])
+
+    const qty = Object.fromEntries(
+      m.supplierGroups[0]!.materials.map((x) => [x.material_name, x.total_quantity]),
+    )
+    expect(qty['A布']).toBe(11)
+    expect(qty['手工加布']).toBe(20.6)
+  })
+
+  it('编辑态：共用同一采购明细的多 SKU 行只算一次（不得叠乘）', async () => {
+    const roles = [15, 16, 17, 18, 19, 20]
+    mockFactory([{
+      customer_name: '网易', product_name: '缤果系列', product_quantity: 30000,
+      suppliers: [{
+        supplier_name: '包好包',
+        fabrics: [{
+          fabric_name: '香珠', specification: '5g', unit: '个',
+          quantity: 24000, item_ids: [21511], loss_rate: null,
+        }],
+      }],
+      skus: [{
+        product_name: '香蕉', order_qty: 30000,
+        materials: roles.map(() => ({
+          supplier_name: '包好包', material_name: '香珠', specification: '5g',
+          unit: '个', quantity: 5000, part_name: '',
+        })),
+      }],
+    }])
+    mockSupplier([{
+      material_name: '香珠', specification: '5g', unit: '个',
+      total_quantity: 24000, supplier_name: '包好包',
+    }])
+
+    const m = useSummaryModal()
+    await m.openSummary([1])
+    m.toggleEditMode(true)
+
+    // 编辑输入框显示落库真值（一条明细 24000 → ×1.03 = 24720）；
+    // 若按 6 个角色行累加会得到 6×5150=30900 —— 两者必须可区分
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(24720)
+  })
+})

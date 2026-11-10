@@ -581,3 +581,60 @@ async def test_c17_blind_box_role_rows_use_role_allocation(db):
     # 供应商侧同口径
     row = next(m for m in supplier['materials'] if m['material_name'] == '香珠')
     assert row['total_quantity'] == 30000.0
+
+
+async def test_c18_supplier_totals_equal_factory_per_sku_sums(db):
+    """C18：同一采购单上，供应商汇总的每个物料 total_quantity 必须等于
+    工厂汇总按 SKU 展开后的同键物料数量之和（两页数量同源的契约锚点）。
+
+    覆盖：盲盒 6 角色、同一面料/辅料在每个角色各一行 BOM、无采购明细（BOM 回退），
+    即生产缺陷 PO-2611-005 的形态。修复前工厂/供应商两侧都会按整单量重复 6 倍，
+    修复后两侧相等且等于 Σ(用量 × 角色数量)。
+    """
+    session, _ = db
+    roles = [15, 16, 17, 18, 19, 20]
+    session.add(Product(id=201, name='盲盒产品', is_blind_box=True, has_hidden_role=False))
+    for rid in roles:
+        session.add(ProductRole(id=rid, product_id=201, role_name=f'角色{rid}'))
+        session.add(ProductFabric(
+            id=rid, product_id=201, role_id=rid, fabric_name='共享布',
+            specification='S1', unit='米', quantity=0.1, supplier_name='供应商甲',
+        ))
+        session.add(ProductAccessory(
+            id=rid + 100, product_id=201, role_id=rid, accessory_name='香珠',
+            specification='5g', unit='个', quantity=1.0, supplier_name='包好包',
+        ))
+    session.add(Order(
+        id=9101, order_no='SO-9101', customer='客户甲',
+        product_id=201, quantity=6000, status='待备货',
+    ))
+    session.add(OrderItem(id=1, order_id=9101, product_id=201, product_name='盲盒产品', quantity=6000))
+    session.add(PurchaseOrder(
+        id=8101, order_no='PO-8101', customer_name='客户甲',
+        product_name='盲盒产品', product_quantity=6000,
+        supplier_name='供应商甲', source_order_ids='[9101]',
+    ))
+    session.add(PurchaseOrderSku(
+        id=1, po_id=8101, product_name='盲盒产品', product_barcode='bM',
+        order_qty=6000, source_order_id=9101, source_record_type='order',
+    ))
+    await session.commit()
+
+    factory = (await get_factory_order_summary(session, [8101]))['groups'][0]
+    supplier = await get_supplier_order_summary(session, [8101])
+
+    factory_sums: dict[tuple, float] = {}
+    for sku in factory['skus']:
+        for m in (sku.get('materials') or []):
+            key = (m['supplier_name'], m['material_name'], m['specification'], m['unit'])
+            factory_sums[key] = round(factory_sums.get(key, 0.0) + float(m['quantity']), 2)
+    supplier_map = {
+        (m['supplier_name'], m['material_name'], m['specification'], m['unit']):
+            round(float(m['total_quantity']), 2)
+        for m in supplier['materials']
+    }
+
+    # 逐键完全相等（工厂 6 角色各 100 码共享布 / 各 1000 个香珠）
+    assert supplier_map == factory_sums
+    assert supplier_map[('供应商甲', '共享布', 'S1', '米')] == 600.0
+    assert supplier_map[('包好包', '香珠', '5g', '个')] == 6000.0
