@@ -93,11 +93,23 @@ class FieldCandidatesResponse(BaseModel):
 
 
 class PartsByVersionResponse(BaseModel):
-    """部位跨版本汇总响应（部位+版本二维表数据源）"""
+    """部位跨版本汇总响应（部位+版本二维表数据源）
+
+    final_version 为角色级默认最终版本；final_versions 为部位级覆盖
+    （{部位名称: 版本号}），未出现在映射里的部位沿用 final_version。
+    """
     success: bool = True
     items: list[PartDetail] = Field(default_factory=list)
     versions: list[str] = Field(default_factory=list)
     final_version: str = 'T1'
+    final_versions: dict[str, str] = Field(default_factory=dict)
+
+
+class PartFinalVersionRequest(BaseModel):
+    """设置单个部位的最终版本"""
+    role_id: int | None = Field(None, description='角色ID（未传时默认指向默认角色）')
+    part_name: str = Field(..., min_length=1, max_length=100, description='部位名称')
+    version_no: str = Field(..., max_length=8, pattern=_VERSION_NO_PATTERN, description='版本号 T1/T2/T3...')
 
 
 # ==================== 角色 ====================

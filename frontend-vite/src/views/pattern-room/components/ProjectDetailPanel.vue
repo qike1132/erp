@@ -41,11 +41,12 @@
       <PartsVersionTableV2
         :parts-by-version="partsByVersion"
         :final-version="finalVersion"
+        :final-versions="finalVersions"
         :project-id="project?.id"
         :current-role-id="currentRoleId"
         :part-loading="partLoading"
         :can-manage="canManage"
-        @set-final-version="$emit('set-final-version', $event)"
+        @set-final-version="(partName, versionNo) => $emit('set-final-version', partName, versionNo)"
         @copy-version="$emit('copy-version', $event)"
         @delete-version="$emit('delete-version', $event)"
       />
@@ -63,6 +64,7 @@ defineProps<{
   project: ProjectDetailResponse | null
   partsByVersion: PartDetail[]
   finalVersion: string
+  finalVersions: Record<string, string>
   partLoading: boolean
   canManage: boolean
   canPrint: boolean
@@ -71,7 +73,7 @@ defineProps<{
 }>()
 
 defineEmits<{
-  'set-final-version': [versionNo: string]
+  'set-final-version': [partName: string, versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
   'select-role': [roleId: number]

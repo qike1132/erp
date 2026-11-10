@@ -1805,6 +1805,12 @@ export interface PartDetail {
   version?: number
 }
 
+export interface PartFinalVersionRequest {
+  role_id?: number | null
+  part_name: string
+  version_no: string
+}
+
 export interface PartListResponse {
   success?: boolean
   items?: Array<PartDetail>
@@ -1831,6 +1837,7 @@ export interface PartsByVersionResponse {
   items?: Array<PartDetail>
   versions?: Array<string>
   final_version?: string
+  final_versions?: Record<string, string>
 }
 
 export interface PatternMakerActionResponse {

@@ -262,16 +262,25 @@ def _version_sort_key(version_no: str | None) -> tuple[int, str]:
     return (len(v), v)
 
 
-def _pick_final_or_latest_per_part(items: list[dict], final_version: str) -> list[dict]:
+def _pick_final_or_latest_per_part(
+    items: list[dict],
+    final_version: str,
+    final_versions: dict[str, str] | None = None,
+) -> list[dict]:
     """打印取数：逐部位名称挑一行 —— 有最终版本行取最终版本，否则取最新有数据的版本。
 
     打样单必须列出该角色已录入的每个部位名称。若整表按
     `version_no == final_version` 过滤，尚未「复制版本」到最终版本的部位
     （行仍停留在更早版本）会整条消失，打印预览的部位名称与页面录入不一致。
+
+    最终版本逐部位解析：``final_versions[部位名称]``（部位级覆盖）优先，
+    未覆盖的部位回退 ``final_version``（角色级默认）。
     """
+    overrides = final_versions or {}
     best: dict[str, dict] = {}
     for item in items:
         name = item.get('part_name') or ''
+        target = overrides.get(name, final_version)
         cur = best.get(name)
         if cur is None:
             best[name] = item
@@ -279,11 +288,11 @@ def _pick_final_or_latest_per_part(items: list[dict], final_version: str) -> lis
         # 排序键：(是否最终版本行, 版本号)。最终版本行优先；同为最终/非最终时
         # 取版本号更大者（元组比较在标志相同时才比较版本号，正是所需语义）
         new_rank = (
-            item.get('version_no') == final_version,
+            item.get('version_no') == target,
             _version_sort_key(item.get('version_no')),
         )
         cur_rank = (
-            cur.get('version_no') == final_version,
+            cur.get('version_no') == target,
             _version_sort_key(cur.get('version_no')),
         )
         if new_rank > cur_rank:
@@ -337,11 +346,16 @@ async def get_parts_by_version(
     else:
         await _ensure_role_belongs_to_project(db, role_id, project_id)
 
-    # 角色当前最终版本（final_only 过滤与返回值共用）
+    # 角色当前最终版本（角色级默认）与部位级覆盖映射
     role_result = await db.execute(
-        select(CustomerSamplingRole.current_version).where(CustomerSamplingRole.id == role_id)
+        select(
+            CustomerSamplingRole.current_version,
+            CustomerSamplingRole.final_versions,
+        ).where(CustomerSamplingRole.id == role_id)
     )
-    final_version = role_result.scalar_one_or_none() or 'T1'
+    role_row = role_result.one_or_none()
+    final_version = (role_row.current_version if role_row else None) or 'T1'
+    final_versions: dict[str, str] = dict(role_row.final_versions or {}) if role_row else {}
 
     # 1. 从 part 表读取该角色所有版本化部件（带 supplier 关联）
     # 注意：final_only 不在此处按版本过滤 —— 版本选择按部位名称逐条进行
@@ -387,9 +401,11 @@ async def get_parts_by_version(
     # 未复制到 part 表」的情况服务；已删除的部位不因历史快照而复活（spec 5.5.1.6 删除级联）
     live_part_names = {p.part_name for p in all_parts}
 
+    # 打印场景只需加载「会被选中」的版本快照：部位级覆盖值 + 角色级默认
+    needed_versions = set(final_versions.values()) | {final_version}
     for ver in versions:
-        if final_only and ver.version_no != final_version:
-            continue  # 打印场景：历史版本快照不参与（避免 JSONB 全量读取）
+        if final_only and ver.version_no not in needed_versions:
+            continue  # 打印场景：无关版本快照不参与（避免 JSONB 全量读取）
         version_set.add(ver.version_no)
         snapshot: list[dict] = ver.snapshot_data or []
         for snap_part in snapshot:
@@ -404,13 +420,14 @@ async def get_parts_by_version(
 
     version_list = sorted(version_set, key=_version_sort_key)
     if final_only:
-        # 打印场景：逐部位名称收敛为一行（最终版本优先，否则取最新有数据的版本）
-        items = _pick_final_or_latest_per_part(items, final_version)
+        # 打印场景：逐部位名称收敛为一行（部位级最终版本优先，否则取最新有数据的版本）
+        items = _pick_final_or_latest_per_part(items, final_version, final_versions)
 
     return {
         'success': True,
         'items': items,
         'versions': version_list,
         'final_version': final_version,
+        'final_versions': final_versions,
     }
 

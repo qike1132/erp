@@ -109,26 +109,21 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     }
   }
 
-  /** 设置最终版本：更新当前角色的 current_version */
-  async function onSetFinalVersion(versionNo: string) {
+  /** 设置最终版本：只记录当前部位的最终版本，不影响其他部位 */
+  async function onSetFinalVersion(partName: string, versionNo: string) {
     if (!requireManage()) return
     if (!selectedProjectId.value) return
-    const currentRole = roleHook.getCurrentRole()
-    if (!currentRole) return
     try {
-      const res = await roleHook.setRoleCurrentVersion(currentRole.id, versionNo, currentRole.version)
-      if (res) {
-        // 部位数据本身未变化，仅本地更新最终版本号，
-        // 避免 fetchPartsByVersion 的 loading 态与数据整体替换导致整表闪烁
-        partHook.setFinalVersion(versionNo)
+      const res = await patternRoomApi.setPartFinalVersion(selectedProjectId.value, {
+        role_id: roleHook.currentRoleId.value ?? undefined,
+        part_name: partName,
+        version_no: versionNo,
+      })
+      if (res.success) {
+        // 部位数据本身未变化，仅本地更新该部位的覆盖，避免整表闪烁
+        partHook.setPartFinalVersionLocal(partName, versionNo)
       } else {
-        // 2026-10-18 OCR 评审：setRoleCurrentVersion 内部吞异常返回 null，
-        // 上面的 catch 不可达；必须显式处理 null，否则失败被当成功。
-        // 复用 toastActionError 的 403 抑制口径（403 已由拦截器提示），
-        // 否则同一次失败会弹两条 toast。
-        if (roleHook.errorStatus.value !== 403) {
-          showToast(roleHook.error.value ?? '设置最终版本失败，请重试', 'error')
-        }
+        showToast(res.message || '设置最终版本失败，请重试', 'error')
       }
     } catch (e) {
       console.error('[PatternRoomView] 设置最终版本失败:', e)
@@ -137,42 +132,15 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   }
 
   /** 复制部位版本：在该部位名称下新增一个版本号 +1 的空白记录，
-   *  并将新版本设为该角色最终版本，随后自动进入新记录的编辑态 */
+   *  后端同时把新版本设为**该部位**的最终版本，随后自动进入新记录的编辑态 */
   async function onCopyPartVersion(part: PartDetail) {
     if (!requireManage()) return
     if (part.id == null) return
     try {
       const res = await patternRoomApi.copyPartVersion(part.id)
       if (res.success) {
-        // 新版本默认成为最终版本：必须先写库再拉取部位数据，
-        // 否则 parts-by-version 返回的 final_version 仍是旧版本，
-        // 折叠态会继续只显示旧版本行，新版本不可见
-        const currentRole = roleHook.getCurrentRole()
-        if (currentRole && res.version_no) {
-          const roleRes = await roleHook.setRoleCurrentVersion(
-            currentRole.id,
-            res.version_no,
-            currentRole.version,
-          )
-          if (!roleRes) {
-            // 2026-10-18 OCR 评审：设最终版本失败时不得继续进入编辑态（假成功）；
-            // 但复制接口已成功落库，必须刷新列表，避免用户重试产生重复版本。
-            // 403 已由 axios 拦截器统一提示，此处需抑制，否则双弹。
-            if (roleHook.errorStatus.value !== 403) {
-              showToast(
-                roleHook.error.value ?? `版本 ${res.version_no} 已复制，但设为最终版本失败，请手动设置`,
-                'error',
-              )
-            }
-            if (selectedProjectId.value) {
-              await partHook.fetchPartsByVersion(
-                selectedProjectId.value,
-                roleHook.currentRoleId.value ?? undefined,
-              )
-            }
-            return
-          }
-        }
+        // 复制接口已在同一事务里写入部位级最终版本，拉取即可看到新行；
+        // 先拉取再进编辑态，避免折叠态继续只显示旧版本行
         if (selectedProjectId.value) {
           await partHook.fetchPartsByVersion(
             selectedProjectId.value,
@@ -269,12 +237,13 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
   async function onDeleteVersion(part: PartDetail) {
     if (!requireManage()) return
     if (part.id == null) return
-    // 删除最终版本时使用加强提示文案
-    const isFinalVersion = !!part.version_no && part.version_no === partHook.finalVersion.value
+    // 删除该部位当前生效的最终版本时使用加强提示文案
+    const isFinalVersion = !!part.version_no
+      && part.version_no === partHook.resolveFinalVersion(part.part_name)
     const ok = isFinalVersion
       ? await confirmDialog.confirm(
           '删除最终版本',
-          `版本 ${part.version_no} 是当前项目的最终版本，删除后将无法再设为最终版，请确认是否继续。`,
+          `版本 ${part.version_no} 是部位「${part.part_name}」当前的最终版本，删除后将无法再设为最终版，请确认是否继续。`,
           'danger',
         )
       : await confirmDialog.confirm(

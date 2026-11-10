@@ -46,6 +46,7 @@
               :parts-by-version="partHook.partsByVersion.value"
               :version-list="partHook.versionList.value"
               :final-version="partHook.finalVersion.value"
+              :final-versions="partHook.finalVersions.value"
               :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"

@@ -13,23 +13,26 @@ export interface GroupedRow {
 export function usePartsVersionFilter(
   partsByVersion: Ref<PartDetail[]>,
   finalVersion: Ref<string>,
+  finalVersions: Ref<Record<string, string>>,
   projectId: Ref<number | null | undefined>,
   currentRoleId: Ref<number | null>,
-  onSetFinalVersion: (versionNo: string) => void,
+  onSetFinalVersion: (partName: string, versionNo: string) => void,
   editingPartId?: Ref<number | undefined>,
 ) {
   const selectedVersion = ref<Record<string, string | null>>({})
   const expandedParts = ref<Set<string>>(new Set())
 
   watch(
-    [finalVersion, partsByVersion, projectId, currentRoleId],
-    ([fv, pbv]) => {
+    [finalVersion, finalVersions, partsByVersion, projectId, currentRoleId],
+    ([fv, overrides, pbv]) => {
       if (!fv) return
       const next: Record<string, string | null> = {}
       for (const item of pbv) {
         if (item.part_name && !next[item.part_name]) {
-          if (item.version_no === fv) {
-            next[item.part_name] = fv
+          // 部位级覆盖优先；未覆盖的部位沿用角色级默认
+          const target = overrides[item.part_name] ?? fv
+          if (item.version_no === target) {
+            next[item.part_name] = target
           }
         }
       }
@@ -55,8 +58,9 @@ export function usePartsVersionFilter(
     } else {
       selectedVersion.value = { ...selectedVersion.value, [partName]: versionNo }
       expandedParts.value.delete(partName)
-      // 选中即写库：打印按角色的 current_version 取数，不写库则打印与所选版本不一致
-      onSetFinalVersion(versionNo)
+      // 选中即写库（只写该部位）：打印按部位级覆盖取数，
+      // 不写库则打印与所选版本不一致
+      onSetFinalVersion(partName, versionNo)
     }
   }
 

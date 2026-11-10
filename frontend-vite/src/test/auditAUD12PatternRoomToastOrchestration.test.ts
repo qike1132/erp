@@ -23,6 +23,7 @@ vi.mock('@/composables/useToast', () => ({ showToast: mocks.showToast }))
 vi.mock('@/api/patternRoom', () => ({
   patternRoomApi: {
     copyPartVersion: vi.fn(),
+    setPartFinalVersion: vi.fn(),
     updatePart: vi.fn(),
     deletePart: vi.fn(),
     batchCreateParts: vi.fn(),
@@ -50,7 +51,6 @@ function makeRoleHook(overrides: Record<string, unknown> = {}) {
     errorStatus: ref<number | undefined>(undefined),
     getCurrentRole: () => ({ id: 1, role_name: '默认', current_version: 'T1', version: 1 }),
     setCurrentRole: vi.fn(),
-    setRoleCurrentVersion: vi.fn(async () => ({ success: true })),
     createRole: vi.fn(async () => ({ success: true })),
     deleteRole: vi.fn(async () => ({ success: true })),
     ...overrides,
@@ -75,15 +75,18 @@ function makeProjectHook(overrides: Record<string, unknown> = {}) {
 
 /** 驱动 usePatternRoomPartActions 的最小依赖集 */
 function buildPartActions(roleHook = makeRoleHook()) {
+  const finalVersions = ref<Record<string, string>>({})
   const partHook = {
     partsByVersion: ref([]),
     parts: ref([]),
     versionList: ref([]),
     finalVersion: ref('T1'),
+    finalVersions,
     loading: ref(false),
     submitting: ref(false),
     error: ref<string | null>(null),
-    setFinalVersion: vi.fn(),
+    setPartFinalVersionLocal: vi.fn(),
+    resolveFinalVersion: (partName: string) => finalVersions.value[partName] ?? 'T1',
     patchPart: vi.fn(),
     removePartLocal: vi.fn(),
     appendPart: vi.fn(),
@@ -136,39 +139,49 @@ describe('AUD-12 编排 Hook 的假成功缺口与 403 双弹', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
   })
 
-  describe('roleHook.error 分支的 403 抑制', () => {
+  describe('部位级最终版本的失败可见性', () => {
     it('设最终版本 403：不弹 toast（拦截器已提示）', async () => {
-      const roleHook = makeRoleHook({
-        error: ref('权限不足'),
-        errorStatus: ref(403),
-        setRoleCurrentVersion: vi.fn(async () => null),
-      })
-      const { actions } = buildPartActions(roleHook)
+      const { patternRoomApi } = await import('@/api/patternRoom')
+      vi.mocked(patternRoomApi.setPartFinalVersion).mockRejectedValue(httpError(403))
+      const { actions } = buildPartActions()
 
-      await actions.onSetFinalVersion('T2')
+      await actions.onSetFinalVersion('主料', 'T2')
 
       expect(mocks.showToast).not.toHaveBeenCalled()
     })
 
     it('设最终版本 500：弹 error toast（失败必须可见）', async () => {
-      const roleHook = makeRoleHook({
-        error: ref('设置最终版本失败'),
-        errorStatus: ref(500),
-        setRoleCurrentVersion: vi.fn(async () => null),
-      })
-      const { actions } = buildPartActions(roleHook)
+      const { patternRoomApi } = await import('@/api/patternRoom')
+      vi.mocked(patternRoomApi.setPartFinalVersion).mockRejectedValue(
+        httpError(500, '设置最终版本失败'),
+      )
+      const { actions } = buildPartActions()
 
-      await actions.onSetFinalVersion('T2')
+      await actions.onSetFinalVersion('主料', 'T2')
 
       expect(mocks.showToast).toHaveBeenCalledWith('设置最终版本失败', 'error')
     })
 
-    it('复制版本后设最终版本 403：不弹 toast', async () => {
-      const roleHook = makeRoleHook({
-        error: ref('权限不足'),
-        errorStatus: ref(403),
-        setRoleCurrentVersion: vi.fn(async () => null),
+    it('设最终版本成功：只写该部位并本地更新覆盖', async () => {
+      const { patternRoomApi } = await import('@/api/patternRoom')
+      vi.mocked(patternRoomApi.setPartFinalVersion).mockResolvedValue({
+        success: true,
+        message: 'ok',
       })
+      const { actions, partHook } = buildPartActions()
+
+      await actions.onSetFinalVersion('主料', 'T2')
+
+      expect(patternRoomApi.setPartFinalVersion).toHaveBeenCalledWith(7, {
+        role_id: 1,
+        part_name: '主料',
+        version_no: 'T2',
+      })
+      expect(partHook.setPartFinalVersionLocal).toHaveBeenCalledWith('主料', 'T2')
+      expect(mocks.showToast).not.toHaveBeenCalled()
+    })
+
+    it('复制版本成功只刷新列表，不再二次写角色最终版本', async () => {
       const { patternRoomApi } = await import('@/api/patternRoom')
       vi.mocked(patternRoomApi.copyPartVersion).mockResolvedValue({
         success: true,
@@ -176,13 +189,15 @@ describe('AUD-12 编排 Hook 的假成功缺口与 403 双弹', () => {
         id: 99,
         version_no: 'T2',
       })
-      const { actions, partHook } = buildPartActions(roleHook)
+      vi.mocked(patternRoomApi.setPartFinalVersion).mockClear()
+      const { actions, partHook } = buildPartActions()
 
       await actions.onCopyPartVersion({ id: 42, part_name: '前片', version_no: 'T1', version: 1 } as never)
 
       expect(mocks.showToast).not.toHaveBeenCalled()
-      // 403 也要刷新列表：复制接口已成功落库，不能停在旧数据上
       expect(partHook.fetchPartsByVersion).toHaveBeenCalled()
+      // 后端复制接口已在同一事务写完部位级最终版本，前端不再补一次
+      expect(patternRoomApi.setPartFinalVersion).not.toHaveBeenCalled()
     })
   })
 

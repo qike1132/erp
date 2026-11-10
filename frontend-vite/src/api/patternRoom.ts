@@ -10,7 +10,7 @@
  */
 import { get, post, put, del, upload } from './request'
 import type { WithRequired, WithItems, ReplaceField, WithField } from '@/types'
-import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest, BatchPartItem as GenBatchPartItem, RoleListResponse as GenRoleListResponse, VersionListResponse as GenVersionListResponse, ChangeLogListResponse as GenChangeLogListResponse, GroupedListResponse as GenGroupedListResponse, PartDetail as GenPartDetail, PartListResponse as GenPartListResponse, PartsByVersionResponse as GenPartsByVersionResponse, PatternMakerGroup as GenPatternMakerGroup, ProjectCreateRequest as GenProjectCreateRequest, ProjectListResponse as GenProjectListResponse, ProjectSummary as GenProjectSummary, VersionDetailResponse as GenVersionDetailResponse } from '@/types/api'
+import type { ChangeLogEntry as GenChangeLogEntry, FieldDiff as GenFieldDiff, RoleBrief as GenRoleBrief, VersionBrief as GenVersionBrief, BatchPartCreateRequest as GenBatchPartCreateRequest, PartCreateRequest as GenPartCreateRequest, PartUpdateRequest as GenPartUpdateRequest, PartFinalVersionRequest as GenPartFinalVersionRequest, ProjectUpdateRequest as GenProjectUpdateRequest, RoleCreateRequest as GenRoleCreateRequest, RoleUpdateRequest as GenRoleUpdateRequest, BatchPartItem as GenBatchPartItem, RoleListResponse as GenRoleListResponse, VersionListResponse as GenVersionListResponse, ChangeLogListResponse as GenChangeLogListResponse, GroupedListResponse as GenGroupedListResponse, PartDetail as GenPartDetail, PartListResponse as GenPartListResponse, PartsByVersionResponse as GenPartsByVersionResponse, PatternMakerGroup as GenPatternMakerGroup, ProjectCreateRequest as GenProjectCreateRequest, ProjectListResponse as GenProjectListResponse, ProjectSummary as GenProjectSummary, VersionDetailResponse as GenVersionDetailResponse } from '@/types/api'
 
 // ==================== 类型别名 ====================
 
@@ -193,6 +193,9 @@ export type PartCreateRequest = GenPartCreateRequest
 /** 编辑部位请求（version 为乐观锁版本号，必填） */
 export type PartUpdateRequest = GenPartUpdateRequest
 
+/** 设置单个部位的最终版本（部位级覆盖，不影响其他部位） */
+export type PartFinalVersionRequest = GenPartFinalVersionRequest
+
 // ==================== 查询参数 ====================
 
 /** 分组列表查询参数 */
@@ -329,6 +332,10 @@ export const patternRoomApi = {
   // ---------- 17. 复制部位版本 ----------
   copyPartVersion: (partId: number) =>
     post<ActionResponse>(`/pattern-room/parts/${partId}/copy-version`),
+
+  // ---------- 17b. 设置单个部位的最终版本 ----------
+  setPartFinalVersion: (projectId: number, data: PartFinalVersionRequest) =>
+    put<ActionResponse>(`/pattern-room/projects/${projectId}/parts/final-version`, data),
 
   // ---------- 18. 角色列表 ----------
   listRoles: (projectId: number) =>

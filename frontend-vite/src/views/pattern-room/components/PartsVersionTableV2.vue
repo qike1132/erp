@@ -54,6 +54,7 @@ import { usePartsVersionFilter } from '../composables/usePartsVersionFilter'
 const props = defineProps<{
   partsByVersion: PartDetail[]
   finalVersion: string
+  finalVersions: Record<string, string>
   projectId: number | null | undefined
   currentRoleId: number | null
   partLoading: boolean
@@ -61,13 +62,14 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'set-final-version': [versionNo: string]
+  'set-final-version': [partName: string, versionNo: string]
   'copy-version': [part: PartDetail]
   'delete-version': [part: PartDetail]
 }>()
 
 const partsByVersionRef = toRef(props, 'partsByVersion')
 const finalVersionRef = toRef(props, 'finalVersion')
+const finalVersionsRef = toRef(props, 'finalVersions')
 const projectIdRef = computed(() => props.projectId)
 const currentRoleIdRef = toRef(props, 'currentRoleId')
 
@@ -77,9 +79,10 @@ const { editingPartId } = injectPartInlineEdit()
 const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVersionFilter(
   partsByVersionRef,
   finalVersionRef,
+  finalVersionsRef,
   projectIdRef,
   currentRoleIdRef,
-  (versionNo) => emit('set-final-version', versionNo),
+  (partName, versionNo) => emit('set-final-version', partName, versionNo),
   editingPartId,
 )
 </script>

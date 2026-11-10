@@ -53,6 +53,7 @@ from fastapi_app.services.customer_sampling_service import (
     list_parts,
     list_roles,
     list_versions,
+    set_part_final_version,
     update_part,
     update_project,
     update_project_status,
@@ -1188,6 +1189,138 @@ class TestServiceIntegration:
         assert by_name['肤色'] == 'T1'
         assert by_name['皇冠'] == 'T1'
         assert by_name['领巾'] == 'T1'
+
+    async def test_set_part_final_version_is_independent_per_part(self, cs_db):
+        """不同部位可以各自选择最终版本，互不牵连
+
+        回归：最终版本原先只能按角色存一个 current_version，给 A 选 T2 会把
+        B 的最终版本一起改成 T2，B 无法保留 T1。
+        """
+        r = await create_project(cs_db, product_name='部位级最终版本')
+        await cs_db.flush()
+        role = (await list_roles(cs_db, r['id']))['items'][0]
+
+        for name in ('主料', '花结'):
+            await create_part(cs_db, r['id'], part_name=name, role_id=role['id'])
+        await cs_db.flush()
+
+        parts = (await list_parts(cs_db, r['id'], role_id=role['id']))['items']
+        for name in ('主料', '花结'):
+            part = next(p for p in parts if p['part_name'] == name)
+            await copy_part_version(cs_db, part['id'])
+        await cs_db.flush()
+
+        # 主料保留 T2，花结改回 T1 —— 两个部位各自独立
+        await set_part_final_version(
+            cs_db, r['id'], role_id=role['id'], part_name='主料', version_no='T2',
+        )
+        await set_part_final_version(
+            cs_db, r['id'], role_id=role['id'], part_name='花结', version_no='T1',
+        )
+        await cs_db.flush()
+
+        view = await get_parts_by_version(cs_db, r['id'], role_id=role['id'])
+        assert view['final_versions'] == {'主料': 'T2', '花结': 'T1'}
+        # 角色级默认不被部位级选择改写
+        assert view['final_version'] == 'T1'
+
+        printed = await get_parts_by_version(
+            cs_db, r['id'], role_id=role['id'], final_only=True,
+        )
+        by_name = {p['part_name']: p['version_no'] for p in printed['items']}
+        assert by_name == {'主料': 'T2', '花结': 'T1'}
+
+    async def test_copy_part_version_only_sets_that_parts_final(self, cs_db):
+        """复制版本只把该部位设为最终版本，不连带其他部位"""
+        r = await create_project(cs_db, product_name='复制版本只设本部位')
+        await cs_db.flush()
+        role = (await list_roles(cs_db, r['id']))['items'][0]
+
+        for name in ('主料', '花结'):
+            await create_part(cs_db, r['id'], part_name=name, role_id=role['id'])
+        await cs_db.flush()
+
+        parts = (await list_parts(cs_db, r['id'], role_id=role['id']))['items']
+        main = next(p for p in parts if p['part_name'] == '主料')
+        await copy_part_version(cs_db, main['id'])
+        await cs_db.flush()
+
+        view = await get_parts_by_version(cs_db, r['id'], role_id=role['id'])
+        assert view['final_versions'] == {'主料': 'T2'}
+        assert view['final_version'] == 'T1'  # 角色默认不变
+
+        printed = await get_parts_by_version(
+            cs_db, r['id'], role_id=role['id'], final_only=True,
+        )
+        by_name = {p['part_name']: p['version_no'] for p in printed['items']}
+        assert by_name == {'主料': 'T2', '花结': 'T1'}
+
+    async def test_delete_final_version_clears_part_override(self, cs_db):
+        """删除某部位的最终版本行后，清除该部位覆盖并回退默认/最新"""
+        r = await create_project(cs_db, product_name='删除最终版本')
+        await cs_db.flush()
+        role = (await list_roles(cs_db, r['id']))['items'][0]
+
+        await create_part(cs_db, r['id'], part_name='主料', role_id=role['id'])
+        await cs_db.flush()
+        parts = (await list_parts(cs_db, r['id'], role_id=role['id']))['items']
+        await copy_part_version(cs_db, parts[0]['id'])
+        await cs_db.flush()
+
+        parts = (await list_parts(cs_db, r['id'], role_id=role['id']))['items']
+        t2_row = next(p for p in parts if p['version_no'] == 'T2')
+        await delete_part(cs_db, t2_row['id'])
+        await cs_db.flush()
+
+        view = await get_parts_by_version(cs_db, r['id'], role_id=role['id'])
+        assert view['final_versions'].get('主料') is None
+
+        printed = await get_parts_by_version(
+            cs_db, r['id'], role_id=role['id'], final_only=True,
+        )
+        assert {p['part_name']: p['version_no'] for p in printed['items']} == {'主料': 'T1'}
+
+    async def test_set_part_final_version_accepts_snapshot_only_version(self, cs_db):
+        """旧「创建新版本」只落快照不复制 part 行时，该版本仍可被选为最终版本并用于打印"""
+        r = await create_project(cs_db, product_name='快照版本选最终')
+        await cs_db.flush()
+        role = (await list_roles(cs_db, r['id']))['items'][0]
+
+        await create_part(cs_db, r['id'], part_name='身体', role_id=role['id'])
+        await cs_db.flush()
+        await _seed_fabric_version(
+            cs_db, r['id'], 'T2', snapshot_data=[{'part_name': '身体'}],
+            role_id=role['id'],
+        )
+        # 把角色默认改回 T1，确保打印取到 T2 只能靠部位级覆盖
+        await update_role(cs_db, role['id'], current_version='T1', version=role['version'])
+        await cs_db.flush()
+
+        await set_part_final_version(
+            cs_db, r['id'], role_id=role['id'], part_name='身体', version_no='T2',
+        )
+        await cs_db.flush()
+
+        view = await get_parts_by_version(cs_db, r['id'], role_id=role['id'])
+        assert view['final_versions'] == {'身体': 'T2'}
+
+        printed = await get_parts_by_version(
+            cs_db, r['id'], role_id=role['id'], final_only=True,
+        )
+        assert {p['part_name']: p['version_no'] for p in printed['items']} == {'身体': 'T2'}
+
+    async def test_set_part_final_version_rejects_missing_version(self, cs_db):
+        """版本不存在时必须拒绝，避免写入看不见的最终版本"""
+        r = await create_project(cs_db, product_name='非法版本')
+        await cs_db.flush()
+        role = (await list_roles(cs_db, r['id']))['items'][0]
+        await create_part(cs_db, r['id'], part_name='身体', role_id=role['id'])
+        await cs_db.flush()
+
+        with pytest.raises(BusinessError):
+            await set_part_final_version(
+                cs_db, r['id'], role_id=role['id'], part_name='身体', version_no='T9',
+            )
 
     async def test_version_list_ordered(self, cs_db):
         """版本列表按 version_no 升序"""

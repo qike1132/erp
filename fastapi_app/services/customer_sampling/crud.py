@@ -11,6 +11,7 @@ from fastapi_app.services.customer_sampling.parts import (
     delete_part,
     get_part_field_candidates,
     list_parts,
+    set_part_final_version,
     update_part,
 )
 from fastapi_app.services.customer_sampling.projects import (

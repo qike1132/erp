@@ -57,6 +57,7 @@ CUSTOMER_SAMPLING_ACTIONS = {
     'create_role': '新增角色',
     'update_role': '编辑角色',
     'delete_role': '删除角色',
+    'set_part_final_version': '设置最终版本',
 }
 
 # 变更类型常量
@@ -220,6 +221,10 @@ class CustomerSamplingRole(Base):
     current_version: Mapped[str] = mapped_column(
         String(8), nullable=False, default='T1', server_default='T1', comment='该角色当前最终版本 T1/T2/T3...',
     )
+    final_versions: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"),
+        comment='部位级最终版本覆盖 {部位名称: 版本号}',
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -270,6 +275,7 @@ class CustomerSamplingRole(Base):
             'sort_order': self.sort_order,
             'is_default': self.is_default,
             'current_version': self.current_version,
+            'final_versions': self.final_versions or {},
             'created_at': format_local_time(self.created_at),
             'updated_at': format_local_time(self.updated_at),
             'version': self.version,

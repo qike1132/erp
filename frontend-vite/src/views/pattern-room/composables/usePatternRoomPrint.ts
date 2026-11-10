@@ -67,8 +67,9 @@ export function usePatternRoomPrint(options: UsePatternRoomPrintOptions) {
     const allRoles = roles.value
     printRoles.value = allRoles
     // 后端不支持不传 role_id 返回全部角色，需逐个角色加载（并行请求，避免多角色串行等待）。
-    // finalOnly=true：每个部位名称只返回一行（有最终版本行取最终版本，否则取该部位最新
-    // 有数据的版本）——打样单不会漏掉尚未复制到最终版本的部位，也避免拉取全部历史版本快照
+    // finalOnly=true：每个部位名称只返回一行（按该部位自己的最终版本，
+    // 未单独选择的沿用角色默认，仍未命中则取最新有数据的版本）——打样单不会
+    // 漏掉尚未复制到最终版本的部位，也避免拉取全部历史版本快照
     try {
       const results = await Promise.all(
         allRoles.map((role) => patternRoomApi.getPartsByVersion(projectId, role.id, true)),

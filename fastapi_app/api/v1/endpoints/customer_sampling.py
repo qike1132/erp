@@ -27,6 +27,7 @@ from fastapi_app.schemas.customer_sampling import (
     FieldCandidatesResponse,
     GroupedListResponse,
     PartCreateRequest,
+    PartFinalVersionRequest,
     PartListResponse,
     PartsByVersionResponse,
     PartUpdateRequest,
@@ -387,6 +388,30 @@ async def api_delete_part(
     async with db_transaction(db):
         await svc.delete_part(db, part_id, user_id=current_user.id)
     return success_response(message='删除成功')
+
+
+@router.put('/projects/{project_id}/parts/final-version', response_model=ActionResponse)
+@_svc_error_guard('设置失败')
+async def api_set_part_final_version(
+    project_id: int,
+    data: PartFinalVersionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(PERM)),
+) -> dict[str, Any]:
+    """设置单个部位的最终版本（只影响该部位，其他部位沿用各自选择/角色默认）"""
+    async with db_transaction(db):
+        await svc.set_part_final_version(
+            db,
+            project_id,
+            part_name=data.part_name,
+            version_no=data.version_no,
+            role_id=data.role_id,
+            user_id=current_user.id,
+        )
+    return success_response(
+        message=f'已将「{data.part_name}」的最终版本设为 {data.version_no}',
+        version_no=data.version_no,
+    )
 
 
 # ==================== 12. 版本列表 ====================

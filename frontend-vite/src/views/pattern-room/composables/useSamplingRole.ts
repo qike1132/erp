@@ -136,41 +136,6 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     }
   }
 
-  /** 设置角色最终版本（current_version） */
-  async function setRoleCurrentVersion(roleId: number, versionNo: string, version: number): Promise<ActionResponse | null> {
-    submitting.value = true
-    error.value = null
-    errorStatus.value = undefined
-    try {
-      const res = await patternRoomApi.updateRole(roleId, { current_version: versionNo, version })
-      // 局部 patch：仅更新对应角色的 current_version 与乐观锁版本号，避免全量 fetchRoles 闪烁。
-      // version 回写用于二次设置最终版本时携带新版本号，避免 409。
-      const idx = roles.value.findIndex((r) => r.id === roleId)
-      if (idx > -1) {
-        roles.value[idx] = {
-          ...roles.value[idx]!,
-          current_version: versionNo,
-          version: res.version ?? (roles.value[idx]!.version + 1),
-        }
-      }
-      return res
-    } catch (e) {
-      console.error('[useSamplingRole] 设置角色最终版本失败:', e)
-      const message = resolveSamplingErrorMessage(e, '设置最终版本失败', ROLE_ERROR_OPTS)
-      const status = getErrorStatus(e)
-      // 乐观锁冲突：自动刷新列表。fetchRoles 入口会重置 error/errorStatus，
-      // 故先取本地副本、刷新完再回写，否则冲突文案被冲掉
-      if (status === 409 && projectId.value != null) {
-        await fetchRoles(projectId.value)
-      }
-      error.value = message
-      errorStatus.value = status
-      return null
-    } finally {
-      submitting.value = false
-    }
-  }
-
   /** 删除角色（角色一律可删除，其部位布料与版本快照级联删除） */
   async function deleteRole(roleId: number): Promise<ActionResponse | null> {
     submitting.value = true
@@ -235,7 +200,6 @@ export function useSamplingRole(projectId: Ref<number | null>) {
     getCurrentRole,
     createRole,
     renameRole,
-    setRoleCurrentVersion,
     deleteRole,
     setCurrentRole,
     clearRoles,

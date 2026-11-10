@@ -621,6 +621,9 @@
       "execute:ALTER TABLE product DROP COLUMN IF EXISTS has_hidden_role",
       "execute:ALTER TABLE product DROP COLUMN IF EXISTS is_blind_box"
     ],
+    "migrations/versions/pg_standalone_117_add_role_final_versions.py": [
+      "execute:ALTER TABLE customer_sampling_role DROP COLUMN IF EXISTS final_versions"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

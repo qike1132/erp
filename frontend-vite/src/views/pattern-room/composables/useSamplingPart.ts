@@ -24,8 +24,10 @@ export function useSamplingPart(
   const partsByVersion = ref<PartDetail[]>([])
   /** 版本号列表 */
   const versionList = ref<string[]>([])
-  /** 最终版本号（用户选中的当前版本） */
+  /** 最终版本号（角色级默认；部位未单独选择时沿用） */
   const finalVersion = ref<string>('T1')
+  /** 部位级最终版本覆盖（部位名称 → 版本号），优先于 finalVersion */
+  const finalVersions = ref<Record<string, string>>({})
   /** 加载中 */
   const loading = ref(false)
   /** 提交中（新增/编辑/删除） */
@@ -60,6 +62,7 @@ export function useSamplingPart(
       partsByVersion.value = res.items ?? []
       versionList.value = res.versions ?? []
       finalVersion.value = res.final_version ?? 'T1'
+      finalVersions.value = res.final_versions ?? {}
     } catch (e) {
       if (reqId !== _requestId) return
       console.error('[useSamplingPart] 查询跨版本部位数据失败:', e)
@@ -70,19 +73,20 @@ export function useSamplingPart(
       partsByVersion.value = []
       versionList.value = []
       finalVersion.value = 'T1'
+      finalVersions.value = {}
     } finally {
       if (reqId === _requestId) loading.value = false
     }
   }
 
-  /**
-   * 本地更新最终版本号（不重新拉取数据）
-   * 用于"设置最终版本"场景：后端仅更新角色 current_version，
-   * 部位数据本身未变化，重新拉取会触发 loading 态与整体替换 partsByVersion，
-   * 导致表格闪烁；直接本地更新可保持数据引用稳定，仅触发局部折叠。
-   */
-  function setFinalVersion(versionNo: string): void {
-    finalVersion.value = versionNo
+  /** 解析某部位当前生效的最终版本：部位级覆盖优先，否则角色级默认 */
+  function resolveFinalVersion(partName: string): string {
+    return finalVersions.value[partName] ?? finalVersion.value
+  }
+
+  /** 本地写入某部位的最终版本覆盖（设置成功后调用，避免全量重拉闪烁） */
+  function setPartFinalVersionLocal(partName: string, versionNo: string): void {
+    finalVersions.value = { ...finalVersions.value, [partName]: versionNo }
   }
 
   /**
@@ -115,6 +119,7 @@ export function useSamplingPart(
     partsByVersion.value = []
     versionList.value = []
     finalVersion.value = 'T1'
+    finalVersions.value = {}
     error.value = null
   }
 
@@ -142,11 +147,13 @@ export function useSamplingPart(
     submitting,
     error,
     fetchPartsByVersion,
-    setFinalVersion,
+    setPartFinalVersionLocal,
+    resolveFinalVersion,
     patchPart,
     removePartLocal,
     appendPart,
     finalVersion,
+    finalVersions,
     clearParts,
   }
 }

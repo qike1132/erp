@@ -226,6 +226,20 @@ async def delete_part(
 
     project_id = part.project_id
     part_name = part.part_name
+    version_no = part.version_no
+
+    # 被删行正是该部位的最终版本时，清掉部位级覆盖（回退角色默认/最新有数据版本）
+    role_result = await db.execute(
+        select(CustomerSamplingRole)
+        .where(CustomerSamplingRole.id == part.role_id)
+        .with_for_update()
+    )
+    role = role_result.scalar_one_or_none()
+    overrides = dict(role.final_versions or {}) if role is not None else {}
+    if overrides.get(part_name) == version_no:
+        overrides.pop(part_name, None)
+        if role is not None:
+            role.final_versions = overrides
 
     await db.delete(part)
     await db.flush()
@@ -463,12 +477,13 @@ async def copy_part_version(
         raise NotFoundError('部位不存在')
 
     # 锁定角色行（串行化同角色并发的版本号推算，防止版本号冲突）
-    role_lock = await db.execute(
-        select(CustomerSamplingRole.id)
+    role_result = await db.execute(
+        select(CustomerSamplingRole)
         .where(CustomerSamplingRole.id == part.role_id)
         .with_for_update()
     )
-    if role_lock.scalar_one_or_none() is None:
+    role = role_result.scalar_one_or_none()
+    if role is None:
         raise NotFoundError('角色不存在')
 
     # 计算下一版本号：以该角色下同部位名称所有行的最大版本号为准
@@ -504,6 +519,13 @@ async def copy_part_version(
     db.add(new_part)
     await db.flush()
 
+    # 新版本只成为「该部位」的最终版本，不改角色级默认，避免连带影响其他部位
+    role.final_versions = {
+        **(role.final_versions or {}),
+        part.part_name: new_version_no,
+    }
+    await db.flush()
+
     # 写审计日志
     operator_name = await _get_user_name(db, user_id)
     await _write_change_log(
@@ -517,3 +539,79 @@ async def copy_part_version(
         part_id, new_part.id, part.part_name, current_ver, new_version_no,
     )
     return {'id': new_part.id, 'version_no': new_version_no}
+
+
+async def set_part_final_version(
+    db: AsyncSession,
+    project_id: int,
+    *,
+    part_name: str,
+    version_no: str,
+    role_id: int | None = None,
+    user_id: int | None = None,
+) -> dict:
+    """设置单个部位的最终版本（写入角色级 final_versions 覆盖）
+
+    - 只影响该部位；未覆盖的部位继续沿用角色的 current_version
+    - 角色行 FOR UPDATE 串行化读改写，避免并发设置不同部位时丢覆盖
+    - 校验版本真实存在：优先 part 表，其次历史版本快照（旧「创建新版本」只
+      落快照、不复制 part 行，这类列也允许被选为最终版本）
+    """
+    await _ensure_project_exists(db, project_id)
+    role_id = await _resolve_role_id(db, project_id, role_id)
+
+    role_result = await db.execute(
+        select(CustomerSamplingRole)
+        .where(CustomerSamplingRole.id == role_id)
+        .with_for_update()
+    )
+    role = role_result.scalar_one_or_none()
+    if role is None:
+        raise NotFoundError('角色不存在')
+
+    part_versions = set((await db.execute(
+        select(CustomerSamplingPart.version_no).where(
+            CustomerSamplingPart.project_id == project_id,
+            CustomerSamplingPart.role_id == role_id,
+            CustomerSamplingPart.part_name == part_name,
+        )
+    )).scalars().all())
+    if not part_versions:
+        raise NotFoundError(f'部位「{part_name}」不存在')
+
+    if version_no not in part_versions:
+        snapshot = (await db.execute(
+            select(CustomerSamplingFabricVersion).where(
+                CustomerSamplingFabricVersion.role_id == role_id,
+                CustomerSamplingFabricVersion.version_no == version_no,
+            )
+        )).scalar_one_or_none()
+        snapshot_has_part = snapshot is not None and any(
+            item.get('part_name') == part_name
+            for item in (snapshot.snapshot_data or [])
+        )
+        if not snapshot_has_part:
+            raise BusinessError(f'部位「{part_name}」没有版本 {version_no}')
+
+    overrides = dict(role.final_versions or {})
+    old_version = overrides.get(part_name)
+    if old_version == version_no:
+        return {'success': True, 'part_name': part_name, 'version_no': version_no}
+
+    overrides[part_name] = version_no
+    role.final_versions = overrides
+    await db.flush()
+
+    operator_name = await _get_user_name(db, user_id)
+    await _write_change_log(
+        db, project_id, 'set_part_final_version', user_id, operator_name,
+        part_name=part_name,
+        target_version=version_no,
+        field_diffs=[{'field': 'final_version', 'old': old_version, 'new': version_no}],
+    )
+
+    logger.info(
+        '设置部位最终版本: project_id=%s, role_id=%s, part_name=%s, %s → %s',
+        project_id, role_id, part_name, old_version, version_no,
+    )
+    return {'success': True, 'part_name': part_name, 'version_no': version_no}
