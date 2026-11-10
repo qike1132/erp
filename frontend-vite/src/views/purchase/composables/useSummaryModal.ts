@@ -717,7 +717,14 @@ export function useSummaryModal() {
           // 与工厂表 displayRowQty 同口径：有落库坐标才读逐行率，无坐标（BOM 新增物料）
           // 加放率为 0；同一物料跨 SKU/角色多行按显示值累加。
           const rate = row.coord ? rateForFabric(gi, row.coord.si, row.coord.fi) : 0
-          const qty = factoryQtyDisplayValue(row.baseQuantity, rate, editMode.value)
+          // 编辑态工厂输入框显示的是**落库真值**（editRowQty），供应商页签必须跟它一致，
+          // 否则编辑期间两页又不同步；非编辑态跟工厂展示列（BOM 推算值）。
+          let baseQty = row.baseQuantity
+          if (editMode.value && row.coord) {
+            const fabric = group.suppliers?.[row.coord.si]?.fabrics?.[row.coord.fi]
+            if (fabric) baseQty = parseFloat(String(fabric.quantity)) || 0
+          }
+          const qty = factoryQtyDisplayValue(baseQty, rate, editMode.value)
           map.set(key, Math.round(((map.get(key) || 0) + qty) * 100) / 100)
         })
         return

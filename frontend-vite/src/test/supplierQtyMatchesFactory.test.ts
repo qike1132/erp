@@ -100,6 +100,18 @@ describe('供应商页签数量与工厂页签同源', () => {
     expect(m.supplierData!.materials[0]!.total_quantity).toBe(50)
   })
 
+  it('编辑态跟随工厂输入框（落库真值 × 率），退出编辑恢复推算值', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([1])
+
+    m.toggleEditMode(true)
+    // 编辑输入框显示 50 × 1.03 = 51.5（精确值，保存后无损反推）
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(51.5)
+
+    m.toggleEditMode(false)
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(207)
+  })
+
   it('同一物料跨角色多行按工厂可见值累加（香珠 6×5000=30000）', async () => {
     const roles = [15, 16, 17, 18, 19, 20]
     const factory: FactorySummaryData = {
