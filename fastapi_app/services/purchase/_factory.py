@@ -385,7 +385,7 @@ def _matching_po_items(po, bom, items_map, items_map_by_part, *, split_parts, pa
 
 def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
                             items_map_by_part=None, split_parts=False, accumulate=True,
-                            role_name: str = ''):
+                            role_name: str = '', row_qty: float | None = None):
     """把一条 BOM 行并入「(供应商, 物料, 规格, 单位, 部位)」聚合行。
 
     ``accumulate=False`` = **只登记展示部位、不碰数量**：跨 SKU 去重（
@@ -421,8 +421,10 @@ def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
         per_order_qty = sum(float(it.quantity or 0) for it in matching_items)
         cur_item_ids = [it.id for it in matching_items]
     else:
-        # 无对应采购明细（BOM 生成后新增）：按 BOM 用量逐行累加
-        per_order_qty = bom['quantity'] * order_qty
+        # 无对应采购明细（BOM 生成后新增）：按 BOM 用量逐行累加。
+        # `row_qty` 为盲盒角色的分配数量：同一物料在每个角色各有一行 BOM，
+        # 若每行都乘整单量会重复 N 倍（生产缺陷 PO-2611-005：香珠 6 行 × 30000）。
+        per_order_qty = bom['quantity'] * (order_qty if row_qty is None else row_qty)
         cur_item_ids = []
 
     existing['quantity'] += per_order_qty
@@ -691,8 +693,11 @@ def _resolve_po_pids(po_pids_map, po, pid) -> list:
 
 def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
                             items_map_by_part=None, split_parts=False,
-                            role_names_by_pid=None) -> bool:
+                            role_names_by_pid=None, blind_box_ctx=None) -> bool:
     """把该采购单覆盖的**全部 SKU** 的 BOM 行并入分组。
+
+    ``blind_box_ctx``：盲盒产品的角色分配上下文。BOM 回退（无对应采购明细）时
+    按角色分配数量折算，否则同一物料在每个角色各一行、每行都乘整单量 → 重复 N 倍。
 
     Returns:
         是否有任何 SKU 配了 BOM（``False`` 时调用方回退到采购明细口径）。
@@ -702,6 +707,8 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
     for idx, sku_pid in enumerate(pids):
         bom_list = bom_data.get(sku_pid, [])
         role_names = (role_names_by_pid or {}).get(sku_pid) or {}
+        ctx_entry = (blind_box_ctx or {}).get(sku_pid)
+        allocation = _factory_sku_allocation(ctx_entry, order_qty) if ctx_entry else None
         if bom_list:
             has_bom = True
         for bom in bom_list:
@@ -734,10 +741,14 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
                 )
                 continue
             seen_materials.add(skey)
+            role_id = bom.get('role_id')
+            row_qty = None if allocation is None else float(
+                allocation.get(role_id, order_qty) or 0,
+            )
             _accumulate_factory_bom(
                 group, po, bom, items_map, order_qty,
                 items_map_by_part=items_map_by_part, split_parts=split_parts,
-                role_name=role_name,
+                role_name=role_name, row_qty=row_qty,
             )
     return has_bom
 
@@ -812,7 +823,7 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
         if not _accumulate_po_bom_rows(
             group, po, pids, bom_data, items_map, order_qty,
             items_map_by_part=items_map_by_part, split_parts=split_parts,
-            role_names_by_pid=role_names_by_pid,
+            role_names_by_pid=role_names_by_pid, blind_box_ctx=blind_box_ctx,
         ):
             # BOM 完全不可用（所选 SKU 均未配 BOM）时的既有回退
             _accumulate_factory_po_items(group, po, items_by_order)

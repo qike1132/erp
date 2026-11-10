@@ -527,3 +527,57 @@ async def test_c16_multi_po_different_supplier_keys_align(db):
         for s in group['suppliers']
     }
     assert by_sup == {'供应商甲': {'共用布': 2.0}, '供应商乙': {'共用布': 4.0}}
+
+
+async def test_c17_blind_box_role_rows_use_role_allocation(db):
+    """C17：盲盒产品同一辅料在每个角色各一行 BOM（无采购明细）时，
+    **工厂侧 fabbrics 与供应商侧都必须按角色分配数量折算**，不得整单量重复累加。
+
+    生产缺陷（PO-2611-005）：香珠 6 个角色 × 单件用量 1、订单 30000，
+    BOM 回退分支逐行乘整单量 → 180000（前端加成后显示 185400）。
+    正确值 = Σ(角色数量 5000 × 用量 1) = 30000。
+    """
+    session, _ = db
+    roles = {15: '香蕉', 16: '梨子', 17: '苹果', 18: '草莓', 19: '蓝莓', 20: '山竹'}
+    session.add(Product(
+        id=201, name='盲盒产品', is_blind_box=True, has_hidden_role=False,
+    ))
+    for rid, name in roles.items():
+        session.add(ProductRole(id=rid, product_id=201, role_name=name))
+        session.add(ProductAccessory(
+            id=rid, product_id=201, role_id=rid, accessory_name='香珠',
+            specification='5g', unit='个', quantity=1.0, supplier_name='包好包',
+        ))
+    session.add(Order(
+        id=9101, order_no='SO-9101', customer='客户甲',
+        product_id=201, quantity=30000, status='待备货',
+    ))
+    session.add(OrderItem(
+        id=1, order_id=9101, product_id=201, product_name='盲盒产品', quantity=30000,
+    ))
+    session.add(PurchaseOrder(
+        id=8101, order_no='PO-8101', customer_name='客户甲',
+        product_name='盲盒产品', product_quantity=30000,
+        supplier_name='包好包', source_order_ids='[9101]',
+    ))
+    session.add(PurchaseOrderSku(
+        id=1, po_id=8101, product_name='盲盒产品', product_barcode='bM',
+        order_qty=30000, source_order_id=9101, source_record_type='order',
+    ))
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8101]))['groups'][0]
+    supplier = await get_supplier_order_summary(session, [8101])
+
+    # 落库侧（fabrics）：角色分配后合计 30000（修复前 180000）
+    assert _fabrics(group)['香珠'] == 30000.0
+    # 按 SKU 推算侧：6 个角色各 5000（同一物料名在 6 个角色段各一行，合计 30000）
+    per_sku_sum = round(sum(
+        float(m['quantity'])
+        for s in group['skus'] for m in (s.get('materials') or [])
+        if m['material_name'] == '香珠'
+    ), 2)
+    assert per_sku_sum == 30000.0
+    # 供应商侧同口径
+    row = next(m for m in supplier['materials'] if m['material_name'] == '香珠')
+    assert row['total_quantity'] == 30000.0

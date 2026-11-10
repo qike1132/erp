@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.purchase._common import _parse_source_order_ids
+from fastapi_app.services.purchase._factory import _factory_sku_allocation
 from fastapi_app.services.purchase._list import _is_filling_category
 from fastapi_app.shared_models import PurchaseOrderItem
 from fastapi_app.shared_models.order import Order
@@ -96,13 +97,18 @@ def _append_order_quantity(row: dict, order_no: str, quantity: float) -> None:
 
 
 def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_order_map,
-                            po_pids_map=None) -> dict[tuple, dict]:
+                            po_pids_map=None, blind_box_ctx=None) -> dict[tuple, dict]:
     """构建 (供应商, 物料, 规格, 单位) → 汇总物料行。
 
     ``po_pids_map``（``{po_id: [product_id, ...]}``）给出该采购单覆盖的**全部 SKU**，
     物料集合取各 SKU BOM 的并集；未传时退化为「首个 SKU」的旧口径。
     跨 SKU 去重规则与 ``_factory._build_factory_group_map`` 完全一致：物料数量取
     跨 SKU 合并后的采购单明细，故同一物料键只能累加一次，否则数量翻倍。
+
+    ``blind_box_ctx``（``{product_id: 盲盒上下文}``）供 BOM 回退分支按角色分配数量：
+    盲盒产品的同一物料在每个角色各有一行 BOM，若每行都乘整单量会重复 N 倍
+    （生产缺陷 PO-2611-005：香珠 6 行 × 30000 → 180000）。非盲盒产品或未传上下文
+    时保持存量口径（每行乘完整订单数量），零行为变化。
     """
     mat_map: dict[tuple, dict] = {}
     for po in orders:
@@ -114,11 +120,16 @@ def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_or
             pids = list(po_pids_map.get(po.id) or ([pid] if pid else []))
 
         seen_materials: set[tuple] = set()
+        # 本单已计入明细的物料键：同 SKU 内多角色共用同一份采购明细，只能计一次
+        stored_seen: set[tuple] = set()
         has_bom = False
         for idx, sku_pid in enumerate(pids):
             bom_list = bom_data.get(sku_pid, [])
             if bom_list:
                 has_bom = True
+            # 盲盒 SKU：角色行按分配数量折算，避免整单量重复累加（见函数头说明）
+            ctx_entry = (blind_box_ctx or {}).get(sku_pid)
+            allocation = _factory_sku_allocation(ctx_entry, order_qty) if ctx_entry else None
             for bom in bom_list:
                 if _is_filling_category(bom.get('category')):
                     continue
@@ -131,7 +142,17 @@ def _build_supplier_mat_map(orders, bom_data, items_map, items_by_order, cust_or
                 seen_materials.add(key)
                 ikey = (po.id, bom['material_name'], bom['specification'], bom['unit'])
                 matching_items = items_map.get(ikey, [])
-                total_qty = sum(float(it.quantity or 0) for it in matching_items) if matching_items else bom['quantity'] * order_qty
+                if matching_items:
+                    if key in stored_seen:
+                        # 同一 SKU 内多角色重复 BOM 行共享同一份明细：只计一次
+                        continue
+                    stored_seen.add(key)
+                    total_qty = sum(float(it.quantity or 0) for it in matching_items)
+                elif allocation is not None:
+                    row_qty = allocation.get(bom.get('role_id'), order_qty)
+                    total_qty = float(bom.get('quantity') or 0) * float(row_qty or 0)
+                else:
+                    total_qty = float(bom.get('quantity') or 0) * order_qty
                 if key in mat_map:
                     mat_map[key]['total_quantity'] += total_qty
                     _append_order_quantity(mat_map[key], po.order_no, total_qty)

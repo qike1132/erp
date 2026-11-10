@@ -200,14 +200,29 @@ async def get_supplier_order_summary(db: AsyncSession, order_ids: list | None = 
     if not product_ids:
         product_ids = list({pid for pid, _ in cust_order_map.values() if pid})
 
-    bom_data = await _fetch_bom_data(db, product_ids)
+    # 盲盒角色分配上下文（与工厂汇总同源）：BOM 回退分支按角色数量折算，
+    # 否则同一物料在每个角色各一行、每行都乘整单量 → 重复 N 倍。
+    from fastapi_app.services.purchase._factory import _fetch_prod_name_and_ratio
+    prod_name_map, blind_ctx, roles_by_pid, hidden_by_pid = await _fetch_prod_name_and_ratio(
+        db, product_ids,
+    )
+    blind_box_ctx = {
+        pid: {
+            **entry,
+            'roles': roles_by_pid.get(pid, {}),
+            'hidden_role_id': hidden_by_pid.get(pid),
+        }
+        for pid, entry in blind_ctx.items()
+    }
+
+    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
 
     po_ids = [o.id for o in orders]
     items_map, items_by_order, _ = await _fetch_po_items_map(db, po_ids)
 
     mat_map = _build_supplier_mat_map(
         orders, bom_data, items_map, items_by_order, cust_order_map,
-        po_pids_map=po_pids_map,
+        po_pids_map=po_pids_map, blind_box_ctx=blind_box_ctx,
     )
     materials = sorted(mat_map.values(), key=lambda x: (x['supplier_name'], x['material_name']))
     return {'materials': materials, 'order_count': len(orders)}

@@ -138,6 +138,66 @@ class TestSupplierMatMapOrderBreakdown:
         assert row['orders'] == [{'order_no': 'PO-001', 'quantity': 60.0}]
 
 
+def _role_bom(role_id, material='香珠', spec='5g', unit='个', qty=1.0, supplier='包好包'):
+    return {
+        'supplier_name': supplier, 'material_name': material,
+        'specification': spec, 'unit': unit, 'quantity': qty,
+        'category': 'accessory', 'role_id': role_id, 'part_name': '',
+    }
+
+
+def _blind_box_ctx(product_id=21397, role_ids=(15, 16, 17, 18, 19, 20)):
+    return {product_id: {
+        'ratio': None, 'has_hidden': False,
+        'roles': {rid: f'角色{rid}' for rid in role_ids},
+        'hidden_role_id': None,
+    }}
+
+
+class TestSupplierMatMapBlindBoxAllocation:
+    """多角色（盲盒）产品的物料行必须按角色分配数量计算，不得整单量重复累加。
+
+    生产缺陷（PO-2611-005）：同一辅料在每个角色各有一行 BOM（6 行、单件用量 1），
+    供应商汇总把每行都乘整单 30000 → 180000，前端再按 30‰ 损耗加成显示 185400。
+    """
+
+    def test_duplicate_role_rows_use_per_role_allocation(self):
+        orders = [_po(1, 'PO-001', supplier_name='包好包', qty=30000.0)]
+        bom_data = {21397: [
+            _role_bom(rid) for rid in (15, 16, 17, 18, 19, 20)
+        ]}
+
+        row = _build_supplier_mat_map(
+            orders, bom_data, {}, {}, {},
+            po_pids_map={1: [21397]},
+            blind_box_ctx=_blind_box_ctx(),
+        )[('包好包', '香珠', '5g', '个')]
+
+        # 6 个角色各 5000 件 × 单件用量 1 → 合计 30000（而非 6 × 30000）
+        assert row['total_quantity'] == 30000.0
+        assert row['orders'] == [{'order_no': 'PO-001', 'quantity': 30000.0}]
+
+    def test_duplicate_role_rows_with_items_counted_once(self):
+        """有落库明细时，同一 PO + 物料键只能贡献一次（多角色共用同一份明细）。"""
+        orders = [_po(1, 'PO-001', supplier_name='包好包', qty=30000.0)]
+        bom_data = {21397: [
+            _role_bom(rid) for rid in (15, 16, 17, 18, 19, 20)
+        ]}
+        items_map = {
+            (1, '香珠', '5g', '个'): [
+                SimpleNamespace(quantity=Decimal('5000')) for _ in range(6)
+            ],
+        }
+
+        row = _build_supplier_mat_map(
+            orders, bom_data, items_map, {}, {},
+            po_pids_map={1: [21397]},
+            blind_box_ctx=_blind_box_ctx(),
+        )[('包好包', '香珠', '5g', '个')]
+
+        assert row['total_quantity'] == 30000.0
+
+
 class TestExportGroupsOrderBreakdown:
     @pytest.mark.asyncio
     async def test_item_breakdown_merges_same_material_across_orders(self):
