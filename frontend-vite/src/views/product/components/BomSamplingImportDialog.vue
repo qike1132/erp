@@ -24,6 +24,7 @@
               class="sampling-input"
               type="search"
               placeholder="搜索产品名称或打样单号（可留空）"
+              aria-label="搜索产品名称或打样单号"
               autocomplete="off"
               @keydown.enter="emit('search')"
             />

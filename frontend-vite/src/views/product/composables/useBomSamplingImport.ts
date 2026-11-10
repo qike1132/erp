@@ -98,14 +98,18 @@ export function useBomSamplingImport(options: UseBomSamplingImportOptions) {
           page,
           per_page: 100,
         })
+        let added = 0
         for (const project of response.items ?? []) {
           if (!seen.has(project.id)) {
             seen.add(project.id)
             projects.push(project)
+            added += 1
           }
         }
         total = response.total ?? projects.length
         page += 1
+        // 并发写入导致分页漂移时本轮可能全是重复项；没有新增就停止，避免死循环。
+        if (added === 0) break
       } while (projects.length < total)
       if (seq !== searchSeq) return
       samplingProjects.value = projects
