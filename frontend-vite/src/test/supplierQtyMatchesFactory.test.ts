@@ -289,3 +289,43 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(24720)
   })
 })
+
+describe('编辑态边界：BOM 有、采购明细没有的物料', () => {
+  it('无落库坐标的物料不加放（与工厂表 — 口径一致）', async () => {
+    const roles = [15, 16, 17, 18, 19, 20]
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue({
+      success: true, order_count: 1, spare_rate: 30,
+      groups: [{
+        customer_name: '网易', product_name: '缤果系列', product_quantity: 30000,
+        suppliers: [{
+          supplier_name: '包好包',
+          fabrics: [{
+            fabric_name: '香珠', specification: '5g', unit: '个',
+            quantity: 30000, item_ids: [], loss_rate: null,
+          }],
+        }],
+        skus: [{
+          product_name: '香蕉', order_qty: 30000,
+          materials: roles.map(() => ({
+            supplier_name: '包好包', material_name: '香珠', specification: '5g',
+            unit: '个', quantity: 5000, part_name: '',
+          })),
+        }],
+      }],
+    } as never)
+    vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({
+      success: true,
+      materials: [{
+        material_name: '香珠', specification: '5g', unit: '个',
+        total_quantity: 30000, supplier_name: '包好包',
+      }],
+    } as never)
+
+    const m = useSummaryModal()
+    await m.openSummary([1])
+    m.toggleEditMode(true)
+
+    // 无采购明细 → 工厂表率显示「—」、数量不加放；供应商页不得自行 ×1.03
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(30000)
+  })
+})

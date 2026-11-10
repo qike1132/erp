@@ -710,8 +710,9 @@ export function useSummaryModal() {
       // 编辑态例外：输入框承载的是**落库真值**（editRowQty），而同一物料跨 SKU/角色
       // 共用同一采购明细行——若仍逐行累加，同一条明细会被重复算 N 倍。
       // 故编辑态走落库行派生（下面 fabrics 分支），一条明细只算一次。
-      const perSku = editMode.value ? [] : buildPerSkuRows(group, lossRate.value)
-      if (perSku.some((row) => !row.noBom)) {
+      const perSku = buildPerSkuRows(group, lossRate.value)
+      const hasPerSkuRows = perSku.some((row) => !row.noBom)
+      if (!editMode.value && hasPerSkuRows) {
         perSku.forEach((row) => {
           if (row.noBom) return
           const key = summaryMaterialKey(
@@ -730,7 +731,11 @@ export function useSummaryModal() {
         ;(supplier.fabrics || []).forEach((fabric, fi) => {
           const key = summaryMaterialKey(supplier.supplier_name, fabric.fabric_name, fabric.specification, fabric.unit)
           const baseQty = parseFloat(String(fabric.quantity)) || 0
-          const qty = factoryQtyDisplayValue(baseQty, rateForFabric(gi, si, fi), editMode.value)
+          // 按 SKU 模式下无采购明细的 BOM 物料没有落库坐标，工厂表不加放（率显示 —）；
+          // 供应商页必须同口径，否则编辑态会被统一损耗率额外放大。
+          const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
+          const rate = hasPerSkuRows && itemIds.length === 0 ? 0 : rateForFabric(gi, si, fi)
+          const qty = factoryQtyDisplayValue(baseQty, rate, editMode.value)
           // 累加后再四舍五入到 2 位小数：多分组落到同一物料键时消除浮点尾差，
           // 使展示值与工厂表「各行相加」严格逐字一致。
           map.set(key, Math.round(((map.get(key) || 0) + qty) * 100) / 100)
