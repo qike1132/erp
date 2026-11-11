@@ -16,6 +16,11 @@ from fastapi_app.services.purchase.bom_sync import (
     sync_pending_items_for_product,
     sync_purchase_order_items,
 )
+from fastapi_app.services.purchase_order_crud import (
+    save_factory_summary_edits,
+    update_purchase_order,
+)
+from fastapi_app.services.purchase_order_query import get_factory_order_summary
 from fastapi_app.shared_models import (
     Base,
     Order,
@@ -293,3 +298,73 @@ async def test_product_has_bom_matches_revoke_oracle(db):
     await db.execute(delete(ProductAccessory))
     await db.execute(delete(ProductFabric))
     assert await product_has_bom(db, 201) is False  # 删空后必须判 False
+
+
+# ============================================================
+# Task 6：明细写接口 items_version 409 并发保护
+# ============================================================
+
+async def test_factory_save_rejects_stale_items_version(db):
+    await _seed(db)                       # items_version=0
+    with pytest.raises(ItemsVersionConflict):
+        await save_factory_summary_edits(
+            db, [], 'tester', spare_rate=30, order_ids=[8101],
+            items_versions={8101: 99},
+        )
+
+
+async def test_update_order_rejects_stale_items_version(db):
+    await _seed(db)
+    with pytest.raises(ItemsVersionConflict):
+        await update_purchase_order(db, 8101, {'items_version': 99})
+
+
+async def test_factory_summary_exposes_items_versions(db):
+    await _seed(db)
+    summary = await get_factory_order_summary(db, [8101])
+    assert summary['items_versions'] == {8101: 0}
+
+
+async def test_factory_save_accepts_matching_items_version(db):
+    """版本一致时正常落库（对照组：防「恒抛 409」的假修复）。"""
+    await _seed(db)
+    res = await save_factory_summary_edits(
+        db, [], 'tester', spare_rate=30, order_ids=[8101],
+        items_versions={8101: 0},
+    )
+    assert res['spare_updated_count'] == 1
+    po = await db.get(PurchaseOrder, 8101)
+    assert float(po.spare_rate) == 30.0
+
+
+async def test_update_order_accepts_matching_items_version(db):
+    await _seed(db)
+    await update_purchase_order(
+        db, 8101, {'items_version': 0, 'note': '改备注'},
+    )
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.remark == '改备注'
+
+
+async def test_factory_save_checks_orders_reached_via_edits_union(db):
+    """order_ids 为空、采购单只由 edits 命中：并集口径必须仍校验该单版本。"""
+    await _seed(db)
+    with pytest.raises(ItemsVersionConflict):
+        await save_factory_summary_edits(
+            db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+            order_ids=[], items_versions={8101: 99},
+        )
+
+
+async def test_factory_save_stale_version_writes_nothing(db):
+    """校验在任何写入之前：冲突抛出后明细/损耗率均保持原值。"""
+    await _seed(db)
+    with pytest.raises(ItemsVersionConflict):
+        await save_factory_summary_edits(
+            db, [{'item_ids': [1], 'quantity': 12345}], 'tester',
+            spare_rate=30, order_ids=[8101], items_versions={8101: 99},
+        )
+    item = await db.get(PurchaseOrderItem, 1)
+    assert float(item.quantity) == 50.0
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.spare_rate is None

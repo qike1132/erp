@@ -950,6 +950,21 @@ class TestPurchaseCenterEndpoints:
         mock_svc.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_factory_save_conflict_maps_to_409(self, client):
+        """items_version 冲突（AppError）必须冒泡为 409，不得被端点 except RuntimeError 吞成 500。"""
+        from fastapi_app.core.exceptions import ItemsVersionConflict
+
+        with patch(
+            'fastapi_app.api.v1.endpoints.purchase_center.order_routes.svc.save_factory_summary_edits',
+            AsyncMock(side_effect=ItemsVersionConflict()),
+        ):
+            resp = await client.post(
+                '/api/v1/purchase-center/orders/factory-summary/save',
+                json={'edits': [], 'order_ids': [1], 'spare_rate': 1, 'items_versions': {'1': 0}},
+            )
+        assert resp.status_code == 409, f'版本冲突应映射 409，实测 {resp.status_code}: {resp.text}'
+
+    @pytest.mark.asyncio
     async def test_supplier_summary_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/supplier-summary", json={})
         assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"

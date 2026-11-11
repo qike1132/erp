@@ -23,8 +23,9 @@ from sqlalchemy.orm import sessionmaker
 from fastapi_app.services.purchase_order_query import get_factory_order_summary
 from fastapi_app.shared_models import Base, PurchaseOrder, PurchaseOrderItem
 
-# 汇总流水线在两个返回分支都必须携带的字段
-_REQUIRED_KEYS = {'groups', 'order_count', 'spare_rate', 'spare_rate_mixed'}
+# 汇总流水线在两个返回分支都必须携带的字段（items_versions：T6 明细版本快照，
+# 前端保存时原样带回，服务层据此做 409 乐观锁校验）
+_REQUIRED_KEYS = {'groups', 'order_count', 'spare_rate', 'spare_rate_mixed', 'items_versions'}
 
 
 @pytest_asyncio.fixture

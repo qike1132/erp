@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.exceptions import ConflictError
+from fastapi_app.core.exceptions import ConflictError, ItemsVersionConflict
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
 from fastapi_app.services.purchase_order_purge import purge_purchase_order_children
@@ -327,6 +327,12 @@ async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, use
     if not order:
         raise ValueError('采购订单不存在')
 
+    # 乐观锁（BOM 实时同步）：客户端持有的明细版本过期 → 409。
+    # 必须在 _apply_order_field_updates 等任何字段写入之前。
+    expected_version = data.get('items_version')
+    if expected_version is not None and (order.items_version or 0) != expected_version:
+        raise ItemsVersionConflict()
+
     _apply_order_field_updates(order, data)
 
     items_data = data.get('items')
@@ -530,16 +536,76 @@ async def batch_complete_purchase_orders(
     return {'completed': completed, 'errors': errors}
 
 
+async def _ensure_items_versions_match(
+    db: AsyncSession, po_ids: set[int], items_versions: dict[int, int] | None,
+) -> None:
+    """乐观锁前置校验：客户端持有的明细版本与库内不一致即抛 ``ItemsVersionConflict``。
+
+    必须在**任何写入之前**调用（否则冲突时已写了一半）。只校验 ``items_versions``
+    中显式给出的采购单：None / 空 dict（旧客户端）不校验；给出但不在本次涉及集合
+    内的采购单也不会被写入，不参与比对（避免无关单的版本变化造成假 409）。
+    单次 ``WHERE id IN (...)`` 取回版本，避免逐单查询（N+1）。
+    """
+    if not items_versions:
+        return
+    check_ids = [oid for oid in po_ids if oid in items_versions]
+    if not check_ids:
+        return
+    result = await db.execute(
+        select(PurchaseOrder.id, PurchaseOrder.items_version).where(
+            PurchaseOrder.id.in_(check_ids)
+        )
+    )
+    versions = {row.id: row.items_version for row in result.all()}
+    for po_id in check_ids:
+        if po_id in versions and (versions[po_id] or 0) != items_versions[po_id]:
+            raise ItemsVersionConflict()
+
+
+async def _validate_factory_edit_versions(
+    db: AsyncSession, data: list, order_ids: list[int] | None,
+    items_versions: dict[int, int] | None,
+) -> None:
+    """按「order_ids ∪ 将被编辑明细所属采购单」做写前版本校验（见上函数）。
+
+    明细归属需先查库（只读），故批量取一次 item_id → order_id；跳过口径与服务层
+    主循环一致（无 item_ids、或 quantity/loss_rate 均为 None 的条目不会写任何单）。
+    """
+    if not items_versions:
+        return
+    edited_item_ids: set[int] = set()
+    for entry in data:
+        if not entry.get('item_ids'):
+            continue
+        if entry.get('quantity') is None and entry.get('loss_rate') is None:
+            continue
+        edited_item_ids.update(entry['item_ids'])
+    scope_po_ids: set[int] = {oid for oid in (order_ids or []) if oid}
+    if edited_item_ids:
+        rows = await db.execute(
+            select(PurchaseOrderItem.id, PurchaseOrderItem.order_id).where(
+                PurchaseOrderItem.id.in_(edited_item_ids)
+            )
+        )
+        scope_po_ids.update(row.order_id for row in rows.all())
+    await _ensure_items_versions_match(db, scope_po_ids, items_versions)
+
+
 async def save_factory_summary_edits(
     db: AsyncSession, data: list, username: str = 'unknown',
     spare_rate: float | None = None, order_ids: list[int] | None = None,
+    items_versions: dict[int, int] | None = None,
 ) -> dict:
     """应用工厂汇总编辑，并按损耗率覆盖写所涉采购单的备品。
 
     - `data`：编辑项列表，**可为空**（用户仅交互了损耗率、无任何布料改动）。
     - `order_ids`：本次汇总涉及的采购单 ID，用于在无编辑项时定位写入目标。
     - `spare_rate` 非 None 时，对「被编辑明细所属采购单 ∪ order_ids」覆盖写率与备品。
+    - `items_versions`：客户端持有的（采购单 ID → 明细版本）快照；非空时在
+      **任何写入之前**逐单比对，过期即抛 ``ItemsVersionConflict``（409）。
     """
+    await _validate_factory_edit_versions(db, data, order_ids, items_versions)
+
     updated = 0
     involved_po_ids: list[int] = list(order_ids or [])
     touched_items: list[PurchaseOrderItem] = []

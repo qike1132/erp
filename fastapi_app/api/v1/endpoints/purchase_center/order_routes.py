@@ -620,6 +620,7 @@ async def api_save_factory_summary_edits(
             result = await svc.save_factory_summary_edits(
                 db, [e.model_dump() for e in data.edits], _current_user.username,
                 data.spare_rate, data.order_ids,
+                items_versions=data.items_versions,
             )
         # 保存会写损耗率/备品（影响 beile 页数量与门控），写入即失效
         await _invalidate_orders_cache()

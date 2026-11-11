@@ -161,6 +161,9 @@ class PurchaseOrderUpdateRequest(BaseModel):
     supplier_name: str | None = None
     customer_name: str | None = None
     modify_reason: str = ''
+    items_version: int | None = Field(
+        None, description="客户端持有的明细版本号；None=不校验（旧客户端），不一致返回 409",
+    )
     item_prices: list[PurchaseOrderItemPriceUpdate] | None = Field(
         None, description="按明细ID补录单价（只改单价，不动数量/物料，也不删行）"
     )
@@ -216,10 +219,16 @@ class FactorySummarySaveRequest(BaseModel):
       没有任何布料改动」，此时仅靠 `order_ids` + `spare_rate` 也要能落库。
     - `order_ids`：本次汇总涉及的采购单 ID 列表，用于在无编辑项时定位要写入备品的采购单。
     - `spare_rate`：对该次涉及的所有采购单覆盖写的损耗率（千分之几）；`None` 表示不覆盖。
+    - `items_versions`：客户端打开汇总时拿到的各采购单明细版本（po_id → items_version）。
+      非空时服务层逐单比对，过期即 409；缺省（旧客户端）不校验。
     """
     edits: list[FactorySummaryEditItem] = Field(default_factory=list, max_length=500, description="编辑列表（可为空）")
     order_ids: list[int] = Field(default_factory=list, max_length=500, description="本次涉及的采购单ID列表")
     spare_rate: float | None = Field(None, description="损耗率(千分之几)，None=不覆盖已存值")
+    items_versions: dict[int, int] = Field(
+        default_factory=dict,
+        description="客户端持有的各采购单明细版本（po_id → items_version），过期返回 409；空=不校验",
+    )
 
 class SummaryPrintRequest(BaseModel):
     """汇总打印请求"""

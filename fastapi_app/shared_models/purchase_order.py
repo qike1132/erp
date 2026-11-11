@@ -184,6 +184,8 @@ class PurchaseOrder(Base):
             'product_quantity': float(self.product_quantity) if self.product_quantity else None,
             'spare_quantity': float(self.spare_quantity) if self.spare_quantity is not None else None,
             'spare_rate': float(self.spare_rate) if self.spare_rate is not None else None,
+            # 明细版本号：客户端保存明细时带回，服务层比对（过期 409）
+            'items_version': self.items_version,
             'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
             'update_time': fmt_business(self.update_time, '%Y-%m-%d %H:%M:%S') if self.update_time else None,
             'completed_at': self.completed_at.strftime('%Y-%m-%d %H:%M:%S') if self.completed_at else None,

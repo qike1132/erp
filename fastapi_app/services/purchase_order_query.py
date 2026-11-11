@@ -387,6 +387,7 @@ async def get_factory_order_summary(
         return {
             'groups': [], 'order_count': 0,
             'spare_rate': None, 'spare_rate_mixed': False,
+            'items_versions': {},
         }
 
     result = await db.execute(
@@ -475,6 +476,9 @@ async def get_factory_order_summary(
     return {
         'groups': groups, 'order_count': len(orders),
         'spare_rate': spare_rate, 'spare_rate_mixed': spare_rate_mixed,
+        # 明细版本快照（po_id → items_version）：前端保存时原样带回，
+        # 服务层比对后过期即 409（BOM 实时同步会递增该值）。
+        'items_versions': {o.id: o.items_version for o in orders},
     }
 
 
