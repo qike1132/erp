@@ -60,21 +60,25 @@ async def _seed(
     order_item_id: int = 1,
     sku_id: int = 1,
     with_product: bool = True,
+    with_bom: bool = True,
 ) -> int:
     """一个产品、两条同物料不同部位的 BOM 行 + 一条采购单。
 
     用量 0.12 / 0.08 × 订单 100 = 12 / 8，与落库明细一致。
+    ``with_bom=False``：只建采购单与明细、不建 BOM 行（用于「BOM 不可用回退」与
+    「组内旧单无 BOM」场景；同产品第二张单不再重复加 BOM，避免同键 BOM 行翻倍）。
     """
     if with_product:
         db.add(Product(id=101, name='产品A'))
-    db.add(ProductFabric(
-        id=po_id * 10 + 1, product_id=101, fabric_name=MATERIAL, specification=SPEC, unit=UNIT,
-        quantity=0.12, supplier_name='供应商甲', part_name=bom_parts[0],
-    ))
-    db.add(ProductFabric(
-        id=po_id * 10 + 2, product_id=101, fabric_name=MATERIAL, specification=SPEC, unit=UNIT,
-        quantity=0.08, supplier_name='供应商甲', part_name=bom_parts[1],
-    ))
+    if with_bom:
+        db.add(ProductFabric(
+            id=po_id * 10 + 1, product_id=101, fabric_name=MATERIAL, specification=SPEC, unit=UNIT,
+            quantity=0.12, supplier_name='供应商甲', part_name=bom_parts[0],
+        ))
+        db.add(ProductFabric(
+            id=po_id * 10 + 2, product_id=101, fabric_name=MATERIAL, specification=SPEC, unit=UNIT,
+            quantity=0.08, supplier_name='供应商甲', part_name=bom_parts[1],
+        ))
     db.add(Order(id=order_id, order_no=f'SO-{order_id}', customer='客户甲',
                  product_id=101, quantity=100, status='待备货'))
     db.add(OrderItem(id=order_item_id, order_id=order_id, product_id=101,
@@ -127,56 +131,78 @@ async def test_new_order_splits_same_material_by_part(db):
     assert float(by_part_sku['头部']['quantity']) == 8
 
 
-async def test_legacy_order_without_item_part_names_stays_merged(db):
-    """旧单：采购明细无 part_name，即使 BOM 有部位也按物料合并，且只计一次落库量。"""
-    session = db
-    po_id = await _seed(session, item_parts=(None, None))
+async def test_legacy_order_without_item_part_names_splits_by_bom(db):
+    """旧单（明细无 part_name）也按 BOM 拆行：BOM 是唯一真源，不再静默合并。
 
-    group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
-    fabrics = _fabrics(group)
-
-    assert len(fabrics) == 1
-    assert not fabrics[0].get('part_name')
-    assert float(fabrics[0]['quantity']) == 20, '落库两行合计只能计一次，不得翻倍'
-
-    sku_materials = group['skus'][0]['materials']
-    assert len(sku_materials) == 1
-    assert not sku_materials[0].get('part_name')
-    assert float(sku_materials[0]['quantity']) == 20
-
-
-async def test_legacy_merged_order_still_shows_bom_part_display(db):
-    """2026-11-05 生产缺陷：明细无 part_name ⇒ 合并模式，但「产品部位」不得整列空白。
-
-    口径（不丢信息 + 不撒谎）：
-    - `part_name` 仍是**聚合键**，合并模式下必须为空（否则与无部位明细匹配不上）；
-    - 展示走独立的 `part_display`：BOM 能确定的部位全部列出（多部位用 `/` 连接）；
-    - 两侧（fabrics / skus[].materials）的 `part_display` 必须一致，
-      且 `part_name` 仍同时为空 ⇒ 前端物料键一一对应，不会退化成只读行。
+    2026-11-11 用户裁决：拆行判定改为 **BOM 感知**（旧口径「任一明细缺部位就整组
+    合并」会把同物料跨部位并成一行）。历史未同步单的明细匹配不到带部位的 BOM 行，
+    行按 BOM 用量给出推算值、item_ids 为空 —— 由前端「推算 vs 实际」差异横幅暴露，
+    交 backfill 校正；绝不静默合并冒充一致。
     """
     session = db
     po_id = await _seed(session, item_parts=(None, None))
 
     group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
     fabrics = _fabrics(group)
-    assert len(fabrics) == 1
-    assert not fabrics[0].get('part_name'), '合并模式下聚合键里的部位必须仍为空'
-    assert fabrics[0]['part_display'] == '身体/头部', 'BOM 的两个部位都必须展示，不能只显示一个'
+
+    by_part = {f.get('part_name'): f for f in fabrics}
+    assert set(by_part) == {'身体', '头部'}, 'BOM 有部位就必须拆行'
+    assert float(by_part['身体']['quantity']) == 12
+    assert float(by_part['头部']['quantity']) == 8
+    # 明细无部位 → 匹配不到带部位的 BOM 行 → 纯推算行（只读），差异交给前端横幅
+    assert by_part['身体']['item_ids'] == []
+    assert by_part['头部']['item_ids'] == []
 
     sku_materials = group['skus'][0]['materials']
-    assert len(sku_materials) == 1
-    assert not sku_materials[0].get('part_name')
-    assert sku_materials[0]['part_display'] == '身体/头部'
+    by_part_sku = {m.get('part_name'): m for m in sku_materials}
+    assert set(by_part_sku) == {'身体', '头部'}
+    assert float(by_part_sku['身体']['quantity']) == 12
+    assert float(by_part_sku['头部']['quantity']) == 8
+
+
+async def test_bom_unavailable_fallback_still_shows_item_parts(db):
+    """BOM 完全不可用（回退用采购明细）时，「产品部位」列仍须显示明细自带的部位。
+
+    2026-11-05 生产缺陷（整列空白）的同类保证在新的路径下继续成立：BOM 有部位时
+    走拆行（每行 ``part_display`` = 自己的部位）；BOM 不可用时回退
+    ``_accumulate_factory_po_items``，必须把明细的 part_name 带进聚合键与展示文本。
+    """
+    session = db
+    session.add_all([
+        Product(id=101, name='产品A'),
+        Order(id=9001, order_no='SO-9001', customer='客户甲',
+              product_id=101, quantity=100, status='待备货'),
+        OrderItem(id=1, order_id=9001, product_id=101, product_name='产品A', quantity=100),
+        PurchaseOrder(id=8001, order_no='PO-8001', customer_name='客户甲',
+                      product_name='产品A', product_quantity=100,
+                      supplier_name='供应商甲', source_order_ids='[9001]'),
+        PurchaseOrderItem(id=1, order_id=8001, material_name=MATERIAL, specification=SPEC,
+                          unit=UNIT, quantity=12, supplier_name='供应商甲', part_name='身体'),
+        PurchaseOrderItem(id=2, order_id=8001, material_name=MATERIAL, specification=SPEC,
+                          unit=UNIT, quantity=8, supplier_name='供应商甲', part_name='头部'),
+        PurchaseOrderSku(id=1, po_id=8001, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8001]))['groups'][0]
+    by_part = {f.get('part_name'): f for f in _fabrics(group)}
+
+    assert set(by_part) == {'身体', '头部'}
+    assert float(by_part['身体']['quantity']) == 12
+    assert float(by_part['头部']['quantity']) == 8
+    assert by_part['身体']['part_display'] == '身体'
+    assert by_part['头部']['part_display'] == '头部'
+    assert list(by_part['身体']['item_ids']) == [1]
+    assert list(by_part['头部']['item_ids']) == [2]
 
 
 async def test_cross_sku_shared_material_lists_every_sku_part(db):
-    """QA Low-1：2 个 SKU 共用同一物料、各用在**不同部位** + 明细无 part_name（合并模式）。
+    """2 个 SKU 共用同一物料、各用在**不同部位**：每个 SKU 的部位都各自成行。
 
-    采购明细里这个物料只有一份，跨 SKU 去重（`seen_materials`）必须继续只计一次；
-    但第 2 个 SKU 的 BOM 行带来的「部位」是新信息，必须登记到落库合并行上 ——
-    否则「产品部位」只显示第一个 SKU 的部位，冒充了整行。
-
-    `skus[].materials` 是逐 SKU 口径，各自只能含自己 SKU 的部位（不得被跨 SKU 合并污染）。
+    BOM 感知拆行（2026-11-11）后，落库明细由同步保证与 BOM 同形（身体/头部各一行）；
+    工厂页据此拆成两行、各挂自己的明细 —— 两个 SKU 的部位都必须出现，谁也不能被
+    合并行冒充。`skus[].materials` 是逐 SKU 口径：各 SKU 只含自己的部位。
     """
     session = db
     session.add_all([
@@ -199,10 +225,14 @@ async def test_cross_sku_shared_material_lists_every_sku_part(db):
             id=8001, order_no='PO-8001', customer_name='客户甲', product_name='产品A、产品B',
             product_quantity=200, supplier_name='供应商甲', source_order_ids='[9001]',
         ),
-        # 明细只有一行、且没有 part_name → 整组走合并模式（缺陷触发条件）
+        # 同步后的明细：同一物料两行，各自带部位（0.3 × 各 100 件 = 30）
         PurchaseOrderItem(
             id=1, order_id=8001, material_name=MATERIAL, specification=SPEC, unit=UNIT,
-            quantity=60, supplier_name='供应商甲', part_name=None,
+            quantity=30, supplier_name='供应商甲', part_name='身体',
+        ),
+        PurchaseOrderItem(
+            id=2, order_id=8001, material_name=MATERIAL, specification=SPEC, unit=UNIT,
+            quantity=30, supplier_name='供应商甲', part_name='头部',
         ),
         PurchaseOrderSku(
             id=1, po_id=8001, product_name='产品A', product_barcode='bA',
@@ -218,17 +248,22 @@ async def test_cross_sku_shared_material_lists_every_sku_part(db):
     group = (await get_factory_order_summary(session, [8001]))['groups'][0]
 
     fabrics = _fabrics(group)
-    assert len(fabrics) == 1, '跨 SKU 共用同一物料 → 落库侧仍只有一行'
-    assert fabrics[0]['part_display'] == '身体/头部', '两个 SKU 的部位都必须出现在这一行'
-    assert not fabrics[0].get('part_name'), '合并模式的聚合键部位仍必须为空'
-    assert float(fabrics[0]['quantity']) == 60, '跨 SKU 去重不得改变数量（仍只计这一份明细）'
-    assert len(fabrics[0]['item_ids']) == 1, '同一份明细只能挂一次，不得因补登记部位而重复'
+    by_part = {f.get('part_name'): f for f in fabrics}
+    assert set(by_part) == {'身体', '头部'}, '两个 SKU 的部位都必须成行'
+    assert float(by_part['身体']['quantity']) == 30
+    assert float(by_part['头部']['quantity']) == 30
+    assert list(by_part['身体']['item_ids']) == [1]
+    assert list(by_part['头部']['item_ids']) == [2]
+    assert set(by_part['身体']['item_ids']).isdisjoint(by_part['头部']['item_ids']), \
+        '同一份明细只能挂一次，不得因跨 SKU 共享而重复'
 
     materials_by_sku = {s['product_name']: s['materials'] for s in group['skus']}
-    assert [m['part_display'] for m in materials_by_sku['产品A']] == ['身体']
-    assert [m['part_display'] for m in materials_by_sku['产品B']] == ['头部']
-    assert float(materials_by_sku['产品A'][0]['quantity']) == 30.0
-    assert float(materials_by_sku['产品B'][0]['quantity']) == 30.0
+    assert [(m['part_display'], float(m['quantity'])) for m in materials_by_sku['产品A']] == [
+        ('身体', 30.0),
+    ]
+    assert [(m['part_display'], float(m['quantity'])) for m in materials_by_sku['产品B']] == [
+        ('头部', 30.0),
+    ]
 
 
 def test_finalize_sku_materials_is_idempotent():
@@ -287,19 +322,34 @@ def test_finalize_sku_materials_keeps_accumulator_state():
     assert bucket_row['_part_unknown'] is False
 
 
-async def test_missing_bom_part_is_marked_unknown_not_silently_dropped(db):
-    """BOM 自己也缺部位时，展示必须带固定标记「未标注」，不许只列已知部位冒充全量。"""
+async def test_mixed_part_bom_splits_and_keeps_partless_row(db):
+    """BOM 自身混有部位/无部位行时仍按部位拆行：无部位行单独成行。
+
+    旧口径在合并行里用「身体/未标注」提示混合；BOM 感知拆行后每一行只覆盖一个
+    部位键（``part_key=''`` 表示无部位行），行内不会再混入「已知 + 未标注」，
+    故该标记不再出现 —— 无部位行以空 ``part_display`` 单独展示。
+    """
     session = db
     po_id = await _seed(session, item_parts=(None, None), bom_parts=('身体', None))
 
     group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
     fabrics = _fabrics(group)
 
-    assert len(fabrics) == 1
-    assert fabrics[0]['part_display'] == '身体/未标注'
+    by_part = {f.get('part_name') or '': f for f in fabrics}
+    assert set(by_part) == {'身体', ''}, '无部位 BOM 行必须单独成行，不得并进带部位行'
+    assert float(by_part['身体']['quantity']) == 12
+    assert by_part['身体']['part_display'] == '身体'
+    # 无部位 BOM 行精确匹配两条无部位旧明细（12+8=20）；带部位行匹配不到 → 按 BOM 推算 12。
+    # 推算 32 ≠ 落库 20，会以差异横幅暴露 —— 这正是「不静默合并」的目的（backfill 校正）。
+    assert float(by_part['']['quantity']) == 20
+    assert list(by_part['']['item_ids']) == [80011, 80012]
+    assert by_part['']['part_display'] == ''
 
     sku_materials = group['skus'][0]['materials']
-    assert sku_materials[0]['part_display'] == '身体/未标注'
+    by_part_sku = {m.get('part_name') or '': m for m in sku_materials}
+    assert set(by_part_sku) == {'身体', ''}
+    assert float(by_part_sku['身体']['quantity']) == 12
+    assert float(by_part_sku['']['quantity']) == 8, '按 SKU 推算只看 BOM 用量（无部位行 0.08×100）'
 
 
 async def test_no_part_anywhere_stays_blank_instead_of_noise(db):
@@ -331,21 +381,29 @@ async def test_split_mode_part_display_equals_part_name(db):
 
 
 
-async def test_mixed_group_falls_back_to_merged(db):
-    """混合组：组内任一旧单即整组按物料合并，避免部分拆分/重复计量。"""
+async def test_mixed_group_splits_when_any_po_bom_has_parts(db):
+    """混合组：组内任一 PO 的 BOM 有部位 → 整组拆行（组级取 OR）。
+
+    旧口径「任一旧单无部位明细就整组合并」会把另一张新单的部位拆行一起压掉。
+    新口径：组键 (客户, 产品名) 共用同一套聚合键，拆行判定按组 OR —— 新单的
+    部位照常拆行；旧单（明细无部位）按 BOM 推算，差异由前端横幅暴露。
+    """
     session = db
     await _seed(session, po_id=8001)
     await _seed(
         session, po_id=8002, item_parts=(None, None), quantities=(5, 5),
-        order_id=9002, order_item_id=2, sku_id=2, with_product=False,
+        order_id=9002, order_item_id=2, sku_id=2, with_product=False, with_bom=False,
     )
 
     group = (await get_factory_order_summary(session, [8001, 8002]))['groups'][0]
-    fabrics = _fabrics(group)
+    by_part = {f.get('part_name'): f for f in _fabrics(group)}
 
-    assert len(fabrics) == 1
-    assert not fabrics[0].get('part_name')
-    assert float(fabrics[0]['quantity']) == 30, '8001 的 12+8 与 8002 的 5+5 各计一次'
+    assert set(by_part) == {'身体', '头部'}, '组内任一单 BOM 有部位 → 整组拆行'
+    # 8001 明细精确命中 12 / 8；8002 无部位明细匹配不到 → 按同一份 BOM 推算 12 / 8
+    assert float(by_part['身体']['quantity']) == 24
+    assert float(by_part['头部']['quantity']) == 16
+    assert list(by_part['身体']['item_ids']) == [80011]
+    assert list(by_part['头部']['item_ids']) == [80012]
 
 
 def test_material_row_carries_part_name():
@@ -458,17 +516,25 @@ def test_backend_factory_print_all_rows_width_equals_header():
     assert set(widths) == {header_width}, f'列数不齐：{widths} != {header_width}'
 
 
-async def test_po_with_mixed_part_and_null_items_merges(db):
-    """一张 PO 内混有带部位与无部位明细 → 整组按物料合并，空部位明细不得被丢弃。"""
+async def test_po_with_mixed_part_and_null_items_splits(db):
+    """一张 PO 内混有带部位与无部位明细 → 按 BOM 拆行，无部位明细单独成行。
+
+    这是 2026-11-11 用户裁决 #5 的核心场景（绿色超柔 身体/脚底 + 木棒无部位）：
+    旧口径「任一明细缺部位整组合并」会让身体/脚底并成一行；新口径下无部位明细
+    用 ``part_key=''`` 精确命中无部位 BOM 行，不阻塞拆行、也不丢数量。
+    """
     session = db
     po_id = await _seed(session, item_parts=('身体', None), bom_parts=('身体', None))
 
     group = (await get_factory_order_summary(session, [po_id]))['groups'][0]
     fabrics = _fabrics(group)
 
-    assert len(fabrics) == 1
-    assert not fabrics[0].get('part_name')
-    assert float(fabrics[0]['quantity']) == 20, '12 + 8 必须都计入，不得丢空部位明细'
+    by_part = {f.get('part_name') or '': f for f in fabrics}
+    assert set(by_part) == {'身体', ''}
+    assert float(by_part['身体']['quantity']) == 12
+    assert float(by_part['']['quantity']) == 8
+    assert list(by_part['身体']['item_ids']) == [80011]
+    assert list(by_part['']['item_ids']) == [80012]
 
 
 def test_backend_factory_print_mixed_parts_merges():

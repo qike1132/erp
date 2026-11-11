@@ -660,27 +660,36 @@ def _finalize_factory_sku_materials(group_map: dict) -> None:
         group['_sku_materials'] = finalized
 
 
-def _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map) -> dict[tuple, bool]:
-    """组内所有采购明细都带 part_name 才按部位拆；混入旧单/手工无部位行则整组合并。
+def _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map,
+                          bom_data, po_pids_map) -> dict[tuple, bool]:
+    """组级拆行判定：**BOM 感知**——该组任一 PO 的相关 BOM 行存在非空部位即拆行。
 
-    - 一张 PO 内只要有一条明细 part_name 为空（手工加行、旧接口写入 NULL），该 PO
-      即按物料合并——拆行模式下空部位明细无法与带部位的 BOM 行精确匹配，会少计且不可编辑。
-    - 无明细的 PO 不参与判定，避免它把同组新单的拆行也压掉。
+    旧口径按「采购明细是否全带 part_name」判定：一条无部位明细（辅料 / 手工行 /
+    旧快照）就把整组压成合并模式，同物料跨部位（身体/脚底）被并成一行
+    （2026-11-11 生产事故 PO-2611-007 的直接原因）。
+
+    新口径只看 BOM（唯一真源，同步保证明细与 BOM 同形）：
+    - BOM 行有部位 → 拆行模式下用 ``items_map_by_part`` 精确匹配（含部位键）；
+    - BOM 行无部位 → ``part_key=''``，与同步后 ``part_name=NULL`` 的明细精确命中，
+      **不阻塞**整组拆行。
+    - 组级取各 PO 的 OR：组键是 (客户, 产品名)，组内各单共用同一套聚合键，
+      不能一半拆一半并。
+    - 填充物在汇总中被过滤，不参与判定（其部位不影响展示行）。
+
+    ``items_by_order`` 保留在签名中（既有调用形态不变；判定已不再依赖明细）。
+    无 BOM 的 PO 判为非感知（回退走 ``_accumulate_factory_po_items``，与拆行无关）。
     """
-    parts_aware_by_po: dict[int, bool] = {}
-    for po in orders:
-        items = items_by_order.get(po.id) or []
-        if items:
-            parts_aware_by_po[po.id] = all(_norm_part_name(it.part_name) for it in items)
-
     split_by_group: dict[tuple, bool] = {}
     for po in orders:
-        aware = parts_aware_by_po.get(po.id)
-        if aware is None:
-            continue
-        cust, prod, _order_qty, _pid = _resolve_factory_po_info(po, cust_order_map, prod_name_map)
+        cust, prod, _order_qty, pid = _resolve_factory_po_info(po, cust_order_map, prod_name_map)
         key = (cust, prod)
-        split_by_group[key] = split_by_group.get(key, True) and aware
+        pids = _resolve_po_pids(po_pids_map, po, pid)
+        aware = any(
+            _norm_part_name(bom.get('part_name'))
+            for p_id in pids for bom in bom_data.get(p_id, [])
+            if not _is_filling_category(bom.get('category'))
+        )
+        split_by_group[key] = split_by_group.get(key, False) or aware
     return split_by_group
 
 
@@ -772,8 +781,11 @@ def _build_factory_group_map(orders, bom_data, items_map, items_by_order, cust_o
     重复出现时必须只累加一次，否则数量翻倍。第 1 个 SKU 保持原累加路径（含同 SKU 内
     多角色重复行的既有行为），从第 2 个 SKU 起跳过已出现过的物料键。
     """
-    # 分组级拆行判定：组内所有采购单明细都带 part_name 才按部位拆；混入旧单则整组合并。
-    split_by_group = _split_parts_by_group(orders, items_by_order, cust_order_map, prod_name_map)
+    # 分组级拆行判定（BOM 感知）：组内任一 PO 的相关 BOM 行有非空部位即拆行；
+    # 无部位明细（辅料/手工行）不再阻塞整组（见 _split_parts_by_group）。
+    split_by_group = _split_parts_by_group(
+        orders, items_by_order, cust_order_map, prod_name_map, bom_data, po_pids_map,
+    )
 
     group_map: dict[tuple, dict] = {}
     for po in orders:

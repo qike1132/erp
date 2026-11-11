@@ -638,3 +638,68 @@ async def test_c18_supplier_totals_equal_factory_per_sku_sums(db):
     assert supplier_map == factory_sums
     assert supplier_map[('供应商甲', '共享布', 'S1', '米')] == 600.0
     assert supplier_map[('包好包', '香珠', '5g', '个')] == 6000.0
+
+
+# ===== 部位拆行：BOM 感知（2026-11-11 BOM 实时同步）=====
+
+async def test_c19_split_parts_when_bom_has_parts_ignoring_partless_accessory(db):
+    """C19：拆行判定改为 **BOM 感知** —— BOM 有非空部位就拆，无部位辅料不阻塞整组。
+
+    同物料 BOM 跨「身体 / 脚底」两行 + 一条无部位辅料（木棒）。旧口径要求该 PO
+    **全部**明细都带 part_name，辅料缺部位就把整组退化为合并模式 → 绿色超柔合成
+    一行「身体/脚底」，工厂无法按部位下单（生产事故 PO-2611-007 的直接原因）。
+
+    新口径：该 PO 相关 BOM 行存在非空部位即拆行；无部位 BOM 行（辅料）用
+    ``part_key=''`` 精确匹配同步后的明细（``part_name NULL`` 归一为 ``''``）。
+    """
+    session, _ = db
+    session.add_all([
+        Product(id=301, name='绿色产品'),
+        # BOM：同一物料两个部位 + 一条无部位辅料（明细按同步后的形态与 BOM 同形）
+        ProductFabric(id=11, product_id=301, fabric_name='绿色超柔', specification='GF-1',
+                      unit='米', quantity=1.0, supplier_name='供应商甲', part_name='身体'),
+        ProductFabric(id=12, product_id=301, fabric_name='绿色超柔', specification='GF-1',
+                      unit='米', quantity=1.0, supplier_name='供应商甲', part_name='脚底'),
+        ProductAccessory(id=13, product_id=301, accessory_name='木棒', specification='5cm',
+                         unit='个', quantity=1.0, supplier_name='供应商乙', part_name=None),
+        Order(id=9301, order_no='SO-9301', customer='客户甲',
+              product_id=301, quantity=10000, status='待备货'),
+        OrderItem(id=1, order_id=9301, product_id=301, product_name='绿色产品', quantity=10000),
+        PurchaseOrder(id=8301, order_no='PO-8301', customer_name='客户甲',
+                      product_name='绿色产品', product_quantity=10000,
+                      supplier_name='供应商甲', source_order_ids='[9301]'),
+        PurchaseOrderSku(id=1, po_id=8301, product_name='绿色产品', product_barcode='bG',
+                         order_qty=10000, source_order_id=9301, source_record_type='order'),
+        # 同步后的明细：绿色超柔两行各 10000（part 身体/脚底）+ 木棒 10000（无部位）
+        PurchaseOrderItem(id=101, order_id=8301, material_name='绿色超柔', specification='GF-1',
+                          unit='米', quantity=10000, supplier_name='供应商甲', part_name='身体'),
+        PurchaseOrderItem(id=102, order_id=8301, material_name='绿色超柔', specification='GF-1',
+                          unit='米', quantity=10000, supplier_name='供应商甲', part_name='脚底'),
+        PurchaseOrderItem(id=103, order_id=8301, material_name='木棒', specification='5cm',
+                          unit='个', quantity=10000, supplier_name='供应商乙', part_name=None),
+    ])
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8301]))['groups'][0]
+
+    # ① 按 SKU 推算侧：绿色超柔拆成身体/脚底两行，各 10000（1.0 × 10000）
+    mats = [m for s in group['skus'] for m in s['materials'] if m['material_name'] == '绿色超柔']
+    assert sorted(m['part_display'] for m in mats) == ['脚底', '身体']
+    assert all(float(m['quantity']) == 10000.0 for m in mats)
+    # ② 无部位辅料单独一行：不被拆行吞掉，也不阻塞整组拆行
+    sticks = [m for s in group['skus'] for m in s['materials'] if m['material_name'] == '木棒']
+    assert len(sticks) == 1
+    assert sticks[0]['part_display'] == ''
+    assert float(sticks[0]['quantity']) == 10000.0
+    # ③ 落库侧（fabrics）与 BOM/明细同形：三行各 10000、各挂自己的明细（不得翻倍/串行）
+    by_key = {
+        (f['fabric_name'], f.get('part_name') or ''): f
+        for sup in group['suppliers'] for f in sup['fabrics']
+    }
+    assert set(by_key) == {('绿色超柔', '身体'), ('绿色超柔', '脚底'), ('木棒', '')}
+    assert float(by_key[('绿色超柔', '身体')]['quantity']) == 10000.0
+    assert float(by_key[('绿色超柔', '脚底')]['quantity']) == 10000.0
+    assert float(by_key[('木棒', '')]['quantity']) == 10000.0
+    assert list(by_key[('绿色超柔', '身体')]['item_ids']) == [101]
+    assert list(by_key[('绿色超柔', '脚底')]['item_ids']) == [102]
+    assert list(by_key[('木棒', '')]['item_ids']) == [103]
