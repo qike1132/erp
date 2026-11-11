@@ -656,6 +656,119 @@ async def _validate_factory_edit_versions(
     await _ensure_items_versions_match(db, scope_po_ids, items_versions)
 
 
+def _apply_quantity_edit(
+    items: list[PurchaseOrderItem], new_quantity: float, changed_po_ids: set[int],
+) -> int:
+    """把目标数量落到明细行，返回更新行数；同值行不算变更。"""
+    if len(items) == 1:
+        target_qty = Decimal(str(new_quantity))
+        if items[0].quantity != target_qty:
+            changed_po_ids.add(items[0].order_id)
+        items[0].quantity = target_qty
+        return 1
+    original_total = sum(float(it.quantity or 0) for it in items)
+    if original_total <= 0:
+        per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
+        for it in items:
+            if it.quantity != per_item:
+                changed_po_ids.add(it.order_id)
+            it.quantity = per_item
+        return len(items)
+    ratio = float(new_quantity) / original_total
+    # B1-06（2026-10-24 审计）：逐行 2 位舍入的残差回填最后一行，
+    # 否则 Σ分摊 ≠ 用户输入的目标数量（3 行拆 100 得 99.99），
+    # 行金额按偏移后的数量重算，对账时出现无解释零头。
+    for it in items:
+        target_qty = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
+        if it.quantity != target_qty:
+            changed_po_ids.add(it.order_id)
+        it.quantity = target_qty
+    residual = round_qty(
+        float(new_quantity) - sum(float(it.quantity or 0) for it in items)
+    )
+    if residual:
+        target_qty = Decimal(str(round_qty(float(items[-1].quantity or 0) + residual)))
+        if items[-1].quantity != target_qty:
+            changed_po_ids.add(items[-1].order_id)
+        items[-1].quantity = target_qty
+    return len(items)
+
+
+def _apply_loss_rate_edit(
+    items: list[PurchaseOrderItem], new_loss_rate: float, changed_po_ids: set[int],
+) -> None:
+    """把损耗率写到明细行（归一化后与库值比对，同值不算变更）。"""
+    normalized_loss = normalize_spare_rate(new_loss_rate)
+    new_loss = Decimal(str(normalized_loss)) if normalized_loss is not None else None
+    for it in items:
+        if it.loss_rate != new_loss:
+            changed_po_ids.add(it.order_id)
+        it.loss_rate = new_loss
+
+
+async def _apply_item_edit_entries(
+    db: AsyncSession, data: list, order_ids: list[int] | None,
+    changed_po_ids: set[int],
+) -> tuple[int, list[int], list[PurchaseOrderItem]]:
+    """逐条应用数量/损耗率编辑。
+
+    返回 ``(updated, involved_po_ids, touched_items)``；``changed_po_ids`` 收集
+    实际发生变更的采购单 id（同值重发不算），供调用方决定是否递增版本。
+    """
+    updated = 0
+    involved_po_ids: list[int] = list(order_ids or [])
+    touched_items: list[PurchaseOrderItem] = []
+    for entry in data:
+        item_ids = entry.get('item_ids', [])
+        new_quantity = entry.get('quantity')
+        new_loss_rate = entry.get('loss_rate')
+        if not item_ids or (new_quantity is None and new_loss_rate is None):
+            continue
+        # 批量预取明细，避免循环内逐条 db.get 产生 N+1 查询
+        fetched_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
+            select(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(item_ids))
+        )
+        fetched_map = {i.id: i for i in fetched_result.scalars().all()}
+        items = [fetched_map[iid] for iid in item_ids if iid in fetched_map]
+        if not items:
+            continue
+        involved_po_ids.extend(it.order_id for it in items)
+        touched_items.extend(items)
+        if new_quantity is not None:
+            updated += _apply_quantity_edit(items, new_quantity, changed_po_ids)
+        if new_loss_rate is not None:
+            _apply_loss_rate_edit(items, new_loss_rate, changed_po_ids)
+            updated += 1
+    return updated, involved_po_ids, touched_items
+
+
+async def _bump_items_versions(
+    db: AsyncSession, changed_po_ids: set[int],
+) -> dict[int, int]:
+    """对实际变更的采购单各 +1 ``items_version``，返回 ``{po_id: 新版本}``。
+
+    与 BOM 同步同序加锁（ORDER BY id + FOR UPDATE），避免与同步/其他保存互锁。
+    键为采购单 id（JSON 序列化后字符串键）；只回传实际递增过的单。
+    """
+    if not changed_po_ids:
+        return {}
+    orders_result = await db.execute(
+        select(PurchaseOrder)
+        .where(PurchaseOrder.id.in_(sorted(changed_po_ids)))
+        .order_by(PurchaseOrder.id)
+        .with_for_update()
+    )
+    version_map = {o.id: o for o in orders_result.scalars().all()}
+    result: dict[int, int] = {}
+    for po_id in sorted(changed_po_ids):
+        order = version_map.get(po_id)
+        if order is None:
+            continue
+        order.items_version = (order.items_version or 0) + 1
+        result[po_id] = order.items_version
+    return result
+
+
 async def save_factory_summary_edits(
     db: AsyncSession, data: list, username: str = 'unknown',
     spare_rate: float | None = None, order_ids: list[int] | None = None,
@@ -674,79 +787,11 @@ async def save_factory_summary_edits(
     """
     await _validate_factory_edit_versions(db, data, order_ids, items_versions)
 
-    updated = 0
-    involved_po_ids: list[int] = list(order_ids or [])
-    touched_items: list[PurchaseOrderItem] = []
     # 实际发生明细变更的采购单（数量/损耗率写前比对，同值重发不算）。
     changed_po_ids: set[int] = set()
-    for entry in data:
-        item_ids = entry.get('item_ids', [])
-        new_quantity = entry.get('quantity')
-        new_loss_rate = entry.get('loss_rate')
-        if not item_ids or (new_quantity is None and new_loss_rate is None):
-            continue
-
-        items = []
-        if item_ids:
-            # 批量预取明细，避免循环内逐条 db.get 产生 N+1 查询
-            fetched_result = await db.execute(  # batch-loop: 有意逐行处理,非 N+1
-                select(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(item_ids))
-            )
-            fetched_map = {i.id: i for i in fetched_result.scalars().all()}
-            items = [fetched_map[iid] for iid in item_ids if iid in fetched_map]
-
-        if not items:
-            continue
-
-        involved_po_ids.extend(it.order_id for it in items)
-        touched_items.extend(items)
-
-        if new_quantity is not None:
-            if len(items) == 1:
-                target_qty = Decimal(str(new_quantity))
-                if items[0].quantity != target_qty:
-                    changed_po_ids.add(items[0].order_id)
-                items[0].quantity = target_qty
-                updated += 1
-            else:
-                original_total = sum(float(it.quantity or 0) for it in items)
-                if original_total > 0:
-                    ratio = float(new_quantity) / original_total
-                    # B1-06（2026-10-24 审计）：逐行 2 位舍入的残差回填最后一行，
-                    # 否则 Σ分摊 ≠ 用户输入的目标数量（3 行拆 100 得 99.99），
-                    # 行金额按偏移后的数量重算，对账时出现无解释零头。
-                    for it in items:
-                        target_qty = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
-                        if it.quantity != target_qty:
-                            changed_po_ids.add(it.order_id)
-                        it.quantity = target_qty
-                    residual = round_qty(
-                        float(new_quantity)
-                        - sum(float(it.quantity or 0) for it in items)
-                    )
-                    if residual:
-                        target_qty = Decimal(str(round_qty(
-                            float(items[-1].quantity or 0) + residual)))
-                        if items[-1].quantity != target_qty:
-                            changed_po_ids.add(items[-1].order_id)
-                        items[-1].quantity = target_qty
-                    updated += len(items)
-                else:
-                    per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
-                    for it in items:
-                        if it.quantity != per_item:
-                            changed_po_ids.add(it.order_id)
-                        it.quantity = per_item
-                        updated += 1
-
-        if new_loss_rate is not None:
-            normalized_loss = normalize_spare_rate(new_loss_rate)
-            new_loss = Decimal(str(normalized_loss)) if normalized_loss is not None else None
-            for it in items:
-                if it.loss_rate != new_loss:
-                    changed_po_ids.add(it.order_id)
-                it.loss_rate = new_loss
-            updated += 1
+    updated, involved_po_ids, touched_items = await _apply_item_edit_entries(
+        db, data, order_ids, changed_po_ids,
+    )
 
     # 编辑应用完毕后，再批量覆盖写所涉采购单的损耗率 / 备品（一次查询，无 N+1）
     spare_written = await _write_spare_rate_to_orders(db, involved_po_ids, spare_rate)
@@ -769,29 +814,11 @@ async def save_factory_summary_edits(
     #   该单全部明细的计价数量与金额都被改了，与「行被改写」同性质）。
     if spare_rate is not None:
         changed_po_ids.update(oid for oid in involved_po_ids if oid)
-    if changed_po_ids:
-        # 与 BOM 同步同序加锁（ORDER BY id + FOR UPDATE），避免与同步/其他保存互锁。
-        orders_result = await db.execute(
-            select(PurchaseOrder)
-            .where(PurchaseOrder.id.in_(sorted(changed_po_ids)))
-            .order_by(PurchaseOrder.id)
-            .with_for_update()
-        )
-        version_map = {o.id: o for o in orders_result.scalars().all()}
-        # 键为采购单 id（JSON 序列化后字符串键）；只回传实际递增过的单。
-        items_versions: dict[int, int] = {}
-        for po_id in sorted(changed_po_ids):
-            order = version_map.get(po_id)
-            if order is None:
-                continue
-            order.items_version = (order.items_version or 0) + 1
-            items_versions[po_id] = order.items_version
-    else:
-        items_versions = {}
+    items_versions_out = await _bump_items_versions(db, changed_po_ids)
 
     await db.flush()
     return {'updated_count': updated, 'spare_updated_count': spare_written,
-            'items_versions': items_versions}
+            'items_versions': items_versions_out}
 
 
 async def _recalc_orders_amount(db: AsyncSession, order_ids: set[int]) -> None:
