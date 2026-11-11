@@ -5,7 +5,7 @@
 """
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -47,9 +47,10 @@ async def db():
 
 
 async def _seed(session, *, status='pending', po_id=8101, po_sku_name='产品A',
-                source_order_ids='[9101]'):
+                source_order_ids='[9101]', product_barcode=None):
     """盲盒产品 201：6 角色；绿色超柔跨身体/脚底各 1.0；木棒辅料每角色 1.0。"""
-    session.add(Product(id=201, name='产品A', is_blind_box=True, has_hidden_role=False))
+    session.add(Product(id=201, name='产品A', is_blind_box=True, has_hidden_role=False,
+                        barcode=product_barcode))
     for rid in range(11, 17):
         session.add(ProductRole(id=rid, product_id=201, role_name=f'角色{rid}'))
         session.add(ProductAccessory(
@@ -136,6 +137,8 @@ async def test_stale_version_raises_conflict(db):
 
 
 async def test_dry_run_reports_counts_without_writing(db):
+    # 行锁语义（dry_run 不 FOR UPDATE）在 sqlite 无法验证（sqlite 忽略 FOR UPDATE），
+    # 这里锁定 dry-run 的可观测契约：零写入、版本不变、无审计。
     await _seed(db)
     res = await sync_purchase_order_items(db, 8101, dry_run=True)
     assert res.changed and res.added == 8 and res.removed == 2
@@ -145,6 +148,25 @@ async def test_dry_run_reports_counts_without_writing(db):
     rows = (await db.execute(select(PurchaseOrderItem).where(
         PurchaseOrderItem.order_id == 8101))).scalars().all()
     assert len(rows) == 2  # 未删未插
+    assert (await db.execute(
+        select(func.count()).select_from(ModificationLog))).scalar() == 0
+
+
+async def test_sync_resolves_sku_by_barcode_when_product_renamed(db):
+    # 产品改名 + 无 source_order_ids：po_sku 快照名对不上，必须靠条码回退解析 pid
+    await _seed(db, po_sku_name='产品A-旧名', source_order_ids=None, product_barcode='bA')
+    res = await sync_purchase_order_items(db, 8101)
+    assert res.changed and res.added == 8
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.items_version == 1
+
+
+async def test_sync_marks_unresolved_when_name_and_barcode_both_miss(db):
+    await _seed(db, po_sku_name='不存在', source_order_ids=None)
+    res = await sync_purchase_order_items(db, 8101)
+    assert res.changed is False and res.skipped_reason == 'unresolved_sku'
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.items_version == 0
 
 
 async def test_sync_pending_items_for_product_batches(db):
@@ -153,6 +175,7 @@ async def test_sync_pending_items_for_product_batches(db):
     assert matched == [8101] and unresolved == []
     out = await sync_pending_items_for_product(db, 201)
     assert out['synced'] == 1
+    assert out['unresolved_po_ids'] == []
     po = await db.get(PurchaseOrder, 8101)
     assert po.items_version == 1
 

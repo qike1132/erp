@@ -27,7 +27,7 @@ from fastapi_app.services.purchase_order_generate import (
     build_expected_items,
 )
 from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
-from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem
+from fastapi_app.shared_models import Product, PurchaseOrder, PurchaseOrderItem
 from fastapi_app.shared_models.purchase_center import ModificationLog
 from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 
@@ -198,12 +198,58 @@ async def _rewrite_items(
     await db.flush()
 
 
+async def _resolve_sku_pids(
+    db: AsyncSession, po_id: int, sku_lines: list[dict], pids: list[int],
+) -> dict[str, int] | None:
+    """sku 行 → {产品名: pid}。名称解析不到时按条码回退；仍失败返回 None。
+
+    条码回退覆盖「产品改名后 po_sku 快照名对不上」：名称是快照、条码更稳定。
+    解析到的 pid 会补进 ``pids``（供后续加载 BOM 上下文）。
+    """
+    name_to_pid: dict[str, int] = {}
+    if pids:
+        pid_name_map = await _load_product_names(db, pids)
+        name_to_pid = {(name or '').strip(): pid for pid, name in pid_name_map.items()}
+
+    unresolved = [line for line in sku_lines if _norm(line.get('product_name')) not in name_to_pid]
+    if not unresolved:
+        return name_to_pid
+
+    barcodes = [b for b in (_norm(line.get('product_barcode')) for line in unresolved) if b]
+    pid_by_barcode: dict[str, int] = {}
+    if barcodes:
+        rows = await db.execute(
+            select(Product.id, Product.barcode).where(Product.barcode.in_(barcodes))
+        )
+        for pid, barcode in rows.all():
+            pid_by_barcode.setdefault(barcode, pid)
+
+    for line in unresolved:
+        name = _norm(line.get('product_name'))
+        barcode = _norm(line.get('product_barcode'))
+        pid = pid_by_barcode.get(barcode)
+        if pid is None:
+            logger.warning(
+                'bom_sync unresolved sku po=%s name=%s barcode=%s',
+                po_id, name, line.get('product_barcode'),
+            )
+            return None
+        name_to_pid[name] = pid
+        if pid not in pids:
+            pids.append(pid)
+    return name_to_pid
+
+
 async def sync_purchase_order_items(
     db: AsyncSession, po_id: int, *,
     expected_version: int | None = None, dry_run: bool = False,
 ) -> SyncResult:
-    """单张采购单按当前 BOM 整体重建明细。事务由调用方控制（本函数只 flush）。"""
-    order = await db.get(PurchaseOrder, po_id, with_for_update=True)
+    """单张采购单按当前 BOM 整体重建明细。事务由调用方控制（本函数只 flush）。
+
+    dry_run 不持行锁：批量预览若也 FOR UPDATE，会把所有匹配采购单锁到外层
+    事务提交，阻塞用户编辑；dry-run 无写入，无锁读即可。
+    """
+    order = await db.get(PurchaseOrder, po_id, with_for_update=not dry_run)
     if order is None:
         return SyncResult(po_id=po_id, changed=False, skipped_reason='not_found')
     if order.status != PurchaseOrderStatus.PENDING:
@@ -214,15 +260,11 @@ async def sync_purchase_order_items(
 
     sku_lines = await _load_sku_lines(db, order)
     po_pids_map = await fetch_po_sku_pids_map(db, [order])
-    pids = po_pids_map.get(po_id) or []
+    pids = list(po_pids_map.get(po_id) or [])
 
-    name_to_pid = {}
-    if pids:
-        pid_name_map = await _load_product_names(db, pids)
-        name_to_pid = {(name or '').strip(): pid for pid, name in pid_name_map.items()}
-    for line in sku_lines:
-        if name_to_pid.get(_norm(line.get('product_name'))) is None:
-            return SyncResult(po_id=po_id, changed=False, skipped_reason='unresolved_sku')
+    name_to_pid = await _resolve_sku_pids(db, po_id, sku_lines, pids)
+    if name_to_pid is None:
+        return SyncResult(po_id=po_id, changed=False, skipped_reason='unresolved_sku')
 
     ctx = await _load_bom_context(db, pids)
     target = build_expected_items(sku_lines, ctx, name_to_pid, order.customer_name or '')
@@ -302,4 +344,5 @@ async def sync_pending_items_for_product(
             logger.exception('BOM 同步失败 po_id=%s（该单已回滚）', po_id)
             results.append(SyncResult(po_id=po_id, changed=False,
                                       skipped_reason='error'))
-    return {'synced': synced, 'skipped': skipped, 'results': results}
+    return {'synced': synced, 'skipped': skipped,
+            'unresolved_po_ids': unresolved, 'results': results}
