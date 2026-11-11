@@ -295,6 +295,23 @@ async def _resolve_sku_pids(
     return name_to_pid
 
 
+def _po_for_update_stmt(po_id: int):
+    """采购单行锁查询（显式 ``SELECT ... FOR UPDATE``，供生产库真正加锁）。
+
+    Why 不用 ``db.get(..., with_for_update=True)``：对象已在 identity map 时
+    ``Session.get`` 直接返回缓存、不发 SQL，锁根本未获取（产品级发现会先整行
+    加载全部 pending 单，随后逐单同步即命中缓存——评审 Minor 3）。
+    ``populate_existing`` 同时强制刷新属性，确保 ``expected_version`` 校验读到
+    加锁后的行。sqlite 方言忽略 FOR UPDATE，锁语义只能靠 PG 方言编译断言。
+    """
+    return (
+        select(PurchaseOrder)
+        .where(PurchaseOrder.id == po_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
 async def sync_purchase_order_items(
     db: AsyncSession, po_id: int, *,
     expected_version: int | None = None, dry_run: bool = False,
@@ -304,7 +321,10 @@ async def sync_purchase_order_items(
     dry_run 不持行锁：批量预览若也 FOR UPDATE，会把所有匹配采购单锁到外层
     事务提交，阻塞用户编辑；dry-run 无写入，无锁读即可。
     """
-    order = await db.get(PurchaseOrder, po_id, with_for_update=not dry_run)
+    if dry_run:
+        order = await db.get(PurchaseOrder, po_id)
+    else:
+        order = (await db.execute(_po_for_update_stmt(po_id))).scalar_one_or_none()
     if order is None:
         return SyncResult(po_id=po_id, changed=False, skipped_reason='not_found')
     if order.status != PurchaseOrderStatus.PENDING:

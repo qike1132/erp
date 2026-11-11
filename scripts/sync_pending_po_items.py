@@ -52,7 +52,11 @@ from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
 
 @dataclass
 class BackfillReport:
-    """一次校正扫描的四类清单（行级明细），供 CLI 打印与测试断言。"""
+    """一次校正扫描的四类清单（行级明细），供 CLI 打印与测试断言。
+
+    ``matched_unchanged``：匹配键相同且数量/用量也相同的行数（仅为计数，
+    不算变更、不逐行打印）。
+    """
 
     dry_run: bool
     scanned: int = 0
@@ -60,6 +64,7 @@ class BackfillReport:
     changed: list[dict] = field(default_factory=list)
     added: list[dict] = field(default_factory=list)
     removed: list[dict] = field(default_factory=list)
+    matched_unchanged: int = 0
     unresolved: list[dict] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
 
@@ -96,14 +101,40 @@ def _base_fields(po_id: int, order_no: str | None, row: dict) -> dict:
     }
 
 
+def _target_entry(po_id: int, order_no: str | None, item: dict) -> dict:
+    return {
+        'po_id': po_id,
+        'order_no': order_no,
+        'material_name': (item.get('material_name') or '').strip(),
+        'specification': (item.get('specification') or '').strip(),
+        'unit': (item.get('unit') or '').strip(),
+        'part_name': item.get('part_name'),
+        'supplier_name': (item.get('supplier_name') or '').strip(),
+        'category': (item.get('category') or '').strip(),
+        'quantity': _num(item.get('quantity')),
+        'unit_usage': _num(item.get('unit_usage')),
+    }
+
+
+def _same_quantity(old: dict, item: dict) -> bool:
+    """按落库列精度比较数量/用量（与 ``bom_sync._canonical`` 同口径）。"""
+    return (round(old['quantity'], 2) == round(_num(item.get('quantity')), 2)
+            and round(old['unit_usage'], 4) == round(_num(item.get('unit_usage')), 4))
+
+
 def _classify_rows(po_id: int, order_no: str | None,
                    old_rows: list[dict], target: list[dict],
-                   ) -> tuple[list[dict], list[dict], list[dict]]:
+                   ) -> tuple[list[dict], list[dict], list[dict], int]:
     """按匹配键 multiset 把旧行/目标行配成 changed / added / removed。
 
-    与 ``bom_sync._diff_counts`` 同源：同键先各取 min(旧数, 目标数) 配对为
-    changed，剩余旧行 = removed、剩余目标行 = added，故三类计数恒等于
-    ``SyncResult.updated/added/removed``（调用方断言）。
+    与 ``bom_sync._diff_counts`` 同源：同键两侧各取 min(旧数, 目标数) 配对；
+    剩余旧行 = removed，剩余目标行（含同键目标行多于旧行时的多余行）= added，
+    故 ``len(changed)+matched_unchanged == updated``、added/removed 逐项相等，
+    调用方据此断言（评审 Important：此前多余目标行被 zip 丢弃，导致该单永远
+    「报告分类不一致」而无法校正）。
+
+    配对行数量/用量完全一致计入 ``matched_unchanged``（不打印为变更，评审
+    Minor 4）——``_diff_counts.updated`` 按键交集计数，包含无变化行。
 
     ``suspected_manual``：删除行的宽松键（去部位）不在任何目标行中 → 该物料
     在当前 BOM 里完全不存在，最可能是手工加行。跨部位调整的旧行宽松键仍命中
@@ -119,13 +150,18 @@ def _classify_rows(po_id: int, order_no: str | None,
         old_by_key[row['key']].append(row)
 
     changed: list[dict] = []
+    added: list[dict] = []
     removed: list[dict] = []
+    matched_unchanged = 0
     for key, olds in old_by_key.items():
         bucket = target_by_key.pop(key, [])
         # 同键多行（盲盒角色均分等）按数量排序配对，避免错位后报出虚假的旧→新差值
         olds_sorted = sorted(olds, key=lambda r: r['quantity'])
         bucket_sorted = sorted(bucket, key=lambda t: _num(t.get('quantity')))
         for old, item in zip(olds_sorted, bucket_sorted, strict=False):
+            if _same_quantity(old, item):
+                matched_unchanged += 1
+                continue
             entry = _base_fields(po_id, order_no, old)
             entry.update({
                 'old_quantity': old['quantity'],
@@ -142,24 +178,13 @@ def _classify_rows(po_id: int, order_no: str | None,
                 'suspected_manual': _fallback_key(key) not in target_fallback_keys,
             })
             removed.append(entry)
+        for item in bucket_sorted[len(olds_sorted):]:
+            added.append(_target_entry(po_id, order_no, item))
 
-    added: list[dict] = []
     for bucket in target_by_key.values():
         for item in bucket:
-            entry = {
-                'po_id': po_id,
-                'order_no': order_no,
-                'material_name': (item.get('material_name') or '').strip(),
-                'specification': (item.get('specification') or '').strip(),
-                'unit': (item.get('unit') or '').strip(),
-                'part_name': item.get('part_name'),
-                'supplier_name': (item.get('supplier_name') or '').strip(),
-                'category': (item.get('category') or '').strip(),
-                'quantity': _num(item.get('quantity')),
-                'unit_usage': _num(item.get('unit_usage')),
-            }
-            added.append(entry)
-    return changed, added, removed
+            added.append(_target_entry(po_id, order_no, item))
+    return changed, added, removed, matched_unchanged
 
 
 async def _load_old_rows(db: AsyncSession, po_id: int) -> list[dict]:
@@ -169,6 +194,60 @@ async def _load_old_rows(db: AsyncSession, po_id: int) -> list[dict]:
         .order_by(PurchaseOrderItem.id)
     )).scalars().all()
     return [_row_snapshot(row) for row in rows]
+
+
+async def _sync_one(db: AsyncSession, po_id: int, order_no: str | None, *,
+                    dry_run: bool, report: BackfillReport) -> None:
+    """单张采购单：同步 → 分类 →（apply 提交）→ 落报告；失败回滚并记 errors。
+
+    apply 下**提交成功后才落报告汇总**（评审 Minor 2）：commit 失败时该单
+    不显示「已变更」，只进 errors。
+    """
+    try:
+        old_rows = await _load_old_rows(db, po_id)
+        res = await sync_purchase_order_items(db, po_id, dry_run=dry_run)
+        if res.changed and not res.target_items and old_rows:
+            # 目标为空 = 该单覆盖的产品 BOM 已整体删空。在线回调对这种情况走
+            # 「撤销采购单」而非「按空 BOM 重建」（Task 5 评审 Important）——
+            # 校正脚本没有撤销职责，必须拒绝把明细整单删光，留给人工处置。
+            raise RuntimeError(
+                '目标明细为空（疑似产品 BOM 已删空，应走撤销链而非同步）'
+                '— 拒绝按空 BOM 整单删光明细')
+        if res.changed:
+            changed, added, removed, matched = _classify_rows(
+                po_id, order_no, old_rows, res.target_items)
+            actual = (len(changed) + matched, len(added), len(removed))
+            expected = (res.updated, res.added, res.removed)
+            if actual != expected:
+                raise RuntimeError(
+                    f'报告分类与服务计数不一致 po_id={po_id}: '
+                    f'{actual} != {expected}')
+        if not dry_run:
+            # 每单独立提交：立即释放 FOR UPDATE 行锁并让单张成败互不牵连
+            await db.commit()
+        if res.changed:
+            report.affected_po_ids.append(po_id)
+            report.changed.extend(changed)
+            report.added.extend(added)
+            report.removed.extend(removed)
+            report.matched_unchanged += matched
+        elif res.skipped_reason:
+            report.unresolved.append({
+                'po_id': po_id, 'order_no': order_no,
+                'reason': res.skipped_reason,
+            })
+    except ItemsVersionConflict:
+        await db.rollback()
+        report.errors.append({
+            'po_id': po_id, 'order_no': order_no,
+            'reason': 'version_conflict',
+        })
+    except Exception as exc:  # 逐单隔离：单张失败回滚该单并继续其余采购单
+        await db.rollback()
+        report.errors.append({
+            'po_id': po_id, 'order_no': order_no,
+            'reason': f'{type(exc).__name__}: {exc}',
+        })
 
 
 async def run_backfill(db: AsyncSession, *, dry_run: bool = True,
@@ -207,50 +286,8 @@ async def run_backfill(db: AsyncSession, *, dry_run: bool = True,
         })
 
     for po_id in po_ids:
-        order_no = order_no_map.get(po_id)
-        try:
-            old_rows = await _load_old_rows(db, po_id)
-            res = await sync_purchase_order_items(db, po_id, dry_run=dry_run)
-            if res.changed and not res.target_items and old_rows:
-                # 目标为空 = 该单覆盖的产品 BOM 已整体删空。在线回调对这种情况走
-                # 「撤销采购单」而非「按空 BOM 重建」（Task 5 评审 Important）——
-                # 校正脚本没有撤销职责，必须拒绝把明细整单删光，留给人工处置。
-                raise RuntimeError(
-                    '目标明细为空（疑似产品 BOM 已删空，应走撤销链而非同步）'
-                    '— 拒绝按空 BOM 整单删光明细')
-            if res.changed:
-                changed, added, removed = _classify_rows(
-                    po_id, order_no, old_rows, res.target_items)
-                actual = (len(changed), len(added), len(removed))
-                expected = (res.updated, res.added, res.removed)
-                if actual != expected:
-                    raise RuntimeError(
-                        f'报告分类与服务计数不一致 po_id={po_id}: '
-                        f'{actual} != {expected}')
-                report.affected_po_ids.append(po_id)
-                report.changed.extend(changed)
-                report.added.extend(added)
-                report.removed.extend(removed)
-            elif res.skipped_reason:
-                report.unresolved.append({
-                    'po_id': po_id, 'order_no': order_no,
-                    'reason': res.skipped_reason,
-                })
-            if not dry_run:
-                # 每单独立提交：立即释放 FOR UPDATE 行锁并让单张成败互不牵连
-                await db.commit()
-        except ItemsVersionConflict:
-            await db.rollback()
-            report.errors.append({
-                'po_id': po_id, 'order_no': order_no,
-                'reason': 'version_conflict',
-            })
-        except Exception as exc:  # 逐单隔离：单张失败回滚该单并继续其余采购单
-            await db.rollback()
-            report.errors.append({
-                'po_id': po_id, 'order_no': order_no,
-                'reason': f'{type(exc).__name__}: {exc}',
-            })
+        await _sync_one(db, po_id, order_no_map.get(po_id),
+                        dry_run=dry_run, report=report)
     return report
 
 
@@ -312,6 +349,7 @@ def print_report(report: BackfillReport) -> None:
     manual = sum(1 for row in report.removed if row['suspected_manual'])
     print(f'\n汇总：变更 {len(report.changed)} 行 / 新增 {len(report.added)} 行 / '
           f'删除 {len(report.removed)} 行（其中疑似手工 {manual} 行）/ '
+          f'同键无变化 {report.matched_unchanged} 行（不计变更）/ '
           f'unresolved {len(report.unresolved)} 张 / 失败 {len(report.errors)} 张')
     if report.dry_run:
         print('[dry-run] 未写库。复核无误后加 --apply 执行。')

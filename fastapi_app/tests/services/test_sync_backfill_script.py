@@ -141,6 +141,7 @@ async def test_dry_run_reports_four_lists_without_writing(db):
     # ④ 无解析失败
     assert report.unresolved == []
     assert report.errors == []
+    assert report.matched_unchanged == 0
 
     # dry-run 绝不写库：明细原样、版本不变、无审计
     assert await _items(db) == before
@@ -245,3 +246,94 @@ async def test_empty_bom_po_refused_and_not_wiped(db):
     assert report.changed == [] and report.added == [] and report.removed == []
     assert (await db.get(PurchaseOrder, 8305)).items_version == 0
     assert [q for _id, _po, _name, q in await _items(db)] == [9.0]
+
+
+async def _seed_blind_box_same_key(db):
+    """盲盒产品 306：双角色共享同一条辅料 BOM 行（目标 2 行同键）；
+    旧明细只有 1 行同键（qty 4000，角色均分目标各 5000）。"""
+    db.add(Product(id=306, name='产品H', is_blind_box=True, has_hidden_role=False))
+    for rid in (11, 12):
+        db.add(ProductRole(id=rid, product_id=306, role_name=f'角色{rid}'))
+        db.add(ProductAccessory(
+            id=306 * 100 + rid, product_id=306, role_id=rid,
+            accessory_name='彩盒', specification='1个', unit='个',
+            quantity=1.0, supplier_name='印刷厂'))
+    db.add(Order(id=9306, order_no='SO-9306', customer='客户甲',
+                 product_id=306, quantity=10000, status='已备货'))
+    db.add(OrderItem(id=93061, order_id=9306, product_id=306,
+                     product_name='产品H', quantity=10000))
+    db.add(PurchaseOrder(
+        id=8306, order_no='PO-8306', customer_name='客户甲', product_name='产品H',
+        product_quantity=10000, supplier_name='印刷厂',
+        source_order_ids='[9306]', status='pending'))
+    db.add(PurchaseOrderSku(
+        id=8306, po_id=8306, product_name='产品H', product_barcode='',
+        order_qty=10000, source_order_id=9306, source_record_type='order'))
+    db.add(PurchaseOrderItem(
+        id=83061, order_id=8306, material_name='彩盒', specification='1个',
+        unit='个', part_name=None, supplier_name='印刷厂',
+        material_category='accessory', quantity=4000, unit_usage=1.0))
+    await db.commit()
+
+
+async def test_same_key_duplicate_target_rows_are_added_not_lost(db):
+    """评审 Important 回归：同键目标行多于旧行时，多余目标行必须进 added。
+
+    盲盒双角色共享同一条辅料 BOM → 目标两行同键（各 5000），旧明细一行 4000：
+    期望 changed 1（4000→5000）+ added 1（5000）。修复前多余目标行被 zip 丢弃，
+    分类计数与服务计数不等 → 该单报错、apply 回滚、永远无法校正。
+    """
+    await _seed_blind_box_same_key(db)
+
+    dry = await run_backfill(db, dry_run=True)
+    assert dry.errors == []
+    assert [(r['po_id'], r['old_quantity'], r['new_quantity'])
+            for r in dry.changed] == [(8306, 4000.0, 5000.0)]
+    assert [(r['po_id'], r['quantity']) for r in dry.added] == [(8306, 5000.0)]
+    assert dry.removed == []
+    assert dry.matched_unchanged == 0
+
+    applied = await run_backfill(db, dry_run=False)
+    assert applied.errors == []
+    assert len(applied.changed) == 1 and len(applied.added) == 1
+    assert (await db.get(PurchaseOrder, 8306)).items_version == 1
+    rows = (await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == 8306)
+    )).scalars().all()
+    assert sorted(float(r.quantity) for r in rows) == [5000.0, 5000.0]
+
+
+async def test_matched_unchanged_rows_not_reported_as_changed(db):
+    """评审 Minor 4：同键且数量/用量未变的行只计 matched_unchanged，
+    不进 changed、不打印为旧→新（避免 500→500 虚高）。"""
+    await _seed(db, pid=307, po_id=8307, order_id=9307, product_name='产品I',
+                fabric_name='布A', fabric_spec='1', fabric_unit='码',
+                fabric_supplier='美利达', old_rows=[
+                    _row('布A', '1', '码', qty=10000, supplier='美利达'),
+                    _row('布B', '2', '码', qty=1, supplier='美利达'),
+                ])
+    db.add(ProductFabric(
+        id=307 * 100 + 3, product_id=307, role_id=None, fabric_name='布B',
+        specification='2', unit='码', quantity=1.0, supplier_name='美利达'))
+    await db.commit()
+
+    report = await run_backfill(db, dry_run=True)
+
+    assert report.errors == []
+    assert [(r['po_id'], r['material_name'], r['old_quantity'], r['new_quantity'])
+            for r in report.changed] == [(8307, '布B', 1.0, 10000.0)]
+    assert report.matched_unchanged == 1  # 布A：10000→10000 不计变更
+
+
+def test_po_lock_select_uses_for_update_on_postgres():
+    """评审 Minor 3：apply 路径必须真正发 FOR UPDATE。
+
+    sqlite 忽略 FOR UPDATE，锁语义无法在测试库观察；改为对同一语句做 PG 方言
+    编译断言（同一条 select 被 sync_purchase_order_items 直接执行）。
+    """
+    from sqlalchemy.dialects import postgresql
+
+    from fastapi_app.services.purchase.bom_sync import _po_for_update_stmt
+
+    sql = str(_po_for_update_stmt(1).compile(dialect=postgresql.dialect()))
+    assert 'FOR UPDATE' in sql
