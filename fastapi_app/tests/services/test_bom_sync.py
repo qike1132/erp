@@ -50,20 +50,25 @@ _UNSET = object()
 
 
 async def _seed(session, *, status='pending', po_id=8101, po_sku_name='产品A',
-                source_order_ids=_UNSET, product_barcode=None):
+                source_order_ids=_UNSET, product_barcode=_UNSET, extra_sku_name=None):
     """盲盒产品 201：6 角色；绿色超柔跨身体/脚底各 1.0；木棒辅料每角色 1.0。
 
     共享夹具（产品/BOM/客户订单）只插一次；可多次调用追加多张采购单，
     旧行 id 按 po_id 偏移（8101 → 1/2、8102 → 11/12），避免主键冲突。
+    ``product_barcode`` 显式传入时对已存在的产品同样生效（不静默忽略）；
+    ``extra_sku_name`` 额外插一行同单 sku（用于「部分行可解」场景）。
     """
     if source_order_ids is _UNSET:
         # sqlite 不支持 partial unique index（uq_po_pending_dedup 的 WHERE 被丢弃），
         # 同 (customer, supplier, source ids) 的第二张单会撞唯一键 → 非 8101 的
         # 单用自身 id 作来源区分；默认调用方只把它当 completed 单，不参与解析。
         source_order_ids = '[9101]' if po_id == 8101 else f'[{po_id}]'
-    if await session.get(Product, 201) is None:
-        session.add(Product(id=201, name='产品A', is_blind_box=True, has_hidden_role=False,
-                            barcode=product_barcode))
+    product = await session.get(Product, 201)
+    if product is None:
+        session.add(Product(
+            id=201, name='产品A', is_blind_box=True, has_hidden_role=False,
+            barcode=None if product_barcode is _UNSET else product_barcode,
+        ))
         for rid in range(11, 17):
             session.add(ProductRole(id=rid, product_id=201, role_name=f'角色{rid}'))
             session.add(ProductAccessory(
@@ -78,6 +83,8 @@ async def _seed(session, *, status='pending', po_id=8101, po_sku_name='产品A',
                           product_id=201, quantity=10000, status='已备货'))
         session.add(OrderItem(id=1, order_id=9101, product_id=201,
                               product_name='产品A', quantity=10000))
+    elif product_barcode is not _UNSET:
+        product.barcode = product_barcode
     session.add(PurchaseOrder(
         id=po_id, order_no=f'PO-{po_id}', customer_name='客户甲', product_name='产品A',
         product_quantity=10000, supplier_name='美利达',
@@ -85,6 +92,11 @@ async def _seed(session, *, status='pending', po_id=8101, po_sku_name='产品A',
     session.add(PurchaseOrderSku(
         id=po_id, po_id=po_id, product_name=po_sku_name, product_barcode='bA',
         order_qty=10000, source_order_id=9101, source_record_type='order'))
+    if extra_sku_name:
+        session.add(PurchaseOrderSku(
+            id=po_id * 10, po_id=po_id, product_name=extra_sku_name,
+            product_barcode='bX', order_qty=1, source_order_id=9101,
+            source_record_type='order'))
     # 旧快照：绿色超柔一行 50（无部位、有率/价）；手工孤儿行 蓝色超柔 890
     base = (po_id - 8101) * 10
     session.add(PurchaseOrderItem(
@@ -237,4 +249,32 @@ async def test_sync_pending_items_for_product_syncs_no_source_id_po_by_name(db):
     assert report['synced'] == 1
     po = await db.get(PurchaseOrder, 8101)
     assert po.items_version == 1
+
+
+async def test_partial_unresolved_sku_po_reported_as_unresolved_not_silent(db):
+    # 两行 sku：一行可解、一行不可解 → 同步必失败；发现层不得只凭部分行命中就判 matched
+    await _seed(db, extra_sku_name='幽灵产品')
+    matched, unresolved = await find_pending_po_ids_for_product(db, 201)
+    assert matched == []
+    assert unresolved == [8101]
+    report = await sync_pending_items_for_product(db, 201)
+    assert report['synced'] == 0
+    assert report['unresolved_po_ids'] == [8101]
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.items_version == 0  # 部分可解也不写库
+
+
+async def test_ambiguous_barcode_is_unresolved_and_not_written(db):
+    # Product.barcode 非唯一：两产品同码视为歧义，不按条码解析（防判给错误产品写错 BOM）
+    await _seed(db, po_sku_name='产品A-旧名', source_order_ids=None, product_barcode='bA')
+    db.add(Product(id=202, name='产品B', is_blind_box=False, has_hidden_role=False,
+                   barcode='bA'))
+    await db.commit()
+    matched, unresolved = await find_pending_po_ids_for_product(db, 201)
+    assert matched == []
+    assert unresolved == [8101]
+    report = await sync_pending_items_for_product(db, 201)
+    assert report['synced'] == 0 and report['unresolved_po_ids'] == [8101]
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.items_version == 0
 

@@ -128,15 +128,33 @@ def _inherit_fields(rows: list[PurchaseOrderItem], target: list[dict]) -> None:
             item['unit_price'] = unit_price
 
 
+async def _load_sku_lines_map(
+    db: AsyncSession, orders: list[PurchaseOrder],
+) -> dict[int, list[dict]]:
+    """批量版逐 SKU 行三层回退：po_sku 快照 → OrderItem 回退 → 订单级单行。
+
+    与单张 ``_load_sku_lines`` 同口径；产品级发现一次加载全部 pending 单的 sku 行，
+    避免按单查询的 N+1。
+    """
+    sku_map = await fetch_po_sku_map(db, [order.id for order in orders])
+    missing = [order for order in orders if not sku_map.get(order.id)]
+    if missing:
+        lines_map = await fetch_po_sku_lines_map(db, missing)
+        for order in missing:
+            lines = lines_map.get(order.id) or []
+            if lines:
+                sku_map[order.id] = lines
+    for order in orders:
+        if not sku_map.get(order.id):
+            sku_map[order.id] = [
+                {'product_name': order.product_name, 'order_qty': order.product_quantity},
+            ]
+    return sku_map
+
+
 async def _load_sku_lines(db: AsyncSession, order: PurchaseOrder) -> list[dict]:
-    """逐 SKU 行三层回退：po_sku 快照 → OrderItem 回退 → 订单级单行。"""
-    sku_map = await fetch_po_sku_map(db, [order.id])
-    lines = sku_map.get(order.id) or []
-    if not lines:
-        lines = (await fetch_po_sku_lines_map(db, [order])).get(order.id) or []
-    if not lines:
-        lines = [{'product_name': order.product_name, 'order_qty': order.product_quantity}]
-    return lines
+    """逐 SKU 行三层回退（单张版，口径与 ``_load_sku_lines_map`` 一致）。"""
+    return (await _load_sku_lines_map(db, [order]))[order.id]
 
 
 def _diff_counts(rows, target: list[dict]) -> tuple[int, int, int, list[int]]:
@@ -201,31 +219,60 @@ async def _rewrite_items(
     await db.flush()
 
 
+async def _load_pid_by_barcode(
+    db: AsyncSession, barcodes: set[str],
+) -> dict[str, int]:
+    """条码 → pid。同一码对应多个 pid（``Product.barcode`` 只建索引、非唯一）视为歧义，
+    不进入映射并告警——宁可判 unresolved，也不能把采购单判给错误产品写错 BOM。
+    """
+    if not barcodes:
+        return {}
+    rows = await db.execute(
+        select(Product.id, Product.barcode).where(Product.barcode.in_(barcodes))
+    )
+    pids_by_barcode: dict[str, set[int]] = defaultdict(set)
+    for pid, barcode in rows.all():
+        pids_by_barcode[_norm(barcode)].add(pid)
+    result: dict[str, int] = {}
+    for barcode, candidate_pids in pids_by_barcode.items():
+        if len(candidate_pids) == 1:
+            result[barcode] = next(iter(candidate_pids))
+        else:
+            logger.warning(
+                'bom_sync 条码对应多个产品，不按条码解析 barcode=%s pids=%s',
+                barcode, sorted(candidate_pids),
+            )
+    return result
+
+
 async def _resolve_sku_pids(
     db: AsyncSession, po_id: int, sku_lines: list[dict], pids: list[int],
+    *, pid_name_map: dict[int, str] | None = None,
+    pid_by_barcode: dict[str, int] | None = None,
 ) -> dict[str, int] | None:
-    """sku 行 → {产品名: pid}。名称解析不到时按条码回退；仍失败返回 None。
+    """sku 行 → {产品名: pid}。**全部**行可解才返回映射，任一行失败返回 None。
 
-    条码回退覆盖「产品改名后 po_sku 快照名对不上」：名称是快照、条码更稳定。
-    解析到的 pid 会补进 ``pids``（供后续加载 BOM 上下文）。
+    名称解析不到时按条码回退（覆盖「产品改名后 po_sku 快照名对不上」：名称是快照、
+    条码更稳定）；条码对应多个产品时不解析（见 ``_load_pid_by_barcode``）。解析到的
+    pid 会补进 ``pids``（供后续加载 BOM 上下文 / 发现层判定产品归属）。
+
+    ``pid_name_map`` / ``pid_by_barcode`` 可传入调用方批量预算好的结果（产品级发现
+    用一次查询覆盖全部 pending 单）；不传则按本单 pid / 条码现查。
     """
-    name_to_pid: dict[str, int] = {}
-    if pids:
-        pid_name_map = await _load_product_names(db, pids)
-        name_to_pid = {(name or '').strip(): pid for pid, name in pid_name_map.items()}
+    if pid_name_map is None:
+        pid_name_map = await _load_product_names(db, pids) if pids else {}
+    allowed = set(pids)
+    name_to_pid = {
+        _norm(name): pid for pid, name in pid_name_map.items() if pid in allowed
+    }
 
     unresolved = [line for line in sku_lines if _norm(line.get('product_name')) not in name_to_pid]
     if not unresolved:
         return name_to_pid
 
-    barcodes = [b for b in (_norm(line.get('product_barcode')) for line in unresolved) if b]
-    pid_by_barcode: dict[str, int] = {}
-    if barcodes:
-        rows = await db.execute(
-            select(Product.id, Product.barcode).where(Product.barcode.in_(barcodes))
-        )
-        for pid, barcode in rows.all():
-            pid_by_barcode.setdefault(barcode, pid)
+    if pid_by_barcode is None:
+        barcodes = {b for b in (_norm(line.get('product_barcode')) for line in unresolved) if b}
+        pid_by_barcode = await _load_pid_by_barcode(db, barcodes)
 
     for line in unresolved:
         name = _norm(line.get('product_name'))
@@ -307,63 +354,65 @@ async def sync_purchase_order_items(
 
 async def _backfill_pids_from_sku_snapshots(
     db: AsyncSession, pids_map: dict[int, list[int]],
+    sku_lines_map: dict[int, list[dict]],
 ) -> None:
-    """给主表来源解析不出 pid 的采购单按 ``purchase_order_sku`` 快照补 pid（原地修改）。
+    """给主表来源解析不出 pid 的采购单按 sku 快照**产品名**补 pid（原地修改）。
 
     Why：备货「一键生成」的采购单主表 ``source_order_ids`` 为 NULL，来源只落在快照表里，
-    ``fetch_po_sku_pids_map`` 对其恒空（与撤销路径 2026-11-07 生产缺陷同款）。先按快照
-    产品名反查（``_resolve_pids_from_sku_lines``，与撤销/工厂汇总同口径），再按快照条码
-    兜底（产品改名场景，与单张同步的条码回退同口径）。两层都失败的采购单保持空 pids，
-    由调用方计入 unresolved —— 解析失败不静默。
+    ``fetch_po_sku_pids_map`` 对其恒空（与撤销路径 2026-11-07 生产缺陷同款）。按产品名反查
+    （``_resolve_pids_from_sku_lines``，与撤销/工厂汇总同口径）；条码回退不在此做——统一由
+    ``_resolve_sku_pids`` 处理，保证发现层与单张同步共用同一份（含歧义保护）的条码解析。
+    补不到的单保持空 pids，由调用方计入 unresolved —— 解析失败不静默。
     """
     empty_ids = [po_id for po_id, pids in pids_map.items() if not pids]
     if not empty_ids:
         return
-    sku_rows = await fetch_po_sku_map(db, empty_ids)
-    if not sku_rows:
-        return
-    await _resolve_pids_from_sku_lines(db, pids_map, sku_rows)
-
-    still_empty = [po_id for po_id in empty_ids if not pids_map.get(po_id)]
-    barcodes = {
-        _norm(line.get('product_barcode'))
-        for po_id in still_empty
-        for line in sku_rows.get(po_id) or []
-    } - {''}
-    if not barcodes:
-        return
-    rows = await db.execute(
-        select(Product.id, Product.barcode).where(Product.barcode.in_(barcodes))
-    )
-    pid_by_barcode: dict[str, int] = {}
-    for pid, barcode in rows.all():
-        pid_by_barcode.setdefault(_norm(barcode), pid)
-    for po_id in still_empty:
-        for line in sku_rows.get(po_id) or []:
-            pid = pid_by_barcode.get(_norm(line.get('product_barcode')))
-            if pid is not None and pid not in pids_map[po_id]:
-                pids_map[po_id].append(pid)
+    await _resolve_pids_from_sku_lines(db, pids_map, sku_lines_map)
 
 
 async def find_pending_po_ids_for_product(
     db: AsyncSession, product_id: int,
 ) -> tuple[list[int], list[int]]:
-    """待同步采购单：pending 且覆盖该 pid（返回 (命中, pid 解析失败) 两组 po_id）。"""
+    """待同步采购单：pending 且**全部** sku 行可解析（返回 (命中, 解析失败) 两组 po_id）。
+
+    判定口径与 ``sync_purchase_order_items`` 共用 ``_resolve_sku_pids``：任一行解析失败
+    的单计入 unresolved（批量同步对它是 ``synced=0``）。只凭部分行命中就判 matched 会让
+    该单在报告里既不命中也不 unresolved —— 静默失踪。
+    """
     pos = (await db.execute(
         select(PurchaseOrder).where(PurchaseOrder.status == PurchaseOrderStatus.PENDING)
         .order_by(PurchaseOrder.id)
     )).scalars().all()
     if not pos:
         return [], []
+    sku_lines_map = await _load_sku_lines_map(db, list(pos))
     pids_map = await fetch_po_sku_pids_map(db, list(pos))
-    await _backfill_pids_from_sku_snapshots(db, pids_map)
+    await _backfill_pids_from_sku_snapshots(db, pids_map, sku_lines_map)
+
+    # 批量预算名称/条码映射：发现层与单张同步的解析结果逐字一致，且无 N+1。
+    all_pids = sorted({pid for pids in pids_map.values() for pid in pids})
+    pid_name_map = await _load_product_names(db, all_pids)
+    all_barcodes = {
+        _norm(line.get('product_barcode'))
+        for lines in sku_lines_map.values() for line in lines
+    } - {''}
+    pid_by_barcode = await _load_pid_by_barcode(db, all_barcodes)
+
     matched: list[int] = []
     unresolved: list[int] = []
     for po in pos:
-        po_pids = pids_map.get(po.id) or []
-        if not po_pids:
+        pids = list(pids_map.get(po.id) or [])
+        name_to_pid = await _resolve_sku_pids(
+            db, po.id, sku_lines_map.get(po.id) or [], pids,
+            pid_name_map=pid_name_map, pid_by_barcode=pid_by_barcode,
+        )
+        if name_to_pid is None:
+            logger.warning(
+                'bom_sync 产品级发现：采购单 sku 无法全部解析，计入 unresolved po_id=%s product_id=%s',
+                po.id, product_id,
+            )
             unresolved.append(po.id)
-        elif product_id in po_pids:
+        elif product_id in pids:
             matched.append(po.id)
     return matched, unresolved
 
