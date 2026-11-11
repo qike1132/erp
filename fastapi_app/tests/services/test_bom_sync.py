@@ -385,3 +385,19 @@ def test_items_version_check_compiles_with_for_update_on_postgres():
     assert 'FOR UPDATE' in sql, sql
     # 多行加锁按 id 排序，降低并发保存互相死锁的可能
     assert 'ORDER BY PURCHASE_ORDER.ID' in sql, sql
+
+
+async def test_factory_save_partial_items_versions_skips_uncovered_orders(db):
+    """Ruling：部分覆盖只校验字典里出现的单；未出现的涉及单不校验（旧客户端兼容）。
+
+    字典里只出现无关单（9999）时，涉及单 8101 没有被校验，保存照常落库；
+    若实现误做「全量强制」，此用例会抛 ItemsVersionConflict 变红。
+    """
+    await _seed(db)
+    result = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+        order_ids=[8101], items_versions={9999: 0},
+    )
+    assert result['updated_count'] == 1
+    item = await db.get(PurchaseOrderItem, 1)
+    assert float(item.quantity) == 60.0
