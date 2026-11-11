@@ -78,6 +78,10 @@ class PurchaseOrder(Base):
     spare_rate: Mapped[float | None] = mapped_column(
         Numeric(8, 2), comment='损耗率快照(千分之几)，用于追溯备品按多少损耗率算出',
     )
+    items_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default='0',
+        comment='采购明细版本号：BOM 同步与用户编辑都递增，用于 409 并发保护',
+    )
     total_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), default=0, comment='订单总金额')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
@@ -135,6 +139,12 @@ class PurchaseOrder(Base):
             name='purchase_order_status_check',
         ),
     )
+
+    def __init__(self, **kwargs):
+        # 构造期默认 0：Column default 只在 INSERT 时生效，未落库实例读到的是 None；
+        # items_version 需要在对象一创建就可比较（BOM 同步/编辑的 409 版本保护）。
+        kwargs.setdefault('items_version', 0)
+        super().__init__(**kwargs)
 
     def __repr__(self):
         return f'<PurchaseOrder {self.order_no}>'

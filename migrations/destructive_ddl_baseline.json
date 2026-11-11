@@ -624,6 +624,9 @@
     "migrations/versions/pg_standalone_117_add_role_final_versions.py": [
       "execute:ALTER TABLE customer_sampling_role DROP COLUMN IF EXISTS final_versions"
     ],
+    "migrations/versions/pg_standalone_118_add_po_items_version.py": [
+      "execute:ALTER TABLE purchase_order DROP COLUMN IF EXISTS items_version"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],
