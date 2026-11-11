@@ -195,9 +195,12 @@
               </template>
             </tr>
 
-            <!-- 数量差异对照块：仅该组最后一行、且该组存在「推算 vs 落库」差异时渲染（无差异不占高度） -->
+            <!-- 数量差异对照块：仅该组最后一行、且该组存在「推算 vs 落库」差异时渲染（无差异不占高度）。
+                 编辑态不渲染（2026-11-11 owner 口径）：本次自定义编辑产生的差异不算「已存在的差异」，
+                 编辑态内输入会即时改写 factoryData 导致 diff 重算弹出横幅（脚底·绿色超柔案例）；
+                 打开时已存在的差异由编辑会话快照（rowDiffMap 冻结）保证退出编辑后仍展示。 -->
             <SummaryDiffBlock
-              v-if="rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
+              v-if="!editMode && rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
               :diffs="rowDiffMap[item.gi]!"
               :stored-rows="storedRowsOf(item.group, item.gi)"
               :show-role-column="showRoleColumn"

@@ -1,0 +1,292 @@
+{
+ "factory": {
+  "groups": [
+   {
+    "customer_name": "TOP TOY",
+    "product_name": "Nommi \u7cef\u7c73\u513f-\u793c\u670d\u5c3c\u514b400%\u9650\u5b9a\u6bdb\u7ed2\u540a\u5361/Nommi \u7cef\u7c73\u513f-\u793c\u670d\u6731\u8fea 400%\u9650\u5b9a\u6bdb\u7ed2\u540a\u5361",
+    "product_quantity": 10000.0,
+    "order_quantity": 10000.0,
+    "order_ids": [
+     20516
+    ],
+    "suppliers": [
+     {
+      "supplier_name": "\u4ed3\u5e93",
+      "fabrics": [
+       {
+        "fabric_name": "\u6f02\u767d\u8fb9\u4f26",
+        "part_name": "\u624b",
+        "role_id": null,
+        "specification": "\u4ed3\u5e93",
+        "quantity": 50.0,
+        "unit": "\u7801",
+        "item_ids": [
+         21555
+        ],
+        "part_display": "\u624b",
+        "role_display": "",
+        "loss_rate": null,
+        "loss_rate_mixed": false
+       }
+      ]
+     },
+     {
+      "supplier_name": "\u65ed\u65e5",
+      "fabrics": [
+       {
+        "fabric_name": "3mm\u6f02\u767d\u5409\u7ed2",
+        "part_name": "\u5934\u53d1",
+        "role_id": null,
+        "specification": "C001",
+        "quantity": 90.0,
+        "unit": "\u7801",
+        "item_ids": [
+         21554
+        ],
+        "part_display": "\u5934\u53d1",
+        "role_display": "",
+        "loss_rate": 0.0,
+        "loss_rate_mixed": false
+       }
+      ]
+     },
+     {
+      "supplier_name": "\u6728\u68d2",
+      "fabrics": [
+       {
+        "fabric_name": "\u6728\u68d2\u6309\u6469\u9524",
+        "part_name": null,
+        "role_id": null,
+        "specification": "1\u6761",
+        "quantity": 10000.0,
+        "unit": "\u4e2a",
+        "item_ids": [
+         21556
+        ],
+        "part_display": "",
+        "role_display": "",
+        "loss_rate": 0.0,
+        "loss_rate_mixed": false
+       }
+      ]
+     },
+     {
+      "supplier_name": "\u7f8e\u5229\u8fbe",
+      "fabrics": [
+       {
+        "fabric_name": "\u7eff\u8272\u8d85\u67d4",
+        "part_name": "\u811a\u5e95",
+        "role_id": null,
+        "specification": "234",
+        "quantity": 18181.82,
+        "unit": "\u7801",
+        "item_ids": [
+         21553
+        ],
+        "part_display": "\u811a\u5e95",
+        "role_display": "",
+        "loss_rate": 100.0,
+        "loss_rate_mixed": false
+       },
+       {
+        "fabric_name": "\u7eff\u8272\u8d85\u67d4",
+        "part_name": "\u8eab\u4f53",
+        "role_id": null,
+        "specification": "234",
+        "quantity": 10000.0,
+        "unit": "\u7801",
+        "item_ids": [
+         21552
+        ],
+        "part_display": "\u8eab\u4f53",
+        "role_display": "",
+        "loss_rate": null,
+        "loss_rate_mixed": false
+       }
+      ]
+     },
+     {
+      "supplier_name": "\u96c4\u5174",
+      "fabrics": [
+       {
+        "fabric_name": "\u4eae\u4eae\u8c82",
+        "part_name": "\u8033\u6735",
+        "role_id": null,
+        "specification": "35#",
+        "quantity": 5000.0,
+        "unit": "\u7801",
+        "item_ids": [
+         21551
+        ],
+        "part_display": "\u8033\u6735",
+        "role_display": "",
+        "loss_rate": null,
+        "loss_rate_mixed": false
+       }
+      ]
+     }
+    ],
+    "skus": [
+     {
+      "product_name": "Nommi \u7cef\u7c73\u513f-\u793c\u670d\u5c3c\u514b400%\u9650\u5b9a\u6bdb\u7ed2\u540a\u5361/Nommi \u7cef\u7c73\u513f-\u793c\u670d\u6731\u8fea 400%\u9650\u5b9a\u6bdb\u7ed2\u540a\u5361",
+      "product_barcode": "6978946330823",
+      "order_qty": 10000.0,
+      "materials": [
+       {
+        "role_id": null,
+        "role_name": "",
+        "supplier_name": "\u4ed3\u5e93",
+        "material_name": "\u6f02\u767d\u8fb9\u4f26",
+        "part_name": "\u624b",
+        "specification": "\u4ed3\u5e93",
+        "unit": "\u7801",
+        "quantity": 50.0,
+        "part_display": "\u624b",
+        "role_display": ""
+       },
+       {
+        "role_id": null,
+        "role_name": "",
+        "supplier_name": "\u65ed\u65e5",
+        "material_name": "3mm\u6f02\u767d\u5409\u7ed2",
+        "part_name": "\u5934\u53d1",
+        "specification": "C001",
+        "unit": "\u7801",
+        "quantity": 90.0,
+        "part_display": "\u5934\u53d1",
+        "role_display": ""
+       },
+       {
+        "role_id": null,
+        "role_name": "",
+        "supplier_name": "\u6728\u68d2",
+        "material_name": "\u6728\u68d2\u6309\u6469\u9524",
+        "part_name": null,
+        "specification": "1\u6761",
+        "unit": "\u4e2a",
+        "quantity": 10000.0,
+        "part_display": "",
+        "role_display": ""
+       },
+       {
+        "role_id": null,
+        "role_name": "",
+        "supplier_name": "\u7f8e\u5229\u8fbe",
+        "material_name": "\u7eff\u8272\u8d85\u67d4",
+        "part_name": "\u811a\u5e95",
+        "specification": "234",
+        "unit": "\u7801",
+        "quantity": 10000.0,
+        "part_display": "\u811a\u5e95",
+        "role_display": ""
+       },
+       {
+        "role_id": null,
+        "role_name": "",
+        "supplier_name": "\u7f8e\u5229\u8fbe",
+        "material_name": "\u7eff\u8272\u8d85\u67d4",
+        "part_name": "\u8eab\u4f53",
+        "specification": "234",
+        "unit": "\u7801",
+        "quantity": 10000.0,
+        "part_display": "\u8eab\u4f53",
+        "role_display": ""
+       },
+       {
+        "role_id": null,
+        "role_name": "",
+        "supplier_name": "\u96c4\u5174",
+        "material_name": "\u4eae\u4eae\u8c82",
+        "part_name": "\u8033\u6735",
+        "specification": "35#",
+        "unit": "\u7801",
+        "quantity": 5000.0,
+        "part_display": "\u8033\u6735",
+        "role_display": ""
+       }
+      ],
+      "role_quantities": []
+     }
+    ],
+    "spare_rate": 0.0,
+    "spare_rate_mixed": false
+   }
+  ],
+  "order_count": 1,
+  "spare_rate": 0.0,
+  "spare_rate_mixed": false,
+  "items_versions": {
+   "20516": 21
+  }
+ },
+ "supplier": {
+  "materials": [
+   {
+    "material_name": "\u6f02\u767d\u8fb9\u4f26",
+    "specification": "\u4ed3\u5e93",
+    "total_quantity": 50.0,
+    "unit": "\u7801",
+    "supplier_name": "\u4ed3\u5e93",
+    "orders": [
+     {
+      "order_no": "PO-2611-007",
+      "quantity": 50.0
+     }
+    ]
+   },
+   {
+    "material_name": "3mm\u6f02\u767d\u5409\u7ed2",
+    "specification": "C001",
+    "total_quantity": 90.0,
+    "unit": "\u7801",
+    "supplier_name": "\u65ed\u65e5",
+    "orders": [
+     {
+      "order_no": "PO-2611-007",
+      "quantity": 90.0
+     }
+    ]
+   },
+   {
+    "material_name": "\u6728\u68d2\u6309\u6469\u9524",
+    "specification": "1\u6761",
+    "total_quantity": 10000.0,
+    "unit": "\u4e2a",
+    "supplier_name": "\u6728\u68d2",
+    "orders": [
+     {
+      "order_no": "PO-2611-007",
+      "quantity": 10000.0
+     }
+    ]
+   },
+   {
+    "material_name": "\u7eff\u8272\u8d85\u67d4",
+    "specification": "234",
+    "total_quantity": 28181.82,
+    "unit": "\u7801",
+    "supplier_name": "\u7f8e\u5229\u8fbe",
+    "orders": [
+     {
+      "order_no": "PO-2611-007",
+      "quantity": 28181.82
+     }
+    ]
+   },
+   {
+    "material_name": "\u4eae\u4eae\u8c82",
+    "specification": "35#",
+    "total_quantity": 5000.0,
+    "unit": "\u7801",
+    "supplier_name": "\u96c4\u5174",
+    "orders": [
+     {
+      "order_no": "PO-2611-007",
+      "quantity": 5000.0
+     }
+    ]
+   }
+  ],
+  "order_count": 1
+ }
+}

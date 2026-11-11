@@ -13,7 +13,7 @@
  * 依赖方向（**务必保持单向**）：本模块从 `useSummaryModal`（类型 + 既有纯函数）与
  * `perSkuRows`（Task 2 冻结行模型）取值；二者均不反向依赖本模块，无环。
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { EmitFn } from 'vue'
 import { factoryQtyDisplayValue, buildSkuDisplayLines } from './useSummaryModal'
 import { buildPerSkuRows, materialKeyOf, computeQuantityDiff, buildStoredRows } from './perSkuRows'
@@ -160,8 +160,18 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     return out
   })
 
-  /** 每组的差异列表（按 SKU 模式下才有；回退模式恒为空 ⇒ 不渲染对照块）。 */
-  const rowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() => {
+  /**
+   * 每组的差异列表（按 SKU 模式下才有；回退模式恒为空 ⇒ 不渲染对照块）。
+   *
+   * **编辑会话冻结**（2026-11-11 生产反馈：自定义编辑数量后横幅立即弹出）：
+   * `updateFactoryQty` 改写 factoryData 会让 diff 即时重算，用户本次编辑产生的
+   * 差异必然弹出。口径（owner 裁决）：只有「打开汇总时后端返回数据里已存在」
+   * 的差异才展示 —— 故进入编辑态的瞬间把当时的 diff 冻结为快照，整个编辑会话
+   * （含保存后未重开弹窗的窗口）都用快照；factoryData 被整体替换（重开弹窗 /
+   * 取消编辑回滚）时解冻，恢复实时重算。编辑态内横幅另由模板 `!editMode` 整体
+   * 不渲染（双保险：退出编辑态后快照仍保证不弹本次编辑的项）。
+   */
+  const liveRowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() => {
     const map: Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]> = {}
     ;(props.factoryData?.groups || []).forEach((group, gi) => {
       const rows = buildPerSkuRows(group, spareRateForGroup(gi))
@@ -169,6 +179,20 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     })
     return map
   })
+
+  /** 编辑会话内冻结的 diff 快照；null = 非编辑会话（用实时值） */
+  const frozenDiff = ref<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]> | null>(null)
+
+  watch(() => props.editMode, (enable, prev) => {
+    // 进入编辑态：冻结打开时的差异（含「已存在差异」）；再次触发不覆盖首份快照
+    if (enable && (!prev || !frozenDiff.value)) frozenDiff.value = liveRowDiffMap.value
+  }, { immediate: true })
+  // factoryData 整体替换 = 编辑会话结束（重开弹窗 / 取消编辑回滚）→ 解冻
+  watch(() => props.factoryData, () => { frozenDiff.value = null })
+
+  const rowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() =>
+    (props.editMode && frozenDiff.value) ? frozenDiff.value : liveRowDiffMap.value,
+  )
 
   /**
    * 该组落库真值（压平供应商维度，供对照块列出），率/数量已按主表口径算好。
