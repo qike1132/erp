@@ -48,6 +48,11 @@ class SyncResult:
     removed: int = 0
     removed_rows: list = field(default_factory=list)
     skipped_reason: str | None = None
+    # 目标明细（``build_expected_items`` 输出，含继承后的 loss_rate/unit_price/remark）：
+    # 供离线校正脚本（scripts/sync_pending_po_items.py）逐行输出「旧→新」报告与
+    # 判定 suspected_manual（复用同一份目标键，不在脚本里重抄解析流水线）。
+    # 仅在 changed=True 时填充；未变更/跳过时为空。
+    target_items: list[dict] = field(default_factory=list)
 
 
 def _norm(value) -> str:
@@ -345,11 +350,13 @@ async def sync_purchase_order_items(
     added, updated, removed, removed_rows = counts
     if dry_run:
         return SyncResult(po_id=po_id, changed=True, added=added,
-                          updated=updated, removed=removed, removed_rows=removed_rows)
+                          updated=updated, removed=removed,
+                          removed_rows=removed_rows, target_items=target)
 
     await _rewrite_items(db, order, target, counts)
     return SyncResult(po_id=po_id, changed=True, added=added,
-                      updated=updated, removed=removed, removed_rows=removed_rows)
+                      updated=updated, removed=removed,
+                      removed_rows=removed_rows, target_items=target)
 
 
 async def _backfill_pids_from_sku_snapshots(
