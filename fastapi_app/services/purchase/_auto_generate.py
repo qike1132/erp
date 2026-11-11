@@ -86,10 +86,12 @@ def schedule_auto_generate_purchase_orders(session) -> None:
 
 
 async def _run_bom_saved(product_id: int) -> None:
-    """BOM 保存提交后：若该产品 BOM 已删空 → 撤销其 pending 采购单；随后跑一次自动生成。
+    """BOM 保存提交后：撤销（若删空）→ 同步 pending 明细 → 跑一次自动生成。
 
-    撤销会把受影响订单状态重算回「待备货」，再由自动生成重新扫描——BOM 若已补回就会
-    重新生成，删空则停在「待生成（未配置BOM）」。
+    顺序即语义：撤销先行——删空的产品其 pending 单已被撤掉，不会被同步「按空 BOM
+    重建」；同步把仍挂着的 pending 单按新 BOM 整体重建明细；最后自动生成补上缺的
+    采购单（BOM 若已补回就会重新生成，删空则停在「待生成（未配置BOM）」）。
+    撤销/同步各自开独立会话，失败只记日志，不影响 BOM 保存本身。
     """
     try:
         from fastapi_app.core.database import require_async_session_local
@@ -105,11 +107,30 @@ async def _run_bom_saved(product_id: int) -> None:
     except Exception:  # broad-except: 撤销失败不得影响 BOM 保存本身
         logger.warning('删空 BOM 后撤销采购单失败（不影响本次保存）', exc_info=True)
 
+    try:
+        from fastapi_app.core.database import require_async_session_local
+        from fastapi_app.core.exceptions import db_transaction
+        from fastapi_app.services.purchase.bom_sync import sync_pending_items_for_product
+
+        session_factory = require_async_session_local()
+        async with session_factory() as db:
+            async with db_transaction(db):
+                report = await sync_pending_items_for_product(db, product_id)
+
+        if report.get('synced'):
+            logger.info(
+                'BOM 变更同步采购明细: product=%s synced=%s skipped=%s',
+                product_id, report.get('synced'), report.get('skipped'),
+            )
+    except Exception:  # broad-except: 同步失败不得影响 BOM 保存本身
+        logger.warning('BOM 变更同步采购明细失败（不影响本次保存）', exc_info=True)
+
     await _run_auto_generate()
 
 
 def schedule_bom_saved_side_effects(session, product_id: int) -> None:
-    """注册「BOM 保存提交成功后」的副作用：先撤销（若删空），再自动生成。
+    """注册「BOM 保存提交成功后」的副作用：先撤销（若删空），再同步 pending 明细，
+    最后自动生成。
 
     与其它 ``schedule_*`` 同款：回调挂到 ``session.info['post_commit_callbacks']``，
     由 ``db_transaction`` 在提交成功后执行。BOM 保存端点每次请求调用一次即可。
