@@ -5,13 +5,14 @@
 """
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.services.purchase.bom_sync import (
     ItemsVersionConflict,
     find_pending_po_ids_for_product,
+    product_has_bom,
     sync_pending_items_for_product,
     sync_purchase_order_items,
 )
@@ -278,3 +279,17 @@ async def test_ambiguous_barcode_is_unresolved_and_not_written(db):
     po = await db.get(PurchaseOrder, 8101)
     assert po.items_version == 0
 
+
+async def test_product_has_bom_matches_revoke_oracle(db):
+    """BOM 存在性守卫与撤销链同口径：任一 BOM 子表有行即视为「未删空」。
+
+    回调层用它决定是否同步：BOM 为空时同步必须跳过，否则条码回退命中的
+    pending 单会被按空 BOM 整单删光明细（2026-11-11 评审 Important）。
+    """
+    await _seed(db)
+    assert await product_has_bom(db, 201) is True   # 面料/辅料有行
+    assert await product_has_bom(db, 99999) is False  # 不存在的产品视为无 BOM
+
+    await db.execute(delete(ProductAccessory))
+    await db.execute(delete(ProductFabric))
+    assert await product_has_bom(db, 201) is False  # 删空后必须判 False

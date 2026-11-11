@@ -370,6 +370,20 @@ async def _backfill_pids_from_sku_snapshots(
     await _resolve_pids_from_sku_lines(db, pids_map, sku_lines_map)
 
 
+async def product_has_bom(db: AsyncSession, product_id: int) -> bool:
+    """该产品当前是否存在任一 BOM 行（填充物/面料/辅料）。
+
+    与撤销链 ``revoke_pending_purchase_orders_for_product`` **同口径**（同用
+    ``_fetch_bom_product_ids``）——「BOM 是否已删空」两处判定必须一致：撤销层按名称
+    回退解析不到的单（如备货一键生成 + 产品改名）撤不掉，若同步层凭条码回退仍命中它，
+    空 BOM 会让目标行集合为空、把整单明细删光，留下 0 明细 pending 单（2026-11-11
+    评审 Important）。因此同步前必须先过本守卫。
+    """
+    from fastapi_app.services.purchase._unprocessed import _fetch_bom_product_ids
+
+    return bool(await _fetch_bom_product_ids(db, [product_id]))
+
+
 async def find_pending_po_ids_for_product(
     db: AsyncSession, product_id: int,
 ) -> tuple[list[int], list[int]]:

@@ -20,6 +20,7 @@ _REVOKE = (
     'fastapi_app.services.purchase_order_revoke.revoke_pending_purchase_orders_for_product'
 )
 _SYNC = 'fastapi_app.services.purchase.bom_sync.sync_pending_items_for_product'
+_HAS_BOM = 'fastapi_app.services.purchase.bom_sync.product_has_bom'
 
 
 class _SessionCM:
@@ -59,9 +60,13 @@ def wiring(monkeypatch):
         calls.append(('revoke', db, product_id))
         return {'revoked': 0, 'orders_reset': 0}
 
+    async def fake_has_bom(_db, _product_id):
+        return True
+
     async def fake_sync(db, product_id, **kwargs):
         calls.append(('sync', db, product_id, kwargs))
-        return {'synced': 1, 'skipped': 0, 'unresolved_po_ids': [], 'results': []}
+        return {'synced': 1, 'skipped': 0, 'unresolved_po_ids': [],
+                'results': [object()]}
 
     async def fake_generate(*_a, **_k):
         calls.append(('generate',))
@@ -69,6 +74,7 @@ def wiring(monkeypatch):
     monkeypatch.setattr(_FACTORY, lambda: factory)
     monkeypatch.setattr(_TRANSACTION, fake_transaction)
     monkeypatch.setattr(_REVOKE, fake_revoke)
+    monkeypatch.setattr(_HAS_BOM, fake_has_bom)
     monkeypatch.setattr(_SYNC, fake_sync)
     monkeypatch.setattr(hook, '_run_auto_generate', fake_generate)
     return calls, factory
@@ -144,3 +150,29 @@ async def test_revoke_failure_does_not_block_sync_and_generate(
 
     assert _steps(calls) == ['revoke', 'sync', 'generate']
     assert '撤销采购单失败' in caplog.text
+
+
+async def test_empty_bom_skips_sync_so_pending_items_are_not_wiped(
+    wiring, monkeypatch, caplog,
+):
+    """BOM 已删空 → 不调用同步（否则条码回退命中的单会被按空 BOM 删光明细）。
+
+    评审 Important：撤销层按名称回退解析、撤不掉的单（备货一键生成 + 产品改名），
+    同步层凭条码回退仍会命中；若此时 BOM 已空，目标行集合为空会整单删光明细并留下
+    0 明细 pending 单。守卫必须针对本次保存的 product_id。
+    """
+    calls, _factory = wiring
+    guarded = []
+
+    async def no_bom(db, product_id):
+        guarded.append((db, product_id))
+        return False
+
+    monkeypatch.setattr(_HAS_BOM, no_bom)
+
+    with caplog.at_level(logging.INFO):
+        await hook._run_bom_saved(42)
+
+    assert _steps(calls) == ['revoke', 'generate'], f'BOM 空时不得同步: {_steps(calls)}'
+    assert [pid for _db, pid in guarded] == [42], '守卫必须针对本次保存的产品'
+    assert 'BOM 已删空，跳过采购明细同步' in caplog.text

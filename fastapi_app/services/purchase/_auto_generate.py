@@ -110,18 +110,33 @@ async def _run_bom_saved(product_id: int) -> None:
     try:
         from fastapi_app.core.database import require_async_session_local
         from fastapi_app.core.exceptions import db_transaction
-        from fastapi_app.services.purchase.bom_sync import sync_pending_items_for_product
+        from fastapi_app.services.purchase.bom_sync import (
+            product_has_bom,
+            sync_pending_items_for_product,
+        )
 
         session_factory = require_async_session_local()
         async with session_factory() as db:
             async with db_transaction(db):
-                report = await sync_pending_items_for_product(db, product_id)
+                report = None
+                # BOM 已删空则不同步：撤销层与同步层解析口径不同（前者无条码回退），
+                # 撤销撤不掉的单若被同步按空 BOM 命中，会把明细整单删光。
+                if await product_has_bom(db, product_id):
+                    report = await sync_pending_items_for_product(db, product_id)
 
-        if report.get('synced'):
-            logger.info(
-                'BOM 变更同步采购明细: product=%s synced=%s skipped=%s',
-                product_id, report.get('synced'), report.get('skipped'),
-            )
+        if report is None:
+            logger.info('BOM 已删空，跳过采购明细同步: product=%s', product_id)
+        else:
+            synced = int(report.get('synced') or 0)
+            # skipped 按「本产品待同步单」口径：results 只含覆盖该产品的 pending 单；
+            # 全库 unresolved 单不属于任何产品，不混入本行日志。
+            per_product_skipped = len(report.get('results') or []) - synced
+            if synced or per_product_skipped:
+                logger.info(
+                    'BOM 变更同步采购明细: product=%s synced=%s skipped=%s'
+                    '（本产品待同步单口径）',
+                    product_id, synced, per_product_skipped,
+                )
     except Exception:  # broad-except: 同步失败不得影响 BOM 保存本身
         logger.warning('BOM 变更同步采购明细失败（不影响本次保存）', exc_info=True)
 
