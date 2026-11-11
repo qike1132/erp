@@ -208,7 +208,8 @@ describe('逐布料行差异化损耗率', () => {
 
     const inputs = wrapper.findAll('input[type="number"]')
     expect((inputs[0]!.element as HTMLInputElement).value).toBe('110')
-    expect((inputs[1]!.element as HTMLInputElement).value).toBe('52.5')
+    // 50 × 1.05 = 52.5 → 向上取整 53（编辑态与非编辑态同口径）
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('53')
 
     wrapper.unmount()
   })

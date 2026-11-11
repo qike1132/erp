@@ -129,7 +129,7 @@ describe('导出供应商汇总 Excel：数量与页面一致', () => {
       ),
     )
     expect(quantities![0]!.quantity).toBe(21)   // ceil(20 × 1.005)
-    expect(quantities![1]!.quantity).toBe(20.1) // 回退：20 × 1.005
+    expect(quantities![1]!.quantity).toBe(21)   // 回退同样向上取整：ceil(20 × 1.005) = 21
   })
 
   it('自定义编辑数量后（未保存）：导出携带编辑中的最新数量', async () => {

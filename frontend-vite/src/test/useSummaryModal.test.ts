@@ -35,7 +35,7 @@ vi.mock('@/composables/useExport', async () => {
   return { useExport: () => ({ exporting: r(false), runExport: vi.fn() }) }
 })
 
-import { getGroupOrderQty, magnifyByLossRate, buildFactoryHtml, factoryTableHead, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
+import { getGroupOrderQty, magnifyByLossRate, buildFactoryHtml, factoryTableHead, factoryQtyDisplayValue, useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
 import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
 import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import { fmtQty } from '@/utils/formatQty'
@@ -206,7 +206,7 @@ describe('SummaryPanel 数量口径（数据行）', () => {
     after.unmount()
   })
 
-  it('【UX 一致性】非编辑态数量列向上取整为整数，编辑态输入框保留精确加放值', () => {
+  it('【UX 一致性】数量列与编辑态输入框都向上取整为整数', () => {
     // 非编辑态：数量列逐行向上取整
     const view = mountModal(5, factoryData, false)
     const viewRows = view.findAll('tbody tr')
@@ -215,9 +215,17 @@ describe('SummaryPanel 数量口径（数据行）', () => {
     expect(viewRows[1]!.findAll('td')[4]!.text()).toBe('21')
     expect(viewRows[2]!.findAll('td')[9]!.text()).toBe('6')
 
-    // 编辑态：数量输入框加载 10.05/20.1/5.03 精确加放值，保存反推不因展示取整而失真
+    // 编辑态：数量输入框与非编辑态同口径，向上取整（10.05→11 / 20.1→21 / 5.03→6），
+    // 与表格可见值一致（2026-11-11 owner 口径：数量一律整数）
     const edit = mountModal(5, factoryData, true)
-    expect(edit.findAll('input[type="number"]').map((i) => (i.element as HTMLInputElement).value)).toEqual(['10.05', '20.1', '5.03'])
+    expect(edit.findAll('input[type="number"]').map((i) => (i.element as HTMLInputElement).value)).toEqual(['11', '21', '6'])
+  })
+
+  it('owner 报告场景：编辑态不显示小数（254.34 × 1.1 = 279.774 → 向上取整 280，而非 279.77）', () => {
+    expect(factoryQtyDisplayValue(254.34, 100, true)).toBe(280)
+    expect(factoryQtyDisplayValue(254.34, 100, false)).toBe(280)
+    // 20.001 也是 21（owner 口径原话）
+    expect(factoryQtyDisplayValue(20.001, 0, true)).toBe(21)
   })
 
   it('数据行数量（lossRate=0 → 不改变数量）', () => {

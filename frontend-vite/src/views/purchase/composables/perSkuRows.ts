@@ -111,9 +111,17 @@ export function magnifyByLossRate(qty: number, lossRate: number): number {
 /**
  * 损耗加放后的「数量」展示值（向上取整）：屏幕表格、打印预览、Excel 导出共用。
  * 只在展示层取整，原始数量仍是落库唯一真值，保存反推仍使用精确的 magnifyByLossRate。
+ *
+ * 取整精度（2026-11-11 owner 口径）：向上取整前**先按 1e-6 清理浮点尾差**，而不是
+ * 先四舍五入到 2 位小数 —— 否则 20.001 会被抹成 20.00、ceil 后仍是 20，与
+ * 「20.001 也是 21」的业务口径相悖。1e-6 的容差用于吸收 `10×1.005=10.049999…`
+ * 这类浮点噪声（减掉 epsilon 后 ceil 仍得 11），同时保证真实整数不被抬成 +1。
  */
 export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
-  return Math.ceil(magnifyByLossRate(qty, lossRate))
+  const v = Number.isFinite(qty) ? qty : 0
+  const r = Number.isFinite(lossRate) ? lossRate : 0
+  const exact = v * (1 + r / 1000)
+  return Math.ceil(Math.round(exact * 1e6) / 1e6 - 1e-9)
 }
 
 /**

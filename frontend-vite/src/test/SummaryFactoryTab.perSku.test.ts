@@ -202,8 +202,9 @@ describe('P9 编辑态预载落库真值（共享行），非编辑态仍显示�
     const qtyB = rows[2]!.find('input[type="number"]')   // B 块 · 共享布
     // 同一物料 = 采购明细中的同一行 ⇒ 两块预载**同一份落库真值**（60 × 1.005 = 60.3）。
     // 这是修复点：曾预载各 SKU 的推算值（21 / 41），而保存却写回共享真值 ⇒ 静默写错。
-    expect((qtyA.element as HTMLInputElement).value).toBe('60.3')
-    expect((qtyB.element as HTMLInputElement).value).toBe('60.3')
+    // 2026-11-11 口径：编辑态输入框向上取整（ceil(60 × 1.005) = 61）
+    expect((qtyA.element as HTMLInputElement).value).toBe('61')
+    expect((qtyB.element as HTMLInputElement).value).toBe('61')
   })
 
   it('编辑态预载值 ≠ 非编辑态该块的推算展示值（证明来源已改、且展示未被污染）', () => {

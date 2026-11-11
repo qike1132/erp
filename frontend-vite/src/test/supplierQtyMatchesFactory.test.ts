@@ -106,8 +106,8 @@ describe('供应商页签数量与工厂页签同源', () => {
     await m.openSummary([1])
 
     m.toggleEditMode(true)
-    // 编辑输入框显示 50 × 1.03 = 51.5（精确值，保存后无损反推）
-    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(51.5)
+    // 编辑输入框显示 ceil(50 × 1.03) = 52（与非编辑态同口径，向上取整）
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(52)
 
     m.toggleEditMode(false)
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(207)
@@ -254,7 +254,8 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
       m.supplierGroups[0]!.materials.map((x) => [x.material_name, x.total_quantity]),
     )
     expect(qty['A布']).toBe(11)
-    expect(qty['手工加布']).toBe(20.6)
+    // 回退同样向上取整（2026-11-11 口径：数量一律整数）：ceil(20 × 1.03) = 21
+    expect(qty['手工加布']).toBe(21)
   })
 
   it('BOM 拆行数据形态：同物料跨部位两行，供应商合计仍为两行之和', async () => {

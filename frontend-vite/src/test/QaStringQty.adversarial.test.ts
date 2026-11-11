@@ -114,8 +114,9 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     // 布料A 与工厂布料行同键 → 取工厂「数量」列派生值（'10' × 1.005 → 11）
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(11)
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).not.toBe(0)
-    // 布料C 工厂侧无对应行 → 回退：字符串真值 '20' × 1.005 = 20.1（同样不得归零）
-    expect(m.supplierGroups[0]!.materials[1]!.total_quantity).toBe(20.1)
+    // 布料C 工厂侧无对应行 → 回退：字符串真值 '20' × 1.005 = 20.1 → 向上取整 21
+    // （2026-11-11 口径：数量一律整数，与工厂「数量」列同口径）
+    expect(m.supplierGroups[0]!.materials[1]!.total_quantity).toBe(21)
     expect(m.supplierGroups[0]!.materials[1]!.total_quantity).not.toBe(0)
     // 原始数据（字符串）不被写回
     expect(m.supplierData!.materials[0]!.total_quantity).toBe('20')
@@ -183,9 +184,9 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
       return tds[tds.length - 3]!.text()
     }
     expect(rows).toHaveLength(2) // 布料A + 布料C（表格内已无「合计」行）
-    // 与工厂数量同源的 11（布料A）+ 回退派生的 20.1（布料C）
+    // 与工厂数量同源的 11（布料A）+ 回退派生的 ceil(20.1)=21（布料C）
     expect(qtyOf(rows[0]!)).toBe('11')
-    expect(qtyOf(rows[1]!)).toBe('20.1')
+    expect(qtyOf(rows[1]!)).toBe('21')
     expect(qtyOf(rows[0]!)).not.toBe(fmtQty(0))
     wrapper.unmount()
   })
@@ -206,8 +207,9 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
       },
     })
     const inputs = wrapper.findAll('input[type="number"]')
-    expect((inputs[0]!.element as HTMLInputElement).value).toBe('10.05')
-    expect((inputs[1]!.element as HTMLInputElement).value).toBe('20.1')
+    // 2026-11-11 口径：编辑态输入框与非编辑态一致，向上取整（10×1.005=10.05→11；20×1.005=20.1→21）
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('11')
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('21')
 
     // 表格内已无「合计」行：编辑态同样只剩数据行
     expect(wrapper.findAll('tbody tr')).toHaveLength(2)

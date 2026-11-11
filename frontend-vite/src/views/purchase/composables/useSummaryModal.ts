@@ -3,7 +3,7 @@ import { purchaseApi } from '@/api'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
-import { calcSpareQuantity, summaryMaterialKey, magnifyByLossRate, ceilMagnifiedByLossRate, buildPerSkuRows, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities } from './perSkuRows'
+import { calcSpareQuantity, summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities } from './perSkuRows'
 import type { PerSkuRow } from './perSkuRows'
 
 // 这些纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
@@ -42,14 +42,18 @@ export function getGroupOrderQty(group: FactoryGroup): number {
 /**
  * 工厂页签「数量」列的展示值（**工厂表 / 供应商表 / 打印 / 导出共用的唯一入口**）。
  *
- * - 非编辑态：按该行损耗率加放后向上取整（与工厂表可见整数一致）；
- * - 编辑态：返回精确加放值，与「自定义编辑」输入框加载值一致（便于保存时无损反推真值）。
+ * 两种状态都按该行损耗率加放后**向上取整**（2026-11-11 owner 口径：数量一律整数，
+ * 20.001 也是 21 —— 编辑态输入框此前显示精确加放值 279.77，与表格可见的整数不一致，
+ * 用户看不懂也不会用小数下单）。
  *
  * 供应商页签的「数量」在同一份工厂数据上调用本函数派生，故两侧天然同源：
  * 用户自定义调整工厂数量或逐行损耗率后，切到供应商页签立即看到同一数值（实时一致）。
+ *
+ * 注：`editing` 参数保留仅为兼容既有调用点（OrderDetailModal 传 false、行模型传
+ * editMode），两种态行为已统一，不再有「精确值」分支。
  */
-export function factoryQtyDisplayValue(baseQty: number, lossRate: number, editing: boolean): number {
-  return editing ? magnifyByLossRate(baseQty, lossRate) : ceilMagnifiedByLossRate(baseQty, lossRate)
+export function factoryQtyDisplayValue(baseQty: number, lossRate: number, _editing: boolean): number {
+  return ceilMagnifiedByLossRate(baseQty, lossRate)
 }
 
 /**
@@ -722,7 +726,7 @@ export function useSummaryModal() {
    * - 同一损耗率、同一取整口径，不再出现「工厂已加放、供应商未加放」的口径差；
    * - 用户自定义编辑工厂数量 / 逐行损耗率后，供应商页签立即反映同一数值（实时一致）。
    *
-   * 编辑态取精确加放值（与输入框一致），非编辑态取向上取整值（与工厂表可见值一致）；
+   * 两种状态都取向上取整值（与工厂表可见值一致，2026-11-11 口径：数量一律整数）；
    * 多分组（客户 × 产品）落到同一物料键时按各行展示值累加，与工厂表可见行相加一致。
    */
   const factoryQtyByMaterialKey = computed(() => {
@@ -784,13 +788,14 @@ export function useSummaryModal() {
         newOrder.push(s)
       }
       // 展示副本：与工厂页签「数量」列同源（见 factoryQtyByMaterialKey），**不写回 supplierData** ——
-      // 原始数量是落库唯一真值；工厂侧无对应行（异常数据）时回退到按统一损耗率放大原始值。
+      // 原始数量是落库唯一真值；工厂侧无对应行（异常数据）时回退到按统一损耗率放大原始值，
+      // 取整口径与工厂「数量」列一致（向上取整，数量一律整数）。
       const derived = factoryQty.get(summaryMaterialKey(m.supplier_name, m.material_name, m.specification, m.unit))
       map[s].push({
         ...m,
         total_quantity: derived !== undefined
           ? derived
-          : magnifyByLossRate(parseFloat(String(m.total_quantity)) || 0, lossRate.value),
+          : ceilMagnifiedByLossRate(parseFloat(String(m.total_quantity)) || 0, lossRate.value),
       })
     })
     const order = supplierOrder.value.length > 0 ? supplierOrder.value : newOrder
