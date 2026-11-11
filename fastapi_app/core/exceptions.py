@@ -60,6 +60,14 @@ class ConflictError(AppError):
         super().__init__(message=message, code="CONFLICT", status_code=409)
 
 
+class ItemsVersionConflict(ConflictError):  # noqa: N818  名称是任务契约的一部分
+    """BOM 同步版本冲突：客户端持有的是过期 items_version（乐观锁 409）"""
+
+    def __init__(self, message: str = "采购单明细已被其他操作更新，请刷新后重试"):
+        super().__init__(message=message)
+        self.code = "ITEMS_VERSION_CONFLICT"
+
+
 class InternalError(AppError):
     """服务器内部错误异常"""
 
