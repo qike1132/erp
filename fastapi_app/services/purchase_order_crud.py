@@ -536,6 +536,23 @@ async def batch_complete_purchase_orders(
     return {'completed': completed, 'errors': errors}
 
 
+def _items_version_lock_stmt(po_ids: list[int]):
+    """构造版本校验 + 行锁语句（PG 下 ``FOR UPDATE``）。
+
+    用途：在读取客户端持有版本的同一语句里对相关 ``purchase_order`` 行加锁，
+    使「比对 → 写入」与 BOM 同步的「加锁 → 递增版本 → 重写明细」互斥，
+    关闭比对后、flush 前被同步提交顶掉的 TOCTOU 窗口。锁范围与
+    ``bom_sync.sync_purchase_order_items`` 一致（仅单表 PO 行）；``ORDER BY id``
+    给多行加锁以确定顺序，降低并发保存互相死锁的可能。
+    """
+    return (
+        select(PurchaseOrder.id, PurchaseOrder.items_version)
+        .where(PurchaseOrder.id.in_(po_ids))
+        .order_by(PurchaseOrder.id)
+        .with_for_update()
+    )
+
+
 async def _ensure_items_versions_match(
     db: AsyncSession, po_ids: set[int], items_versions: dict[int, int] | None,
 ) -> None:
@@ -544,18 +561,14 @@ async def _ensure_items_versions_match(
     必须在**任何写入之前**调用（否则冲突时已写了一半）。只校验 ``items_versions``
     中显式给出的采购单：None / 空 dict（旧客户端）不校验；给出但不在本次涉及集合
     内的采购单也不会被写入，不参与比对（避免无关单的版本变化造成假 409）。
-    单次 ``WHERE id IN (...)`` 取回版本，避免逐单查询（N+1）。
+    单次 ``WHERE id IN (...)`` 取回版本并 ``FOR UPDATE`` 锁行，避免逐单查询（N+1）。
     """
     if not items_versions:
         return
-    check_ids = [oid for oid in po_ids if oid in items_versions]
+    check_ids = sorted(oid for oid in po_ids if oid in items_versions)
     if not check_ids:
         return
-    result = await db.execute(
-        select(PurchaseOrder.id, PurchaseOrder.items_version).where(
-            PurchaseOrder.id.in_(check_ids)
-        )
-    )
+    result = await db.execute(_items_version_lock_stmt(check_ids))
     versions = {row.id: row.items_version for row in result.all()}
     for po_id in check_ids:
         if po_id in versions and (versions[po_id] or 0) != items_versions[po_id]:

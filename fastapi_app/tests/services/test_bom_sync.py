@@ -6,6 +6,7 @@
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -17,6 +18,7 @@ from fastapi_app.services.purchase.bom_sync import (
     sync_purchase_order_items,
 )
 from fastapi_app.services.purchase_order_crud import (
+    _items_version_lock_stmt,
     save_factory_summary_edits,
     update_purchase_order,
 )
@@ -368,3 +370,18 @@ async def test_factory_save_stale_version_writes_nothing(db):
     assert float(item.quantity) == 50.0
     po = await db.get(PurchaseOrder, 8101)
     assert po.spare_rate is None
+
+
+def test_items_version_check_compiles_with_for_update_on_postgres():
+    """版本校验语句必须在 PostgreSQL 下带 ``FOR UPDATE``（行锁）。
+
+    评审修复（Task 6）：比对后、flush 前若 BOM 同步提交了新版本，无锁 SELECT
+    仍会写入旧快照 —— 正是本任务要防的场景。本用例锁定「校验语句含行锁」这一
+    编译期契约。局限：sqlite 夹具不支持 FOR UPDATE 语义（方言直接忽略），无法
+    在行为上验证并发互斥效果；实际锁语义依赖 PG。
+    """
+    stmt = _items_version_lock_stmt([8101, 8102])
+    sql = str(stmt.compile(dialect=postgresql.dialect())).upper()
+    assert 'FOR UPDATE' in sql, sql
+    # 多行加锁按 id 排序，降低并发保存互相死锁的可能
+    assert 'ORDER BY PURCHASE_ORDER.ID' in sql, sql
