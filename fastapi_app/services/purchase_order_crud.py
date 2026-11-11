@@ -764,7 +764,8 @@ async def _bump_items_versions(
         order = version_map.get(po_id)
         if order is None:
             continue
-        order.items_version = (order.items_version or 0) + 1
+        # getattr 兜轻量 mock（SimpleNamespace 无该字段）：真实 ORM 列默认 0/None。
+        order.items_version = (getattr(order, 'items_version', 0) or 0) + 1
         result[po_id] = order.items_version
     return result
 
