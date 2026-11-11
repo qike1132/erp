@@ -120,8 +120,41 @@ describe('汇总保存：items_versions 乐观锁', () => {
       [7],
       { '7': 3 },
     )
+    // 旧后端/响应缺 items_versions：本地快照保持原值（不因缺字段被清空）
+    expect(m.itemsVersions).toEqual({ '7': 3 })
     // 正常保存不得出现 409 提示
     expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it('保存成功响应带 items_versions：本地快照前移，后续保存不再带过期版本', async () => {
+    // 用户编辑数量也会递增 items_version（spec 同步算法-7）：响应回传新版本
+    vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValueOnce(
+      { success: true, items_versions: { '7': 4 } } as never,
+    )
+
+    const m = useSummaryModal()
+    await m.openSummary([7])
+    expect(m.itemsVersions).toEqual({ '7': 3 })
+    m.toggleEditMode(true)
+    m.updateFactoryQty(0, 0, 0, 1100)
+    await m.saveFactoryEdits()
+
+    expect(m.itemsVersions).toEqual({ '7': 4 })
+  })
+
+  it('损耗率自动落库响应带 items_versions：版本快照同步前移', async () => {
+    // spare_rate 覆盖写同样递增 items_version；不回收新版本会让之后的
+    // 「保存修改」带过期版本被 409。
+    vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValueOnce(
+      { success: true, items_versions: { '7': 5 } } as never,
+    )
+
+    const m = useSummaryModal()
+    await m.openSummary([7])
+    await m.applyLossRateAndSave(50)
+
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith([], 50, [7])
+    expect(m.itemsVersions).toEqual({ '7': 5 })
   })
 
   it('409 冲突：warning 提示「BOM 已更新」+ 重新拉汇总（版本前移）+ 仍 reject', async () => {
@@ -241,6 +274,23 @@ describe('订单详情单价保存：items_version 乐观锁', () => {
       5,
     )
     expect(showToast).toHaveBeenCalledWith('单价已保存', 'success')
+  })
+
+  it('保存单价响应带新版本：回写本地订单对象，下一次保存携带新版本', async () => {
+    // 后端对用户改价也递增 items_version：响应 order.items_version 必须回写本地，
+    // 否则同一详情页连续保存第二次会带过期版本被 409。
+    vi.mocked(purchaseApi.updateItemPrices).mockResolvedValueOnce(
+      { success: true, order: { items_version: 6 } } as never,
+    )
+    const order = makeOrder()
+    const w = mountModal(order)
+    await editFirstPriceAndSave(w)
+    expect(order.items_version).toBe(6)
+
+    await w.findAll('input.odm-price-input')[1]!.setValue('7')
+    await w.get('button.odm-save').trigger('click')
+    await flushPromises()
+    expect(purchaseApi.updateItemPrices).toHaveBeenLastCalledWith(100, expect.any(Array), 6)
   })
 
   it('409 冲突：warning 提示「BOM 已更新」+ 触发重新拉单，不出成功提示', async () => {

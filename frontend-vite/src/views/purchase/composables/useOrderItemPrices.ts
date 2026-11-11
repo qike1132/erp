@@ -98,7 +98,13 @@ export function useOrderItemPrices(
       // 携带订单当前的明细版本（乐观锁）：未下发（旧后端/字段缺失）时保持 2 参调用。
       const itemsVersion = current.items_version
       const versionArgs: [number?] = itemsVersion !== undefined ? [itemsVersion] : []
-      await purchaseApi.updateItemPrices(current.id, changedEntries.value, ...versionArgs)
+      const res = await purchaseApi.updateItemPrices(
+        current.id, changedEntries.value, ...versionArgs,
+      ) as unknown as { order?: { items_version?: number } }
+      // 后端对用户改价同样递增 items_version：把响应里的新版本回写到本地订单，
+      // 同一详情页连续保存第二次才不会带过期版本被 409。旧后端无该字段时保持原值。
+      const nextVersion = res?.order?.items_version
+      if (typeof nextVersion === 'number') current.items_version = nextVersion
       showToast('单价已保存', 'success')
       onSaved(current.id)
     } catch (err: unknown) {

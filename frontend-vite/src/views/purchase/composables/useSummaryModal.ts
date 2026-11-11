@@ -609,6 +609,8 @@ export interface SupplierSummaryData {
 interface SaveFactoryEditsResponse {
   success: boolean
   message?: string
+  /** 本次实际递增过 items_version 的采购单 → 新版本（用户编辑也递增版本） */
+  items_versions?: Record<string, number>
 }
 
 /**
@@ -651,6 +653,18 @@ export function useSummaryModal() {
   const orderTime = ref('')
   /** 明细版本快照（`{po_id: items_version}`）：openSummary 记录，保存修改时原样带回 */
   const itemsVersions = ref<Record<string, number>>({})
+  /**
+   * 用保存响应里的 `items_versions`（本次实际递增版本的单 → 新版本）前移本地快照。
+   *
+   * 后端现在对**用户编辑**也递增 items_version（数量/损耗率/备品率覆盖写），
+   * 若不回写，同一弹窗内第二次保存会带着已过期的版本被 409 顶掉。
+   * 响应缺失该字段（旧后端）时保持原值，兼容。
+   */
+  function applyServerItemsVersions(res: SaveFactoryEditsResponse): void {
+    if (res.items_versions && Object.keys(res.items_versions).length > 0) {
+      itemsVersions.value = { ...itemsVersions.value, ...res.items_versions }
+    }
+  }
   /**
    * 损耗率自动落库的可见反馈状态。
    * idle：未发起 / 已复位；saving：有请求在途；saved：最后一次输入已成功落库；error：任一次发送失败。
@@ -990,7 +1004,9 @@ export function useSummaryModal() {
    * `edits` 恒空的理由：数量落库只走编辑态「保存修改」，
    * 自动落库只负责把用户输入的损耗率持久化到本次汇总涉及的采购单。
    */
-  async function sendLossRateToOrders(rate: number, targetOrderIds: number[]) {
+  async function sendLossRateToOrders(
+    rate: number, targetOrderIds: number[],
+  ): Promise<SaveFactoryEditsResponse> {
     const res = await purchaseApi.saveFactoryEdits(
       [],
       rate,
@@ -999,9 +1015,10 @@ export function useSummaryModal() {
     if (!res.success) {
       throw new Error(res.message || '损耗率保存失败')
     }
+    return res
   }
 
-  async function sendLossRate(rate: number) {
+  async function sendLossRate(rate: number): Promise<SaveFactoryEditsResponse> {
     return sendLossRateToOrders(rate, orderIds.value)
   }
 
@@ -1115,11 +1132,14 @@ export function useSummaryModal() {
           const sentEpoch = lossRateEpoch
           const versionsAtSend = new Map(fabricRateVersions)
           const busyAtSend = currentBusyFabricKeys()
-          await sendLossRate(sent)
+          const res = await sendLossRate(sent)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得回写（取消编辑不增代数，仍正常回写）
           if (sentEpoch === lossRateEpoch) {
+            // 备品率覆盖写也会递增 items_version：版本快照必须同步前移，否则
+            // 之后的「保存修改」会带过期版本被 409。
+            applyServerItemsVersions(res)
             syncPersistedLossRateBaseline(sent, versionsAtSend, busyAtSend)
             lastSentEpoch = sentEpoch
           }
@@ -1151,13 +1171,16 @@ export function useSummaryModal() {
    * 单次布料损耗率落库请求：只提交该布料行对应明细的 loss_rate。
    * 数量落库仍只走编辑态「保存修改」，此处不携带 quantity。
    */
-  async function sendFabricLossRate(itemIds: number[], rate: number) {
+  async function sendFabricLossRate(
+    itemIds: number[], rate: number,
+  ): Promise<SaveFactoryEditsResponse> {
     const res = await purchaseApi.saveFactoryEdits(
       [{ item_ids: itemIds, loss_rate: rate }],
     ) as unknown as SaveFactoryEditsResponse
     if (!res.success) {
       throw new Error(res.message || '布料损耗率保存失败')
     }
+    return res
   }
 
   /**
@@ -1199,9 +1222,11 @@ export function useSummaryModal() {
           lossRateSaveState.value = 'saving'
           const sent = next
           const sentEpoch = lossRateEpoch
-          await sendFabricLossRate(ids, sent)
+          const res = await sendFabricLossRate(ids, sent)
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得复活已清空的基线
           if (sentEpoch === lossRateEpoch) {
+            // 逐行损耗率编辑同样递增 items_version（spec 同步算法-7），版本快照前移
+            applyServerItemsVersions(res)
             const persistedRow = fabricPersistedRates.value[gi]?.[si]
             if (persistedRow) persistedRow[fi] = sent
             const mixedRow = fabricLossRateMixed.value[gi]?.[si]
@@ -1293,6 +1318,9 @@ export function useSummaryModal() {
       throw err
     }
     if (res.success) {
+      // 用户编辑（数量/损耗率/备品率）同样递增 items_version：用响应里的新版本
+      // 前移本地快照，同一弹窗内第二次「保存修改」才不会带过期版本被 409。
+      applyServerItemsVersions(res)
       edits.forEach((edit) => {
         factoryData.value?.groups?.forEach((group) => {
           ;(group.suppliers || []).forEach((supplier) => {
