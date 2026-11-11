@@ -213,7 +213,9 @@ def build_expected_items(sku_lines, ctx: _BomContext, name_to_pid, customer_name
         else:
             allocation = dict.fromkeys(scopes, entry['qty'])
         for role_id in scopes:
-            scope_qty = allocation.get(role_id, entry['qty'])
+            # 分配值恒为 int（各角色）/ float（默认 BOM=合并总量），
+            # cast 只是把「object 返回类型」收窄回 _material_row 的数量参数。
+            scope_qty = cast('int | float', allocation.get(role_id, entry['qty']))
             scope_label = _scope_label(pid, role_id, ctx.role_names)
             for spec in _MATERIAL_SPECS:
                 for row in getattr(ctx, spec.map_attr).get(role_id, []):
