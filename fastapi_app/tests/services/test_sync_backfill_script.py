@@ -294,6 +294,9 @@ async def test_same_key_duplicate_target_rows_are_added_not_lost(db):
     assert sorted((r['po_id'], r['quantity']) for r in dry.added) == [
         (8306, 5000.0), (8306, 5000.0)]
     assert [(r['po_id'], r['quantity']) for r in dry.removed] == [(8306, 4000.0)]
+    # 历史行 role=NULL 被角色目标行取代：物料仍在当前 BOM 中 → 不得误报「疑似手工」
+    # （2026-11-11 真实 dry-run 实测：保留 role 的判定键会把同一物料的存在性判否）
+    assert dry.removed[0]['suspected_manual'] is False
     assert dry.matched_unchanged == 0
 
     applied = await run_backfill(db, dry_run=False)

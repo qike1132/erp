@@ -9,7 +9,8 @@
 - ``--product-id N``：只处理覆盖该产品的 pending 单（与产品级发现同口径）。
 
 ``removed`` 行的 ``suspected_manual`` 判定：该行物料键去掉部位后的宽松键
-（``_fallback_key``：物料/规格/单位/供应商/分类）不在任何目标行中 → 疑似手工添加行。
+（``_manual_key``：物料/规格/单位/供应商/分类，忽略 role/部位）不在任何目标行中
+→ 疑似手工添加行。
 部位拆行（旧行无部位、新 BOM 有部位）属 BOM 自身演化，**不**标记为手工行；
 真正的删除行无论是否标记都会逐行列出供人工复核（spec：BOM 已不存在的行一律删除）。
 
@@ -41,7 +42,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.exceptions import ItemsVersionConflict
 from fastapi_app.services.purchase.bom_sync import (
     _existing_key,
-    _fallback_key,
     _target_key,
     find_pending_po_ids_for_product,
     sync_purchase_order_items,
@@ -122,6 +122,17 @@ def _same_quantity(old: dict, item: dict) -> bool:
             and round(old['unit_usage'], 4) == round(_num(item.get('unit_usage')), 4))
 
 
+def _manual_key(key: tuple) -> tuple:
+    """疑似手工判定的物料身份键：**去掉 role 与部位**（物料/规格/单位/供应商/分类）。
+
+    role 是同一物料的「分账维度」而非物料身份（2026-11-11）：历史 pending 单
+    的明细 role=NULL（哨兵 0），目标是各角色行（11..N）——若判定键保留 role，
+    同一物料的存在性会判否，所有旧行都被误报成「疑似手工」（真实 dry-run
+    实测 PO-2611-005 27/27 误报）。
+    """
+    return (key[1], key[2], key[3], key[5], key[6])
+
+
 def _classify_rows(po_id: int, order_no: str | None,
                    old_rows: list[dict], target: list[dict],
                    ) -> tuple[list[dict], list[dict], list[dict], int]:
@@ -136,14 +147,14 @@ def _classify_rows(po_id: int, order_no: str | None,
     配对行数量/用量完全一致计入 ``matched_unchanged``（不打印为变更，评审
     Minor 4）——``_diff_counts.updated`` 按键交集计数，包含无变化行。
 
-    ``suspected_manual``：删除行的宽松键（去部位）不在任何目标行中 → 该物料
-    在当前 BOM 里完全不存在，最可能是手工加行。跨部位调整的旧行宽松键仍命中
-    目标行，不算手工行。
+    ``suspected_manual``：删除行的**物料身份键**（去 role/部位，见 ``_manual_key``）
+    不在任何目标行中 → 该物料在当前 BOM 里完全不存在，最可能是手工加行。
+    跨部位/跨角色调整的旧行身份键仍命中目标行，不算手工行（2026-11-11 修误报）。
     """
     target_by_key: dict[tuple, list[dict]] = defaultdict(list)
     for item in target:
         target_by_key[_target_key(item)].append(item)
-    target_fallback_keys = {_fallback_key(_target_key(item)) for item in target}
+    target_fallback_keys = {_manual_key(_target_key(item)) for item in target}
 
     old_by_key: dict[tuple, list[dict]] = defaultdict(list)
     for row in old_rows:
@@ -175,7 +186,7 @@ def _classify_rows(po_id: int, order_no: str | None,
             entry.update({
                 'quantity': old['quantity'],
                 'unit_usage': old['unit_usage'],
-                'suspected_manual': _fallback_key(key) not in target_fallback_keys,
+                'suspected_manual': _manual_key(key) not in target_fallback_keys,
             })
             removed.append(entry)
         for item in bucket_sorted[len(olds_sorted):]:
