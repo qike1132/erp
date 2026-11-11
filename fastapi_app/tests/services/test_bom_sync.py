@@ -46,25 +46,38 @@ async def db():
     await engine.dispose()
 
 
+_UNSET = object()
+
+
 async def _seed(session, *, status='pending', po_id=8101, po_sku_name='产品A',
-                source_order_ids='[9101]', product_barcode=None):
-    """盲盒产品 201：6 角色；绿色超柔跨身体/脚底各 1.0；木棒辅料每角色 1.0。"""
-    session.add(Product(id=201, name='产品A', is_blind_box=True, has_hidden_role=False,
-                        barcode=product_barcode))
-    for rid in range(11, 17):
-        session.add(ProductRole(id=rid, product_id=201, role_name=f'角色{rid}'))
-        session.add(ProductAccessory(
-            id=1000 + rid, product_id=201, role_id=rid, accessory_name='木棒按摩锤',
-            specification='1条', unit='个', quantity=1.0, supplier_name='木棒'))
-    for fid, part in ((1, '身体'), (2, '脚底')):
-        session.add(ProductFabric(
-            id=fid, product_id=201, role_id=None, fabric_name='绿色超柔',
-            specification='234', unit='码', quantity=1.0, part_name=part,
-            supplier_name='美利达'))
-    session.add(Order(id=9101, order_no='SO-9101', customer='客户甲',
-                      product_id=201, quantity=10000, status='已备货'))
-    session.add(OrderItem(id=1, order_id=9101, product_id=201,
-                          product_name='产品A', quantity=10000))
+                source_order_ids=_UNSET, product_barcode=None):
+    """盲盒产品 201：6 角色；绿色超柔跨身体/脚底各 1.0；木棒辅料每角色 1.0。
+
+    共享夹具（产品/BOM/客户订单）只插一次；可多次调用追加多张采购单，
+    旧行 id 按 po_id 偏移（8101 → 1/2、8102 → 11/12），避免主键冲突。
+    """
+    if source_order_ids is _UNSET:
+        # sqlite 不支持 partial unique index（uq_po_pending_dedup 的 WHERE 被丢弃），
+        # 同 (customer, supplier, source ids) 的第二张单会撞唯一键 → 非 8101 的
+        # 单用自身 id 作来源区分；默认调用方只把它当 completed 单，不参与解析。
+        source_order_ids = '[9101]' if po_id == 8101 else f'[{po_id}]'
+    if await session.get(Product, 201) is None:
+        session.add(Product(id=201, name='产品A', is_blind_box=True, has_hidden_role=False,
+                            barcode=product_barcode))
+        for rid in range(11, 17):
+            session.add(ProductRole(id=rid, product_id=201, role_name=f'角色{rid}'))
+            session.add(ProductAccessory(
+                id=1000 + rid, product_id=201, role_id=rid, accessory_name='木棒按摩锤',
+                specification='1条', unit='个', quantity=1.0, supplier_name='木棒'))
+        for fid, part in ((1, '身体'), (2, '脚底')):
+            session.add(ProductFabric(
+                id=fid, product_id=201, role_id=None, fabric_name='绿色超柔',
+                specification='234', unit='码', quantity=1.0, part_name=part,
+                supplier_name='美利达'))
+        session.add(Order(id=9101, order_no='SO-9101', customer='客户甲',
+                          product_id=201, quantity=10000, status='已备货'))
+        session.add(OrderItem(id=1, order_id=9101, product_id=201,
+                              product_name='产品A', quantity=10000))
     session.add(PurchaseOrder(
         id=po_id, order_no=f'PO-{po_id}', customer_name='客户甲', product_name='产品A',
         product_quantity=10000, supplier_name='美利达',
@@ -73,12 +86,13 @@ async def _seed(session, *, status='pending', po_id=8101, po_sku_name='产品A',
         id=po_id, po_id=po_id, product_name=po_sku_name, product_barcode='bA',
         order_qty=10000, source_order_id=9101, source_record_type='order'))
     # 旧快照：绿色超柔一行 50（无部位、有率/价）；手工孤儿行 蓝色超柔 890
+    base = (po_id - 8101) * 10
     session.add(PurchaseOrderItem(
-        id=1, order_id=po_id, material_name='绿色超柔', specification='234',
+        id=base + 1, order_id=po_id, material_name='绿色超柔', specification='234',
         unit='码', part_name=None, supplier_name='美利达', quantity=50,
         loss_rate=30, unit_price=2, material_category='fabric'))
     session.add(PurchaseOrderItem(
-        id=2, order_id=po_id, material_name='蓝色超柔', specification='223',
+        id=base + 2, order_id=po_id, material_name='蓝色超柔', specification='223',
         unit='码', part_name=None, supplier_name='美利达', quantity=890,
         material_category='fabric'))
     await session.commit()
@@ -176,6 +190,51 @@ async def test_sync_pending_items_for_product_batches(db):
     out = await sync_pending_items_for_product(db, 201)
     assert out['synced'] == 1
     assert out['unresolved_po_ids'] == []
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.items_version == 1
+
+
+async def test_find_pending_only_and_skip_completed(db):
+    await _seed(db)                       # PO 8101 pending，产品 201
+    await _seed(db, po_id=8102, status='completed')
+    affected, unresolved = await find_pending_po_ids_for_product(db, 201)
+    assert affected == [8101]
+    assert unresolved == []
+
+
+async def test_unresolved_sku_is_reported_not_written(db):
+    # 无 source_order_ids 且 sku 名称对不上 → 三层回退全部失败 → unresolved
+    await _seed(db, po_sku_name='改名前的产品名', source_order_ids=None)
+    affected, unresolved = await find_pending_po_ids_for_product(db, 201)
+    assert affected == []
+    assert unresolved == [8101]
+    report = await sync_pending_items_for_product(db, 201)
+    assert report['synced'] == 0
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.items_version == 0  # 解析失败不写库
+
+
+async def test_find_pending_resolves_snapshot_name_without_source_ids(db):
+    # 备货「一键生成」单主表无来源，来源只在 po_sku 快照：按快照名反查（产品未改名）
+    await _seed(db, source_order_ids=None)
+    affected, unresolved = await find_pending_po_ids_for_product(db, 201)
+    assert affected == [8101]
+    assert unresolved == []  # 能解析却报 unresolved = 该单永远不会被同步（静默漏同步）
+
+
+async def test_find_pending_resolves_barcode_when_renamed_without_source_ids(db):
+    # 快照名已过期（产品改名）但条码仍可解析：与单张同步的条码回退同口径
+    await _seed(db, po_sku_name='产品A-旧名', source_order_ids=None, product_barcode='bA')
+    affected, unresolved = await find_pending_po_ids_for_product(db, 201)
+    assert affected == [8101]
+    assert unresolved == []
+
+
+async def test_sync_pending_items_for_product_syncs_no_source_id_po_by_name(db):
+    # 发现与同步必须同口径：快照名可解析的单要真能同步（产品无条码也成立）
+    await _seed(db, source_order_ids=None)
+    report = await sync_pending_items_for_product(db, 201)
+    assert report['synced'] == 1
     po = await db.get(PurchaseOrder, 8101)
     assert po.items_version == 1
 

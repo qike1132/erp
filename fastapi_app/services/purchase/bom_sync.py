@@ -1,10 +1,12 @@
-"""BOM 明细同步服务（task-3）。
+"""BOM 明细同步服务（task-3/4）。
 
 对 pending 采购单按当前 BOM（与生成路径同口径）整单重建明细：
 - 版本保护（``items_version`` 乐观锁，冲突抛 409）；
 - 旧行的损耗率/单价/备注按匹配键继承（精确键消费式 + 回退键复用）；
 - 规范序列无变化时不写库、不递增版本；
 - 写路径落 ModificationLog(field_name='bom_sync')，事务由调用方控制。
+- 产品级发现：来源订单链 + po_sku 快照名/条码解析受影响 pending 单；
+  解析失败的单进 ``unresolved``（不静默），批量同步逐单 savepoint 隔离。
 """
 import json
 import logging
@@ -17,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import ItemsVersionConflict
 from fastapi_app.services.purchase._common import (
+    _resolve_pids_from_sku_lines,
     fetch_po_sku_lines_map,
     fetch_po_sku_pids_map,
 )
@@ -261,6 +264,12 @@ async def sync_purchase_order_items(
     sku_lines = await _load_sku_lines(db, order)
     po_pids_map = await fetch_po_sku_pids_map(db, [order])
     pids = list(po_pids_map.get(po_id) or [])
+    if not pids:
+        # 备货「一键生成」单主表 source_order_ids 为 NULL（2026-11-07 生产缺陷同款）：
+        # 与产品级发现同口径，先按快照产品名反查 pid；条码回退仍由 _resolve_sku_pids 兜底。
+        pids_by_po: dict[int, list[int]] = {po_id: pids}
+        await _resolve_pids_from_sku_lines(db, pids_by_po, {po_id: sku_lines})
+        pids = pids_by_po[po_id]
 
     name_to_pid = await _resolve_sku_pids(db, po_id, sku_lines, pids)
     if name_to_pid is None:
@@ -296,6 +305,46 @@ async def sync_purchase_order_items(
                       updated=updated, removed=removed, removed_rows=removed_rows)
 
 
+async def _backfill_pids_from_sku_snapshots(
+    db: AsyncSession, pids_map: dict[int, list[int]],
+) -> None:
+    """给主表来源解析不出 pid 的采购单按 ``purchase_order_sku`` 快照补 pid（原地修改）。
+
+    Why：备货「一键生成」的采购单主表 ``source_order_ids`` 为 NULL，来源只落在快照表里，
+    ``fetch_po_sku_pids_map`` 对其恒空（与撤销路径 2026-11-07 生产缺陷同款）。先按快照
+    产品名反查（``_resolve_pids_from_sku_lines``，与撤销/工厂汇总同口径），再按快照条码
+    兜底（产品改名场景，与单张同步的条码回退同口径）。两层都失败的采购单保持空 pids，
+    由调用方计入 unresolved —— 解析失败不静默。
+    """
+    empty_ids = [po_id for po_id, pids in pids_map.items() if not pids]
+    if not empty_ids:
+        return
+    sku_rows = await fetch_po_sku_map(db, empty_ids)
+    if not sku_rows:
+        return
+    await _resolve_pids_from_sku_lines(db, pids_map, sku_rows)
+
+    still_empty = [po_id for po_id in empty_ids if not pids_map.get(po_id)]
+    barcodes = {
+        _norm(line.get('product_barcode'))
+        for po_id in still_empty
+        for line in sku_rows.get(po_id) or []
+    } - {''}
+    if not barcodes:
+        return
+    rows = await db.execute(
+        select(Product.id, Product.barcode).where(Product.barcode.in_(barcodes))
+    )
+    pid_by_barcode: dict[str, int] = {}
+    for pid, barcode in rows.all():
+        pid_by_barcode.setdefault(_norm(barcode), pid)
+    for po_id in still_empty:
+        for line in sku_rows.get(po_id) or []:
+            pid = pid_by_barcode.get(_norm(line.get('product_barcode')))
+            if pid is not None and pid not in pids_map[po_id]:
+                pids_map[po_id].append(pid)
+
+
 async def find_pending_po_ids_for_product(
     db: AsyncSession, product_id: int,
 ) -> tuple[list[int], list[int]]:
@@ -307,6 +356,7 @@ async def find_pending_po_ids_for_product(
     if not pos:
         return [], []
     pids_map = await fetch_po_sku_pids_map(db, list(pos))
+    await _backfill_pids_from_sku_snapshots(db, pids_map)
     matched: list[int] = []
     unresolved: list[int] = []
     for po in pos:
