@@ -232,17 +232,37 @@ def _is_loopback_client(request: Request) -> bool:
     return host in {"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"}
 
 
+def _is_direct_loopback(request: Request) -> bool:
+    """本机进程**直连**（回环且无反代头）。
+
+    后端仅绑 127.0.0.1，经 nginx 来的公网/局域网请求在 backend 侧同样表现为
+    回环，但 nginx 必带 ``X-Forwarded-For``（$proxy_add_x_forwarded_for）；
+    直连的本机 GUI/脚本没有该头。内部运维信号（runtime/backup 等）只对直连开放。
+    """
+    if not _is_loopback_client(request):
+        return False
+    headers = getattr(request, "headers", None)
+    return not (headers and headers.get("x-forwarded-for"))
+
+
 def _attach_runtime(payload: Any, request: Request) -> Any:
-    if isinstance(payload, dict) and _is_loopback_client(request):
+    if isinstance(payload, dict) and _is_direct_loopback(request):
         payload["runtime"] = _runtime_fingerprint()
     return payload
 
 
-def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[str]):
-    """基于缓存快照构建健康响应（降级标记逐请求注入，不写回缓存）。"""
+def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[str],
+                       include_internal: bool | None = None):
+    """基于缓存快照构建健康响应（降级标记逐请求注入，不写回缓存）。
+
+    ``include_internal`` 显式控制是否附加 backup/audit/checks 等内部信号；
+    缺省沿用旧语义（仅已登录用户可见）。服务器管理器在本机直连时由
+    ``health_check`` 传 True（见 ``_is_direct_loopback``）。
+    """
+    internal_visible = (user_id is not None) if include_internal is None else include_internal
     # P0-10：降级标记逐请求注入（不写回缓存，缓存只存 DB/Redis 健康快照）
     cached_public = _with_security_degraded(cached_public, reasons)
-    if user_id is None:
+    if not internal_visible:
         if cached_public.get("status") == "unhealthy":
             return Response(
                 content=json.dumps(cached_public, ensure_ascii=False),
@@ -275,8 +295,10 @@ def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[s
     return health_data
 
 
-async def _build_fresh_health(user_id: int | None, reasons: list[str]):
+async def _build_fresh_health(user_id: int | None, reasons: list[str],
+                              include_internal: bool | None = None):
     """无缓存时实时探测 DB/Redis 并构建健康响应。"""
+    internal_visible = (user_id is not None) if include_internal is None else include_internal
     overall_healthy = await verify_db_connectivity()
 
     redis_ok = True
@@ -321,7 +343,7 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str]):
     # P0-10：降级标记只加在响应上（缓存里存的是 DB/Redis 健康快照）
     health_data = _with_security_degraded(dict(public_data), reasons)
 
-    if user_id is not None:
+    if internal_visible:
         health_data["backup"] = backup_signal
         health_data["audit_retention"] = audit_signal
         health_data["numbering_audit_retention"] = numbering_retention_signal
@@ -351,11 +373,16 @@ async def health_check(
     user_id: int | None = Depends(_get_optional_user),
 ):
     reasons = await degraded_reasons_all()
+    # 本机直连（服务器管理器 / watchdog）视为内部调用：备份徽章依赖
+    # /api/health 的 backup 块；2026-11-02 匿名隐藏后 GUI 永远显示「备份 未上报」。
+    include_internal = user_id is not None or _is_direct_loopback(request)
     cached_public = _get_cached_health()
     if cached_public is not None:
-        payload = _health_from_cache(cached_public, user_id, reasons)
+        payload = _health_from_cache(cached_public, user_id, reasons,
+                                     include_internal=include_internal)
     else:
-        payload = await _build_fresh_health(user_id, reasons)
+        payload = await _build_fresh_health(user_id, reasons,
+                                            include_internal=include_internal)
     return _attach_runtime(payload, request)
 
 

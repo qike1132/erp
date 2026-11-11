@@ -19,8 +19,9 @@ import pytest
 from fastapi_app.core import health
 
 
-def _req(host: str):
-    return SimpleNamespace(client=SimpleNamespace(host=host))
+def _req(host: str, xff: str | None = None):
+    headers = {} if xff is None else {'x-forwarded-for': xff}
+    return SimpleNamespace(client=SimpleNamespace(host=host), headers=headers)
 
 
 def test_runtime_fingerprint_is_stable_within_process():
