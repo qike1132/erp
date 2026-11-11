@@ -1143,6 +1143,7 @@ export interface FactorySummarySaveRequest {
   edits?: Array<FactorySummaryEditItem>
   order_ids?: Array<number>
   spare_rate?: number | null
+  items_versions?: Record<string, number>
 }
 
 export interface FieldCandidateValue {
@@ -2308,6 +2309,7 @@ export interface PurchaseOrderUpdateRequest {
   supplier_name?: string | null
   customer_name?: string | null
   modify_reason?: string
+  items_version?: number | null
   item_prices?: Array<PurchaseOrderItemPriceUpdate> | null
 }
 

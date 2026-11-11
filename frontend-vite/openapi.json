@@ -26565,11 +26565,19 @@
             ],
             "title": "Spare Rate",
             "description": "损耗率(千分之几)，None=不覆盖已存值"
+          },
+          "items_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Items Versions",
+            "description": "客户端持有的各采购单明细版本（po_id → items_version），过期返回 409；空=不校验"
           }
         },
         "type": "object",
         "title": "FactorySummarySaveRequest",
-        "description": "保存工厂订单编辑请求。\n\n- `edits` 允许为空：损耗率输入框在非编辑态即可交互，用户可能「只改了损耗率、\n  没有任何布料改动」，此时仅靠 `order_ids` + `spare_rate` 也要能落库。\n- `order_ids`：本次汇总涉及的采购单 ID 列表，用于在无编辑项时定位要写入备品的采购单。\n- `spare_rate`：对该次涉及的所有采购单覆盖写的损耗率（千分之几）；`None` 表示不覆盖。"
+        "description": "保存工厂订单编辑请求。\n\n- `edits` 允许为空：损耗率输入框在非编辑态即可交互，用户可能「只改了损耗率、\n  没有任何布料改动」，此时仅靠 `order_ids` + `spare_rate` 也要能落库。\n- `order_ids`：本次汇总涉及的采购单 ID 列表，用于在无编辑项时定位要写入备品的采购单。\n- `spare_rate`：对该次涉及的所有采购单覆盖写的损耗率（千分之几）；`None` 表示不覆盖。\n- `items_versions`：客户端打开汇总时拿到的各采购单明细版本（po_id → items_version）。\n  非空时服务层逐单比对，过期即 409；缺省（旧客户端）不校验。"
       },
       "FieldCandidateValue": {
         "properties": {
@@ -33317,6 +33325,18 @@
             "type": "string",
             "title": "Modify Reason",
             "default": ""
+          },
+          "items_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items Version",
+            "description": "客户端持有的明细版本号；None=不校验（旧客户端），不一致返回 409"
           },
           "item_prices": {
             "anyOf": [
