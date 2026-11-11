@@ -182,6 +182,47 @@ def _material_row(
     }
 
 
+def build_expected_items(sku_lines, ctx: _BomContext, name_to_pid, customer_name: str) -> list[dict]:
+    """按 PO 的逐 SKU 快照重算采购明细行（与生成路径同口径）。
+
+    同一 pid 的多行先合并订单数量；盲盒 pid 合并后整体分配一次（避免重复进位）；
+    非盲盒保持历史上限「每个作用域都用完整数量」。
+    """
+    pid_name_map = {pid: name for name, pid in name_to_pid.items()}
+    items: list[dict] = []
+    merged: dict[int, dict] = {}
+    for line in sku_lines or []:
+        name = (line.get('product_name') or '').strip()
+        pid = name_to_pid.get(name)
+        if pid is None:
+            continue
+        entry = merged.setdefault(pid, {'qty': 0.0, 'name': name})
+        entry['qty'] += float(line.get('order_qty') or 0)
+
+    for pid, entry in merged.items():
+        product_name = pid_name_map.get(pid) or entry['name']
+        scopes = ctx.scopes_for(pid)
+        if pid in ctx.blind_box_pids:
+            allocation = allocate_scope_quantities(
+                entry['qty'], scopes,
+                hidden_carton_ratio=ctx.hidden_ratios.get(pid),
+                name_of=partial(_role_name_lookup, ctx.role_names, pid),
+                hidden_role_id=ctx.hidden_role_ids.get(pid),
+                blind_box=True, has_hidden=pid in ctx.has_hidden_pids,
+            )
+        else:
+            allocation = dict.fromkeys(scopes, entry['qty'])
+        for role_id in scopes:
+            scope_qty = allocation.get(role_id, entry['qty'])
+            scope_label = _scope_label(pid, role_id, ctx.role_names)
+            for spec in _MATERIAL_SPECS:
+                for row in getattr(ctx, spec.map_attr).get(role_id, []):
+                    if row.product_id != pid:
+                        continue
+                    items.append(_material_row(spec, row, scope_qty, product_name, customer_name, scope_label))
+    return items
+
+
 def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[int, str]) -> list:
     """为给定记录列表构建物料项。
 
