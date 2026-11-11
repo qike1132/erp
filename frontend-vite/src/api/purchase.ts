@@ -152,9 +152,14 @@ export const purchaseApi = {
    * 补录采购明细单价（按明细 id）。
    * 一键生成路径没有价格来源（BOM 行无价字段），单价恒 0；这是唯一的补录入口。
    * 只改单价：不动数量/物料，也不删行。
+   * `itemsVersion` 为订单当前的明细版本（乐观锁）：携带后若 BOM 同步已改写明细，
+   * 后端返回 409（ITEMS_VERSION_CONFLICT）而非把价格写到已过期的行上。
    */
-  updateItemPrices: (id: number, itemPrices: { id: number; unit_price: number }[]) =>
-    put(`/purchase-center/orders/${id}`, { item_prices: itemPrices }),
+  updateItemPrices: (id: number, itemPrices: { id: number; unit_price: number }[], itemsVersion?: number) =>
+    put(`/purchase-center/orders/${id}`, {
+      item_prices: itemPrices,
+      ...(itemsVersion !== undefined ? { items_version: itemsVersion } : {}),
+    }),
   oneClickGenerate: (
     data: OneClickGenerateRequest,
     options?: { headers?: Record<string, string> },
@@ -175,13 +180,21 @@ export const purchaseApi = {
    * 保存工厂汇总编辑。
    * - `edits` 可为空（用户仅交互了损耗率、无布料改动）；
    * - `spareRate` 省略时不进请求体 → 后端保留已存率（避免用 0 覆盖）；
-   * - `orderIds` 为本次汇总涉及的采购单 ID，用于无编辑项时定位写入备品的目标。
+   * - `orderIds` 为本次汇总涉及的采购单 ID，用于无编辑项时定位写入备品的目标；
+   * - `itemsVersions` 为 `{po_id: items_version}` 快照（乐观锁）：携带后若汇总打开
+   *   期间 BOM 同步已改写明细，后端返回 409（ITEMS_VERSION_CONFLICT）。
    */
-  saveFactoryEdits: (edits: Record<string, unknown>[], spareRate?: number, orderIds?: number[]) =>
+  saveFactoryEdits: (
+    edits: Record<string, unknown>[], spareRate?: number, orderIds?: number[],
+    itemsVersions?: Record<string, number>,
+  ) =>
     post('/purchase-center/orders/factory-summary/save', {
       edits,
       ...(spareRate !== undefined ? { spare_rate: spareRate } : {}),
       ...(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
+      ...(itemsVersions && Object.keys(itemsVersions).length > 0
+        ? { items_versions: itemsVersions }
+        : {}),
     }),
   summaryPrint: (ids: number[], format: string) => post<ExportResponse>('/purchase-center/orders/summary-print', { ids, format }),
   /**

@@ -95,10 +95,21 @@ export function useOrderItemPrices(
     if (!hasPriceChanges.value) return
     saving.value = true
     try {
-      await purchaseApi.updateItemPrices(current.id, changedEntries.value)
+      // 携带订单当前的明细版本（乐观锁）：未下发（旧后端/字段缺失）时保持 2 参调用。
+      const itemsVersion = current.items_version
+      const versionArgs: [number?] = itemsVersion !== undefined ? [itemsVersion] : []
+      await purchaseApi.updateItemPrices(current.id, changedEntries.value, ...versionArgs)
       showToast('单价已保存', 'success')
       onSaved(current.id)
     } catch (err: unknown) {
+      // 409（ITEMS_VERSION_CONFLICT）：BOM 同步已改写明细，价格不能写到过期行上。
+      // 提示 + 触发重新拉单（父组件收到 saved 后重新取详情，拿到最新明细与版本）；
+      // 不显示「单价已保存」，也不显示通用失败提示。
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        showToast('BOM 已更新，采购明细已刷新，请重新编辑', 'warning')
+        onSaved(current.id)
+        return
+      }
       showToast((err as Error).message || '保存单价失败', 'error')
     } finally {
       saving.value = false

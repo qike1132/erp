@@ -1,5 +1,6 @@
 import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
+import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
 import { calcSpareQuantity, summaryMaterialKey, magnifyByLossRate, ceilMagnifiedByLossRate, buildPerSkuRows, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities } from './perSkuRows'
@@ -573,6 +574,12 @@ export interface FactorySummaryData {
   spare_rate?: number | null
   /** 各单损耗率不一致：true 时 spare_rate 恒为 null，供 UI 提示「各订单损耗率不一致」 */
   spare_rate_mixed?: boolean
+  /**
+   * 本次汇总所涉采购单的明细版本快照（`{po_id: items_version}`，BOM 实时同步乐观锁）。
+   * 保存汇总时原样带回；期间 BOM 同步改写明细 → 后端 409（ITEMS_VERSION_CONFLICT）。
+   * 旧后端不返回此字段 → undefined（不传版本，保持改动前行为）。
+   */
+  items_versions?: Record<string, number>
   groups: FactoryGroup[]
 }
 
@@ -642,6 +649,8 @@ export function useSummaryModal() {
   const supplierOrder = ref<string[]>([])
   /** 订单时间（选中订单中最晚 create_time，回退 order_date；由 openSummary 调用方传入） */
   const orderTime = ref('')
+  /** 明细版本快照（`{po_id: items_version}`）：openSummary 记录，保存修改时原样带回 */
+  const itemsVersions = ref<Record<string, number>>({})
   /**
    * 损耗率自动落库的可见反馈状态。
    * idle：未发起 / 已复位；saving：有请求在途；saved：最后一次输入已成功落库；error：任一次发送失败。
@@ -804,6 +813,8 @@ export function useSummaryModal() {
     factoryOriginalData.value = structuredClone(fRes)
     supplierData.value = structuredClone(sRes)
     supplierOriginalData.value = structuredClone(sRes)
+    // 明细版本快照：保存修改时原样带回（乐观锁）；旧后端无此字段 → 空对象 = 不传版本。
+    itemsVersions.value = { ...(fRes.items_versions || {}) }
     const initOrder: string[] = []
     sRes.materials?.forEach((m) => {
       const s = m.supplier_name || '未指定供应商'
@@ -1250,11 +1261,28 @@ export function useSummaryModal() {
       return
     }
     // 损耗率仅在交互过时提交；未交互则不发送 spare_rate（避免用 0 覆盖已存率）
-    const res = await purchaseApi.saveFactoryEdits(
-      edits,
-      rateTouched ? lossRate.value : undefined,
-      orderIds.value,
-    ) as unknown as SaveFactoryEditsResponse
+    // items_versions 仅在拿到快照时作为第 4 参携带（旧后端/空快照保持 3 参调用）
+    const versionSnapshot = { ...itemsVersions.value }
+    const versionArgs: [Record<string, number>?] =
+      Object.keys(versionSnapshot).length > 0 ? [versionSnapshot] : []
+    let res: SaveFactoryEditsResponse
+    try {
+      res = await purchaseApi.saveFactoryEdits(
+        edits,
+        rateTouched ? lossRate.value : undefined,
+        orderIds.value,
+        ...versionArgs,
+      ) as unknown as SaveFactoryEditsResponse
+    } catch (err) {
+      // 409（ITEMS_VERSION_CONFLICT）：汇总打开期间 BOM 同步改写了明细。
+      // 提示 + 重新拉汇总（拿到最新明细与新版本），并继续抛出——
+      // 上层不得把这次失败显示成「修改已保存」。
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        toast.warning('BOM 已更新，采购明细已刷新，请重新编辑')
+        await openSummary(orderIds.value, orderTime.value)
+      }
+      throw err
+    }
     if (res.success) {
       edits.forEach((edit) => {
         factoryData.value?.groups?.forEach((group) => {
@@ -1300,6 +1328,7 @@ export function useSummaryModal() {
     pendingRate = null
     supplierOrder.value = []
     orderTime.value = ''
+    itemsVersions.value = {}
     // 关闭弹窗即丢弃「尚未落库的损耗率交互」：否则失败态残留的 lossRate/lossRateTouched
     // 会被后续 handleCompleteOrder/handleBatchComplete 读取，把陈旧损耗率推给无关订单。
     lossRate.value = 0
@@ -1403,6 +1432,7 @@ export function useSummaryModal() {
     lossRateSaveState,
     orderIds,
     supplierGroups,
+    itemsVersions,
     openSummary,
     close,
     toggleEditMode,

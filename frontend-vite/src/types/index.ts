@@ -288,6 +288,8 @@ export interface PurchaseOrder {
   quantity?: number
   /** 订单级损耗率快照（千分之几）；后端 get_purchase_order 下发，物料清单的数量回退口径 */
   spare_rate?: number | null
+  /** 采购明细版本（BOM 实时同步的乐观锁）：保存单价时原样带回，过期则后端 409 */
+  items_version?: number
   completed_at?: string
   supplier_id?: number
   customer?: string

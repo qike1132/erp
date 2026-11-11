@@ -31,6 +31,7 @@ vi.mock('@/composables/useExport', async () => {
 })
 
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
+import { buildPerSkuRows } from '@/views/purchase/composables/perSkuRows'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
 
@@ -254,6 +255,56 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
     )
     expect(qty['A布']).toBe(11)
     expect(qty['手工加布']).toBe(20.6)
+  })
+
+  it('BOM 拆行数据形态：同物料跨部位两行，供应商合计仍为两行之和', async () => {
+    // Task 9 扩展：BOM 把同一物料拆到两个部位（身体 2.2 / 头部 3.5），
+    // 工厂页显示两行（同物料键，键不含部位），供应商页仍聚合为一行——
+    // 合计必须等于两行可见值之和，不能按合计后单行加放。
+    // 数据刻意选非整齐值以区分两种口径：逐行 ceil(2.2×1.03)=3、ceil(3.5×1.03)=4 → 7，
+    // 而「先合计再取整」ceil(5.7×1.03)=6 —— 两者必须可区分。
+    mockFactory([{
+      customer_name: '客户', product_name: '产品', product_quantity: 100,
+      suppliers: [{
+        supplier_name: '供应商1',
+        fabrics: [
+          fabric('里布', 2.2, { item_ids: [1], part_name: '身体', part_display: '身体' }),
+          fabric('里布', 3.5, { item_ids: [2], part_name: '头部', part_display: '头部' }),
+        ],
+      }],
+      skus: [{
+        product_name: 'SKU-1', order_qty: 100,
+        materials: [
+          {
+            supplier_name: '供应商1', material_name: '里布', specification: 'S1',
+            unit: '米', quantity: 2.2, part_name: '身体', part_display: '身体',
+          },
+          {
+            supplier_name: '供应商1', material_name: '里布', specification: 'S1',
+            unit: '米', quantity: 3.5, part_name: '头部', part_display: '头部',
+          },
+        ],
+      }],
+    }])
+    mockSupplier([
+      { material_name: '里布', specification: 'S1', unit: '米', total_quantity: 5.7, supplier_name: '供应商1' },
+    ])
+
+    const m = useSummaryModal()
+    await m.openSummary([1])
+
+    // 工厂页：同一物料按部位拆成两行（部位列分别显示，物料键不含部位）
+    const rows = buildPerSkuRows(m.factoryData!.groups[0]!, 30)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => [r.materialName, r.partDisplay])).toEqual([
+      ['里布', '身体'],
+      ['里布', '头部'],
+    ])
+
+    // 供应商页：仍聚合为一行；数量 = 两条工厂可见行之和（3 + 4 = 7）
+    expect(m.supplierGroups).toHaveLength(1)
+    expect(m.supplierGroups[0]!.materials).toHaveLength(1)
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(7)
   })
 
   it('编辑态：共用同一采购明细的多 SKU 行只算一次（不得叠乘）', async () => {
