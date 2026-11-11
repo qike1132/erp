@@ -313,6 +313,11 @@ def _role_sort_key(role_id) -> tuple[int, int]:
     return (0, 0) if role_id is None else (1, int(role_id))
 
 
+def _role_sentinel(role_id) -> int:
+    """role 归一哨兵：NULL（默认 BOM/历史/手工）→ 0。键比较用，与 _supplier 同口径。"""
+    return int(role_id) if role_id is not None else 0
+
+
 def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: str = ''):
     """定位（必要时创建）该 BOM 行对应的聚合行，并登记它的展示部位。
 
@@ -335,14 +340,17 @@ def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: st
     bom_part = _norm_part_name(bom.get('part_name'))
     # 聚合键里的部位：只在拆行模式下参与，合并模式下必须为空串才能与无部位明细匹配。
     part_key = bom_part if split_parts else ''
-    fkey = (bom['material_name'], bom['specification'], bom['unit'], part_key)
+    # 2026-11-11 口径：键加入 role（哨兵 0 = NULL/默认 BOM/历史）——同物料不同角色
+    # 各自成行（数量/损耗率/编辑互不串行）；无角色时键退化历史口径，普通 SKU 零变化。
+    role_key = _role_sentinel(bom.get('role_id'))
+    fkey = (role_key, bom['material_name'], bom['specification'], bom['unit'], part_key)
 
     existing = fabric_map.get(fkey)
     if existing is None:
         if not accumulate:
             # 只登记、行却不存在：逻辑上不可达，靠三条不变量支撑 ——
             #   (1) 调用方只在 `skey in seen_materials` 时才传 accumulate=False，
-            #   (2) `skey` 与这里的 `fkey` 是同一套算法（供应商 + 物料 + 规格 + 单位 + 部位），
+            #   (2) `skey` 与这里的 `fkey` 是同一套算法（角色 + 供应商 + 物料 + 规格 + 单位 + 部位），
             #   (3) 产生该 skey 的那次正常累加必然已建行（建行在数量累加之前）。
             # 真被破坏时症状只是「部位少标一个」，静默就永远没人发现，故打一条 warning 让
             # 不变量破坏可观测；返回语义不变：**不建行**（建 quantity=0 的幽灵行会在表里
@@ -356,6 +364,7 @@ def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: st
         existing = fabric_map[fkey] = {
             'fabric_name': bom['material_name'],
             'part_name': part_key or None,
+            'role_id': bom.get('role_id'),
             'specification': bom['specification'],
             'quantity': 0.0,
             'unit': bom['unit'],
@@ -373,14 +382,27 @@ def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: st
 
 
 def _matching_po_items(po, bom, items_map, items_map_by_part, *, split_parts, part_key):
-    """该 BOM 行对应的采购明细：拆行模式按部位精确匹配，合并模式按物料匹配。"""
+    """该 BOM 行对应的采购明细：拆行模式按 (部位, 角色) 精确匹配，合并模式按物料+角色匹配。
+
+    2026-11-11：两种模式的明细匹配都按 role 隔离——同物料多角色行各自命中
+    自己的明细（数量/损耗率/编辑互不串行）。历史行 role=NULL（哨兵 0）只与
+    默认 BOM / 无角色 BOM 行匹配；角色行匹配不到时走 BOM 回退（数量=用量×订单量），
+    等下次 BOM 保存同步落 role（用户口径：历史 pending 单不批量回填）。
+    """
+    role = _role_sentinel(bom.get('role_id'))
     if split_parts:
         return (items_map_by_part or {}).get(
-            (po.id, bom['material_name'], bom['specification'], bom['unit'], part_key), [],
+            (po.id, bom['material_name'], bom['specification'], bom['unit'], part_key, role), [],
         )
-    return items_map.get(
-        (po.id, bom['material_name'], bom['specification'], bom['unit']), [],
-    )
+    # 合并模式（组内 BOM 全部无部位）：items_map 的键不含 role，必须在返回值上
+    # 按 role 过滤——否则每个角色行都拿到全部角色的明细，数量按角色数翻倍
+    # （2026-11-11 评审复现：2 角色 × 1000 明细 → 每行各计 2000，合计 4000）。
+    return [
+        it for it in items_map.get(
+            (po.id, bom['material_name'], bom['specification'], bom['unit']), [],
+        )
+        if _role_sentinel(getattr(it, 'role_id', None)) == role
+    ]
 
 
 def _accumulate_factory_bom(group, po, bom, items_map, order_qty, *,
@@ -725,7 +747,10 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
                 continue
             role_name = role_names.get(bom.get('role_id')) or ''
             part_key = _norm_part_name(bom.get('part_name')) if split_parts else ''
+            # 2026-11-11：跨 SKU 去重键含 role（与 _ensure_fabric_row 的 fkey 同口径）——
+            # 同物料在角色 A 已计数的行不再挡住角色 B 的行。
             skey = (
+                _role_sentinel(bom.get('role_id')),
                 bom['supplier_name'] or po.supplier_name or '未指定供应商',
                 bom['material_name'], bom['specification'], bom['unit'], part_key,
             )
@@ -854,7 +879,10 @@ def _serialize_factory_groups(group_map: dict[tuple, dict]) -> list:
             fabrics = sorted(
                 (_finalize_role_display(_finalize_part_display(dict(f)))
                  for f in supplier['_fabric_map'].values()),
-                key=lambda x: (x.get('part_name') or '', x['fabric_name']),
+                # 角色（默认 BOM 在前）→ 部位 → 物料名：与 skus[].materials 的稳定序同口径
+                key=lambda x: (
+                    _role_sort_key(x.get('role_id')), x.get('part_name') or '', x['fabric_name'],
+                ),
             )
             suppliers.append({'supplier_name': supplier['supplier_name'], 'fabrics': fabrics})
         groups.append({

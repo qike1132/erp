@@ -287,3 +287,78 @@ describe('resolveItemLossRate', () => {
     expect(resolveItemLossRate(undefined, undefined)).toBe(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 2026-11-11 拆行口径：同物料多角色各自成行（键含 role），数量输入框可编辑
+// ---------------------------------------------------------------------------
+
+/** 单 SKU：同物料「香珠」在角色 11 / 12 各一行；fabrics 侧两行（含 role_id） */
+function multiRoleGroup(): FactoryGroup {
+  return {
+    customer_name: '客户乙',
+    product_name: '产品B',
+    product_quantity: 1000,
+    spare_rate: 10,
+    skus: [
+      {
+        product_name: '产品B', product_barcode: 'bB', order_qty: 1000,
+        materials: [
+          { supplier_name: '香味', material_name: '香珠', specification: '5g', unit: '个', quantity: 1000, role_id: 11, role_display: '角色11' },
+          { supplier_name: '香味', material_name: '香珠', specification: '5g', unit: '个', quantity: 1000, role_id: 12, role_display: '角色12' },
+        ],
+      },
+    ],
+    suppliers: [
+      {
+        supplier_name: '香味',
+        fabrics: [
+          { fabric_name: '香珠', specification: '5g', unit: '个', quantity: 1000, item_ids: [101], role_id: 11, part_name: '' },
+          { fabric_name: '香珠', specification: '5g', unit: '个', quantity: 1000, item_ids: [102], role_id: 12, part_name: '' },
+        ],
+      },
+    ],
+  } as unknown as FactoryGroup
+}
+
+describe('拆行口径（键含 role_id）', () => {
+  it('F1 同物料多角色 → 各自成行、readonlyReason 为空（数量输入框可编辑）、各自独立 coord/itemIds', () => {
+    const rows = buildPerSkuRows(multiRoleGroup(), 10)
+    const pearl = rows.filter((r) => r.materialName === '香珠')
+
+    expect(pearl).toHaveLength(2)
+    expect(pearl.map((r) => r.roleId).sort()).toEqual([11, 12])
+    // 拆行后锁解除：不再因「多角色共用」只读
+    pearl.forEach((r) => expect(r.readonlyReason).toBe(''))
+    // 各行映射各自落库坐标（编辑互不串行）
+    expect(pearl[0]!.coord).toEqual({ si: 0, fi: 0 })
+    expect(pearl[1]!.coord).toEqual({ si: 0, fi: 1 })
+    expect(pearl[0]!.itemIds).toEqual([101])
+    expect(pearl[1]!.itemIds).toEqual([102])
+  })
+
+  it('F2 改 A 角色行的数量展示不影响 B 角色行（buildPerSkuRows 是纯函数：baseQuantity 各自独立）', () => {
+    const rows = buildPerSkuRows(multiRoleGroup(), 10)
+    const a = rows.find((r) => r.roleId === 11)!
+    const b = rows.find((r) => r.roleId === 12)!
+
+    expect(a.baseQuantity).toBe(1000)
+    expect(b.baseQuantity).toBe(1000)
+    // 两行是不同对象、不同 coord/itemIds —— 按行编辑互不影响（保存按 itemIds 定位）
+    expect(a.itemIds).not.toEqual(b.itemIds)
+  })
+
+  it('F3 无 role_id（旧后端 / 默认 BOM 多行）→ 键退化合并口径，维持既有只读行为兜底', () => {
+    const group = multiRoleGroup()
+    // 旧后端不返回 role_id：两行同物料都无 role → 键相同（含 r0 哨兵）→ 仍锁数量编辑
+    const mats = (group.skus![0]!.materials! as { role_id?: number }[])
+    mats.forEach((m) => { delete m.role_id })
+    const fabrics = (group.suppliers![0]!.fabrics as { role_id?: number }[])
+    fabrics.forEach((f) => { delete f.role_id })
+
+    const rows = buildPerSkuRows(group, 10)
+    const pearl = rows.filter((r) => r.materialName === '香珠')
+    expect(pearl).toHaveLength(2)
+    // 旧口径兜底：同键（无 role）出现两次 → 仍锁数量编辑
+    pearl.forEach((r) => expect(r.readonlyReason).not.toBe(''))
+  })
+})

@@ -445,6 +445,8 @@ export interface FabricItem {
   part_display?: string
   /** 「角色名称」列展示文本（多角色共用同一物料时并列，如 `角色A/角色B`） */
   role_display?: string
+  /** 该布料行的角色 id（2026-11-11 拆行口径：后端 fabrics 聚合键成员；默认 BOM / 旧后端为空） */
+  role_id?: number | null
   specification?: string
   quantity: number
   unit?: string
@@ -738,6 +740,7 @@ export function useSummaryModal() {
       if (!editMode.value && hasPerSkuRows) {
         perSku.forEach((row) => {
           if (row.noBom) return
+          // 供应商页是合并口径（键不含 role）：多角色行按显示值累加进同一供应商物料键
           const key = summaryMaterialKey(
             row.supplierName, row.materialName, row.specification, row.unit,
           )

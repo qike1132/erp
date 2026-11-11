@@ -59,8 +59,16 @@ def _norm(value) -> str:
     return (value or '').strip()
 
 
+def _norm_role(value) -> int:
+    """role 归一：NULL（默认 BOM/历史/手工）与 None 统一为哨兵 0 参与键比较。"""
+    return int(value) if value is not None else 0
+
+
 def _existing_key(row: PurchaseOrderItem) -> tuple:
+    # 2026-11-11 口径：键加入 role_id——同物料多角色各自成行，同步继承不得跨 role
+    # 互相覆盖损耗率（问题 2 根因：旧键无 role，A 行改率会把 B 行一并顶掉）。
     return (
+        _norm_role(getattr(row, 'role_id', None)),
         _norm(row.material_name), _norm(row.specification), _norm(row.unit),
         _norm(row.part_name), _norm(row.supplier_name), _norm(row.material_category),
     )
@@ -68,6 +76,7 @@ def _existing_key(row: PurchaseOrderItem) -> tuple:
 
 def _target_key(item: dict) -> tuple:
     return (
+        _norm_role(item.get('role_id')),
         _norm(item.get('material_name')), _norm(item.get('specification')),
         _norm(item.get('unit')), _norm(item.get('part_name')),
         _norm(item.get('supplier_name')), _norm(item.get('category')),
@@ -75,14 +84,20 @@ def _target_key(item: dict) -> tuple:
 
 
 def _fallback_key(key: tuple) -> tuple:
-    """去掉 part_name 的宽松匹配键（同一物料跨部位共享率/价）。"""
-    return (key[0], key[1], key[2], key[4], key[5])
+    """去掉 part_name 的宽松匹配键（**同一 role 内**跨部位共享率/价）。
+
+    2026-11-11 口径收窄：回退键保留 role_id（去掉它会让 A 角色的率覆盖 B 角色
+    ——问题 2 病根）。跨角色永不回退；NULL-role 历史行的率/价只被 NULL-role
+    目标行继承，不泄漏给角色行。
+    """
+    return (key[0], key[1], key[2], key[3], key[5], key[6])
 
 
 def _canonical(item: dict) -> tuple:
     # 数量/用量按落库列精度比较（Numeric(12,2) / Numeric(10,4)），避免
     # 浮点表示差异和 Numeric 截断导致「刚同步过又被判为有变化」。
     return (
+        _norm_role(item.get('role_id')),
         _norm(item.get('material_name')), _norm(item.get('specification')),
         _norm(item.get('unit')), _norm(item.get('part_name')),
         _norm(item.get('supplier_name')), _norm(item.get('category')),
@@ -188,6 +203,7 @@ def _removed_row_snapshot(row: PurchaseOrderItem) -> dict:
         'specification': row.specification,
         'unit': row.unit,
         'part_name': row.part_name,
+        'role_id': getattr(row, 'role_id', None),
         'supplier_name': row.supplier_name,
         'quantity': _num(row.quantity),
         'loss_rate': _num(row.loss_rate),
@@ -252,6 +268,7 @@ async def _rewrite_items(
             remark=t.get('remark'),
             material_category=t.get('category') or '',
             part_name=t.get('part_name'),
+            role_id=t.get('role_id'),
             supplier_name=t.get('supplier_name') or '',
             unit_usage=t.get('unit_usage'),
         )
@@ -409,7 +426,11 @@ async def sync_purchase_order_items(
     _inherit_fields(rows, target)
 
     existing_sig = sorted(
-        (*_existing_key(r), round(float(r.quantity or 0), 2), round(float(r.unit_usage or 0), 4))
+        (
+            _norm_role(getattr(r, 'role_id', None)),
+            *_existing_key(r)[1:],
+            round(float(r.quantity or 0), 2), round(float(r.unit_usage or 0), 4),
+        )
         for r in rows
     )
     target_sig = sorted(_canonical(t) for t in target)

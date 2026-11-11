@@ -17,22 +17,38 @@ logger = logging.getLogger(__name__)
 
 
 def _build_po_items_map(all_items) -> dict[tuple, list]:
+    """按 (order_id, material, spec, unit) 分组（**合并口径**：不含 role）。
+
+    供应商汇总页保持合并显示（2026-11-11 用户裁决）：同一物料多角色行在
+    供应商页仍聚成一行，此键不含 role_id。
+    """
     items_map: dict[tuple, list] = {}
     for item in all_items:
         ikey = (item.order_id, item.material_name, item.specification or '', item.unit or '')
         items_map.setdefault(ikey, []).append(item)
     return items_map
 
+
 def _build_po_items_map_by_part(all_items) -> dict[tuple, list]:
-    """按 (order_id, material, spec, unit, part_name) 分组，供工厂汇总按部位精确匹配。"""
+    """工厂汇总按 (order_id, material, spec, unit, part, role) 精确匹配。
+
+    2026-11-11 口径：工厂汇总拆行至「角色 × 部位」粒度——键含 role_id（哨兵
+    0 = NULL/默认 BOM/历史行），使同物料各角色行各自命中自己的明细（损耗率/
+    数量/编辑互不串行）。供应商页走 ``_build_po_items_map`` 的合并口径，不动。
+    """
     items_map: dict[tuple, list] = {}
     for item in all_items:
         ikey = (
             item.order_id, item.material_name, item.specification or '', item.unit or '',
-            (item.part_name or '').strip(),
+            (item.part_name or '').strip(), _role_sentinel(getattr(item, 'role_id', None)),
         )
         items_map.setdefault(ikey, []).append(item)
     return items_map
+
+
+def _role_sentinel(role_id) -> int:
+    """role 归一哨兵：NULL（默认 BOM/历史/手工）→ 0，与 bom_sync._norm_role 同口径。"""
+    return int(role_id) if role_id is not None else 0
 
 def _build_po_items_by_order(all_items) -> dict[int, list]:
     """按 order_id 分组 PO 明细，用于 BOM 不可用时的回退。"""

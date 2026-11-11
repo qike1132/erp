@@ -627,6 +627,10 @@
     "migrations/versions/pg_standalone_118_add_po_items_version.py": [
       "execute:ALTER TABLE purchase_order DROP COLUMN IF EXISTS items_version"
     ],
+    "migrations/versions/pg_standalone_119_add_po_item_role_id.py": [
+      "execute:ALTER TABLE purchase_order_item DROP COLUMN IF EXISTS role_id",
+      "execute:DROP INDEX IF EXISTS idx_perf_poi_order_role"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

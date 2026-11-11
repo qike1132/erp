@@ -158,8 +158,14 @@ class _BomContext:
 def _material_row(
     spec: _MaterialSpec, row, qty: int | float,
     product_name: str, customer_name: str, scope_label: str,
+    role_id: int | None = None,
 ) -> dict:
-    """把一条 BOM 行展开为一条采购明细（字段口径与重构前逐字对齐）。"""
+    """把一条 BOM 行展开为一条采购明细（字段口径与重构前逐字对齐）。
+
+    ``role_id``：该行所属 BOM 作用域（None=默认 BOM）。落库后供同步键 /
+    汇总聚合键 / 前端物料键区分「同物料多角色」——否则同物料各角色行会被
+    当成同一行互相覆盖损耗率（2026-11-11 口径：率与数量按 角色+部位 独立）。
+    """
     usage = float(getattr(row, spec.usage_attr) or 0)
     if spec.name_attr is None:
         material_name = product_name + spec.name_suffix
@@ -179,6 +185,7 @@ def _material_row(
         'category': spec.category,
         'unit_usage': usage,
         'source_role': scope_label,
+        'role_id': role_id,
     }
 
 
@@ -221,7 +228,9 @@ def build_expected_items(sku_lines, ctx: _BomContext, name_to_pid, customer_name
                 for row in getattr(ctx, spec.map_attr).get(role_id, []):
                     if row.product_id != pid:
                         continue
-                    items.append(_material_row(spec, row, scope_qty, product_name, customer_name, scope_label))
+                    items.append(_material_row(
+                        spec, row, scope_qty, product_name, customer_name,
+                        scope_label, role_id=role_id))
     return items
 
 
@@ -279,7 +288,10 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
                             if row.product_id != pid:
                                 continue
                             result_items.append(
-                                _material_row(spec, row, scope_qty, product_name, customer_name, scope_label)
+                                _material_row(
+                                    spec, row, scope_qty, product_name, customer_name,
+                                    scope_label, role_id=role_id,
+                                )
                             )
                 continue
 
@@ -290,7 +302,10 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
                         if row.product_id != pid:
                             continue
                         result_items.append(
-                            _material_row(spec, row, qty, product_name, customer_name, scope_label)
+                            _material_row(
+                                spec, row, qty, product_name, customer_name,
+                                scope_label, role_id=role_id,
+                            )
                         )
     return result_items
 

@@ -143,6 +143,8 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
             customer_name=customer_name,
             material_category=item_data.get('category', ''),
             part_name=item_data.get('part_name'),
+            # BOM 作用域角色（2026-11-11 口径）：同物料多角色各自成行，键含 role_id
+            role_id=item_data.get('role_id'),
             # 来源 BOM 作用域（默认BOM / 各角色）：写进备注，采购员能看出这条需求由谁产生。
             # 无 source_role（如手工单、旧路径）时保持 remark 原样，不产生多余文本。
             remark=item_data.get('remark') or _scope_remark(item_data.get('source_role')),
@@ -210,6 +212,8 @@ def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: Purchase
     item.material_category = item_data.get('category', '')
     if 'part_name' in item_data:
         item.part_name = item_data.get('part_name')
+    if 'role_id' in item_data:
+        item.role_id = item_data.get('role_id')
     item.remark = item_data.get('remark') or _scope_remark(item_data.get('source_role'))
     item.supplier_name = order.supplier_name
     item.customer_name = order.customer_name
@@ -221,7 +225,7 @@ def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: Purchase
 _ITEM_SIGNATURE_FIELDS = (
     'material_name', 'material_code', 'specification', 'unit', 'unit_price',
     'quantity', 'material_category', 'part_name', 'remark', 'supplier_name',
-    'customer_name',
+    'customer_name', 'role_id',
 )
 
 

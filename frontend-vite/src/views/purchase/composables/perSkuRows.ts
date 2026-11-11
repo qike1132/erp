@@ -65,11 +65,16 @@ export function calcSpareQuantity(orderQty: number, rate: number): number {
 }
 
 /**
- * 汇总物料键：`供应商 + 物料名 + 规格 + 单位`。
+ * 汇总物料键：`供应商 + 物料名 + 规格 + 单位 + 部位 + 角色`。
  *
  * 后端工厂汇总（fabric）与供应商汇总（material）同源，均按
- * (供应商, 物料, 规格, 单位) 聚合，故两侧可用同一键一一对应。
+ * (供应商, 物料, 规格, 单位, 部位) 聚合，故两侧可用同一键一一对应。
  * 用 `\u0000` 分隔，避免字段值本身含分隔符时发生键碰撞。
+ *
+ * `roleId`（2026-11-11 口径）：工厂汇总拆行至「角色 × 部位」粒度——同物料
+ * 不同角色各自成行（数量/损耗率/编辑互不串行）。**未传（undefined）时键不含
+ * 角色段**：供应商页（合并口径，用户裁决保持不动）与旧后端数据因此零行为变化；
+ * `null`（默认 BOM 段）显式传入时用哨兵 `r0`，与角色行区分。
  */
 export function summaryMaterialKey(
   supplierName: string | null | undefined,
@@ -77,10 +82,12 @@ export function summaryMaterialKey(
   specification: string | null | undefined,
   unit: string | null | undefined,
   partName?: string | null,
+  roleId?: number | null,
 ): string {
-  return [
+  const base = [
     supplierName || '未指定供应商', materialName || '', specification || '', unit || '', partName || '',
   ].join('\u0000')
+  return roleId === undefined ? base : `${base}\u0000r${roleId ?? 0}`
 }
 
 /**
@@ -204,6 +211,8 @@ export interface PerSkuRow {
   partDisplay: string
   /** 「角色名称」列展示文本（多角色共用同一物料时并列，默认 BOM 为空串） */
   roleDisplay: string
+  /** 该行所属角色 id（与后端聚合键同源；默认 BOM / 旧后端为 null） */
+  roleId: number | null
   specification: string
   unit: string
   baseQuantity: number
@@ -239,24 +248,33 @@ export interface PerSkuRow {
   noBom: boolean
 }
 
-/** 物料键：与工厂页/供应商页同源（复用 summaryMaterialKey，不另造一套）。 */
+/** 物料键：与工厂页/供应商页同源（复用 summaryMaterialKey，不另造一套）。
+ *  供应商页调用（不传 role）键退化为合并口径；工厂页（perSku/stored）传 role 拆行。 */
 export function materialKeyOf(m: {
-  supplier_name?: string; material_name?: string; specification?: string; unit?: string; part_name?: string
+  supplier_name?: string; material_name?: string; specification?: string; unit?: string
+  part_name?: string; role_id?: number | null; withRole?: boolean
 }): string {
-  return summaryMaterialKey(m.supplier_name, m.material_name, m.specification, m.unit, m.part_name)
+  return summaryMaterialKey(
+    m.supplier_name, m.material_name, m.specification, m.unit, m.part_name,
+    m.withRole ? (m.role_id ?? null) : undefined,
+  )
 }
 
-/** 落库明细索引：物料键 → 坐标 / item_ids / 落库数量。 */
+/** 落库明细索引：物料键（含角色）→ 坐标 / item_ids / 落库数量。 */
 function buildStoredIndex(group: FactoryGroup) {
   const index = new Map<string, { coord: { si: number; fi: number }; itemIds: number[]; storedQuantity: number }>()
   ;(group.suppliers || []).forEach((supplier, si) => {
     ;(supplier.fabrics || []).forEach((fabric, fi) => {
+      // 工厂侧键含 role（后端 fabrics 行带 role_id；旧后端无该字段 → null 哨兵，
+      // 与 skus[].materials 的默认 BOM 行同键，零回归）
       const key = materialKeyOf({
         supplier_name: supplier.supplier_name,
         material_name: fabric.fabric_name,
         specification: fabric.specification,
         unit: fabric.unit,
         part_name: fabric.part_name,
+        role_id: (fabric as { role_id?: number | null }).role_id,
+        withRole: true,
       })
       const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
       // 无落库明细的 BOM 行（BOM 生成后新增 / 旧单未生成）不建坐标：coord=null 只读，
@@ -315,6 +333,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         partName: '',
         partDisplay: '',
         roleDisplay: '',
+        roleId: null,
         specification: '',
         unit: '',
         baseQuantity: 0,
@@ -331,13 +350,13 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
       return
     }
     const skuQty = parseFloat(String(sku.order_qty ?? 0)) || 0
-    // 同一 SKU 内同一物料键出现多次（多角色共用同一采购明细行）→ 锁**数量编辑**：
-    // 明细存的是**合并总量**，按角色分行后每行只是该角色的分配量，编辑框写入会把
-    // 总量改错。但**不锁显示**：coord 保留，损耗率/加放数量照常展示（生产反馈
-    // 2026-11-08：共用物料的损耗率被显示成 —，用户看不到率）。
+    // 同一 SKU 内「同角色同部位」的同一物料键出现多次 → 锁**数量编辑**：
+    // 2026-11-11 拆行口径下键已含 role_id，多角色各成一行、键互不相同，
+    // 原先「多角色共用一行」的锁定自然解除（每行有自己的坐标与 item_ids）。
+    // 剩余会命中的场景：同角色同部位内 BOM 真的配了重复物料行（合并进同一明细行）。
     const keyCounts = new Map<string, number>()
     materials.forEach((m) => {
-      const k = materialKeyOf(m)
+      const k = materialKeyOf({ ...m, withRole: true })
       keyCounts.set(k, (keyCounts.get(k) || 0) + 1)
     })
     // 连续段预计算（**表格对齐的基础**）：角色段 + 段内「(角色, 供应商)」子段。
@@ -385,7 +404,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
     }
 
     materials.forEach((m, i) => {
-      const key = materialKeyOf(m)
+      const key = materialKeyOf({ ...m, withRole: true })
       const hit = stored.get(key)
       const sharedInSku = (keyCounts.get(key) || 0) > 1
       const roleQty = roleQtyOf(m.role_id)
@@ -410,6 +429,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         // 若这里回退到 `part_name` 整列就会空白（2026-11-05 生产缺陷）。
         partDisplay: m.part_display || m.part_name || '',
         roleDisplay: m.role_display || '',
+        roleId: m.role_id ?? null,
         specification: m.specification,
         unit: m.unit,
         baseQuantity: parseFloat(String(m.quantity)) || 0,
@@ -417,7 +437,7 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
         coord: hit?.coord ?? null,
         itemIds: hit?.itemIds ?? [],
         readonlyReason: sharedInSku
-          ? '该物料被多个角色共用采购明细中的同一行，此处按角色分行显示分配量；如需调整总量请在采购明细中修改'
+          ? '该物料在同一角色同一部位内被 BOM 重复配置、合并为采购明细的同一行；如需调整总量请在采购明细中修改'
           : '',
         hasRoleQtySplit,
         roleQuantity: roleQty,
@@ -452,9 +472,11 @@ export function computeQuantityDiff(
   const summed = new Map<string, number>()
   rows.forEach((r) => {
     if (r.noBom) return   // 占位行不对应任何物料，不参与比对
+    // 键含角色（与 buildStoredIndex 同口径）：角色行各比对各自的落库量
     const key = materialKeyOf({
       supplier_name: r.supplierName, material_name: r.materialName,
       specification: r.specification, unit: r.unit, part_name: r.partName,
+      role_id: r.roleId, withRole: true,
     })
     summed.set(key, (summed.get(key) ?? 0) + r.baseQuantity)
   })

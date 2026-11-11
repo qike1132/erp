@@ -120,7 +120,9 @@ def _fabrics(group) -> dict[str, float]:
     out: dict[str, float] = {}
     for supplier in group['suppliers']:
         for fabric in supplier['fabrics']:
-            out[fabric['fabric_name']] = float(fabric['quantity'])
+            # 2026-11-11 拆行口径：同物料按角色多行 → 按名累加（旧行为是覆盖，
+            # 单行时代两者等价；拆行后必须求和才是合计口径）
+            out[fabric['fabric_name']] = out.get(fabric['fabric_name'], 0.0) + float(fabric['quantity'])
     return out
 
 
@@ -703,3 +705,55 @@ async def test_c19_split_parts_when_bom_has_parts_ignoring_partless_accessory(db
     assert list(by_key[('绿色超柔', '身体')]['item_ids']) == [101]
     assert list(by_key[('绿色超柔', '脚底')]['item_ids']) == [102]
     assert list(by_key[('木棒', '')]['item_ids']) == [103]
+
+
+async def test_c19_no_part_multi_role_items_not_double_counted(db):
+    """C19（2026-11-11 评审回归）：**无部位**（合并模式）+ 多角色时，
+    每个角色行只能命中自己的明细，数量不得按角色数翻倍。
+
+    缺陷复现：合并模式下 `_matching_po_items` 按物料键（不含 role）返回全部角色
+    明细，而 fabric 聚合键已含 role → 每个角色行各计全部角色数量（2 角色 ×1000
+    → 每行 2000，合计 4000）。修复后每行 1000、item_ids 各自独立、合计 2000。
+    """
+    session, _ = db
+    session.add(Product(id=205, name='产品C'))
+    for rid in (11, 12):
+        session.add(ProductRole(id=rid, product_id=205, role_name=f'角色{rid}'))
+        # 无 part_name → 组级拆行判定为 False（合并模式）
+        session.add(ProductAccessory(
+            id=205 * 100 + rid, product_id=205, role_id=rid, accessory_name='香珠',
+            specification='5g', unit='个', quantity=1.0, supplier_name='香味',
+        ))
+    session.add(Order(id=9205, order_no='SO-9205', customer='客户乙',
+                      product_id=205, quantity=1000, status='待备货'))
+    session.add(OrderItem(id=21, order_id=9205, product_id=205,
+                          product_name='产品C', quantity=1000))
+    session.add(PurchaseOrder(
+        id=8105, order_no='PO-8105', customer_name='客户乙', product_name='产品C',
+        product_quantity=1000, supplier_name='香味', source_order_ids='[9205]',
+    ))
+    session.add(PurchaseOrderSku(
+        id=8105, po_id=8105, product_name='产品C', product_barcode='bC',
+        order_qty=1000, source_order_id=9205, source_record_type='order',
+    ))
+    # 新口径落库：两角色各一行、role_id 正确
+    session.add(PurchaseOrderItem(
+        id=1, order_id=8105, material_name='香珠', specification='5g', unit='个',
+        part_name=None, supplier_name='香味', material_category='accessory',
+        quantity=1000, role_id=11,
+    ))
+    session.add(PurchaseOrderItem(
+        id=2, order_id=8105, material_name='香珠', specification='5g', unit='个',
+        part_name=None, supplier_name='香味', material_category='accessory',
+        quantity=1000, role_id=12,
+    ))
+    await session.commit()
+
+    group = (await get_factory_order_summary(session, [8105]))['groups'][0]
+    rows = [f for sup in group['suppliers'] for f in sup['fabrics']
+            if f['fabric_name'] == '香珠']
+    assert sorted(r.get('role_id') for r in rows) == [11, 12]
+    # 每角色行只带自己的数量与明细；合计 2000（修复前 4000）
+    assert sorted(float(r['quantity']) for r in rows) == [1000.0, 1000.0]
+    assert sorted(tuple(r['item_ids']) for r in rows) == [(1,), (2,)]
+    assert sum(float(r['quantity']) for r in rows) == 2000.0

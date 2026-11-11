@@ -218,6 +218,9 @@ class PurchaseOrderItem(Base):
     part_name: Mapped[str | None] = mapped_column(String(100), comment='产品部位')
     remark: Mapped[str | None] = mapped_column(Text, comment='备注')
     supplier_name: Mapped[str | None] = mapped_column(String(100), comment='供应商名称(明细级)')
+    # 产品角色 ID（BOM 作用域）：同一物料在不同角色/部位下各自成行（2026-11-11 口径：
+    # 损耗率与数量按 (role_id, part_name) 独立）。NULL = 默认 BOM / 历史行 / 手工行。
+    role_id: Mapped[int | None] = mapped_column(Integer, comment='产品角色ID')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), comment='创建时间')
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), comment='更新时间')
 
@@ -229,6 +232,7 @@ class PurchaseOrderItem(Base):
         Index('idx_purchase_order_item_material', 'material_name'),
         Index('idx_perf_poi_order_include', 'order_id',
               postgresql_include=['material_name', 'quantity', 'unit_price']),
+        Index('idx_perf_poi_order_role', 'order_id', 'role_id'),
     )
 
     def __repr__(self):
@@ -253,6 +257,7 @@ class PurchaseOrderItem(Base):
             'material_category': self.material_category,
             'part_name': self.part_name,
             'supplier_name': self.supplier_name,
+            'role_id': self.role_id,
             'remark': self.remark
         }
 

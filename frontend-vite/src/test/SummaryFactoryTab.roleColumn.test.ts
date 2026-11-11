@@ -50,27 +50,27 @@ function roleGroup(): FactoryGroup {
         materials: [
           {
             supplier_name: '供应商甲', material_name: '红布', part_name: '',
-            part_display: '身体', role_display: '角色A',
+            part_display: '身体', role_display: '角色A', role_id: 1,
             specification: 'S1', unit: '米', quantity: 10,
           },
           {
             supplier_name: '供应商甲', material_name: '松紧带', part_name: '',
-            part_display: '身体', role_display: '角色A',
+            part_display: '身体', role_display: '角色A', role_id: 1,
             specification: 'S3', unit: '米', quantity: 3,
           },
           {
             supplier_name: '供应商甲', material_name: '蓝布', part_name: '',
-            part_display: '头部', role_display: '角色B',
+            part_display: '头部', role_display: '角色B', role_id: 2,
             specification: 'S2', unit: '米', quantity: 20,
           },
           {
             supplier_name: '供应商甲', material_name: '松紧带', part_name: '',
-            part_display: '头部', role_display: '角色B',
+            part_display: '头部', role_display: '角色B', role_id: 2,
             specification: 'S3', unit: '米', quantity: 2,
           },
           {
             supplier_name: '供应商乙', material_name: '蓝扣', part_name: '',
-            part_display: '头部', role_display: '角色B',
+            part_display: '头部', role_display: '角色B', role_id: 2,
             specification: 'S4', unit: '个', quantity: 2,
           },
         ],
@@ -80,15 +80,16 @@ function roleGroup(): FactoryGroup {
       {
         supplier_name: '供应商甲',
         fabrics: [
-          { fabric_name: '红布', part_display: '身体', role_display: '角色A', specification: 'S1', unit: '米', quantity: 10, item_ids: [1] },
-          { fabric_name: '松紧带', part_display: '身体', role_display: '角色A/角色B', specification: 'S3', unit: '米', quantity: 5, item_ids: [2] },
-          { fabric_name: '蓝布', part_display: '头部', role_display: '角色B', specification: 'S2', unit: '米', quantity: 20, item_ids: [3] },
+          { fabric_name: '红布', part_display: '身体', role_display: '角色A', role_id: 1, specification: 'S1', unit: '米', quantity: 10, item_ids: [1] },
+          { fabric_name: '松紧带', part_display: '身体', role_display: '角色A', role_id: 1, specification: 'S3', unit: '米', quantity: 3, item_ids: [2] },
+          { fabric_name: '松紧带', part_display: '头部', role_display: '角色B', role_id: 2, specification: 'S3', unit: '米', quantity: 2, item_ids: [5] },
+          { fabric_name: '蓝布', part_display: '头部', role_display: '角色B', role_id: 2, specification: 'S2', unit: '米', quantity: 20, item_ids: [3] },
         ],
       },
       {
         supplier_name: '供应商乙',
         fabrics: [
-          { fabric_name: '蓝扣', part_display: '头部', role_display: '角色B', specification: 'S4', unit: '个', quantity: 2, item_ids: [4] },
+          { fabric_name: '蓝扣', part_display: '头部', role_display: '角色B', role_id: 2, specification: 'S4', unit: '个', quantity: 2, item_ids: [4] },
         ],
       },
     ],
@@ -240,9 +241,10 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     expect(FACTORY_TABLE_HEAD).toContain('<th>角色名称</th><th>订单数量</th><th>备品数量</th><th>产品部位</th><th>供应商</th>')
   })
 
-  it('R5 多角色共用同一物料：损耗率正常显示，数量编辑锁定并说明原因', () => {
-    // 非编辑态：共用行的损耗率是**可编辑输入框**（一条明细一个率，各角色共用），
-    // 数量显示该角色的分配量——2026-11-08 生产反馈「共用物料损耗率显示 —」的回归护栏
+  it('R5 拆行口径：多角色共用的同一物料各自成行，损耗率与数量都可编辑（键含 role_id）', () => {
+    // 2026-11-11 拆行后：松紧带在角色 A、B 各有一条落库明细（role_id 1/2），
+    // 每行有自己的坐标与 item_ids —— 数量输入框正常出现，不再因「多角色共用」锁定。
+    // 非编辑态：损耗率照常是可编辑输入框（各自独立），数量为该行基准量
     const view = mountModal(roleGroup(), false)
     const viewRows = view.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
     expect(viewRows).toHaveLength(2)
@@ -252,8 +254,7 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     }
     view.unmount()
 
-    // 编辑态：率显示数值（0.0 = 回退统一率）；数量**无输入框**（明细是合并总量，
-    // 在角色行编辑会把「改分量」写成「改总量」），只显示分配量并给出原因提示
+    // 编辑态：率与数量都是输入框（各自独立，编辑互不串行）
     const wrapper = mountModal(roleGroup(), true)
     const rows = wrapper.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
     expect(rows).toHaveLength(2)
@@ -261,9 +262,9 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
     for (const tr of rows) {
       const tds = tr.findAll('td')
       expect(tds[3]!.text()).toBe('0.0')
-      expect(tds[4]!.find('input').exists()).toBe(false)
-      expect(tds[4]!.find('span').attributes('title')).toContain('多个角色共用')
-      qtyTexts.push(tds[4]!.text())
+      // 拆行后每行有自己的落库坐标 → 数量输入框正常渲染（原 readonly span 分支不再命中）
+      expect(tds[4]!.find('input[type="number"]').exists()).toBe(true)
+      qtyTexts.push(tds[4]!.find('input').element.value || tds[4]!.text())
     }
     expect(qtyTexts).toEqual(['3', '2'])
     wrapper.unmount()

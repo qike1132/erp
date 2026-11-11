@@ -279,28 +279,33 @@ async def _seed_blind_box_same_key(db):
 async def test_same_key_duplicate_target_rows_are_added_not_lost(db):
     """评审 Important 回归：同键目标行多于旧行时，多余目标行必须进 added。
 
-    盲盒双角色共享同一条辅料 BOM → 目标两行同键（各 5000），旧明细一行 4000：
-    期望 changed 1（4000→5000）+ added 1（5000）。修复前多余目标行被 zip 丢弃，
-    分类计数与服务计数不等 → 该单报错、apply 回滚、永远无法校正。
+    2026-11-11 拆行口径：键含 role_id——旧明细一行（NULL role，qty 4000）与
+    两行角色目标（role 11/12，各 5000）**键不同**：旧行不与角色行配对（率/价
+    继承才走 fallback），数量校正走「removed 旧行 + added 两行」。
+    分类计数与服务计数（bom_sync._diff_counts 同口径 multiset）必须相等，
+    否则该单报错、apply 回滚、永远无法校正。
     """
     await _seed_blind_box_same_key(db)
 
     dry = await run_backfill(db, dry_run=True)
     assert dry.errors == []
-    assert [(r['po_id'], r['old_quantity'], r['new_quantity'])
-            for r in dry.changed] == [(8306, 4000.0, 5000.0)]
-    assert [(r['po_id'], r['quantity']) for r in dry.added] == [(8306, 5000.0)]
-    assert dry.removed == []
+    # 旧行（NULL role）键不匹配任何目标角色行 → removed；两行角色目标 → added
+    assert dry.changed == []
+    assert sorted((r['po_id'], r['quantity']) for r in dry.added) == [
+        (8306, 5000.0), (8306, 5000.0)]
+    assert [(r['po_id'], r['quantity']) for r in dry.removed] == [(8306, 4000.0)]
     assert dry.matched_unchanged == 0
 
     applied = await run_backfill(db, dry_run=False)
     assert applied.errors == []
-    assert len(applied.changed) == 1 and len(applied.added) == 1
+    assert applied.changed == [] and len(applied.added) == 2
     assert (await db.get(PurchaseOrder, 8306)).items_version == 1
     rows = (await db.execute(
         select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == 8306)
     )).scalars().all()
     assert sorted(float(r.quantity) for r in rows) == [5000.0, 5000.0]
+    # 拆行口径：两行分别挂 role 11 / 12
+    assert sorted(r.role_id for r in rows) == [11, 12]
 
 
 async def test_matched_unchanged_rows_not_reported_as_changed(db):

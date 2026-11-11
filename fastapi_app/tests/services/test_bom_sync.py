@@ -431,12 +431,12 @@ async def test_sync_audit_log_contains_removed_row_snapshot(db):
     assert set(by_name) == {'绿色超柔', '蓝色超柔'}
     assert by_name['绿色超柔'] == {
         'material_name': '绿色超柔', 'specification': '234', 'unit': '码',
-        'part_name': None, 'supplier_name': '美利达',
+        'part_name': None, 'role_id': None, 'supplier_name': '美利达',
         'quantity': 50.0, 'loss_rate': 30.0, 'unit_price': 2.0,
     }
     assert by_name['蓝色超柔'] == {
         'material_name': '蓝色超柔', 'specification': '223', 'unit': '码',
-        'part_name': None, 'supplier_name': '美利达',
+        'part_name': None, 'role_id': None, 'supplier_name': '美利达',
         # unit_price 列有 Python 侧默认 0（未显式赋值的行 flush 后即为 0）；
         # loss_rate 无默认值，保持 NULL → None。
         'quantity': 890.0, 'loss_rate': None, 'unit_price': 0.0,
@@ -560,3 +560,170 @@ async def test_bulk_sync_warns_when_more_than_20_orders(db, monkeypatch, caplog)
                          logger='fastapi_app.services.purchase.bom_sync'):
         await sync_pending_items_for_product(db, 201)
     assert any('BOM 同步影响采购单较多' in msg for msg in caplog.messages)
+
+
+# ---------------------------------------------------------------------------
+# 角色/部位独立口径（2026-11-11）：损耗率与数量按 (role_id, part_name) 独立
+# ---------------------------------------------------------------------------
+
+async def _seed_role_fabric(db, po_id=8101):
+    """产品 205：2 角色（11/12），同一物料「香珠」各角色一行 + 同角色跨部位 2 行。
+
+    结构（覆盖 a~d 用例）：
+    - 角色A(11) / 角色B(12) 各有 香珠(5g) 一行 → 落库应 2 行、role_id 各自正确；
+    - 角色A 另有 绿色超柔 跨 身体/脚底 2 行 → 同角色跨部位共享率/价（fallback 保留）；
+    - 默认 BOM（role_id=None）一行 木棒 → 落库 role_id 为 None。
+    """
+    session = db
+    session.add(Product(id=205, name='产品B', is_blind_box=False))
+    for rid in (11, 12):
+        session.add(ProductRole(id=rid, product_id=205, role_name=f'角色{rid}'))
+    # 同一物料 香珠 在两个角色各一行（问题 2 的复现场景）
+    session.add(ProductAccessory(
+        id=2101, product_id=205, role_id=11, accessory_name='香珠',
+        specification='5g', unit='个', quantity=1.0, supplier_name='香味'))
+    session.add(ProductAccessory(
+        id=2102, product_id=205, role_id=12, accessory_name='香珠',
+        specification='5g', unit='个', quantity=1.0, supplier_name='香味'))
+    # 同角色(11)跨部位 2 行
+    for fid, part in ((1, '身体'), (2, '脚底')):
+        session.add(ProductFabric(
+            id=fid, product_id=205, role_id=11, fabric_name='绿色超柔',
+            specification='234', unit='码', quantity=1.0, part_name=part,
+            supplier_name='美利达'))
+    # 默认 BOM
+    session.add(ProductAccessory(
+        id=2110, product_id=205, role_id=None, accessory_name='木棒',
+        specification='1条', unit='个', quantity=1.0, supplier_name='木棒'))
+    session.add(Order(id=9205, order_no='SO-9205', customer='客户乙',
+                      product_id=205, quantity=1000, status='已备货'))
+    session.add(OrderItem(id=21, order_id=9205, product_id=205,
+                          product_name='产品B', quantity=1000))
+    session.add(PurchaseOrder(
+        id=po_id, order_no=f'PO-{po_id}', customer_name='客户乙', product_name='产品B',
+        product_quantity=1000, supplier_name='香味', source_order_ids='[9205]',
+        status='pending'))
+    session.add(PurchaseOrderSku(
+        id=po_id, po_id=po_id, product_name='产品B', product_barcode='bB',
+        order_qty=1000, source_order_id=9205, source_record_type='order'))
+    await session.commit()
+
+
+async def test_role_scoped_items_get_distinct_rows_with_role_id(db):
+    """a) 同一物料在角色 A、B 下各一行，role_id 正确；默认 BOM 行 role_id 为 None。"""
+    await _seed_role_fabric(db)
+    res = await sync_purchase_order_items(db, 8101)
+    assert res.changed
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101))).scalars().all()
+    pearl = [r for r in rows if r.material_name == '香珠']
+    assert len(pearl) == 2
+    assert sorted(r.role_id for r in pearl) == [11, 12]
+    # 非盲盒：每个作用域都用完整数量 → 各角色 1000
+    assert {float(r.quantity) for r in pearl} == {1000.0}
+    # 默认 BOM 行 role_id 为 NULL
+    wood = [r for r in rows if r.material_name == '木棒']
+    assert len(wood) == 1 and wood[0].role_id is None
+
+
+async def test_role_loss_rate_not_cross_overwritten(db):
+    """b) 把 A 行的 loss_rate 改为 10，B 行仍为原值。"""
+    await _seed_role_fabric(db)
+    await sync_purchase_order_items(db, 8101)   # 重建出 2 行香珠
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101,
+        PurchaseOrderItem.material_name == '香珠'))).scalars().all()
+    a = next(r for r in rows if r.role_id == 11)
+    a.loss_rate = 10
+    await db.commit()
+    # 再次同步：旧行（键含 role_id）按精确键逐行继承，B 行不得被 A 行的 10 覆盖
+    await sync_purchase_order_items(db, 8101)
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101,
+        PurchaseOrderItem.material_name == '香珠'))).scalars().all()
+    a2 = next(r for r in rows if r.role_id == 11)
+    b2 = next(r for r in rows if r.role_id == 12)
+    assert float(a2.loss_rate) == 10.0
+    assert b2.loss_rate is None or float(b2.loss_rate) != 10.0
+
+
+async def test_same_role_cross_part_shares_rate_via_fallback(db):
+    """c) 同角色跨部位仍共享率/价（fallback 收窄为「同 role 内跨部位」）。
+
+    旧快照：同角色（NULL→视为默认 BOM 语义外的 11 不适用；这里用 role=11 的
+    历史行）绿色超柔一条带率/价（无部位）。同步后该角色的身体/脚底两行
+    经回退键（去部位、留 role）继承同一份率/价。
+    """
+    await _seed_role_fabric(db)
+    db.add(PurchaseOrderItem(
+        id=302, order_id=8101, role_id=11, material_name='绿色超柔',
+        specification='234', unit='码', part_name=None, supplier_name='美利达',
+        quantity=1500, loss_rate=12, unit_price=2, material_category='fabric'))
+    await db.commit()
+    await sync_purchase_order_items(db, 8101)
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101,
+        PurchaseOrderItem.material_name == '绿色超柔'))).scalars().all()
+    assert len(rows) == 2    # 身体 / 脚底 各一行，同 role=11
+    assert {r.role_id for r in rows} == {11}
+    # 同角色跨部位共享率/价：回退键去掉部位但保留 role，两行都继承 12‰ / 2
+    assert {float(r.loss_rate) for r in rows} == {12.0}
+    assert {float(r.unit_price) for r in rows} == {2.0}
+
+
+async def test_pending_resync_no_role_cross_overwrite(db):
+    """d) pending 单经 BOM 保存重建后，角色间不互相覆盖。
+
+    数量按既有契约**恒重建**（BOM 真值，见 test_sync_backfill_script 的
+    50→10000 断言）；受保护的是损耗率/单价/备注的按行继承。
+    """
+    await _seed_role_fabric(db)
+    await sync_purchase_order_items(db, 8101)
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101,
+        PurchaseOrderItem.material_name == '香珠'))).scalars().all()
+    a = next(r for r in rows if r.role_id == 11)
+    a.loss_rate = 10
+    await db.commit()
+    await sync_purchase_order_items(db, 8101)
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101,
+        PurchaseOrderItem.material_name == '香珠'))).scalars().all()
+    a2 = next(r for r in rows if r.role_id == 11)
+    b2 = next(r for r in rows if r.role_id == 12)
+    # A 行编辑过的率按精确键（含 role）继承；B 行不受 A 行影响
+    assert float(a2.loss_rate) == 10.0
+    assert b2.loss_rate is None
+    # 数量按 BOM 重建（既有契约）
+    assert {float(r.quantity) for r in rows} == {1000.0}
+
+
+async def test_role_null_history_row_not_leaked_to_role_rows(db):
+    """d2) 历史 NULL-role 行的率/价只允许被 NULL-role 目标行继承，不跨 role 泄漏。"""
+    await _seed_role_fabric(db)
+    db.add(PurchaseOrderItem(
+        id=301, order_id=8101, material_name='香珠', specification='5g',
+        unit='个', part_name=None, supplier_name='香味', quantity=1500,
+        loss_rate=8, unit_price=1, material_category='accessory'))
+    await db.commit()
+    await sync_purchase_order_items(db, 8101)
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101,
+        PurchaseOrderItem.material_name == '香珠'))).scalars().all()
+    assert len(rows) == 2
+    # 两个角色行都不得从 NULL 历史行继承 8‰（跨 role / 跨 NULL 边界不复用率/价）
+    assert all(r.loss_rate is None for r in rows), [
+        (r.role_id, r.loss_rate) for r in rows]
+
+
+async def test_completed_po_snapshot_untouched_by_role_split(db):
+    """e) completed 单内容不被改动（快照语义）。"""
+    await _seed_role_fabric(db)
+    po = await db.get(PurchaseOrder, 8101)
+    po.status = 'completed'
+    await db.commit()
+    res = await sync_purchase_order_items(db, 8101)
+    assert res.changed is False and res.skipped_reason == 'status:completed'
+    rows = (await db.execute(select(PurchaseOrderItem).where(
+        PurchaseOrderItem.order_id == 8101))).scalars().all()
+    assert len(rows) == 0   # 未写入任何行

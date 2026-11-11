@@ -138,6 +138,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
               partDisplay: fabric.part_display || fabric.part_name || '',
               // 角色名称同走 `role_display`（后端按 BOM 角色归属产出；无角色时为空）
               roleDisplay: fabric.role_display || '',
+              roleId: (fabric as { role_id?: number | null }).role_id ?? null,
               specification: fabric.specification || '',
               unit: fabric.unit || '',
               baseQuantity: parseFloat(String(fabric.quantity)) || 0,
@@ -263,6 +264,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
       const k = materialKeyOf({
         supplier_name: r.row.supplierName, material_name: r.row.materialName,
         specification: r.row.specification, unit: r.row.unit, part_name: r.row.partName,
+        role_id: r.row.roleId, withRole: true,
       })
       counts.set(k, (counts.get(k) || 0) + 1)
     })
@@ -272,17 +274,19 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
   })
 
   /**
-   * 编辑态提示文案：该物料键出现多行（跨 SKU 共用 / 同 SKU 多角色共用）⇒ 明示
+   * 编辑态提示文案：该物料键（含角色）出现多行（跨 SKU 共用同一行明细）⇒ 明示
    * 改动影响面（spec §4.3 的可见性要求）。率编辑对各共用方是同一份明细状态，联动一致。
+   * 2026-11-11 拆行口径：键含 role，跨角色不再视为共用。
    */
   function sharedMaterialTitle(item: RowItem): string {
     if (item.legacy || item.row.noBom) return ''
     const k = materialKeyOf({
       supplier_name: item.row.supplierName, material_name: item.row.materialName,
       specification: item.row.specification, unit: item.row.unit, part_name: item.row.partName,
+      role_id: item.row.roleId, withRole: true,
     })
     return sharedMaterialKeys.value.has(k)
-      ? '该物料被多个 SKU/角色共用采购明细中的同一行，改动会影响全部'
+      ? '该物料被多个 SKU 共用采购明细中的同一行，改动会影响全部'
       : ''
   }
 
