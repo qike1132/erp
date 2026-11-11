@@ -66,3 +66,30 @@ async def test_purchase_order_detail_loss_rate_none_when_unset(db):
     assert detail['spare_rate'] is None
     assert 'loss_rate' in detail['items'][0]
     assert detail['items'][0]['loss_rate'] is None
+
+
+async def test_purchase_order_detail_exposes_items_version(db):
+    """明细版本 items_version 必须随详情下发（前端单价保存的 409 乐观锁依赖它）。
+
+    回归背景（2026-11-11 评审 Critical）：``items_version`` 此前只加在
+    ``PurchaseOrder.to_dict``，而订单详情端点走 ``get_purchase_order`` 手拼
+    dict、**不经过** to_dict —— 前端读到的恒为 undefined，单价保存的
+    409 并发保护在生产完全失效（前端测试用假造字段而假绿）。
+    """
+    order = PurchaseOrder(
+        order_no='LR-PO-003', customer_name='损耗率测试客户',
+        order_date=datetime.now(UTC).date(), status='pending',
+    )
+    db.add(order)
+    await db.flush()
+
+    detail = await get_purchase_order(db, order.id)
+    # 新建单默认 0，且必须是 int（None/字符串都会让前端拿不到有效版本）
+    assert detail['items_version'] == 0
+    assert isinstance(detail['items_version'], int)
+
+    # BOM 同步递增版本后，详情必须读到新版本（前端据此提交，过期才可能触发 409）
+    order.items_version = 3
+    await db.flush()
+    detail = await get_purchase_order(db, order.id)
+    assert detail['items_version'] == 3

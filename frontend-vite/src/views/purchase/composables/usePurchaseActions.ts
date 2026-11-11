@@ -98,6 +98,10 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
       await summary.saveFactoryEdits()
       showToast('修改已保存', 'success')
     } catch (err: unknown) {
+      // 409（ITEMS_VERSION_CONFLICT）已由 summary.saveFactoryEdits 弹出
+      // 「BOM 已更新…」warning 并刷新数据；此处直接返回，避免再弹一条
+      // 英文 axios 错误（双 toast）。
+      if ((err as { response?: { status?: number } })?.response?.status === 409) return
       showToast((err as Error).message || '保存失败', 'error')
     }
   }

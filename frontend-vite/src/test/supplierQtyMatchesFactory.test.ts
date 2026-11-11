@@ -259,7 +259,8 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
 
   it('BOM 拆行数据形态：同物料跨部位两行，供应商合计仍为两行之和', async () => {
     // Task 9 扩展：BOM 把同一物料拆到两个部位（身体 2.2 / 头部 3.5），
-    // 工厂页显示两行（同物料键，键不含部位），供应商页仍聚合为一行——
+    // 工厂页按「含部位」的物料键（materialKeyOf）逐部位展开两行；
+    // 供应商页的聚合键（summaryMaterialKey 不带部位）不含部位，仍聚合为一行——
     // 合计必须等于两行可见值之和，不能按合计后单行加放。
     // 数据刻意选非整齐值以区分两种口径：逐行 ceil(2.2×1.03)=3、ceil(3.5×1.03)=4 → 7，
     // 而「先合计再取整」ceil(5.7×1.03)=6 —— 两者必须可区分。
@@ -293,7 +294,7 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
     const m = useSummaryModal()
     await m.openSummary([1])
 
-    // 工厂页：同一物料按部位拆成两行（部位列分别显示，物料键不含部位）
+    // 工厂页：同一物料按部位拆成两行（部位列分别显示，行键含部位）
     const rows = buildPerSkuRows(m.factoryData!.groups[0]!, 30)
     expect(rows).toHaveLength(2)
     expect(rows.map((r) => [r.materialName, r.partDisplay])).toEqual([

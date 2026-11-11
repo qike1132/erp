@@ -39,6 +39,7 @@ vi.mock('@/composables/useExport', async () => {
 })
 
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
+import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 import OrderDetailModal from '@/views/purchase/components/OrderDetailModal.vue'
 import { purchaseApi } from '@/api'
@@ -144,6 +145,59 @@ describe('汇总保存：items_versions 乐观锁', () => {
     expect(m.itemsVersions).toEqual({ '7': 4 })
     // 刷新回到展示态：用户需基于最新明细重新进入编辑
     expect(m.editMode).toBe(false)
+  })
+
+  it('关闭后 409 迟到：不重新打开弹窗、不再拉汇总', async () => {
+    let rejectSave!: (reason: unknown) => void
+    vi.mocked(purchaseApi.saveFactoryEdits).mockImplementationOnce(
+      () => new Promise<never>((_resolve, reject) => { rejectSave = reject }),
+    )
+
+    const m = useSummaryModal()
+    await m.openSummary([7])
+    m.toggleEditMode(true)
+    m.updateFactoryQty(0, 0, 0, 1100)
+
+    const saving = m.saveFactoryEdits()
+    // 请求在途期间用户关闭了弹窗（orderIds 已清空）
+    m.close()
+    rejectSave({ response: { status: 409 } })
+
+    await expect(saving).rejects.toBeTruthy()
+    // 提示仍会弹出（告知刚才的保存没生效），但不得刷新——
+    // 否则会用空 orderIds 重新打开一个空弹窗。
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('BOM 已更新'))
+    expect(purchaseApi.factorySummary).toHaveBeenCalledTimes(1)
+    expect(purchaseApi.supplierSummary).toHaveBeenCalledTimes(1)
+    expect(m.open).toBe(false)
+    expect(m.orderIds).toEqual([])
+  })
+
+  it('上层 handler 收到 409 时不再弹通用错误（warning 已由汇总弹窗弹出）', async () => {
+    vi.mocked(purchaseApi.saveFactoryEdits).mockRejectedValueOnce({ response: { status: 409 } })
+    vi.mocked(purchaseApi.factorySummary)
+      .mockResolvedValueOnce(FACTORY as never)
+      .mockResolvedValueOnce({ ...FACTORY, items_versions: { '7': 4 } } as never)
+
+    const m = useSummaryModal()
+    await m.openSummary([7])
+    const actions = usePurchaseActions({
+      purchaseOrders: {} as never,
+      completed: {} as never,
+      summary: m,
+      confirm: {} as never,
+      queryClient: {} as never,
+    })
+    m.toggleEditMode(true)
+    m.updateFactoryQty(0, 0, 0, 1100)
+    await actions.handleSaveFactoryEdits()
+
+    // warning 来自 composable；handler 不得再弹第二条（英文 axios 错误 /「保存失败」）
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(showToast).not.toHaveBeenCalled()
+    // 数据仍按 409 契约刷新过
+    expect(purchaseApi.factorySummary).toHaveBeenCalledTimes(2)
+    expect(m.itemsVersions).toEqual({ '7': 4 })
   })
 })
 

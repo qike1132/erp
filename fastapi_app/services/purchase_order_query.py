@@ -121,6 +121,11 @@ async def get_purchase_order(db: AsyncSession, order_id: int) -> dict | None:
         # 订单级损耗率快照（千分之几）：物料清单「数量」列在逐行 loss_rate 缺失时回退到它，
         # 与「汇总下单 → 工厂内部采购订单汇总」的展示口径完全同源。
         'spare_rate': float(order.spare_rate) if order.spare_rate is not None else None,
+        # 采购明细版本（BOM 实时同步乐观锁）：订单详情是单价保存的唯一数据源，
+        # 前端保存时原样带回；期间 BOM 同步改写明细 → 后端 409（ITEMS_VERSION_CONFLICT）。
+        # 注意：本详情端点走本函数手拼 dict，**不**经过 PurchaseOrder.to_dict——两处
+        # 都要下发该字段，只加一处会让前端读到 undefined、409 保护在生产静默失效。
+        'items_version': order.items_version,
         'items': [
             # 逐行损耗率快照随明细一并下发，供前端派生「最终采购数量」；
             # 复用 _serialize_po_item 保持字段集不变，仅追加 loss_rate（不污染其它调用方）。

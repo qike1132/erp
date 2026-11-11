@@ -1279,7 +1279,16 @@ export function useSummaryModal() {
       // 上层不得把这次失败显示成「修改已保存」。
       if ((err as { response?: { status?: number } })?.response?.status === 409) {
         toast.warning('BOM 已更新，采购明细已刷新，请重新编辑')
-        await openSummary(orderIds.value, orderTime.value)
+        // 弹窗已关闭 / 无目标单：不得刷新（否则会用空 orderIds 重新打开空弹窗）
+        if (open.value && orderIds.value.length > 0) {
+          // 刷新会按新明细重建率基线数组；先作废在途自动落库的回写，否则迟到响应
+          // 会按旧 gi/si/fi 写到错位的行上（BOM 拆行后行序可能变化）并误置 saved。
+          // 与 close() 同款清理。
+          lossRateEpoch += 1
+          pendingRate = null
+          fabricPendingRates.clear()
+          await openSummary(orderIds.value, orderTime.value)
+        }
       }
       throw err
     }
