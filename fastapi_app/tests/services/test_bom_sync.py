@@ -1,8 +1,11 @@
 """BOM 明细同步服务测试（task-3）。
 
 覆盖：pending 单整单重建、无变化不抖动、跨部位率/价继承、
-非 pending 跳过、版本冲突 409。
+非 pending 跳过、版本冲突 409、审计删除行快照、用户编辑递增版本、大批量告警。
 """
+import json
+import logging
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, func, select
@@ -401,3 +404,159 @@ async def test_factory_save_partial_items_versions_skips_uncovered_orders(db):
     assert result['updated_count'] == 1
     item = await db.get(PurchaseOrderItem, 1)
     assert float(item.quantity) == 60.0
+
+
+# ============================================================
+# 终审修复：审计删除行快照 / 用户编辑递增 items_version / 大批量告警
+# ============================================================
+
+async def _bom_sync_audit_entries(db) -> list[dict]:
+    rows = (await db.execute(
+        select(ModificationLog).where(ModificationLog.field_name == 'bom_sync')
+    )).scalars().all()
+    return [json.loads(row.new_value) for row in rows]
+
+
+async def test_sync_audit_log_contains_removed_row_snapshot(db):
+    """spec §同步算法-6：审计 new_value 除计数外还要有被删除行的明细快照。"""
+    await _seed(db)
+    await sync_purchase_order_items(db, 8101)
+
+    entries = await _bom_sync_audit_entries(db)
+    assert len(entries) == 1
+    summary = entries[0]
+    assert (summary['added'], summary['updated'], summary['removed']) == (8, 0, 2)
+    assert 'removed_truncated' not in summary
+    by_name = {row['material_name']: row for row in summary['removed_rows']}
+    assert set(by_name) == {'绿色超柔', '蓝色超柔'}
+    assert by_name['绿色超柔'] == {
+        'material_name': '绿色超柔', 'specification': '234', 'unit': '码',
+        'part_name': None, 'supplier_name': '美利达',
+        'quantity': 50.0, 'loss_rate': 30.0, 'unit_price': 2.0,
+    }
+    assert by_name['蓝色超柔'] == {
+        'material_name': '蓝色超柔', 'specification': '223', 'unit': '码',
+        'part_name': None, 'supplier_name': '美利达',
+        # unit_price 列有 Python 侧默认 0（未显式赋值的行 flush 后即为 0）；
+        # loss_rate 无默认值，保持 NULL → None。
+        'quantity': 890.0, 'loss_rate': None, 'unit_price': 0.0,
+    }
+
+
+async def test_sync_audit_truncates_removed_snapshot_at_200(db):
+    """删除行快照上限 200 行：超出部分截断并置 removed_truncated。"""
+    await _seed(db)
+    for idx in range(201):
+        db.add(PurchaseOrderItem(
+            id=1000 + idx, order_id=8101, material_name=f'手工行{idx}',
+            specification=str(idx), unit='个', supplier_name='美利达',
+            quantity=1, material_category='accessory',
+        ))
+    await db.commit()
+    await sync_purchase_order_items(db, 8101)
+
+    summary = (await _bom_sync_audit_entries(db))[0]
+    assert summary['removed'] == 203          # 2 条旧行 + 201 条手工行
+    assert len(summary['removed_rows']) == 200
+    assert summary['removed_truncated'] is True
+
+
+async def test_factory_save_bumps_items_version_on_quantity_edit(db):
+    await _seed(db)
+    res = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 60}], 'tester', order_ids=[8101],
+    )
+    assert res['items_versions'] == {8101: 1}
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.items_version == 1
+
+
+async def test_factory_save_bumps_items_version_on_loss_rate_only(db):
+    await _seed(db)                       # item 1: loss_rate=30
+    res = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'loss_rate': 40}], 'tester', order_ids=[8101],
+    )
+    assert res['items_versions'] == {8101: 1}
+    assert (await db.get(PurchaseOrder, 8101)).items_version == 1
+
+
+async def test_factory_save_no_bump_when_values_unchanged(db):
+    """同值重发不算变更：版本不动（否则每保存一次就顶掉别人的版本）。"""
+    await _seed(db)                       # item 1: quantity=50 / loss_rate=30
+    res = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 50, 'loss_rate': 30}], 'tester',
+        order_ids=[8101],
+    )
+    assert res['items_versions'] == {}
+    assert (await db.get(PurchaseOrder, 8101)).items_version == 0
+
+
+async def test_factory_save_spare_rate_bumps_all_involved_orders_once(db):
+    """spare_rate 覆盖写：涉及的每张单各 +1（order_ids 重复也只加一次）。"""
+    await _seed(db)
+    await _seed(db, po_id=8102)
+    res = await save_factory_summary_edits(
+        db, [], 'tester', spare_rate=25, order_ids=[8101, 8102, 8102],
+    )
+    assert res['items_versions'] == {8101: 1, 8102: 1}
+    assert (await db.get(PurchaseOrder, 8101)).items_version == 1
+    assert (await db.get(PurchaseOrder, 8102)).items_version == 1
+
+
+async def test_factory_save_bumps_each_edited_order_once(db):
+    """两张单各自被编辑（含同单多次编辑）：每单只 +1。"""
+    await _seed(db)
+    await _seed(db, po_id=8102)
+    res = await save_factory_summary_edits(
+        db, [
+            {'item_ids': [1], 'quantity': 60},
+            {'item_ids': [11], 'quantity': 70},
+            {'item_ids': [1], 'loss_rate': 40},   # 8101 的第二次编辑
+        ], 'tester', order_ids=[8101, 8102],
+    )
+    assert res['items_versions'] == {8101: 1, 8102: 1}
+
+
+async def test_update_order_item_prices_bumps_items_version_only_on_change(db):
+    await _seed(db)
+    same = await update_purchase_order(
+        db, 8101, {'item_prices': [{'id': 1, 'unit_price': 2}], 'items_version': 0},
+    )
+    assert same['items_version'] == 0     # 同值重发不递增
+    changed = await update_purchase_order(
+        db, 8101, {'item_prices': [{'id': 1, 'unit_price': 3}], 'items_version': 0},
+    )
+    assert changed['items_version'] == 1  # 真实改价 +1，响应携带新版本
+    assert (await db.get(PurchaseOrder, 8101)).items_version == 1
+
+
+async def test_update_order_items_upsert_bumps_items_version(db):
+    await _seed(db)
+    result = await update_purchase_order(db, 8101, {
+        'items_version': 0,
+        'items': [{
+            'id': 1, 'material_name': '绿色超柔', 'specification': '234',
+            'unit': '码', 'unit_price': 2, 'quantity': 60,
+            'material_category': 'fabric',
+        }],
+    })
+    assert result['items_version'] == 1
+    assert (await db.get(PurchaseOrder, 8101)).items_version == 1
+
+
+async def test_bulk_sync_warns_when_more_than_20_orders(db, monkeypatch, caplog):
+    """一次 BOM 保存影响 >20 张 pending 单时打印 warning（日志可被发现）。"""
+    from fastapi_app.services.purchase import bom_sync as bom_sync_mod
+
+    async def fake_find(_db, _product_id):
+        return list(range(9001, 9022)), []    # 21 张
+
+    async def fake_sync(_db, po_id, *, dry_run=False):
+        return bom_sync_mod.SyncResult(po_id=po_id, changed=False)
+
+    monkeypatch.setattr(bom_sync_mod, 'find_pending_po_ids_for_product', fake_find)
+    monkeypatch.setattr(bom_sync_mod, 'sync_purchase_order_items', fake_sync)
+    with caplog.at_level(logging.WARNING,
+                         logger='fastapi_app.services.purchase.bom_sync'):
+        await sync_pending_items_for_product(db, 201)
+    assert any('BOM 同步影响采购单较多' in msg for msg in caplog.messages)

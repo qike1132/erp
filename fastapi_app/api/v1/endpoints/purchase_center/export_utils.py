@@ -178,20 +178,39 @@ def generate_factory_summary_print(
     :func:`fastapi_app.services.purchase_order_query.build_bom_display_maps` 一次产出。
     **必须传**：采购明细没有部位与角色，只凭明细打印件印不出这两列，会出现
     「屏幕有、打印空白」。缺省 ``None`` 时退回纯明细口径（旧调用方零变化）。
+
+    拆行口径与屏幕一致：传 ``bom_part_map`` 时按 BOM 感知（组内任一相关物料带
+    部位即拆行，无部位辅料单独成行）；不传时退回旧口径（全部明细带部位才拆行）。
     """
     source_orders = source_orders or []
     source_order_map = {o.id: o for o in source_orders}
 
-    # 与工厂汇总同口径：组内所有采购明细都带部位才按部位拆；否则按物料合并，
-    # 避免「屏幕合并 / 打印拆开」以及空部位明细被静默丢弃。
+    # 与工厂汇总**屏幕**同口径（2026-11-11 用户裁决）：拆行判定在「客户×产品」组
+    # 级别取 OR —— 只要该组任一相关明细在 BOM 中带有部位，就按部位拆行；没有部位
+    # 的明细（辅料/手工行）归 part_key='' 单独成行，**不阻塞**其他行拆行。
+    # 旧口径 `all(item.part_name)` 会把「有部位面料 + 无部位辅料」整组退化为合并，
+    # 屏幕上拆开、打印件却合并，数量口径对不上。
+    # 未传 bom_part_map（旧调用方）时保持旧口径：组内明细全部带部位才拆行。
     split_by_cp: dict[tuple[str, str], bool] = {}
     for order in orders:
         items = order_items_map.get(order.id, [])
         if not items:
             continue
         cp_key, _ = _resolve_factory_cp_key(order, source_order_map)
-        aware = all((getattr(it, 'part_name', None) or '').strip() for it in items)
-        split_by_cp[cp_key] = split_by_cp.get(cp_key, True) and aware
+        if bom_part_map is None:
+            aware = all((getattr(it, 'part_name', None) or '').strip() for it in items)
+            split_by_cp[cp_key] = split_by_cp.get(cp_key, True) and aware
+        else:
+            aware = any(
+                bom_part_map.get((
+                    cp_key[1],
+                    getattr(it, 'material_name', '') or '',
+                    getattr(it, 'specification', '') or '',
+                    getattr(it, 'unit', '') or '',
+                ))
+                for it in items
+            )
+            split_by_cp[cp_key] = split_by_cp.get(cp_key, False) or aware
 
     grouped_data: dict[tuple[str, str], dict[str, dict[tuple[str, str, str, str], dict[str, Any]]]] = {}
     order_count_map = {}

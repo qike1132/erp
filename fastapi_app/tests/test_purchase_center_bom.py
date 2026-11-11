@@ -263,6 +263,11 @@ class TestUpdatePurchaseOrderCrossOrderTampering:
         # ⚠️ 必须显式置 None：MagicMock 会自动生成任意属性，
         # float(MagicMock()) == 1.0 → 会被当成 1‰ 损耗率，把行金额算成 200.2000。
         order_100.spare_rate = None
+        # update_purchase_order 现在返回 to_dict()（含 items_version，供前端回写版本）；
+        # MagicMock 的 to_dict 会返回 MagicMock，令 result['id'] 断言失真 → 给真实 dict。
+        order_100.to_dict = MagicMock(return_value={
+            'id': 100, 'order_no': 'CG-00100', 'status': 'pending', 'items_version': 1,
+        })
 
         item_1 = MagicMock()
         item_1.id = 1
@@ -472,6 +477,10 @@ class TestUpdatePurchaseOrderCrossOrderTampering:
         order.customer_name = '客户X'
         order.supplier_name = '供应商X'
         order.remark = ''
+        # update_purchase_order 现在返回 to_dict()（含 items_version，供前端回写版本）。
+        order.to_dict = MagicMock(return_value={
+            'id': 500, 'order_no': 'CG-00500', 'status': 'pending', 'items_version': 1,
+        })
 
         item_existing = MagicMock()
         item_existing.id = 50

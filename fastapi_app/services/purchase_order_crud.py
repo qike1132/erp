@@ -216,10 +216,37 @@ def _apply_item_fields(item: PurchaseOrderItem, item_data: dict, order: Purchase
     return line_total
 
 
+# 明细「内容」的判定字段：用于 upsert 是否**实际改动**了明细（决定 items_version 递增）。
+# 不含 total_price（派生列）与 order_id/product_name/customer_name 之外的派生信息。
+_ITEM_SIGNATURE_FIELDS = (
+    'material_name', 'material_code', 'specification', 'unit', 'unit_price',
+    'quantity', 'material_category', 'part_name', 'remark', 'supplier_name',
+    'customer_name',
+)
+
+
+def _item_signature(item: PurchaseOrderItem) -> tuple:
+    """明细可变字段快照；None 与 '' 归一（两者在库里/页面上都表示空），Numeric 转 float。"""
+    def _norm_value(value):
+        if value is None or value == '':
+            return None
+        if isinstance(value, Decimal):
+            return float(value)
+        return value
+
+    return tuple(_norm_value(getattr(item, field, None)) for field in _ITEM_SIGNATURE_FIELDS)
+
+
 async def _upsert_order_items(
     db: AsyncSession, order: PurchaseOrder, order_id: int, items_data: list
-) -> None:
-    """批量预取并 upsert 订单明细，返回 None（直接修改 order.total_amount）。"""
+) -> bool:
+    """批量预取并 upsert 订单明细（直接修改 order.total_amount）。
+
+    Returns:
+        是否**实际改动**了明细（新增行、字段值变化、或删除未提交的行）。
+        仅原样重发相同明细时为 False —— 调用方据此决定 items_version 是否递增，
+        避免「保存一次就顶掉别人的版本」。
+    """
     existing_items_result = await db.execute(
         select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order_id)
     )
@@ -227,6 +254,7 @@ async def _upsert_order_items(
 
     total_amount = Decimal('0')
     updated_ids = set()
+    changed = False
 
     # 批量预取待更新的明细，避免循环内逐条 db.get 产生 N+1 查询
     item_ids_to_fetch = [d.get('id') for d in items_data if d.get('id')]
@@ -257,7 +285,12 @@ async def _upsert_order_items(
             # id 无效（已被删除、不存在，或属于其他订单）：跳过，避免跨订单写入
             continue
 
+        # 新增行（无 item_id）无论内容如何都是明细变化；已有行逐字段比对，
+        # 仅原样重发相同的明细不递增版本。
+        before = _item_signature(item) if item_id else None
         line_total = _apply_item_fields(item, item_data, order)
+        if before is None or _item_signature(item) != before:
+            changed = True
 
         if not item_id:
             db.add(item)
@@ -265,16 +298,18 @@ async def _upsert_order_items(
 
     to_delete_ids = existing_items - updated_ids
     if to_delete_ids:
+        changed = True
         await db.execute(
             delete(PurchaseOrderItem).where(PurchaseOrderItem.id.in_(to_delete_ids))
         )
 
     order.total_amount = total_amount
+    return changed
 
 
 async def _update_item_prices(
     db: AsyncSession, order: PurchaseOrder, order_id: int, price_entries: list,
-) -> None:
+) -> bool:
     """按明细 id 补录单价，并重算行金额与订单总金额。
 
     一键生成路径把 unit_price 写死 0（BOM 里没有价格来源），而更新请求原本
@@ -283,6 +318,9 @@ async def _update_item_prices(
 
     只改单价：不动数量/物料，也不删行——与 ``_upsert_order_items`` 的
     「未提交的明细视为删除」语义区分开，避免只补录价格时误删其它行。
+
+    Returns:
+        是否有单价**实际变化**（同值重发不算，不递增 items_version）。
     """
     # 先落库：同一次请求里若还带了 items（upsert 新增的明细尚未 flush），
     # 不 flush 就查不到那些新行，订单总金额会漏算。
@@ -294,6 +332,7 @@ async def _update_item_prices(
     items = {item.id: item for item in items_result.scalars().all()}
 
     seen: set[int] = set()
+    changed = False
     for entry in price_entries:
         item_id = entry['id']
         price = Decimal(str(entry['unit_price'])).quantize(Decimal('0.01'))
@@ -305,12 +344,15 @@ async def _update_item_prices(
         item = items.get(item_id)
         if item is None:
             raise ValueError(f'采购明细 {item_id} 不存在或不属于该采购单')
+        if item.unit_price is None or item.unit_price != price:
+            changed = True
         item.unit_price = price
         _recalc_item_total_price(item, order.spare_rate)
 
     order.total_amount = sum(
         (item.total_price or Decimal('0') for item in items.values()), Decimal('0')
     )
+    return changed
 
 
 async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, username: str = 'unknown') -> dict:
@@ -335,13 +377,21 @@ async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, use
 
     _apply_order_field_updates(order, data)
 
+    items_changed = False
     items_data = data.get('items')
     if items_data is not None:
-        await _upsert_order_items(db, order, order_id, items_data)
+        items_changed = await _upsert_order_items(db, order, order_id, items_data)
 
+    prices_changed = False
     price_entries = data.get('item_prices')
     if price_entries:
-        await _update_item_prices(db, order, order_id, price_entries)
+        prices_changed = await _update_item_prices(db, order, order_id, price_entries)
+
+    # 用户编辑明细同样递增版本（spec 同步算法-7）：BOM 同步的版本保护必须把
+    # 手工改数量/价格也视为「明细已变」，否则客户端在打开汇总/详情期间发生的
+    # 用户编辑不会被 409 拦住，保存时用旧版本写回已失效的行上。
+    if items_changed or prices_changed:
+        order.items_version = (order.items_version or 0) + 1
 
     await db.flush()
 
@@ -357,7 +407,9 @@ async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, use
         modifier_name=username,
     ))
 
-    return {'id': order.id, 'order_no': order.order_no, 'status': order.status}
+    # 返回完整 to_dict（含 items_version）：前端保存单价后要用响应里的新版本
+    # 回写本地订单对象，否则同一详情页连续保存的第二次会带过期版本被 409。
+    return order.to_dict()
 
 
 async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
@@ -616,12 +668,17 @@ async def save_factory_summary_edits(
     - `spare_rate` 非 None 时，对「被编辑明细所属采购单 ∪ order_ids」覆盖写率与备品。
     - `items_versions`：客户端持有的（采购单 ID → 明细版本）快照；非空时在
       **任何写入之前**逐单比对，过期即抛 ``ItemsVersionConflict``（409）。
+
+    返回值额外带 ``items_versions``（本次实际递增过版本的采购单 → 新版本）：
+    客户端保存成功后用它前移本地版本快照，避免同一弹窗内连续保存第二次带旧版本 409。
     """
     await _validate_factory_edit_versions(db, data, order_ids, items_versions)
 
     updated = 0
     involved_po_ids: list[int] = list(order_ids or [])
     touched_items: list[PurchaseOrderItem] = []
+    # 实际发生明细变更的采购单（数量/损耗率写前比对，同值重发不算）。
+    changed_po_ids: set[int] = set()
     for entry in data:
         item_ids = entry.get('item_ids', [])
         new_quantity = entry.get('quantity')
@@ -646,7 +703,10 @@ async def save_factory_summary_edits(
 
         if new_quantity is not None:
             if len(items) == 1:
-                items[0].quantity = Decimal(str(new_quantity))
+                target_qty = Decimal(str(new_quantity))
+                if items[0].quantity != target_qty:
+                    changed_po_ids.add(items[0].order_id)
+                items[0].quantity = target_qty
                 updated += 1
             else:
                 original_total = sum(float(it.quantity or 0) for it in items)
@@ -656,25 +716,36 @@ async def save_factory_summary_edits(
                     # 否则 Σ分摊 ≠ 用户输入的目标数量（3 行拆 100 得 99.99），
                     # 行金额按偏移后的数量重算，对账时出现无解释零头。
                     for it in items:
-                        it.quantity = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
+                        target_qty = Decimal(str(round_qty(float(it.quantity or 0) * ratio)))
+                        if it.quantity != target_qty:
+                            changed_po_ids.add(it.order_id)
+                        it.quantity = target_qty
                     residual = round_qty(
                         float(new_quantity)
                         - sum(float(it.quantity or 0) for it in items)
                     )
                     if residual:
-                        items[-1].quantity = Decimal(str(round_qty(
+                        target_qty = Decimal(str(round_qty(
                             float(items[-1].quantity or 0) + residual)))
+                        if items[-1].quantity != target_qty:
+                            changed_po_ids.add(items[-1].order_id)
+                        items[-1].quantity = target_qty
                     updated += len(items)
                 else:
                     per_item = Decimal(str(round_qty(float(new_quantity) / len(items))))
                     for it in items:
+                        if it.quantity != per_item:
+                            changed_po_ids.add(it.order_id)
                         it.quantity = per_item
                         updated += 1
 
         if new_loss_rate is not None:
             normalized_loss = normalize_spare_rate(new_loss_rate)
+            new_loss = Decimal(str(normalized_loss)) if normalized_loss is not None else None
             for it in items:
-                it.loss_rate = Decimal(str(normalized_loss)) if normalized_loss is not None else None
+                if it.loss_rate != new_loss:
+                    changed_po_ids.add(it.order_id)
+                it.loss_rate = new_loss
             updated += 1
 
     # 编辑应用完毕后，再批量覆盖写所涉采购单的损耗率 / 备品（一次查询，无 N+1）
@@ -692,8 +763,35 @@ async def save_factory_summary_edits(
         recalc_order_ids.update(oid for oid in involved_po_ids if oid)
     await _recalc_orders_amount(db, recalc_order_ids)
 
+    # 用户编辑也递增 items_version（spec 同步算法-7）：
+    # - 数量/损耗率实际变化 → 涉及单各 +1（每个单只加一次，用集合去重）；
+    # - spare_rate 覆盖写 → 所有涉及单 +1（订单级率是明细有效损耗率的回退源，
+    #   该单全部明细的计价数量与金额都被改了，与「行被改写」同性质）。
+    if spare_rate is not None:
+        changed_po_ids.update(oid for oid in involved_po_ids if oid)
+    if changed_po_ids:
+        # 与 BOM 同步同序加锁（ORDER BY id + FOR UPDATE），避免与同步/其他保存互锁。
+        orders_result = await db.execute(
+            select(PurchaseOrder)
+            .where(PurchaseOrder.id.in_(sorted(changed_po_ids)))
+            .order_by(PurchaseOrder.id)
+            .with_for_update()
+        )
+        version_map = {o.id: o for o in orders_result.scalars().all()}
+        # 键为采购单 id（JSON 序列化后字符串键）；只回传实际递增过的单。
+        items_versions: dict[int, int] = {}
+        for po_id in sorted(changed_po_ids):
+            order = version_map.get(po_id)
+            if order is None:
+                continue
+            order.items_version = (order.items_version or 0) + 1
+            items_versions[po_id] = order.items_version
+    else:
+        items_versions = {}
+
     await db.flush()
-    return {'updated_count': updated, 'spare_updated_count': spare_written}
+    return {'updated_count': updated, 'spare_updated_count': spare_written,
+            'items_versions': items_versions}
 
 
 async def _recalc_orders_amount(db: AsyncSession, order_ids: set[int]) -> None:

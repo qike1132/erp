@@ -173,6 +173,48 @@ def _diff_counts(rows, target: list[dict]) -> tuple[int, int, int, list[int]]:
     return added, updated, removed, removed_rows
 
 
+# 审计 new_value 里删除行快照的行数上限：BOM 整体换版可能一次删几百行，
+# 快照无限大既不便于人工复核，也把 modification_log 行撑大。
+_AUDIT_REMOVED_ROWS_LIMIT = 200
+
+
+def _removed_row_snapshot(row: PurchaseOrderItem) -> dict:
+    """审计用删除行快照（纯 JSON 可序列化值；Numeric 列转 float/None）。"""
+    def _num(value):
+        return float(value) if value is not None else None
+
+    return {
+        'material_name': row.material_name,
+        'specification': row.specification,
+        'unit': row.unit,
+        'part_name': row.part_name,
+        'supplier_name': row.supplier_name,
+        'quantity': _num(row.quantity),
+        'loss_rate': _num(row.loss_rate),
+        'unit_price': _num(row.unit_price),
+    }
+
+
+def _removed_items(
+    rows: list[PurchaseOrderItem], target: list[dict],
+) -> list[PurchaseOrderItem]:
+    """键差异口径下真正被删除的旧行（与 added/updated/removed 计数同源）。
+
+    ``_rewrite_items`` 是重建式同步（删全部旧行再插入），但业务口径的「删除」
+    是 multiset 键差异：同键换成新 id 的行属于「更新」，不能进删除快照。
+    按 ``rows`` 顺序消费目标键余量，余量耗尽的旧行才是 removed。
+    """
+    remaining = Counter(_target_key(t) for t in target)
+    result: list[PurchaseOrderItem] = []
+    for row in rows:
+        key = _existing_key(row)
+        if remaining.get(key, 0) > 0:
+            remaining[key] -= 1
+        else:
+            result.append(row)
+    return result
+
+
 async def _rewrite_items(
     db: AsyncSession, order: PurchaseOrder, target: list[dict],
     counts: tuple[int, int, int, list[int]],
@@ -182,7 +224,12 @@ async def _rewrite_items(
     rows = (await db.execute(
         select(PurchaseOrderItem)
         .where(PurchaseOrderItem.order_id == order.id)
+        .order_by(PurchaseOrderItem.id)
     )).scalars().all()
+    # 删除行快照必须在 DELETE/expunge 之前取：之后对象属性不可依赖。
+    removed_snapshot = [
+        _removed_row_snapshot(r) for r in _removed_items(rows, target)
+    ]
     await db.execute(delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order.id))
     # Core DELETE 不同步 identity map：旧行对象已从库中消失，移出会话避免后续
     # 按主键取到幽灵对象或在 flush 时被误写回。
@@ -214,7 +261,10 @@ async def _rewrite_items(
 
     order.total_amount = total
     order.items_version = (order.items_version or 0) + 1
-    summary = {'added': added, 'updated': updated, 'removed': removed}
+    summary: dict = {'added': added, 'updated': updated, 'removed': removed,
+                     'removed_rows': removed_snapshot[:_AUDIT_REMOVED_ROWS_LIMIT]}
+    if len(removed_snapshot) > _AUDIT_REMOVED_ROWS_LIMIT:
+        summary['removed_truncated'] = True
     db.add(ModificationLog(
         target_type='purchase_order', target_id=order.id, field_name='bom_sync',
         old_value=None,
@@ -463,6 +513,12 @@ async def sync_pending_items_for_product(
 ) -> dict:
     """同步所有覆盖该产品的 pending 采购单；逐单 savepoint，单张失败不污染其他单。"""
     matched, unresolved = await find_pending_po_ids_for_product(db, product_id)
+    # 一次 BOM 保存影响面过大是异常信号（多半是公共物料挂在大量产品上）：
+    # 打印 warning 供运维在日志里发现，便于核实是否需要人工复核批量改写。
+    if len(matched) > 20:
+        logger.warning(
+            'BOM 同步影响采购单较多: product=%s count=%s', product_id, len(matched),
+        )
     results: list[SyncResult] = []
     synced = 0
     skipped = len(unresolved)

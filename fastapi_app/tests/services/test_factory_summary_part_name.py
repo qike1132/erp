@@ -537,8 +537,89 @@ async def test_po_with_mixed_part_and_null_items_splits(db):
     assert list(by_part['']['item_ids']) == [80012]
 
 
-def test_backend_factory_print_mixed_parts_merges():
-    """后端打印与屏幕同口径：PO 内混有无部位明细时按物料合并，不拆两行。"""
+async def test_backend_factory_print_bom_aware_splits_parts_and_accessory(db):
+    """打印与屏幕同口径（BOM 感知，2026-11-11 裁决）：两行部位行 + 一行无部位辅料。
+
+    旧口径 ``all(item.part_name)`` 遇到「有部位面料 + 无部位辅料」会把整组退化为
+    合并：打印件只出一行 22 码、部位列「身体/未标注」，与屏幕拆行（12/10/8）数量
+    对不上。新口径传入 bom_part_map 时组级取 OR，无部位辅料归 ``part_key=''``
+    单独成行，不阻塞其他行拆行。
+    """
+    from sqlalchemy import select
+
+    from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
+        generate_factory_summary_print,
+    )
+    from fastapi_app.services.purchase_order_query import build_bom_part_display_map
+    from fastapi_app.shared_models import PurchaseOrderItem
+
+    session = db
+    session.add_all([
+        Product(id=101, name='产品A'),
+        ProductFabric(id=1, product_id=101, fabric_name='绿色超柔', specification='234',
+                      unit='码', quantity=0.12, supplier_name='供应商甲', part_name='身体'),
+        ProductFabric(id=2, product_id=101, fabric_name='绿色超柔', specification='234',
+                      unit='码', quantity=0.10, supplier_name='供应商甲', part_name='脚底'),
+        ProductAccessory(id=3, product_id=101, role_id=None, accessory_name='木棒按摩锤',
+                         specification='1条', unit='个', quantity=0.08, supplier_name='供应商甲'),
+        Order(id=9001, order_no='SO-9001', customer='客户甲', product_id=101,
+              quantity=100, status='待备货'),
+        OrderItem(id=1, order_id=9001, product_id=101, product_name='产品A', quantity=100),
+        PurchaseOrder(id=8001, order_no='PO-8001', customer_name='客户甲',
+                      product_name='产品A', product_quantity=100,
+                      supplier_name='供应商甲', source_order_ids='[9001]'),
+        PurchaseOrderItem(id=80011, order_id=8001, material_name='绿色超柔',
+                          specification='234', unit='码', quantity=12,
+                          supplier_name='供应商甲', part_name='身体'),
+        PurchaseOrderItem(id=80012, order_id=8001, material_name='绿色超柔',
+                          specification='234', unit='码', quantity=10,
+                          supplier_name='供应商甲', part_name='脚底'),
+        PurchaseOrderItem(id=80013, order_id=8001, material_name='木棒按摩锤',
+                          specification='1条', unit='个', quantity=8,
+                          supplier_name='供应商甲', part_name=None),
+        PurchaseOrderSku(id=1, po_id=8001, product_name='产品A', product_barcode='bA',
+                         order_qty=100, source_order_id=9001, source_record_type='order'),
+    ])
+    await session.commit()
+
+    order = await session.get(PurchaseOrder, 8001)
+    items = (await session.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == 8001)
+    )).scalars().all()
+    part_map = await build_bom_part_display_map(session, [order])
+
+    html = generate_factory_summary_print(
+        [order], {8001: items}, bom_part_map=part_map,
+    )
+
+    # 两行部位行 + 一行辅料行；不得退化为合并行（旧口径会印「身体/未标注」+ 22 码）。
+    assert html.count('>绿色超柔</td>') == 2
+    assert html.count('>木棒按摩锤</td>') == 1
+    assert '<td style="text-align:left">身体</td>' in html
+    assert '<td style="text-align:left">脚底</td>' in html
+    assert '未标注' not in html
+    assert '>22.0 码<' not in html
+    assert '>12.0 码<' in html and '>10.0 码<' in html and '>8.0 个<' in html
+
+    # 数量与屏幕一致：屏幕按 BOM 拆出的三行与打印件逐行对应。
+    group = (await get_factory_order_summary(session, [8001]))['groups'][0]
+    screen_rows = {
+        (f['fabric_name'], f.get('part_name') or ''): float(f['quantity'])
+        for f in _fabrics(group)
+    }
+    assert screen_rows == {
+        ('绿色超柔', '身体'): 12.0,
+        ('绿色超柔', '脚底'): 10.0,
+        ('木棒按摩锤', ''): 8.0,
+    }
+
+
+def test_backend_factory_print_without_bom_map_keeps_legacy_merge():
+    """旧调用方（未传 bom_part_map）保持旧口径：明细全带部位才拆行。
+
+    混合「有部位 + 无部位」→ 按物料合并为一行「身体/未标注」、数量相加（20.0）。
+    这是零回归契约：参数缺省 = 纯明细口径，防后来者把 map 做成必填。
+    """
     from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
         generate_factory_summary_print,
     )
