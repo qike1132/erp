@@ -226,6 +226,9 @@ describe('SummaryPanel 数量口径（数据行）', () => {
     expect(factoryQtyDisplayValue(254.34, 100, false)).toBe(280)
     // 20.001 也是 21（owner 口径原话）
     expect(factoryQtyDisplayValue(20.001, 0, true)).toBe(21)
+    // 落库 2 位基数反乘的存储量化误差不得抬成 +1：
+    // 生产真实行 脚底·绿色超柔 基数 18181.82（= 20000/1.1 舍入）@100‰ → 20000，不是 20001
+    expect(factoryQtyDisplayValue(18181.82, 100, false)).toBe(20000)
   })
 
   it('数据行数量（lossRate=0 → 不改变数量）', () => {

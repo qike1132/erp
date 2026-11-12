@@ -112,15 +112,21 @@ export function magnifyByLossRate(qty: number, lossRate: number): number {
  * 损耗加放后的「数量」展示值（向上取整）：屏幕表格、打印预览、Excel 导出共用。
  * 只在展示层取整，原始数量仍是落库唯一真值，保存反推仍使用精确的 magnifyByLossRate。
  *
- * 取整精度（2026-11-11 owner 口径）：向上取整前**先按 1e-6 清理浮点尾差**，而不是
- * 先四舍五入到 2 位小数 —— 否则 20.001 会被抹成 20.00、ceil 后仍是 20，与
- * 「20.001 也是 21」的业务口径相悖。1e-6 的容差用于吸收 `10×1.005=10.049999…`
- * 这类浮点噪声（减掉 epsilon 后 ceil 仍得 11），同时保证真实整数不被抬成 +1。
+ * 取整精度随**基数精度**（2026-11-11 口径：数量一律整数，20.001 也是 21）：
+ * - 落库基数只有 2 位小数（Numeric(12,2)），它是「展示值 / 损耗系数」的舍入结果，
+ *   反乘回来会带 < 1 分的存储量化误差（如 18181.82 × 1.1 = 20000.002，用户输入的
+ *   是 20000）——这类基数先按 2 位归位再 ceil，避免把 20000 显示成 20001；
+ * - BOM 推算基数可达 4 位小数（unit_usage Numeric(10,4) × 订单量），保留真实小数位，
+ *   按 1e-6 清理浮点噪声后 ceil —— 20.001 正确得到 21。
  */
 export function ceilMagnifiedByLossRate(qty: number, lossRate: number): number {
   const v = Number.isFinite(qty) ? qty : 0
   const r = Number.isFinite(lossRate) ? lossRate : 0
   const exact = v * (1 + r / 1000)
+  // 基数是 2 位小数（落库值）→ 先按 2 位归位，吸收「反推 → 回乘」的存储量化误差
+  if (Math.abs(v * 100 - Math.round(v * 100)) < 1e-9) {
+    return Math.ceil(Math.round(exact * 100) / 100 - 1e-9)
+  }
   return Math.ceil(Math.round(exact * 1e6) / 1e6 - 1e-9)
 }
 
