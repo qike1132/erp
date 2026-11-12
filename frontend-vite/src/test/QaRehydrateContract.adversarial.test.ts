@@ -156,7 +156,6 @@ describe('C3. SummaryPanel 组件层 mixed 提示', () => {
       props: {
         factoryData: FACTORY,
         supplierData: null,
-        editMode: false,
         lossRate,
         orderCount: 1,
         supplierGroups: [],
@@ -179,25 +178,23 @@ describe('C3. SummaryPanel 组件层 mixed 提示', () => {
 
   it('缺省（未传 lossRateMixed）→ 不渲染（向后兼容）', () => {
     const w = mount(SummaryPanel, {
-      props: { factoryData: FACTORY, supplierData: null, editMode: false, lossRate: 0, orderCount: 1, supplierGroups: [] },
+      props: { factoryData: FACTORY, supplierData: null, lossRate: 0, orderCount: 1, supplierGroups: [] },
     })
     expect(w.text()).not.toContain('各订单损耗率不一致')
     w.unmount()
   })
 })
 
-describe('C4. 已落库基线恢复（非 0）', () => {
-  it('applyLossRateAndSave(5) 成功 → persistedLossRate=5；编辑→取消编辑 → lossRate=5', async () => {
+describe('C4. 已落库基线（非 0）', () => {
+  it('applyLossRateAndSave(5) 成功 → persistedLossRate=5，展示与基线一致', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     await m.applyLossRateAndSave(5)
 
     expect(m.persistedLossRate).toBe(5)
-    m.toggleEditMode(true)
-    m.toggleEditMode(false)
     expect(m.lossRate).toBe(5)
     expect(m.lossRateTouched).toBe(false)
-    expect(m.lossRateSaveState).toBe('idle')
+    expect(m.lossRateSaveState).toBe('saved')
   })
 })
 

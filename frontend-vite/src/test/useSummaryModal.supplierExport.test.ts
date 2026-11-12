@@ -132,16 +132,29 @@ describe('导出供应商汇总 Excel：数量与页面一致', () => {
     expect(quantities![1]!.quantity).toBe(21)   // 回退同样向上取整：ceil(20 × 1.005) = 21
   })
 
-  it('自定义编辑数量后（未保存）：导出携带编辑中的最新数量', async () => {
+  it('单行保存数量后：导出携带保存后的最新数量', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     await m.applyFabricLossRateAndSave(0, 0, 0, 100) // 该行 100‰
-    m.toggleEditMode(true)
-    m.updateFactoryQty(0, 0, 0, 33)                   // 真值 30 → 展示 33
+    m.beginQtyEdit(0, 0, 0, 22)
+    m.setQtyDraft(0, 0, 0, '33')                     // 真值 30 → 展示 33
+    await m.saveQtyRow(0, 0, 0)
 
     await m.exportSupplier()
 
     expect(lastExportQuantities()![0]!.quantity).toBe(33)
+  })
+
+  it('未保存的数量草稿不参与导出（供应商页只反映已落库值）', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    await m.applyFabricLossRateAndSave(0, 0, 0, 100)
+    m.beginQtyEdit(0, 0, 0, 22)
+    m.setQtyDraft(0, 0, 0, '33')                     // 只改草稿，不保存
+
+    await m.exportSupplier()
+
+    expect(lastExportQuantities()![0]!.quantity).toBe(22)
   })
 
   it('orderIds 为空时不发起导出请求', async () => {

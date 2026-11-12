@@ -79,7 +79,6 @@ function mountModal(group: FactoryGroup, opts: {
     props: {
       factoryData: dataWith(group, opts.lossRate ?? 15),
       supplierData: { success: true, order_count: 1, materials: [] },
-      editMode: false,
       lossRate: opts.lossRate ?? 15,
       orderCount: 1,
       supplierGroups: [],
@@ -192,7 +191,7 @@ describe('A1/A3 屏幕：新列位置 + 自定义行率不影响备品', () => {
     const wrapper = mount(SummaryPanel, {
       props: {
         factoryData: data, supplierData: { success: true, order_count: 2, materials: [] },
-        editMode: false, lossRate: 15, orderCount: 2, supplierGroups: [],
+        lossRate: 15, orderCount: 2, supplierGroups: [],
         groupSpareRates: [15, 30],
       },
       attachTo: document.body,

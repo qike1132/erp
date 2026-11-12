@@ -132,7 +132,6 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
       props: {
         factoryData: m.factoryData,
         supplierData: m.supplierData,
-        editMode: false,
         lossRate: m.lossRate,
         orderCount: 1,
         supplierGroups: m.supplierGroups,
@@ -167,7 +166,6 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
       props: {
         factoryData: m.factoryData,
         supplierData: m.supplierData,
-        editMode: false,
         lossRate: m.lossRate,
         orderCount: 1,
         supplierGroups: m.supplierGroups,
@@ -191,7 +189,7 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
     wrapper.unmount()
   })
 
-  it('编辑态：输入框绑定当前工序损耗率加放后的订单用量，绝不为 0', async () => {
+  it('点击进入编辑：预载值 = 当前工序损耗率加放后的订单用量，绝不为 0', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     m.applyLossRate(5)
@@ -200,18 +198,22 @@ describe('【上线阻断项】字符串 quantity 不得导致「数量列/合�
       props: {
         factoryData: m.factoryData,
         supplierData: m.supplierData,
-        editMode: true,
         lossRate: m.lossRate,
         orderCount: 1,
         supplierGroups: m.supplierGroups,
       },
     })
-    const inputs = wrapper.findAll('input[type="number"]')
-    // 2026-11-11 口径：编辑态输入框与非编辑态一致，向上取整（10×1.005=10.05→11；20×1.005=20.1→21）
-    expect((inputs[0]!.element as HTMLInputElement).value).toBe('11')
-    expect((inputs[1]!.element as HTMLInputElement).value).toBe('21')
+    const cells = wrapper.findAll('.sm-qty-cell')
+    expect(cells).toHaveLength(2)
+    await cells[0]!.trigger('click')
+    await cells[1]!.trigger('click')
 
-    // 表格内已无「合计」行：编辑态同样只剩数据行
+    // 2026-11-11 口径：编辑预载与非编辑态一致，向上取整（10×1.005=10.05→11；20×1.005=20.1→21）
+    const emitted = wrapper.emitted('beginQtyEdit')!
+    expect(emitted[0]![3]).toBe(11)
+    expect(emitted[1]![3]).toBe(21)
+
+    // 表格内已无「合计」行：同样只剩数据行
     expect(wrapper.findAll('tbody tr')).toHaveLength(2)
     wrapper.unmount()
   })

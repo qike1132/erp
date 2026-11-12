@@ -464,11 +464,111 @@ export function buildPerSkuRows(group: FactoryGroup, groupRate: number): PerSkuR
   return rows
 }
 
+/** 数量落库精度为 2 位小数：先归位再比较，避免浮点尾差误报。 */
+function roundQty2(v: number): number {
+  return Math.round(v * 100) / 100
+}
+
+/**
+ * 「手工调整」的唯一判定：某物料键的 BOM 推算合计与落库真值是否不一致。
+ *
+ * `computeQuantityDiff`（差异横幅）与 `buildRowDisplayQuantities`（数量展示）
+ * 必须共用本判定 —— 两处各自写容差/舍入，未来单改一处就会让「横幅说有差异、
+ * 显示却仍按 BOM 推算」这种同屏两套口径重新出现。
+ */
+export function hasManualAdjustment(perSkuSum: number, storedQuantity: number): boolean {
+  return Math.abs(roundQty2(perSkuSum) - storedQuantity) > 0.005
+}
+
+/**
+ * 最大余数法：把整数总量按权重拆成整数份额，Σ份额 ≡ total。
+ *
+ * 权重全 0（BOM 全为 0 但落库有量）时等分，避免除零后全部落到同一行。
+ * 并列余数按行顺序分配，保证同一份数据每次渲染结果稳定。
+ */
+function allocateIntegerByWeights(total: number, weights: number[]): number[] {
+  const safeTotal = Math.max(0, Math.round(total))
+  if (weights.length === 0) return []
+  const safe = weights.map((w) => (Number.isFinite(w) && w > 0 ? w : 0))
+  const weightSum = safe.reduce((s, w) => s + w, 0)
+  const effective = weightSum > 0 ? safe : safe.map(() => 1)
+  const effectiveSum = weightSum > 0 ? weightSum : safe.length
+  const shares = effective.map((w) => (safeTotal * w) / effectiveSum)
+  const allocated = shares.map((v) => Math.floor(v))
+  let remaining = safeTotal - allocated.reduce((s, v) => s + v, 0)
+  const byRemainder = shares
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  for (let k = 0; k < byRemainder.length && remaining > 0; k++, remaining--) {
+    allocated[byRemainder[k]!.i] = (allocated[byRemainder[k]!.i] ?? 0) + 1
+  }
+  return allocated
+}
+
+/**
+ * 按 SKU 行的「数量」展示值（工厂表 / 供应商页 / 打印 / 导出**唯一口径**）。
+ *
+ * 判定（按物料键，与 `buildStoredIndex` / `computeQuantityDiff` 同键同容差）：
+ * - **非手工**（Σ BOM 基准 ≈ 落库真值）：逐行 `ceil(该行基准 × 该行损耗率)`，
+ *   与改造前的逐 SKU 推算值逐字一致；
+ * - **手工调整**（落库 ≠ Σ BOM）：以落库真值为权威 —— 先按该行损耗率加放得到
+ *   整数总量，再按各 SKU 的 BOM 基准量权重用最大余数法拆份额。
+ *   这样「同一物料被多个 SKU 共用」时 **Σ 各 SKU 行 ≡ 落库总量加放值**，
+ *   供应商页对同一批行求和即可天然对平（不再另写一套判断）；
+ * - 无落库坐标的行（BOM 生成后新增）：不加放，展示基准量（与「损耗率 —」同口径）。
+ *
+ * 返回数组与 `rows` 下标严格对齐，调用方不得重排。
+ */
+export function buildRowDisplayQuantities(
+  group: FactoryGroup,
+  rows: PerSkuRow[],
+  rateOf: (si: number, fi: number) => number,
+): number[] {
+  const out: number[] = new Array(rows.length).fill(0)
+  if (rows.length === 0) return out
+  const stored = buildStoredIndex(group)
+  const buckets = new Map<string, number[]>()
+  rows.forEach((r, i) => {
+    if (r.noBom) {
+      out[i] = r.baseQuantity
+      return
+    }
+    const key = materialKeyOf({
+      supplier_name: r.supplierName, material_name: r.materialName,
+      specification: r.specification, unit: r.unit, part_name: r.partName,
+      role_id: r.roleId, withRole: true,
+    })
+    const list = buckets.get(key) ?? []
+    list.push(i)
+    buckets.set(key, list)
+  })
+
+  buckets.forEach((indices, key) => {
+    const hit = stored.get(key)
+    if (!hit) {
+      // 只出现在 BOM、落库没有的物料：无率可加放，展示基准量（与改造前一致）
+      indices.forEach((i) => { out[i] = rows[i]!.baseQuantity })
+      return
+    }
+    const rate = rateOf(hit.coord.si, hit.coord.fi)
+    const baseSum = indices.reduce((s, i) => s + rows[i]!.baseQuantity, 0)
+    if (!hasManualAdjustment(baseSum, hit.storedQuantity)) {
+      indices.forEach((i) => { out[i] = ceilMagnifiedByLossRate(rows[i]!.baseQuantity, rate) })
+      return
+    }
+    const total = ceilMagnifiedByLossRate(hit.storedQuantity, rate)
+    const allocated = allocateIntegerByWeights(total, indices.map((i) => rows[i]!.baseQuantity))
+    indices.forEach((i, k) => { out[i] = allocated[k] ?? 0 })
+  })
+  return out
+}
+
 /**
  * 数量差异：**逐键**比较「各 SKU 基准量之和」与「落库真值」（按物料键）。
  *
  * 两个方向都算差异（spec §2.3「逐键比较」）：
- *   - 两侧都有的键：`|Σ推算 − 落库| > 0.005` 才算差异；
+ *   - 两侧都有的键：`|Σ推算 − 落库| > 0.005` 才算差异（与展示共用
+ *     `hasManualAdjustment`，避免两处口径漂移）；
  *   - 只在落库侧的键（手工加进采购明细的物料、或 BOM 生成后被删除的物料）：
  *     `Σ推算 = 0`，落库 > 0 即为差异 —— 否则用户在按 SKU 视图里看不到
  *     「采购明细里有、BOM 里没有」这件事实；
@@ -502,7 +602,7 @@ export function computeQuantityDiff(
     const hit = stored.get(key)
     if (!hit) return                       // 只出现在 BOM、落库里没有 → 不是「差异」，是新增物料
     const perSkuRounded = Math.round(perSku * 100) / 100
-    if (Math.abs(perSkuRounded - hit.storedQuantity) > 0.005) {
+    if (hasManualAdjustment(perSku, hit.storedQuantity)) {
       diffs.push({
         materialName: nameOfStoredKey(key), partName: partOfStoredKey(key),
         perSku: perSkuRounded, stored: hit.storedQuantity,

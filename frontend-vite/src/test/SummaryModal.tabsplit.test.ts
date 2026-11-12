@@ -62,7 +62,6 @@ function mountModal() {
     props: {
       factoryData,
       supplierData: null,
-      editMode: false,
       lossRate: 0,
       orderCount: 1,
       supplierGroups: [],

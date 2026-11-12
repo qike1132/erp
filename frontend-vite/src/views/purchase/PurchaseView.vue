@@ -1,24 +1,26 @@
 <template>
   <div class="pc-container">
-    <!-- 汇总下单整页视图（2026-10-31 由弹窗改为铺满内容区）：open 时替换整个订单列表卡片，
-         侧边栏保留。数据层 useSummaryModal 不变，仅承载方式从 UiDialog 换成页面视图。 -->
+    <!-- 汇总下单整页视图：open 时替换订单列表卡片，侧边栏保留 -->
     <div v-if="summary.open" class="page-card page-card-main">
       <SummaryPanel
         :factory-data="summary.factoryData"
         :supplier-data="summary.supplierData"
-        :edit-mode="summary.editMode"
         :loss-rate="summary.lossRate"
         :loss-rate-save-state="summary.lossRateSaveState"
         :loss-rate-mixed="summary.lossRateMixed"
         :fabric-loss-rates="summary.fabricLossRates"
         :fabric-loss-rate-mixed="summary.fabricLossRateMixed"
         :group-spare-rates="summary.groupSpareRates"
+        :qty-drafts="summary.qtyDrafts"
+        :qty-saving-key="summary.qtySavingKey"
+        :has-unsaved-qty-edits="summary.hasUnsavedQtyEdits"
         :order-count="purchaseOrders.selectedIds.length"
         :supplier-groups="summary.supplierGroups"
         @close="handleSummaryClose"
-        @toggle-edit-mode="summary.toggleEditMode"
-        @save-edits="handleSaveFactoryEdits"
-        @update-qty="handleUpdateFactoryQty"
+        @begin-qty-edit="summary.beginQtyEdit"
+        @qty-draft-input="summary.setQtyDraft"
+        @cancel-qty-edit="summary.cancelQtyEdit"
+        @save-qty-row="handleSaveQtyRow"
         @apply-loss-rate="handleApplyLossRate"
         @apply-fabric-loss-rate="handleApplyFabricLossRate"
         @export-factory="summary.exportFactory"
@@ -27,7 +29,6 @@
         @print-supplier="summary.printSupplier"
       />
     </div>
-
     <div v-else class="page-card page-card-main">
       <div class="page-card-header">
         <div class="pc-tab-group" role="tablist">
@@ -215,8 +216,7 @@ const {
   handleBatchComplete,
   handleSummary,
   handleOrderPageChange,
-  handleSaveFactoryEdits,
-  handleUpdateFactoryQty,
+  handleSaveQtyRow,
   handleApplyLossRate,
   handleApplyFabricLossRate,
   handleViewDetail,
@@ -233,8 +233,7 @@ const {
  */
 const activeOrderCount = computed(() => unprocessed.total + purchaseOrders.total)
 
-/* 汇总下单整页视图的离开守卫（编辑态确认）：判定与确认细节在 useSummaryLeaveGuard
- * （View 在 400 行门禁边缘，接线一行化；弹窗时代靠遮罩拦导航，整页化后侧边栏可点）。 */
+/* 汇总下单整页视图的离开守卫：判定与确认细节在 useSummaryLeaveGuard（一行化接线）。 */
 const { handleSummaryClose } = useSummaryLeaveGuard(summary, confirm.confirm)
 
 /** 待生产/待生成任一列表加载失败时，重试两者 */

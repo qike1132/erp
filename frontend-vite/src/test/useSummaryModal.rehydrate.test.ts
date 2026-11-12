@@ -7,7 +7,7 @@
  *  3. 响应不含字段（未重启的旧后端）→ lossRate=0 且不发任何请求（零回归）；
  *  4. spare_rate_mixed=true → lossRate=0 且 lossRateMixed=true；组件层提示「各订单损耗率不一致」；
  *  5. 回显不得把 lossRateTouched 置 true → handleCompleteOrder 实参 (999, undefined)；
- *  6. 自动落库成功更新 persistedLossRate；随后 编辑→取消编辑 恢复到该值（不是 0）；
+ *  6. 自动落库成功更新 persistedLossRate；单行数量保存不改 spare_rate；
  *  7. close() 全量复位。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -165,80 +165,52 @@ describe('openSummary 回显损耗率（服务端已落库快照）', () => {
   })
 })
 
-describe('persistedLossRate / 取消编辑恢复真值', () => {
-  it('6. 自动落库成功 → persistedLossRate 更新；编辑→取消编辑 → lossRate 恢复为该值（非 0）', async () => {
+describe('persistedLossRate / 自动落库基线', () => {
+  it('6. 自动落库成功 → persistedLossRate 更新，展示与基线一致', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
 
     await m.applyLossRateAndSave(5)
     expect(m.persistedLossRate).toBe(5)
-
-    m.toggleEditMode(true)
-    // 编辑态下取消编辑：恢复到「已落库」真值 5，而不是清零
-    m.toggleEditMode(false)
-
     expect(m.lossRate).toBe(5)
     expect(m.lossRateTouched).toBe(false)
-    expect(m.lossRateSaveState).toBe('idle')
+    expect(m.lossRateSaveState).toBe('saved')
   })
 
-  it('6b. 回显后未交互即取消编辑 → 恢复回显值（不失真）', async () => {
+  it('6b. 回显后未交互 → 保持回显值（不失真）', async () => {
     vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factoryRes({ spare_rate: 8 }) as never)
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     expect(m.lossRate).toBe(8)
-
-    m.toggleEditMode(true)
-    m.toggleEditMode(false)
-
-    expect(m.lossRate).toBe(8)
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
   })
 
-  it('6d. 「保存修改」落库 spare_rate 后：factoryData 同为新率，取消编辑不回滚（OCR 2026-10-18）', async () => {
-    // 打开时 spare_rate 缺省（0），用户在编辑态交互损耗率后走「保存修改」提交 spare_rate。
+  it('6d. 损耗率自动落库后：factoryData 与分组率同为新值（同屏两套口径）', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
     expect(m.factoryData!.spare_rate).toBeUndefined()
 
-    m.applyLossRate(5)
-    m.toggleEditMode(true)
-    await m.saveFactoryEdits()
+    await m.applyLossRateAndSave(5)
 
-    // 此前只同步 factoryOriginalData，factoryData 仍是旧值 → 同屏两套口径
     expect(m.factoryData!.spare_rate).toBe(5)
     expect(m.factoryData!.groups[0]!.spare_rate).toBe(5)
-
-    // 取消编辑：分组率从 factoryOriginalData 重播，必须仍是 5（不是回滚到 0）
-    m.toggleEditMode(false)
-    expect(m.lossRate).toBe(5)
     expect(m.groupSpareRates[0]).toBe(5)
-    // 重播后 factoryData 仍保持新率（回滚不会把 spare_rate 打回旧值）
-    expect(m.factoryData!.spare_rate).toBe(5)
+    expect(m.lossRate).toBe(5)
   })
 
-  it('6e. 对照：未交互损耗率时「保存修改」不改 spare_rate（基线零回归）', async () => {
+  it('6e. 对照：单行数量保存不改 spare_rate（基线零回归）', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
-    m.updateFactoryQty(0, 0, 0, 12)
-    await m.saveFactoryEdits()
+    m.beginQtyEdit(0, 0, 0, 10)
+    m.setQtyDraft(0, 0, 0, '12')
+    await m.saveQtyRow(0, 0, 0)
 
     expect(m.factoryData!.spare_rate).toBeUndefined()
-
-    m.toggleEditMode(true)
-    m.toggleEditMode(false)
     expect(m.groupSpareRates[0]).toBe(0)
-  })
-
-  it('6c. 取消编辑消掉上一轮遗留的「已保存」小字（saveState → idle）', async () => {
-    const m = useSummaryModal()
-    await m.openSummary([7, 8])
-    await m.applyLossRateAndSave(5)
-    expect(m.lossRateSaveState).toBe('saved')
-
-    m.toggleEditMode(true)
-    m.toggleEditMode(false)
-
-    expect(m.lossRateSaveState).toBe('idle')
+    // 数量保存不携带 spare_rate（第 2 参 undefined）
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith(
+      [{ item_ids: [101], quantity: 12 }], undefined, [7, 8],
+    )
   })
 
   it('7. close() 全量复位：lossRate=0、persistedLossRate=0、saveState=idle、mixed=false', async () => {
@@ -265,7 +237,6 @@ describe('SummaryModal 组件：mixed 提示', () => {
       props: {
         factoryData: factoryRes(),
         supplierData: null,
-        editMode: false,
         lossRate: 0,
         orderCount: 1,
         supplierGroups: [],

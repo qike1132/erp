@@ -31,7 +31,7 @@ vi.mock('@/composables/useExport', async () => {
 })
 
 import { useSummaryModal } from '@/views/purchase/composables/useSummaryModal'
-import { buildPerSkuRows } from '@/views/purchase/composables/perSkuRows'
+import { buildPerSkuRows, buildRowDisplayQuantities } from '@/views/purchase/composables/perSkuRows'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
 
@@ -91,26 +91,35 @@ beforeEach(() => {
 })
 
 describe('供应商页签数量与工厂页签同源', () => {
-  it('按 SKU 模式下取 BOM 推算值（207），而不是落库明细（52）', async () => {
+  it('落库 50 与 BOM 200.5 不一致 → 两页都取落库口径（52），不再出现 207/52 分叉', async () => {
     const m = useSummaryModal()
     await m.openSummary([1])
 
-    expect(m.supplierGroups).toHaveLength(1)
-    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(207)
+    // 手工调整判定（落库 50 ≠ Σ BOM 200.5）→ 工厂行以落库为准加放：ceil(50 × 1.03) = 52
+    const rows = buildPerSkuRows(m.factoryData!.groups[0]!, 30)
+    expect(buildRowDisplayQuantities(m.factoryData!.groups[0]!, rows, () => 30)).toEqual([52])
+    // 供应商页对同一批行求和 → 52（2026-11-10 的 207/52 不一致不会回归）
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(52)
     // 原始后端数据（落库真值）不被写回
     expect(m.supplierData!.materials[0]!.total_quantity).toBe(50)
   })
 
-  it('编辑态跟随工厂输入框（落库真值 × 率），退出编辑恢复推算值', async () => {
+  it('单行保存自定义数量后，供应商页取同一权威值（不回退 BOM 推算）', async () => {
     const m = useSummaryModal()
     await m.openSummary([1])
 
-    m.toggleEditMode(true)
-    // 编辑输入框显示 ceil(50 × 1.03) = 52（与非编辑态同口径，向上取整）
-    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(52)
+    // 进入编辑（预载 ceil(50 × 1.03) = 52），改成 20000 并保存
+    m.beginQtyEdit(0, 0, 0, 52)
+    m.setQtyDraft(0, 0, 0, '20000')
+    await m.saveQtyRow(0, 0, 0)
 
-    m.toggleEditMode(false)
-    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(207)
+    // 保存的是按 30‰ 反推后的落库真值（不是展示值）
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith(
+      [{ item_ids: [1], quantity: 19417.48 }], undefined, [1],
+    )
+    expect(m.qtyDrafts).toEqual({})
+    // 供应商页与工厂行都按新落库值加放：ceil(19417.48 × 1.03) = 20000
+    expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(20000)
   })
 
   it('同一物料跨角色多行按工厂可见值累加（香珠 6×5000=30000）', async () => {
@@ -183,7 +192,7 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
     } as never)
   }
 
-  it('非编辑态：共享物料 = Σ 各 SKU 可见行（逐行加放后累加）', async () => {
+  it('手工调整的共享物料：以落库总量为准并按 SKU 分摊（60 vs ΣBOM 120 → 62）', async () => {
     mockFactory([{
       customer_name: '客户', product_name: '产品', product_quantity: 200,
       suppliers: [{
@@ -206,8 +215,9 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
     const qty = Object.fromEntries(
       m.supplierGroups[0]!.materials.map((x) => [x.material_name, x.total_quantity]),
     )
-    // 共享布：两个 SKU 各一路可见行（60 × 1.03 → ceil 62）→ 合计 124
-    expect(qty['共享布']).toBe(124)
+    // 共享布：落库 60 ≠ ΣBOM 120 → 手工调整，总量 ceil(60×1.03)=62，
+    // 分摊到两个 SKU 后相加仍为 62（不再按 BOM 逐行累加成 124）
+    expect(qty['共享布']).toBe(62)
     // A布：一路 10 × 1.03 → 11
     expect(qty['A布']).toBe(11)
   })
@@ -309,7 +319,7 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(7)
   })
 
-  it('编辑态：共用同一采购明细的多 SKU 行只算一次（不得叠乘）', async () => {
+  it('手工调整的共享明细：按落库总量分摊，不得按 6 行叠乘', async () => {
     const roles = [15, 16, 17, 18, 19, 20]
     mockFactory([{
       customer_name: '网易', product_name: '缤果系列', product_quantity: 30000,
@@ -335,10 +345,9 @@ describe('工厂/供应商两页数量一致性（模拟数据）', () => {
 
     const m = useSummaryModal()
     await m.openSummary([1])
-    m.toggleEditMode(true)
 
-    // 编辑输入框显示落库真值（一条明细 24000 → ×1.03 = 24720）；
-    // 若按 6 个角色行累加会得到 6×5150=30900 —— 两者必须可区分
+    // 落库 24000 ≠ 6×5000 → 手工调整：总量 ceil(24000×1.03)=24720，
+    // 按 6 行等权分摊后相加仍为 24720；若按各行推算值累加会得到 6×5150=30900。
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(24720)
   })
 })
@@ -376,9 +385,8 @@ describe('编辑态边界：BOM 有、采购明细没有的物料', () => {
 
     const m = useSummaryModal()
     await m.openSummary([1])
-    m.toggleEditMode(true)
 
-    // 无采购明细 → 工厂表率显示「—」、数量不加放；供应商页不得自行 ×1.03
+    // 无采购明细 → 工厂表损耗率显示「—」、数量不加放；供应商页不得自行 ×1.03
     expect(m.supplierGroups[0]!.materials[0]!.total_quantity).toBe(30000)
   })
 })

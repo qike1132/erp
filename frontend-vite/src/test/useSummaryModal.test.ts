@@ -40,6 +40,7 @@ import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActi
 import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import { fmtQty } from '@/utils/formatQty'
 import { purchaseApi } from '@/api'
+import { toast } from '@/composables/useToast'
 import type { FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 // FontAwesomeIcon 已由 src/test/setup.ts 全局 stub。
@@ -105,8 +106,8 @@ describe('SummaryPanel 数量口径（数据行）', () => {
           {
             supplier_name: '供应商1',
             fabrics: [
-              { fabric_name: '布料A', specification: 'S1', quantity: 10, unit: '米' },
-              { fabric_name: '布料B', specification: 'S2', quantity: 20, unit: '米' },
+              { fabric_name: '布料A', specification: 'S1', quantity: 10, unit: '米', item_ids: [1] },
+              { fabric_name: '布料B', specification: 'S2', quantity: 20, unit: '米', item_ids: [2] },
             ],
           },
         ],
@@ -118,19 +119,22 @@ describe('SummaryPanel 数量口径（数据行）', () => {
         suppliers: [
           {
             supplier_name: '供应商2',
-            fabrics: [{ fabric_name: '布料C', specification: 'S3', quantity: 5, unit: '米' }],
+            fabrics: [{ fabric_name: '布料C', specification: 'S3', quantity: 5, unit: '米', item_ids: [3] }],
           },
         ],
       },
     ],
   }
 
-  function mountModal(lossRate: number, data: FactorySummaryData = factoryData, editMode = false) {
+  function mountModal(
+    lossRate: number, data: FactorySummaryData = factoryData,
+    qtyDrafts: Record<string, string> = {},
+  ) {
     return mount(SummaryPanel, {
       props: {
         factoryData: data,
         supplierData: null,
-        editMode,
+        qtyDrafts,
         lossRate,
         orderCount: 2,
         supplierGroups: [],
@@ -179,7 +183,6 @@ describe('SummaryPanel 数量口径（数据行）', () => {
 
           factoryData: m.factoryData,
           supplierData: m.supplierData,
-          editMode: m.editMode,
           lossRate: m.lossRate,
           orderCount: 2,
           supplierGroups: m.supplierGroups,
@@ -206,19 +209,22 @@ describe('SummaryPanel 数量口径（数据行）', () => {
     after.unmount()
   })
 
-  it('【UX 一致性】数量列与编辑态输入框都向上取整为整数', () => {
+  it('【UX 一致性】数量列与就地编辑输入框都向上取整为整数', () => {
     // 非编辑态：数量列逐行向上取整
-    const view = mountModal(5, factoryData, false)
+    const view = mountModal(5, factoryData)
     const viewRows = view.findAll('tbody tr')
     expect(viewRows[0]!.findAll('td')[9]!.text()).toBe('11')
     // 同供应商第二行只有 5 个 td，数量仍在第 4 位
     expect(viewRows[1]!.findAll('td')[4]!.text()).toBe('21')
     expect(viewRows[2]!.findAll('td')[9]!.text()).toBe('6')
 
-    // 编辑态：数量输入框与非编辑态同口径，向上取整（10.05→11 / 20.1→21 / 5.03→6），
+    // 就地编辑：数量输入框与非编辑态同口径，向上取整（10.05→11 / 20.1→21 / 5.03→6），
     // 与表格可见值一致（2026-11-11 owner 口径：数量一律整数）
-    const edit = mountModal(5, factoryData, true)
-    expect(edit.findAll('input[type="number"]').map((i) => (i.element as HTMLInputElement).value)).toEqual(['11', '21', '6'])
+    const edit = mountModal(5, factoryData, {
+      '0-0-0': '11', '0-0-1': '21', '1-0-0': '6',
+    })
+    expect(edit.findAll('.sm-qty-input').map((i) => (i.element as HTMLInputElement).value))
+      .toEqual(['11', '21', '6'])
   })
 
   it('owner 报告场景：编辑态不显示小数（254.34 × 1.1 = 279.774 → 向上取整 280，而非 279.77）', () => {
@@ -351,7 +357,7 @@ describe('buildFactoryHtml 打印/导出共用 HTML', () => {
  * - 损耗率**已交互**（即使无布料改动、即使值恰为 0）时必须携带 spare_rate，
  *   并把本次涉及的 order_ids 一并提交，供后端定位写入备品的目标采购单。
  */
-describe('saveFactoryEdits 提交语义（spare_rate 只在交互后提交）', () => {
+describe('saveQtyRow 单行保存语义', () => {
   const factorySummaryResponse: FactorySummaryData = {
     success: true,
     order_count: 1,
@@ -378,52 +384,55 @@ describe('saveFactoryEdits 提交语义（spare_rate 只在交互后提交）', 
     vi.mocked(purchaseApi.saveFactoryEdits).mockResolvedValue({ success: true } as never)
   })
 
-  it('损耗率未交互且无布料改动 → 不发起请求（保持原直接退出行为）', async () => {
+  it('无草稿 → 不发起请求', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
 
-    const res = await m.saveFactoryEdits()
+    await m.saveQtyRow(0, 0, 0)
 
-    expect(res).toBeUndefined()
     expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
-    expect(m.editMode).toBe(false)
+    expect(m.qtyDrafts).toEqual({})
   })
 
-  it('交互损耗率（无手动改布料）→ 必须提交，且携带 spare_rate 与 order_ids', async () => {
+  it('草稿值与落库真值相同 → 不发请求，直接退出编辑', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
-    m.applyLossRate(5)
+    m.beginQtyEdit(0, 0, 0, 10)
+    // 率未交互（0）→ 输入 10 反推仍为 10，与落库一致
+    m.setQtyDraft(0, 0, 0, '10')
 
-    await m.saveFactoryEdits()
+    await m.saveQtyRow(0, 0, 0)
 
-    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
-    const [editsArg, rateArg, idsArg] = vi.mocked(purchaseApi.saveFactoryEdits).mock.calls[0]!
-    // spare_rate 与 order_ids 必须随请求提交
-    expect(rateArg).toBe(5)
-    expect(idsArg).toEqual([7, 8])
-    // 新契约：applyLossRate 只记录「率」，不改写任何数量；放大值仅是展示派生值。
-    // 故「保存修改」的 diff 天然为空 —— 绝不把 10.05 这类展示值当作真实数量落库。
-    expect(editsArg).toEqual([])
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(m.qtyDrafts).toEqual({})
   })
 
-  it('仅交互损耗率且值为 0（无任何布料改动）→ 仍须提交 spare_rate=0 与 order_ids', async () => {
+  it('草稿值等于 ceil 预载展示值 → 不发请求（防 52 反推成 50.49）', async () => {
+    const data = JSON.parse(JSON.stringify(factorySummaryResponse)) as FactorySummaryData
+    data.groups[0]!.suppliers[0]!.fabrics[0]!.quantity = 50
+    data.groups[0]!.suppliers[0]!.fabrics[0]!.loss_rate = 30
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(data as never)
+
     const m = useSummaryModal()
     await m.openSummary([7, 8])
-    m.applyLossRate(0)
+    // 预载 ceil(50 × 1.03) = 52；未改动直接 Enter
+    m.beginQtyEdit(0, 0, 0, 52)
+    m.setQtyDraft(0, 0, 0, '52')
 
-    await m.saveFactoryEdits()
+    await m.saveQtyRow(0, 0, 0)
 
-    // rate=0 不改变布料数量（无编辑明细），但「已交互」必须提交，否则无法只改损耗率保存
-    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
-    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith([], 0, [7, 8])
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(m.qtyDrafts).toEqual({})
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(50)
   })
 
-  it('有布料改动但损耗率未交互 → 提交 edits，且不携带 spare_rate（第二参为 undefined）', async () => {
+  it('单行保存：只提交该行 edits，且不携带 spare_rate', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
-    m.updateFactoryQty(0, 0, 0, 12)
+    m.beginQtyEdit(0, 0, 0, 10)
+    m.setQtyDraft(0, 0, 0, '12')
 
-    await m.saveFactoryEdits()
+    await m.saveQtyRow(0, 0, 0)
 
     expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
     expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith(
@@ -431,6 +440,38 @@ describe('saveFactoryEdits 提交语义（spare_rate 只在交互后提交）', 
       undefined,
       [7, 8],
     )
+    // 成功后写回落库真值并退出编辑
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(12)
+    expect(m.qtyDrafts).toEqual({})
+  })
+
+  it('无采购明细 item_ids 的物料：不发起请求并给出提示', async () => {
+    const data = JSON.parse(JSON.stringify(factorySummaryResponse)) as FactorySummaryData
+    data.groups[0]!.suppliers[0]!.fabrics[0]!.item_ids = []
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(data as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.beginQtyEdit(0, 0, 0, 10)
+    m.setQtyDraft(0, 0, 0, '12')
+
+    await m.saveQtyRow(0, 0, 0)
+
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('该物料不在采购明细中，无法保存')
+    expect(m.qtyDrafts).toEqual({})
+  })
+
+  it('非法输入：不发起请求，保留草稿供修正', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.beginQtyEdit(0, 0, 0, 10)
+    m.setQtyDraft(0, 0, 0, '-5')
+
+    await m.saveQtyRow(0, 0, 0)
+
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('请输入有效的数量')
+    expect(m.qtyDrafts).toEqual({ '0-0-0': '-5' })
   })
 })
 
