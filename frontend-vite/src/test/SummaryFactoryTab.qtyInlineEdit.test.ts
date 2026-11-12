@@ -246,6 +246,25 @@ describe('数量单元格就地编辑（验收 a/b/f/g）', () => {
     wrapper.unmount()
   })
 
+  it('输入非法文本：保存按钮出现，保存时提示且保留草稿（不静默丢弃）', async () => {
+    const wrapper = await setup()
+    const input = await beginEdit(wrapper, 'A专有布')
+    await input.setValue('abc')
+
+    // 非法输入也视为「有改动」：按钮不得消失，失焦不得静默收起
+    expect(wrapper.find('.sm-qty-save').exists()).toBe(true)
+    await input.trigger('blur')
+    await flushPromises()
+    expect(wrapper.find('.sm-qty-input').exists()).toBe(true)
+
+    await wrapper.find('.sm-qty-input').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(toast.error).toHaveBeenCalledWith('请输入有效的数量')
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(wrapper.find('.sm-qty-input').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('b) Esc 取消后恢复原值，且不发起保存', async () => {
     const wrapper = await setup()
     const input = await beginEdit(wrapper, 'A专有布')

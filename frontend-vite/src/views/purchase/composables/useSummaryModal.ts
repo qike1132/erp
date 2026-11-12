@@ -3,7 +3,7 @@ import { purchaseApi } from '@/api'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
-import { calcSpareQuantity, summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities } from './perSkuRows'
+import { calcSpareQuantity, summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities, parseQtyInput } from './perSkuRows'
 import type { PerSkuRow } from './perSkuRows'
 
 // 这些纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
@@ -892,10 +892,9 @@ export function useSummaryModal() {
     const key = qtyKey(gi, si, fi)
     const raw = qtyDrafts.value[key]
     if (raw === undefined || qtySavingKey.value !== null) return
-    // 输入框为 text（去步进箭头）→ 用 Number 严格校验，避免 parseFloat('12abc') 静默截断
-    const trimmed = raw.trim()
-    const value = trimmed === '' ? NaN : Number(trimmed)
-    if (!Number.isFinite(value) || value < 0) {
+    // 输入框为 text（去步进箭头）→ 与行模型共用严格解析器，避免 parseFloat('12abc') 截断
+    const value = parseQtyInput(raw)
+    if (value === null) {
       toast.error('请输入有效的数量')
       return
     }

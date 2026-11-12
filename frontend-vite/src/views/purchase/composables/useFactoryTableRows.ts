@@ -16,7 +16,7 @@
 import { computed, ref, watch } from 'vue'
 import type { EmitFn } from 'vue'
 import { factoryQtyDisplayValue, buildSkuDisplayLines } from './useSummaryModal'
-import { buildPerSkuRows, materialKeyOf, computeQuantityDiff, buildStoredRows, buildRowDisplayQuantities } from './perSkuRows'
+import { buildPerSkuRows, materialKeyOf, computeQuantityDiff, buildStoredRows, buildRowDisplayQuantities, parseQtyInput } from './perSkuRows'
 import type { PerSkuRow, StoredRow } from './perSkuRows'
 import type { FactorySummaryData, FactoryGroup, FabricItem, SkuDisplayLine } from './useSummaryModal'
 
@@ -375,12 +375,14 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
   /**
    * 草稿是否真的改过：与**进入编辑时的预载值**比较（不是与分摊后的行值比较）。
    * 共享物料预载的是落库总量，其行显示值只是分摊份额，二者本来不同。
+   * 非法/空串视为「有改动」：让保存按钮出现、保存时给出明确提示，绝不静默丢弃草稿。
    */
   function isQtyDraftDirty(item: RowItem): boolean {
     const draft = qtyDraftOf(item)
     if (draft === undefined) return false
-    const value = parseFloat(draft)
-    return Number.isFinite(value) && Math.abs(value - editRowQty(item)) > 1e-9
+    const value = parseQtyInput(draft)
+    if (value === null) return true
+    return Math.abs(value - editRowQty(item)) > 1e-9
   }
 
   function isQtySaving(item: RowItem): boolean {

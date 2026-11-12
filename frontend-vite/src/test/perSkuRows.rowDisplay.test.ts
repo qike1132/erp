@@ -8,7 +8,7 @@
  *  - 无落库坐标 → 不加放。
  */
 import { describe, it, expect } from 'vitest'
-import { buildPerSkuRows, buildRowDisplayQuantities } from '@/views/purchase/composables/perSkuRows'
+import { buildPerSkuRows, buildRowDisplayQuantities, parseQtyInput } from '@/views/purchase/composables/perSkuRows'
 import type { FactoryGroup } from '@/views/purchase/composables/useSummaryModal'
 
 type Mat = {
@@ -71,6 +71,22 @@ function sharedGroups(baseA: number, baseB: number, stored: number, rate: number
 function display(g: FactoryGroup, rateOf: (si: number, fi: number) => number) {
   return buildRowDisplayQuantities(g, buildPerSkuRows(g, 0), rateOf)
 }
+
+describe('parseQtyInput（脏判定与保存共用的严格解析）', () => {
+  it('接受十进制整数/小数（含前后空格、.5、5.）', () => {
+    expect(parseQtyInput('12')).toBe(12)
+    expect(parseQtyInput(' 12 ')).toBe(12)
+    expect(parseQtyInput('12.5')).toBe(12.5)
+    expect(parseQtyInput('.5')).toBe(0.5)
+    expect(parseQtyInput('5.')).toBe(5)
+  })
+
+  it('拒绝空串/字母/负数/十六进制/科学计数法', () => {
+    for (const raw of ['', '  ', 'abc', '12abc', '-1', '0x10', '1e3', '1,000']) {
+      expect(parseQtyInput(raw), raw).toBeNull()
+    }
+  })
+})
 
 describe('buildRowDisplayQuantities', () => {
   it('2026-11-10 207/52 场景：落库 50 ≠ BOM 200.5 → 取落库加放 52', () => {
