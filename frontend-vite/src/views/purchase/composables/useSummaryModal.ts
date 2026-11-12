@@ -643,6 +643,7 @@ export function useSummaryModal() {
   const open = ref(false)
   const tab = ref<'factory' | 'supplier'>('factory')
   const factoryData = ref<FactorySummaryData | null>(null)
+  /** 率基线快照（groupSpareRates 前移用）；数量字段非权威，数量只认 factoryData */
   const factoryOriginalData = ref<FactorySummaryData | null>(null)
   const supplierData = ref<SupplierSummaryData | null>(null)
   const lossRate = ref(0)
@@ -904,8 +905,16 @@ export function useSummaryModal() {
       cancelQtyEdit(gi, si, fi)
       return
     }
-    const newBase = unmagnifyByLossRate(value, rateForFabric(gi, si, fi))
+    const rate = rateForFabric(gi, si, fi)
     const oldBase = parseFloat(String(fabric.quantity)) || 0
+    // 防伪变更（双保险）：输入值等于「进入编辑时的 ceil 预载值」→ 视为未改动。
+    // 预载值经过 ceil，直接反推回落库基数会引入 52 → 50.49 这类无声改写。
+    const preloadDisplay = factoryQtyDisplayValue(oldBase, rate, true)
+    if (Math.abs(value - preloadDisplay) < 1e-9) {
+      cancelQtyEdit(gi, si, fi)
+      return
+    }
+    const newBase = unmagnifyByLossRate(value, rate)
     if (Math.abs(newBase - oldBase) < 1e-9) {
       cancelQtyEdit(gi, si, fi)
       return
@@ -1104,20 +1113,22 @@ export function useSummaryModal() {
   }
 
   /**
-   * 把「刚成功落库的统一损耗率」同步为新的已落库基线（供「取消编辑」恢复）。
+   * 把「刚成功落库的损耗率」同步为新的已落库基线。
    *
    * 两条落库路径必须共用本函数，否则同一份基线各自维护会漂移：
    * - `applyLossRateAndSave`（顶部输入框自动落库，率已随请求发出）；
-   * - `saveFactoryEdits`（编辑态「保存修改」，rateTouched 时才提交 spare_rate）。
+   * - `applyFabricLossRateAndSave`（逐布料行率自动落库）。
    *
    * 同步范围（缺一即「同屏两套口径」）：
-   * - persistedLossRate / persistedLossRateMixed：取消编辑时恢复的订单级基线；
+   * - persistedLossRate / persistedLossRateMixed：订单级率基线；
    * - fabricPersistedRates / fabricLossRateMixedPersisted：逐布料行的基线与 mixed 标记
    *   （统一率输入会批量改写全部行，见 applyLossRate，故逐行基线必须一起刷新）；
    * - lossRateMixed / fabricLossRateMixed：本次已把所有单统一为该值，不一致标记清除；
-   * - factoryOriginalData / factoryData：取消编辑时 groupSpareRates 从
-   *   factoryOriginalData 重播、diff 也以它为基准，不同步就会回滚到打开时的旧分组率；
-   *   factoryData 不同步则「取消编辑回新率、当前展示用旧率」同屏两套口径（OCR 2026-10-18）。
+   * - factoryOriginalData / factoryData：groupSpareRates 的前移来源；
+   *   factoryData 不同步会让顶部率与「备品数量」停在旧值（同屏两套口径）。
+   *
+   * 注：`factoryOriginalData` 自 2026-11-12 起只承载**率基线**；数量字段不是权威值，
+   * 单行数量保存只原地更新 factoryData，不回写本快照。
    */
   function syncPersistedLossRateBaseline(
     rate: number,

@@ -407,6 +407,25 @@ describe('saveQtyRow 单行保存语义', () => {
     expect(m.qtyDrafts).toEqual({})
   })
 
+  it('草稿值等于 ceil 预载展示值 → 不发请求（防 52 反推成 50.49）', async () => {
+    const data = JSON.parse(JSON.stringify(factorySummaryResponse)) as FactorySummaryData
+    data.groups[0]!.suppliers[0]!.fabrics[0]!.quantity = 50
+    data.groups[0]!.suppliers[0]!.fabrics[0]!.loss_rate = 30
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue(data as never)
+
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    // 预载 ceil(50 × 1.03) = 52；未改动直接 Enter
+    m.beginQtyEdit(0, 0, 0, 52)
+    m.setQtyDraft(0, 0, 0, '52')
+
+    await m.saveQtyRow(0, 0, 0)
+
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(m.qtyDrafts).toEqual({})
+    expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(50)
+  })
+
   it('单行保存：只提交该行 edits，且不携带 spare_rate', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])

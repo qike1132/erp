@@ -97,6 +97,34 @@ function readonlyFactory(): FactorySummaryData {
   return data
 }
 
+/** ceil 预载会产生反推漂移的夹具：落库 50、率 30‰ → 预载 52，52/1.03 = 50.49。 */
+function roundingFactory(): FactorySummaryData {
+  return {
+    success: true,
+    order_count: 1,
+    spare_rate: 0,
+    groups: [{
+      customer_name: '客户甲',
+      product_name: '产品',
+      product_quantity: 100,
+      suppliers: [{
+        supplier_name: '供应商甲',
+        fabrics: [{
+          fabric_name: '宝乐绒', specification: 'S1', unit: '米',
+          quantity: 50, item_ids: [9], loss_rate: 30,
+        }],
+      }],
+      skus: [{
+        product_name: 'SKU-A', order_qty: 100,
+        materials: [{
+          supplier_name: '供应商甲', material_name: '宝乐绒', specification: 'S1',
+          unit: '米', quantity: 50, part_name: '',
+        }],
+      }],
+    }],
+  }
+}
+
 function supplierData(): SupplierSummaryData {
   return {
     success: true,
@@ -196,6 +224,25 @@ describe('数量单元格就地编辑（验收 a/b/f/g）', () => {
     expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith(
       [{ item_ids: [2], quantity: 90.91 }], undefined, [1],
     )
+    wrapper.unmount()
+  })
+
+  it('点开不改值直接 Enter：退出编辑且不发起保存（ceil 预载值不得反推成伪变更）', async () => {
+    const wrapper = await setup(roundingFactory())
+    const fabric = m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!
+    expect(qtyCellOf(wrapper, '宝乐绒').text()).toBe('52')
+
+    const versions = { ...m.itemsVersions }
+    const input = await beginEdit(wrapper, '宝乐绒')
+    // 预载 ceil(50 × 1.03) = 52；若直接反推会得到 50.49（静默改写落库真值）
+    expect((input.element as HTMLInputElement).value).toBe('52')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(wrapper.find('.sm-qty-input').exists()).toBe(false)
+    expect(fabric.quantity).toBe(50)
+    expect(m.itemsVersions).toEqual(versions)
     wrapper.unmount()
   })
 

@@ -404,7 +404,12 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     if (props.qtySavingKey != null) return
     const c = rowCoord(item)
     if (!c) return
-    // 值未改动也提交：composable 检测到与落库相同会直接收起草稿（Enter 即退出编辑）
+    // 未改动：Enter 只退出编辑，绝不落库 —— 预载值是 ceil 后的展示值，
+    // 反推回落库基数会引入「50 → 50.49」这类伪变更（显示不变但真值被改写）
+    if (!isQtyDraftDirty(item)) {
+      emit('cancelQtyEdit', item.gi, c.si, c.fi)
+      return
+    }
     emit('saveQtyRow', item.gi, c.si, c.fi)
   }
 
