@@ -52,7 +52,6 @@ function mountPanel() {
     props: {
       factoryData: FACTORY,
       supplierData: null,
-      editMode: false,
       lossRate: 5,
       orderCount: 1,
       supplierGroups: [],
@@ -155,10 +154,10 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
-describe('useSummaryLeaveGuard：编辑态离开确认', () => {
+describe('useSummaryLeaveGuard：未保存修改离开确认', () => {
   function setup(summaryState: {
     open?: boolean
-    editMode?: boolean
+    hasUnsavedQtyEdits?: boolean
     lossRateTouched?: boolean
     lossRateSaveState?: 'idle' | 'saving' | 'saved' | 'error'
   } = {}, confirmResult = true) {
@@ -166,7 +165,7 @@ describe('useSummaryLeaveGuard：编辑态离开确认', () => {
     const confirm = vi.fn(() => Promise.resolve(confirmResult))
     const summary = {
       open: summaryState.open ?? true,
-      editMode: summaryState.editMode ?? false,
+      hasUnsavedQtyEdits: summaryState.hasUnsavedQtyEdits ?? false,
       lossRateTouched: summaryState.lossRateTouched ?? false,
       lossRateSaveState: summaryState.lossRateSaveState ?? 'idle',
       close: vi.fn(),
@@ -182,8 +181,8 @@ describe('useSummaryLeaveGuard：编辑态离开确认', () => {
     expect(confirm).not.toHaveBeenCalled()
   })
 
-  it('脏态（editMode）+ 用户确认 → 放行并 close', async () => {
-    const { guard, confirm, summary } = setup({ editMode: true }, true)
+  it('脏态（有未保存数量草稿）+ 用户确认 → 放行并 close', async () => {
+    const { guard, confirm, summary } = setup({ hasUnsavedQtyEdits: true }, true)
     await expect(guard()).resolves.toBe(true)
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(summary.close).toHaveBeenCalled()
@@ -197,7 +196,7 @@ describe('useSummaryLeaveGuard：编辑态离开确认', () => {
   })
 
   it('弹窗未打开（open=false）即使脏字段残留也放行', async () => {
-    const { guard, confirm } = setup({ open: false, editMode: true }, true)
+    const { guard, confirm } = setup({ open: false, hasUnsavedQtyEdits: true }, true)
     await expect(guard()).resolves.toBe(true)
     expect(confirm).not.toHaveBeenCalled()
   })
@@ -210,7 +209,7 @@ describe('useSummaryLeaveGuard：编辑态离开确认', () => {
   })
 
   it('handleSummaryClose：脏态取消时不 close', async () => {
-    const { handleSummaryClose, confirm, summary } = setup({ editMode: true }, false)
+    const { handleSummaryClose, confirm, summary } = setup({ hasUnsavedQtyEdits: true }, false)
     await handleSummaryClose()
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(summary.close).not.toHaveBeenCalled()

@@ -34,7 +34,7 @@
       <div class="sm-header-actions">
         <button
           class="sm-back-btn"
-          :title="editMode ? '编辑态返回需确认' : '返回订单列表'"
+          :title="hasUnsavedQtyEdits ? '有未保存修改，返回需确认' : '返回订单列表'"
           @click="$emit('close')"
         >
           <FontAwesomeIcon icon="arrow-left" aria-hidden="true" /> 返回订单列表
@@ -81,7 +81,6 @@
       <SummaryFactoryTab
         v-if="activeTab === 'factory' && factoryData"
         :factory-data="factoryData"
-        :edit-mode="editMode"
         :loss-rate="lossRate"
         :order-count="orderCount"
         :loss-rate-save-state="lossRateSaveState"
@@ -89,9 +88,12 @@
         :fabric-loss-rates="fabricLossRates"
         :fabric-loss-rate-mixed="fabricLossRateMixed"
         :group-spare-rates="groupSpareRates"
-        @toggle-edit-mode="onToggleEditMode"
-        @save-edits="$emit('saveEdits')"
-        @update-qty="(gi, si, fi, value) => $emit('updateQty', gi, si, fi, value)"
+        :qty-drafts="qtyDrafts"
+        :qty-saving-key="qtySavingKey"
+        @begin-qty-edit="(gi, si, fi, initial) => $emit('beginQtyEdit', gi, si, fi, initial)"
+        @qty-draft-input="(gi, si, fi, value) => $emit('qtyDraftInput', gi, si, fi, value)"
+        @cancel-qty-edit="(gi, si, fi) => $emit('cancelQtyEdit', gi, si, fi)"
+        @save-qty-row="(gi, si, fi) => $emit('saveQtyRow', gi, si, fi)"
         @loss-rate-input="applyLossRateDebounced"
         @fabric-loss-rate-input="applyFabricLossRateDebounced"
       />
@@ -128,7 +130,6 @@ import type { FactorySummaryData, SupplierSummaryData, MaterialItem } from '../c
 defineProps<{
   factoryData: FactorySummaryData | null
   supplierData: SupplierSummaryData | null
-  editMode: boolean
   lossRate: number
   orderCount: number
   supplierGroups: { supplierName: string; materials: MaterialItem[] }[]
@@ -142,13 +143,20 @@ defineProps<{
   fabricLossRateMixed?: boolean[][][]
   /** 每个分组的订单级损耗率（「备品数量」列唯一口径，由 useSummaryModal 提供） */
   groupSpareRates?: number[]
+  /** 数量单行编辑草稿（key = `${gi}-${si}-${fi}`） */
+  qtyDrafts?: Record<string, string>
+  /** 当前在途保存的数量行 key */
+  qtySavingKey?: string | null
+  /** 是否有未保存的数量编辑（返回按钮提示 + 离开守卫同一口径） */
+  hasUnsavedQtyEdits?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
-  toggleEditMode: [enable: boolean]
-  saveEdits: []
-  updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
+  beginQtyEdit: [gi: number, si: number, fi: number, initial: number]
+  qtyDraftInput: [gi: number, si: number, fi: number, value: string]
+  cancelQtyEdit: [gi: number, si: number, fi: number]
+  saveQtyRow: [gi: number, si: number, fi: number]
   applyLossRate: [rate: number]
   applyFabricLossRate: [gi: number, si: number, fi: number, rate: number]
   exportFactory: []
@@ -191,15 +199,7 @@ function cancelPendingRateEdits() {
   fabricLossRateTimers.clear()
 }
 
-/**
- * 只有点击「取消编辑」才作废挂起的防抖。
- * 不能 watch editMode→false：保存修改/播种同样会置 false，会把用户刚输入、
- * 尚未到点落库的损耗率静默丢掉（且 saveFactoryEdits 不会代为提交）。
- */
-function onToggleEditMode(enable: boolean) {
-  if (!enable) cancelPendingRateEdits()
-  emit('toggleEditMode', enable)
-}
+// 整页视图卸载（关闭/路由离开）时作废尚未到点的损耗率防抖，避免 emit 到已卸载的父级
 onUnmounted(cancelPendingRateEdits)
 </script>
 

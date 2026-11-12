@@ -169,7 +169,7 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
   function mountModal() {
     // 2026-10-31 整页化：SummaryPanel 不再包 UiDialog、无 open prop
     return mount(SummaryPanel, {
-      props: { factoryData, supplierData: null, editMode: false, lossRate: 5, orderCount: 2, supplierGroups: [] },
+      props: { factoryData, supplierData: null, lossRate: 5, orderCount: 2, supplierGroups: [] },
     })
   }
 
@@ -233,7 +233,7 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
 // =========================================================================
 // D2①. useSummaryModal：仅改损耗率（edits 为空）也必须保存
 // =========================================================================
-describe('D2①. useSummaryModal 仅交互损耗率也能保存（edits.length===0 早退已修）', () => {
+describe('D2①. useSummaryModal 仅交互损耗率也能自动落库（edits.length===0）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(purchaseApi.factorySummary).mockResolvedValue({
@@ -245,11 +245,10 @@ describe('D2①. useSummaryModal 仅交互损耗率也能保存（edits.length==
     mocks.saveFactoryEditsMock.mockResolvedValue({ success: true } as never)
   })
 
-  it('openSummary + applyLossRate(50) + saveFactoryEdits → 调用 purchaseApi.saveFactoryEdits([], 50, orderIds)', async () => {
+  it('openSummary + applyLossRateAndSave(50) → 调用 purchaseApi.saveFactoryEdits([], 50, orderIds)', async () => {
     const m = useSummaryModal()
     await m.openSummary([601, 602])
-    m.applyLossRate(50)
-    await m.saveFactoryEdits()
+    await m.applyLossRateAndSave(50)
 
     expect(mocks.saveFactoryEditsMock).toHaveBeenCalledTimes(1)
     const [editsArg, rateArg, idsArg] = mocks.saveFactoryEditsMock.mock.calls[0]!

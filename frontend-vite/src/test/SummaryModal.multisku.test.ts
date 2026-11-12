@@ -77,7 +77,6 @@ function mountModal(group: FactoryGroup, lossRate = 10) {
     props: {
       factoryData: dataWith(group),
       supplierData: { success: true, order_count: 1, materials: [] },
-      editMode: false,
       lossRate,
       orderCount: 1,
       supplierGroups: [],

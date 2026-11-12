@@ -139,13 +139,11 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     expect(m.lossRateTouched).toBe(true)
   })
 
-  it('A2 输入损耗率 → 进编辑态 → 保存修改：edits 不含放大派生的伪编辑（恒为空）', async () => {
+  it('A2 输入损耗率自动落库：edits 恒为空，不产生放大派生的伪数量编辑', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
 
-    m.applyLossRate(5)
-    m.toggleEditMode(true)
-    await m.saveFactoryEdits()
+    await m.applyLossRateAndSave(5)
 
     expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
     const [editsArg, rateArg, idsArg] = vi.mocked(purchaseApi.saveFactoryEdits).mock.calls[0]!
@@ -155,18 +153,20 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     expect(idsArg).toEqual([7, 8])
   })
 
-  it('A2 对照：编辑态真实改过的数量仍会作为 edits 提交（diff 逻辑未被削弱）', async () => {
+  it('A2 对照：单行真实改过的数量仍会作为 edits 提交（且不夹带损耗率）', async () => {
     const m = useSummaryModal()
     await m.openSummary([7, 8])
 
     m.applyLossRate(5)
-    m.toggleEditMode(true)
-    m.updateFactoryQty(0, 0, 0, 12)
-    await m.saveFactoryEdits()
+    m.beginQtyEdit(0, 0, 0, 11)
+    m.setQtyDraft(0, 0, 0, '12')
+    await m.saveQtyRow(0, 0, 0)
 
     const [editsArg, rateArg] = vi.mocked(purchaseApi.saveFactoryEdits).mock.calls[0]!
+    // 12 / (1 + 5‰) = 11.94（按该行率反推落库真值）
     expect(editsArg).toEqual([{ item_ids: [101], quantity: 11.94 }])
-    expect(rateArg).toBe(5)
+    // 数量保存不携带 spare_rate（率的自动落库走独立路径）
+    expect(rateArg).toBeUndefined()
   })
 
   it('A3 幂等/无复利：save(5) 后再输入 8‰，展示值基于原始基数而非放大值', async () => {
@@ -185,7 +185,6 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
       props: {
         factoryData: m.factoryData,
         supplierData: m.supplierData,
-        editMode: false,
         lossRate: m.lossRate,
         orderCount: 1,
         supplierGroups: m.supplierGroups,
@@ -229,7 +228,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(20)
   })
 
-  it('A6 工厂自定义编辑数量 / 逐行损耗率后，供应商页「数量」实时一致（DOM 级）', async () => {
+  it('A6 工厂单行保存数量 / 逐行损耗率后，供应商页「数量」同源一致（DOM 级）', async () => {
     vi.mocked(purchaseApi.factorySummary).mockResolvedValue(factoryOf(20) as never)
     vi.mocked(purchaseApi.supplierSummary).mockResolvedValue({
       success: true,
@@ -249,7 +248,6 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
         props: {
           factoryData: m.factoryData,
           supplierData: m.supplierData,
-          editMode: m.editMode,
           lossRate: m.lossRate,
           fabricLossRates: m.fabricLossRates,
           orderCount: 1,
@@ -262,7 +260,7 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
       return rows[0]!.findAll('td')[3]!.text()
     }
 
-    // 非编辑态：工厂「数量」列与供应商页「数量」逐字一致（22）
+    // 保存前：工厂「数量」列与供应商页「数量」逐字一致（22）
     const before = mountModal()
     const factoryCell = before.findAll('tbody tr')[0]!.findAll('td')[9]!.text()
     expect(factoryCell).toBe('22')
@@ -270,18 +268,17 @@ describe('A. 损耗率放大改为纯展示派生（不再就地改写数据）'
     expect(supplierRowQty(before)).toBe(factoryCell)
     before.unmount()
 
-    // 自定义编辑：把该行数量改成 33（真值 30）
-    m.toggleEditMode(true)
-    m.updateFactoryQty(0, 0, 0, 33)
+    // 单行保存：把该行数量改成 33（按 100‰ 反推落库真值 30）
+    m.beginQtyEdit(0, 0, 0, 22)
+    m.setQtyDraft(0, 0, 0, '33')
+    await m.saveQtyRow(0, 0, 0)
     expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(30)
 
     const after = mountModal()
-    // 编辑态输入框加载 33（= 30 × 1.1）
-    const inputValue = (after.find('input[type="number"]').element as HTMLInputElement).value
-    expect(inputValue).toBe('33')
-    // 切到供应商页签：立即同步为编辑中的 33（实时且逐字一致）
+    // 工厂与供应商页签都显示 33（同一权威值）
+    expect(after.findAll('tbody tr')[0]!.findAll('td')[9]!.text()).toBe('33')
     await after.findAll('.sm-tab-btn')[1]!.trigger('click')
-    expect(supplierRowQty(after)).toBe(inputValue)
+    expect(supplierRowQty(after)).toBe('33')
     after.unmount()
   })
 })
@@ -532,7 +529,6 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
         props: {
           factoryData: factoryOf(10),
           supplierData: null,
-          editMode: false,
           lossRate: 5,
           orderCount: 1,
           supplierGroups: [],
@@ -577,15 +573,13 @@ describe('C. 在途落库与关闭/取消编辑', () => {
     expect(m.lossRate).toBe(0)
   })
 
-  it('C6 取消编辑后在途统一率响应仍同步基线，且 groupSpareRates 同源', async () => {
+  it('C6 在途统一率响应成功 → 基线与 groupSpareRates 同源', async () => {
     const d = deferred<{ success: boolean }>()
     vi.mocked(purchaseApi.saveFactoryEdits).mockReturnValue(d.promise as never)
     const m = useSummaryModal()
     await m.openSummary([7, 8])
 
-    m.applyLossRate(5)
     const p = m.applyLossRateAndSave(5)
-    m.toggleEditMode(false)
     d.resolve({ success: true })
     await p
 
@@ -612,39 +606,28 @@ describe('C. 在途落库与关闭/取消编辑', () => {
     expect(m.fabricLossRates).toEqual([])
   })
 
-  it('C8 取消编辑会作废挂起的 300ms 防抖；保存修改不会', async () => {
+  it('C8 组件卸载会作废挂起的 300ms 防抖；正常等待则照常发出', async () => {
     vi.useFakeTimers()
     const mountModal = () => mount(SummaryPanel, {
       props: {
-        factoryData: factoryOf(10), supplierData: SUPPLIER_RESPONSE, editMode: false,
+        factoryData: factoryOf(10), supplierData: SUPPLIER_RESPONSE,
         lossRate: 0, orderCount: 1, supplierGroups: [],
       },
     })
     try {
-      // 对照：不取消 → 防抖到点后照常发出
+      // 对照：不卸载 → 防抖到点后照常发出
       const ok = mountModal()
       ok.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
       vi.advanceTimersByTime(400)
       expect(ok.emitted('applyLossRate')).toEqual([[50]])
       ok.unmount()
 
-      // 取消编辑 → 挂起值被丢弃
-      const cancelled = mountModal()
-      cancelled.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
-      cancelled.findComponent(SummaryFactoryTab).vm.$emit('toggleEditMode', false)
+      // 卸载（关闭整页视图）→ 挂起值被丢弃，不得 emit 到已卸载的父级
+      const unmounted = mountModal()
+      unmounted.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
+      unmounted.unmount()
       vi.advanceTimersByTime(400)
-      expect(cancelled.emitted('applyLossRate')).toBeUndefined()
-      expect(cancelled.emitted('toggleEditMode')).toEqual([[false]])
-      cancelled.unmount()
-
-      // 保存修改（editMode prop true→false，非用户点取消）不得丢弃挂起输入
-      const saved = mountModal()
-      saved.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
-      await saved.setProps({ editMode: true })
-      await saved.setProps({ editMode: false })
-      vi.advanceTimersByTime(400)
-      expect(saved.emitted('applyLossRate')).toEqual([[50]])
-      saved.unmount()
+      expect(unmounted.emitted('applyLossRate')).toBeUndefined()
     } finally {
       vi.useRealTimers()
     }

@@ -103,15 +103,15 @@ beforeEach(() => {
 })
 
 describe('汇总保存：items_versions 乐观锁', () => {
-  it('openSummary 记录版本快照；保存修改时原样带回（第 4 参）', async () => {
+  it('openSummary 记录版本快照；单行保存时原样带回（第 4 参）', async () => {
     const m = useSummaryModal()
     await m.openSummary([7])
     expect(m.itemsVersions).toEqual({ '7': 3 })
 
-    m.toggleEditMode(true)
-    // 率=0（逐行 loss_rate: 0）→ 输入框值即落库真值，diff 得 quantity=1100
-    m.updateFactoryQty(0, 0, 0, 1100)
-    await m.saveFactoryEdits()
+    // 率=0（逐行 loss_rate: 0）→ 输入值即落库真值，保存 quantity=1100
+    m.beginQtyEdit(0, 0, 0, 100)
+    m.setQtyDraft(0, 0, 0, '1100')
+    await m.saveQtyRow(0, 0, 0)
 
     expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
     expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith(
@@ -124,6 +124,7 @@ describe('汇总保存：items_versions 乐观锁', () => {
     expect(m.itemsVersions).toEqual({ '7': 3 })
     // 正常保存不得出现 409 提示
     expect(toast.warning).not.toHaveBeenCalled()
+    expect(m.qtyDrafts).toEqual({})
   })
 
   it('保存成功响应带 items_versions：本地快照前移，后续保存不再带过期版本', async () => {
@@ -135,9 +136,9 @@ describe('汇总保存：items_versions 乐观锁', () => {
     const m = useSummaryModal()
     await m.openSummary([7])
     expect(m.itemsVersions).toEqual({ '7': 3 })
-    m.toggleEditMode(true)
-    m.updateFactoryQty(0, 0, 0, 1100)
-    await m.saveFactoryEdits()
+    m.beginQtyEdit(0, 0, 0, 100)
+    m.setQtyDraft(0, 0, 0, '1100')
+    await m.saveQtyRow(0, 0, 0)
 
     expect(m.itemsVersions).toEqual({ '7': 4 })
   })
@@ -166,18 +167,18 @@ describe('汇总保存：items_versions 乐观锁', () => {
 
     const m = useSummaryModal()
     await m.openSummary([7])
-    m.toggleEditMode(true)
-    m.updateFactoryQty(0, 0, 0, 1100)
+    m.beginQtyEdit(0, 0, 0, 100)
+    m.setQtyDraft(0, 0, 0, '1100')
 
-    await expect(m.saveFactoryEdits()).rejects.toBeTruthy()
+    await expect(m.saveQtyRow(0, 0, 0)).rejects.toBeTruthy()
 
     expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('BOM 已更新'))
     // 重新拉取工厂 + 供应商汇总（openSummary 共两次）
     expect(purchaseApi.factorySummary).toHaveBeenCalledTimes(2)
     expect(purchaseApi.supplierSummary).toHaveBeenCalledTimes(2)
     expect(m.itemsVersions).toEqual({ '7': 4 })
-    // 刷新回到展示态：用户需基于最新明细重新进入编辑
-    expect(m.editMode).toBe(false)
+    // 刷新后草稿被清空：用户需基于最新明细重新编辑
+    expect(m.qtyDrafts).toEqual({})
   })
 
   it('关闭后 409 迟到：不重新打开弹窗、不再拉汇总', async () => {
@@ -188,25 +189,26 @@ describe('汇总保存：items_versions 乐观锁', () => {
 
     const m = useSummaryModal()
     await m.openSummary([7])
-    m.toggleEditMode(true)
-    m.updateFactoryQty(0, 0, 0, 1100)
+    m.beginQtyEdit(0, 0, 0, 100)
+    m.setQtyDraft(0, 0, 0, '1100')
 
-    const saving = m.saveFactoryEdits()
-    // 请求在途期间用户关闭了弹窗（orderIds 已清空）
+    const saving = m.saveQtyRow(0, 0, 0)
+    // 让队列任务真正发出请求后，用户关闭页面
+    await flushPromises()
     m.close()
     rejectSave({ response: { status: 409 } })
 
-    await expect(saving).rejects.toBeTruthy()
-    // 提示仍会弹出（告知刚才的保存没生效），但不得刷新——
-    // 否则会用空 orderIds 重新打开一个空弹窗。
-    expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('BOM 已更新'))
+    // 关闭后的迟到失败属于已丢弃批次：静默结束，不刷新、不复活草稿
+    await expect(saving).resolves.toBeUndefined()
     expect(purchaseApi.factorySummary).toHaveBeenCalledTimes(1)
     expect(purchaseApi.supplierSummary).toHaveBeenCalledTimes(1)
     expect(m.open).toBe(false)
     expect(m.orderIds).toEqual([])
+    expect(m.qtyDrafts).toEqual({})
+    expect(m.qtySavingKey).toBeNull()
   })
 
-  it('上层 handler 收到 409 时不再弹通用错误（warning 已由汇总弹窗弹出）', async () => {
+  it('上层 handler 收到 409 时不再弹通用错误（warning 已由汇总状态弹出）', async () => {
     vi.mocked(purchaseApi.saveFactoryEdits).mockRejectedValueOnce({ response: { status: 409 } })
     vi.mocked(purchaseApi.factorySummary)
       .mockResolvedValueOnce(FACTORY as never)
@@ -221,9 +223,9 @@ describe('汇总保存：items_versions 乐观锁', () => {
       confirm: {} as never,
       queryClient: {} as never,
     })
-    m.toggleEditMode(true)
-    m.updateFactoryQty(0, 0, 0, 1100)
-    await actions.handleSaveFactoryEdits()
+    m.beginQtyEdit(0, 0, 0, 100)
+    m.setQtyDraft(0, 0, 0, '1100')
+    await actions.handleSaveQtyRow(0, 0, 0)
 
     // warning 来自 composable；handler 不得再弹第二条（英文 axios 错误 /「保存失败」）
     expect(toast.warning).toHaveBeenCalledTimes(1)

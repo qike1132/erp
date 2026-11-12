@@ -124,12 +124,12 @@ function dataOf(group: FactoryGroup): FactorySummaryData {
   return { success: true, order_count: 1, spare_rate: 0, groups: [group] }
 }
 
-function mountModal(group: FactoryGroup, editMode = false, lossRate = 0) {
+function mountModal(group: FactoryGroup, qtyDrafts: Record<string, string> = {}, lossRate = 0) {
   return mount(SummaryPanel, {
     props: {
       factoryData: dataOf(group),
       supplierData: { success: true, order_count: 1, materials: [] },
-      editMode,
+      qtyDrafts,
       lossRate,
       orderCount: 1,
       supplierGroups: [],
@@ -243,28 +243,28 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
 
   it('R5 拆行口径：多角色共用的同一物料各自成行，损耗率与数量都可编辑（键含 role_id）', () => {
     // 2026-11-11 拆行后：松紧带在角色 A、B 各有一条落库明细（role_id 1/2），
-    // 每行有自己的坐标与 item_ids —— 数量输入框正常出现，不再因「多角色共用」锁定。
-    // 非编辑态：损耗率照常是可编辑输入框（各自独立），数量为该行基准量
-    const view = mountModal(roleGroup(), false)
+    // 每行有自己的坐标与 item_ids —— 数量单元格正常进入编辑，不再因「多角色共用」锁定。
+    // 非编辑态：损耗率是可编辑输入框（各自独立），数量为可点击的展示值
+    const view = mountModal(roleGroup())
     const viewRows = view.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
     expect(viewRows).toHaveLength(2)
     for (const tr of viewRows) {
       const tds = tr.findAll('td')
       expect(tds[3]!.find('input[type="number"]').exists()).toBe(true)
+      expect(tds[4]!.find('.sm-qty-cell').exists()).toBe(true)
     }
     view.unmount()
 
-    // 编辑态：率与数量都是输入框（各自独立，编辑互不串行）
-    const wrapper = mountModal(roleGroup(), true)
+    // 进入编辑：率与数量都是输入框（各自独立，编辑互不串行）
+    const wrapper = mountModal(roleGroup(), { '0-0-1': '3', '0-0-2': '2' })
     const rows = wrapper.findAll('.smf-scroll tbody tr').filter((tr) => tr.text().includes('松紧带'))
     expect(rows).toHaveLength(2)
     const qtyTexts: string[] = []
     for (const tr of rows) {
       const tds = tr.findAll('td')
-      expect(tds[3]!.text()).toBe('0.0')
-      // 拆行后每行有自己的落库坐标 → 数量输入框正常渲染（原 readonly span 分支不再命中）
-      expect(tds[4]!.find('input[type="number"]').exists()).toBe(true)
-      qtyTexts.push(tds[4]!.find('input').element.value || tds[4]!.text())
+      expect(tds[3]!.find('input[type="number"]').exists()).toBe(true)
+      expect(tds[4]!.find('.sm-qty-input').exists()).toBe(true)
+      qtyTexts.push((tds[4]!.find('.sm-qty-input').element as HTMLInputElement).value)
     }
     expect(qtyTexts).toEqual(['3', '2'])
     wrapper.unmount()
@@ -272,7 +272,7 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
 
   it('R6 订单数量与备品都按角色段拆格：各角色数量/备品 + 名称格合计副行 + 隐藏款标记；列宽恒 12', () => {
     // rate=50‰：角色A 备品 = ceil(60×50/1000)=3，角色B（隐藏款）= ceil(40×50/1000)=2
-    const wrapper = mountModal(roleQtyGroup(), false, 50)
+    const wrapper = mountModal(roleQtyGroup(), {}, 50)
     const rows = wrapper.findAll('.smf-scroll tbody tr')
     expect(rows).toHaveLength(5)
 

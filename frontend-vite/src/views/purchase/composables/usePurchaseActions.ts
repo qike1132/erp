@@ -93,21 +93,18 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     // P3-17: 页码变更由 Vue Query queryKey 自动触发 fetch，不 invalidate 以保留 prefetch 缓存。
   }
 
-  async function handleSaveFactoryEdits() {
+  /**
+   * 单行数量保存：摘要层的成功/失败（含 409）已在 useSummaryModal 内提示；
+   * 这里只兜非 409 的异常，避免同一错误弹两条 toast。
+   */
+  async function handleSaveQtyRow(gi: number, si: number, fi: number) {
     try {
-      await summary.saveFactoryEdits()
-      showToast('修改已保存', 'success')
+      await summary.saveQtyRow(gi, si, fi)
     } catch (err: unknown) {
-      // 409（ITEMS_VERSION_CONFLICT）已由 summary.saveFactoryEdits 弹出
-      // 「BOM 已更新…」warning 并刷新数据；此处直接返回，避免再弹一条
-      // 英文 axios 错误（双 toast）。
+      // 409 已由 summary.saveQtyRow 弹出「BOM 已更新…」warning 并刷新数据
       if ((err as { response?: { status?: number } })?.response?.status === 409) return
-      showToast((err as Error).message || '保存失败', 'error')
+      showToast((err as Error).message || '数量保存失败', 'error')
     }
-  }
-
-  function handleUpdateFactoryQty(gi: number | string, si: number | string, fi: number | string, value: string) {
-    summary.updateFactoryQty(Number(gi), Number(si), Number(fi), parseFloat(value) || 0)
   }
 
   /**
@@ -160,8 +157,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     handleBatchComplete,
     handleSummary,
     handleOrderPageChange,
-    handleSaveFactoryEdits,
-    handleUpdateFactoryQty,
+    handleSaveQtyRow,
     handleApplyLossRate,
     handleApplyFabricLossRate,
     handleCompletedPageChange,

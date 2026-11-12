@@ -10,58 +10,33 @@
         已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
       </div>
       <div class="flex gap-2 items-center ml-auto">
-        <div v-if="!editMode" class="flex items-center gap-2">
-          <button
-            class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-border bg-transparent text-text-secondary hover:text-primary-500 hover:border-primary-500 hover:bg-primary-50 transition-colors"
-            @click="$emit('toggleEditMode', true)"
-          >
-            <FontAwesomeIcon icon="edit" aria-hidden="true" /> 自定义编辑
-          </button>
-          <div class="relative flex flex-col items-end gap-0.5">
-            <div class="flex items-center gap-2">
-              <label class="text-xs text-text-secondary whitespace-nowrap">统一损耗率（千分之几）</label>
-              <input
-                type="number"
-                class="w-16 text-right py-1 px-1.5 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                :value="lossRate"
-                min="0"
-                max="1000"
-                step="any"
-                @input="onLossRateInput"
-              />
-            </div>
-            <!--
-            提示位必须「不参与布局」：既不能内联在输入框后（文案出现/消失会改变行宽，
-            把整行左右推挤 → 输入一次数字抖动一次），也不能在列内占一行高度
-            （列变两行后会比左侧按钮高，items-center 居中会让输入框与按钮上下错位）。
-            故绝对定位在输入框下方，只做覆盖显示：行宽、行高、按钮与输入框的垂直居中都不变。
-          -->
-            <span
-              class="sm-loss-hint absolute right-0 top-full mt-0.5 text-[12px] leading-4 whitespace-nowrap"
-            >
-              <span v-if="lossRateSaveState === 'saving'" class="text-text-muted">保存中…</span>
-              <span v-else-if="lossRateSaveState === 'error'" class="text-danger-500">保存失败</span>
-              <span v-else-if="lossRateMixed" class="text-text-muted">各订单损耗率不一致</span>
-            </span>
+        <div class="relative flex flex-col items-end gap-0.5">
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-text-secondary whitespace-nowrap">统一损耗率（千分之几）</label>
+            <input
+              type="number"
+              class="w-16 text-right py-1 px-1.5 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+              :value="lossRate"
+              min="0"
+              max="1000"
+              step="any"
+              @input="onLossRateInput"
+            />
           </div>
+          <!--
+          提示位必须「不参与布局」：既不能内联在输入框后（文案出现/消失会改变行宽，
+          把整行左右推挤 → 输入一次数字抖动一次），也不能在列内占一行高度
+          （列变两行后会比左侧按钮高，items-center 居中会让输入框与按钮上下错位）。
+          故绝对定位在输入框下方，只做覆盖显示：行宽、行高、按钮与输入框的垂直居中都不变。
+        -->
+          <span
+            class="sm-loss-hint absolute right-0 top-full mt-0.5 text-[12px] leading-4 whitespace-nowrap"
+          >
+            <span v-if="lossRateSaveState === 'saving'" class="text-text-muted">保存中…</span>
+            <span v-else-if="lossRateSaveState === 'error'" class="text-danger-500">保存失败</span>
+            <span v-else-if="lossRateMixed" class="text-text-muted">各订单损耗率不一致</span>
+          </span>
         </div>
-        <template v-else>
-          <button
-            class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-warning-500 rounded-lg border-none transition-colors hover:bg-warning-600"
-            @click="$emit('toggleEditMode', false)"
-          >
-            <FontAwesomeIcon icon="times" aria-hidden="true" /> 取消编辑
-          </button>
-          <!-- F1a-02（2026-10-24 审计）：加在途禁用——接口幂等不致错账，但双击
-             会交错改写基线并发多一次写；lossRateSaveState 由 useSummaryModal 维护。 -->
-          <button
-            class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-success-500 rounded-lg border-none transition-colors hover:bg-success-600 disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="lossRateSaveState === 'saving'"
-            @click="$emit('saveEdits')"
-          >
-            <FontAwesomeIcon icon="save" aria-hidden="true" /> {{ lossRateSaveState === 'saving' ? '保存中…' : '保存修改' }}
-          </button>
-        </template>
       </div>
     </div>
 
@@ -156,35 +131,49 @@
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
                 <td>{{ item.row.materialName }}</td>
                 <td>{{ item.row.specification || '' }}</td>
-                <!-- 损耗率：有落库坐标即可显示/编辑（多角色共用物料也显示——一条明细一个率，
-                     与跨 SKU 共用同一套联动语义）；无坐标（BOM 新增物料）→ — 并说明原因 -->
+                <!-- 损耗率：有落库坐标即可直接编辑（自动落库），与是否编辑数量无关；
+                     无坐标（BOM 新增物料）→ — 并说明原因 -->
                 <td>
                   <template v-if="rowCoord(item)">
-                    <!-- 非编辑态：率输入框 +「不一致」提示同处一支（与改造前逐字一致；提示仅非编辑态显示） -->
-                    <template v-if="!editMode">
-                      <input
-                        type="number" class="w-14 text-right py-1 px-1 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                        :value="rowRate(item)" min="0" max="1000" step="any"
-                        :title="sharedMaterialTitle(item)"
-                        @input="onRowRateInput(item, $event)"
-                      />
-                      <span v-if="isRowRateMixed(item)" class="text-[12px] text-text-muted whitespace-nowrap">不一致</span>
-                    </template>
-                    <template v-else>{{ formatQty(rowRate(item)) }}</template>
+                    <input
+                      type="number" class="w-14 text-right py-1 px-1 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                      :value="rowRate(item)" min="0" max="1000" step="any"
+                      :title="sharedMaterialTitle(item)"
+                      @input="onRowRateInput(item, $event)"
+                    />
+                    <span v-if="isRowRateMixed(item)" class="text-[12px] text-text-muted whitespace-nowrap">不一致</span>
                   </template>
                   <span v-else class="text-text-muted" title="该物料不在采购明细中（BOM 生成后新增），无法在此修改">—</span>
                 </td>
-                <!-- 数量：编辑态可改（同物料跨 SKU 联动，故给出提示）；多角色共用行锁编辑
-                     （明细是合并总量，此处只显示该角色的分配量）；否则取派生展示值 -->
+                <!-- 数量：点击数字就地编辑（只改该行对应采购明细，保存为行级操作）。
+                     多角色共用行锁编辑（明细是合并总量，此处只显示该角色的分配量）。 -->
                 <td>
-                  <input
-                    v-if="rowCoord(item) && editMode && !item.row.readonlyReason"
-                    type="number" class="w-20 text-right py-1 px-1.5 text-[14px] inline-block border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                    :value="editRowQty(item)" min="0"
-                    :title="sharedMaterialTitle(item)"
-                    @change="onRowQtyChange(item, $event)"
-                    @focus="($event.target as HTMLInputElement).select()"
-                  />
+                  <template v-if="canEditQty(item)">
+                    <div v-if="qtyDraftOf(item) !== undefined" class="sm-qty-editor">
+                      <input
+                        type="number" class="sm-qty-input w-20 text-right py-1 px-1.5 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                        :value="qtyDraftOf(item)" min="0"
+                        :title="sharedMaterialTitle(item)"
+                        :disabled="isQtySaving(item)"
+                        @input="onQtyDraftInput(item, $event)"
+                        @keydown.enter.prevent="onQtySave(item)"
+                        @keydown.esc.prevent="onQtyEsc(item)"
+                        @blur="onQtyBlur(item)"
+                        @focus="($event.target as HTMLInputElement).select()"
+                      />
+                      <button
+                        v-if="isQtyDraftDirty(item)"
+                        class="sm-qty-save" :disabled="qtySavingKey != null"
+                        @mousedown.prevent
+                        @click="onQtySave(item)"
+                      >{{ isQtySaving(item) ? '保存中…' : '保存' }}</button>
+                    </div>
+                    <span
+                      v-else class="sm-qty-cell" role="button" tabindex="0"
+                      :title="sharedMaterialTitle(item)"
+                      @click="onQtyCellClick(item)"
+                    >{{ displayRowQty(item) }}</span>
+                  </template>
                   <span
                     v-else-if="item.row.readonlyReason"
                     class="text-text-muted" :title="item.row.readonlyReason"
@@ -195,12 +184,11 @@
               </template>
             </tr>
 
-            <!-- 数量差异对照块：仅该组最后一行、且该组存在「推算 vs 落库」差异时渲染（无差异不占高度）。
-                 编辑态不渲染（2026-11-11 owner 口径）：本次自定义编辑产生的差异不算「已存在的差异」，
-                 编辑态内输入会即时改写 factoryData 导致 diff 重算弹出横幅（脚底·绿色超柔案例）；
-                 打开时已存在的差异由编辑会话快照（rowDiffMap 冻结）保证退出编辑后仍展示。 -->
+            <!-- 数量差异对照块：仅该组最后一行、且打开汇总时已存在「推算 vs 落库」差异时渲染。
+                 2026-11-11 owner 口径：本次会话保存产生的差异不弹横幅（rowDiffMap 在
+                 factoryData 整体替换时重新快照；单行数量保存原地改数量不更新快照）。 -->
             <SummaryDiffBlock
-              v-if="!editMode && rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
+              v-if="rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
               :diffs="rowDiffMap[item.gi]!"
               :stored-rows="storedRowsOf(item.group, item.gi)"
               :show-role-column="showRoleColumn"
@@ -257,7 +245,9 @@ function onLossRateInput(e: Event) {
 // 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
 const {
   flatRows, rowDiffMap, storedRowsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
-  editRowQty, displayRowQty, sharedMaterialTitle, isRowRateMixed, onRowRateInput, onRowQtyChange,
+  displayRowQty, sharedMaterialTitle, isRowRateMixed, onRowRateInput,
+  canEditQty, qtyDraftOf, isQtyDraftDirty, isQtySaving, onQtyCellClick, onQtyDraftInput,
+  onQtySave, onQtyEsc, onQtyBlur,
 } = useFactoryTableRows(props, emit)
 </script>
 
@@ -310,5 +300,33 @@ const {
   margin-top: 2px;
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+/* 数量单元格就地编辑：输入框 + 行内保存按钮，不改变列宽节奏 */
+.sm-qty-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sm-qty-save {
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-primary-600);
+  border: 1px solid var(--color-primary-500);
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sm-qty-save:hover {
+  background: var(--color-primary-50);
+}
+.sm-qty-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.sm-qty-cell {
+  cursor: text;
 }
 </style>

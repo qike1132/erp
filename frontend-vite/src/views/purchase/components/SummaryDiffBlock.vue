@@ -1,9 +1,9 @@
 <template>
   <template v-if="diffs.length > 0">
-    <!-- 差异横幅：说明「实际下单含手工调整」并点名不一致的物料（跨满整行：含角色列 12 / 隐藏时 11） -->
+    <!-- 差异横幅：说明「下方为实际下单值」并点名被手工调整的物料（跨满整行：含角色列 12 / 隐藏时 11） -->
     <tr class="sm-diff-banner">
       <td :colspan="showRoleColumn ? 12 : 11">
-        ⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：
+        ⚠ 以下物料含手工调整：上方「数量」已按实际下单值显示，BOM 推算值为：
         <span v-for="(d, i) in diffs" :key="`${d.partName}-${d.materialName}`">{{ i > 0 ? '、' : '' }}{{ d.partName ? d.partName + '·' : '' }}{{ d.materialName }}（推算 {{ formatQty(d.perSku) }} / 实际 {{ formatQty(d.stored) }}）</span>
       </td>
     </tr>

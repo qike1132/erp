@@ -239,7 +239,6 @@ describe('C. 状态机（独立复核）', () => {
         props: {
           factoryData: FACTORY,
           supplierData: null,
-          editMode: false,
           lossRate: 5,
           orderCount: 1,
           supplierGroups: [],

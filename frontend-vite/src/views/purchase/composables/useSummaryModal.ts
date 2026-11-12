@@ -3,7 +3,7 @@ import { purchaseApi } from '@/api'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { fmtQty } from '@/utils/formatQty'
-import { calcSpareQuantity, summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities } from './perSkuRows'
+import { calcSpareQuantity, summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, computeQuantityDiff, buildStoredRows, allocateOrderDisplayQuantities } from './perSkuRows'
 import type { PerSkuRow } from './perSkuRows'
 
 // 这些纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
@@ -49,8 +49,8 @@ export function getGroupOrderQty(group: FactoryGroup): number {
  * 供应商页签的「数量」在同一份工厂数据上调用本函数派生，故两侧天然同源：
  * 用户自定义调整工厂数量或逐行损耗率后，切到供应商页签立即看到同一数值（实时一致）。
  *
- * 注：`editing` 参数保留仅为兼容既有调用点（OrderDetailModal 传 false、行模型传
- * editMode），两种态行为已统一，不再有「精确值」分支。
+ * 注：`editing` 参数保留仅为兼容既有调用点（OrderDetailModal 传 false、编辑预载传
+ * true），两种态行为已统一，不再有「精确值」分支。
  */
 export function factoryQtyDisplayValue(baseQty: number, lossRate: number, _editing: boolean): number {
   return ceilMagnifiedByLossRate(baseQty, lossRate)
@@ -193,11 +193,17 @@ function buildPerSkuGroupHtml(
 ): string {
   const perSkuRows = buildPerSkuRows(group, spareRate)
   if (perSkuRows.length === 0) return ''
+  // 数量列与屏幕/供应商同源：手工调整 → 落库真值加放并按 SKU 分摊；
+  // 否则逐 SKU BOM 推算（唯一判定见 perSkuRows.buildRowDisplayQuantities）。
+  const displayQtys = buildRowDisplayQuantities(
+    group, perSkuRows, (si, fi) => fabricRates?.[gi]?.[si]?.[fi] ?? lossRate,
+  )
 
   let tableHtml = ''
   let cursor = 0
   let blockNo = 0
   while (cursor < perSkuRows.length) {
+    const blockStart = cursor
     const skuIdx = perSkuRows[cursor]!.skuIdx
     const block: PerSkuRow[] = []
     while (cursor < perSkuRows.length && perSkuRows[cursor]!.skuIdx === skuIdx) {
@@ -205,6 +211,7 @@ function buildPerSkuGroupHtml(
       cursor++
     }
     block.forEach((row, i) => {
+      const displayQty = displayQtys[blockStart + i] ?? row.baseQuantity
       tableHtml += '<tr>'
       const line = row.cellLines[0]
       if (i === 0) {
@@ -261,13 +268,13 @@ function buildPerSkuGroupHtml(
       if (row.coord) {
         const rowRate = fabricRates?.[gi]?.[row.coord.si]?.[row.coord.fi] ?? lossRate
         tableHtml += `<td>${escapeHtml(String(rowRate))}</td>`
-        tableHtml += `<td>${ceilMagnifiedByLossRate(row.baseQuantity, rowRate)}</td>`
+        tableHtml += `<td>${displayQty}</td>`
       } else {
         // 无落库坐标（BOM 生成后新增的物料）：**必须与屏幕同源** —— 屏幕
         // `SummaryFactoryTab.vue` 对无坐标行渲染率 '—'、数量取基准量（不加放）。
         // 曾在此回退 lossRate 并加放，导致同一张单屏幕「— / 20」而打印「10 / 21」。
         tableHtml += '<td>—</td>'
-        tableHtml += `<td>${row.baseQuantity}</td>`
+        tableHtml += `<td>${displayQty}</td>`
       }
       tableHtml += `<td>${escapeHtml(row.unit)}</td>`
       tableHtml += '</tr>'
@@ -298,7 +305,7 @@ function buildDiffBlockHtml(
     .map((d) => `${d.partName ? d.partName + '·' : ''}${d.materialName}（推算 ${fmtQty(d.perSku)} / 实际 ${fmtQty(d.stored)}）`)
     .join('、')
   const totalCols = showRoleColumn ? 12 : 11
-  let tableHtml = `<tr><td colspan="${totalCols}" style="background:#fffaf0;color:#7a4a00;">⚠ 本条「实际下单」含手工调整，与上方按 BOM 推算的明细不一致：${escapeHtml(detail)}</td></tr>`
+  let tableHtml = `<tr><td colspan="${totalCols}" style="background:#fffaf0;color:#7a4a00;">⚠ 以下物料含手工调整：上方「数量」已按实际下单值显示，BOM 推算值为：${escapeHtml(detail)}</td></tr>`
 
   const storedRows = buildStoredRows(group, () => spareRate)
   storedRows.forEach((r, i) => {
@@ -638,8 +645,6 @@ export function useSummaryModal() {
   const factoryData = ref<FactorySummaryData | null>(null)
   const factoryOriginalData = ref<FactorySummaryData | null>(null)
   const supplierData = ref<SupplierSummaryData | null>(null)
-  const supplierOriginalData = ref<SupplierSummaryData | null>(null)
-  const editMode = ref(false)
   const lossRate = ref(0)
   /**
    * 服务端**当前已落库**的损耗率基线（openSummary 时按汇总接口的 spare_rate 播种，
@@ -698,6 +703,25 @@ export function useSummaryModal() {
   const fabricItemIds = ref<number[][][][]>([])
 
   /**
+   * 数量「点击单元格就地编辑」的草稿（key = fabricKey(gi,si,fi)，值 = 输入框原串）。
+   *
+   * 放 composable 而非行组件本地：页签切换会卸载 SummaryFactoryTab，放本地会静默
+   * 丢掉「失焦未保存」的草稿；离开守卫也需要读到这份状态。
+   * 草稿按**落库坐标**存储：同一物料跨 SKU 共用采购明细同一行 ⇒ 同一份编辑状态。
+   */
+  const qtyDrafts = ref<Record<string, string>>({})
+  /** 当前在途保存的数量行 key；非空时所有「保存」按钮禁用 */
+  const qtySavingKey = ref<string | null>(null)
+  /** 关闭/刷新代数：迟到的保存响应不得回写已替换的数据 */
+  let qtyEpoch = 0
+  /** 数量保存单飞队列：串行化，保证后一次携带前一次前移后的 items_version */
+  let qtySaveChain: Promise<void> = Promise.resolve()
+  /** 是否有未保存的数量草稿或在途保存（离开守卫 / 返回按钮共用） */
+  const hasUnsavedQtyEdits = computed(() =>
+    Object.keys(qtyDrafts.value).length > 0 || qtySavingKey.value !== null,
+  )
+
+  /**
    * 损耗率自动落库的串行化状态（**实例闭包内**，禁止模块级全局，避免多实例互相干扰）：
    * - drainPromise：当前「排空循环」的句柄，非空表示有请求在途 / 队列待排空；
    * - pendingRate：在途期间累积的**最新**待发率（中间值允许合并跳过）。
@@ -723,49 +747,38 @@ export function useSummaryModal() {
    * 工厂页签「数量」列的当前展示值索引：key = (供应商,物料,规格,单位) → 汇总数量。
    *
    * 供应商页签的「数量」直接由此派生（见 supplierGroups），保证与工厂页签**同源**：
-   * - 同一损耗率、同一取整口径，不再出现「工厂已加放、供应商未加放」的口径差；
-   * - 用户自定义编辑工厂数量 / 逐行损耗率后，供应商页签立即反映同一数值（实时一致）。
-   *
-   * 两种状态都取向上取整值（与工厂表可见值一致，2026-11-11 口径：数量一律整数）；
-   * 多分组（客户 × 产品）落到同一物料键时按各行展示值累加，与工厂表可见行相加一致。
+   * - 按 SKU 模式下工厂可见行由 `buildRowDisplayQuantities` 统一产出（手工调整以
+   *   落库真值为准；否则逐 SKU BOM 推算），本 map 只是把同一批行按供应商合并键
+   *   求和，**不再有第二套 BOM/落库判断**；
+   * - 单行保存后 factoryData 原地更新 → 本 map 与供应商页立即同步；
+   * - 旧后端 / 无 BOM 明细回退到落库布料行（与原逻辑一致）。
    */
   const factoryQtyByMaterialKey = computed(() => {
     const map = new Map<string, number>()
     factoryData.value?.groups?.forEach((group, gi) => {
-      // 按 SKU 展开模式：工厂页签「数量」列显示的是**逐 SKU 的 BOM 推算值**
-      // （displayRowQty = ceil(基准量 × 行损耗率)）。供应商页签必须取同一批行，
-      // 否则会取到落库明细（手工调整后的值），两页数字不一致
-      // （生产反馈 2026-11-10：宝乐绒工厂 207 / 供应商 52）。
-      // 编辑态例外：输入框承载的是**落库真值**（editRowQty），而同一物料跨 SKU/角色
-      // 共用同一采购明细行——若仍逐行累加，同一条明细会被重复算 N 倍。
-      // 故编辑态走落库行派生（下面 fabrics 分支），一条明细只算一次。
       const perSku = buildPerSkuRows(group, lossRate.value)
-      const hasPerSkuRows = perSku.some((row) => !row.noBom)
-      if (!editMode.value && hasPerSkuRows) {
-        perSku.forEach((row) => {
+      if (perSku.some((row) => !row.noBom)) {
+        const displayQtys = buildRowDisplayQuantities(
+          group, perSku, (si, fi) => rateForFabric(gi, si, fi),
+        )
+        perSku.forEach((row, i) => {
           if (row.noBom) return
-          // 供应商页是合并口径（键不含 role）：多角色行按显示值累加进同一供应商物料键
+          // 供应商页是合并口径（键不含 role/部位）：多角色/多部位行按显示值累加
           const key = summaryMaterialKey(
             row.supplierName, row.materialName, row.specification, row.unit,
           )
-          // 与工厂表 displayRowQty 同口径：有落库坐标才读逐行率，无坐标（BOM 新增物料）
-          // 加放率为 0；同一物料跨 SKU/角色多行按显示值累加。
-          const rate = row.coord ? rateForFabric(gi, row.coord.si, row.coord.fi) : 0
-          const qty = factoryQtyDisplayValue(row.baseQuantity, rate, false)
-          map.set(key, Math.round(((map.get(key) || 0) + qty) * 100) / 100)
+          map.set(key, Math.round(((map.get(key) || 0) + (displayQtys[i] ?? 0)) * 100) / 100)
         })
         return
       }
-      // 落库布料行派生（编辑态恒走此分支；非编辑态用于旧后端 / 无 BOM 明细回退）
+      // 落库布料行派生（旧后端 / 无 BOM 明细回退）：工厂 legacy 行按落库量加放，
+      // 供应商侧必须同率同口径（含 item_ids 为空的历史行），否则两页数字会分叉。
       ;(group.suppliers || []).forEach((supplier, si) => {
         ;(supplier.fabrics || []).forEach((fabric, fi) => {
           const key = summaryMaterialKey(supplier.supplier_name, fabric.fabric_name, fabric.specification, fabric.unit)
           const baseQty = parseFloat(String(fabric.quantity)) || 0
-          // 按 SKU 模式下无采购明细的 BOM 物料没有落库坐标，工厂表不加放（率显示 —）；
-          // 供应商页必须同口径，否则编辑态会被统一损耗率额外放大。
-          const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
-          const rate = hasPerSkuRows && itemIds.length === 0 ? 0 : rateForFabric(gi, si, fi)
-          const qty = factoryQtyDisplayValue(baseQty, rate, editMode.value)
+          const rate = rateForFabric(gi, si, fi)
+          const qty = factoryQtyDisplayValue(baseQty, rate, false)
           // 累加后再四舍五入到 2 位小数：多分组落到同一物料键时消除浮点尾差，
           // 使展示值与工厂表「各行相加」严格逐字一致。
           map.set(key, Math.round(((map.get(key) || 0) + qty) * 100) / 100)
@@ -823,9 +836,128 @@ export function useSummaryModal() {
     return typeof v === 'number' && Number.isFinite(v) ? v : lossRate.value
   }
 
+  /** 数量草稿 key：与损耗率行级串行化共用同一套落库坐标键（gi-si-fi）。 */
+  function qtyKey(gi: number, si: number, fi: number): string {
+    return fabricKey(gi, si, fi)
+  }
+
+  /** 点击数量单元格进入编辑：仅在尚无草稿时以当前编辑预载值播种。 */
+  function beginQtyEdit(gi: number, si: number, fi: number, initial: number) {
+    const key = qtyKey(gi, si, fi)
+    if (qtyDrafts.value[key] !== undefined) return
+    qtyDrafts.value = { ...qtyDrafts.value, [key]: String(initial) }
+  }
+
+  function setQtyDraft(gi: number, si: number, fi: number, value: string) {
+    const key = qtyKey(gi, si, fi)
+    if (qtyDrafts.value[key] === undefined) return
+    qtyDrafts.value = { ...qtyDrafts.value, [key]: value }
+  }
+
+  /** Esc / 失焦未改动：丢弃草稿，显示回落为落库派生值。 */
+  function cancelQtyEdit(gi: number, si: number, fi: number) {
+    const key = qtyKey(gi, si, fi)
+    if (qtyDrafts.value[key] === undefined) return
+    const next = { ...qtyDrafts.value }
+    delete next[key]
+    qtyDrafts.value = next
+  }
+
+  function clearQtyDrafts() {
+    qtyDrafts.value = {}
+    qtySavingKey.value = null
+  }
+
+  /** 保存成功后把新真值写回 factoryData 中所有引用该明细的行（跨 SKU/分组共用）。 */
+  function applyQtyToFactoryData(itemIds: number[], quantity: number) {
+    factoryData.value?.groups?.forEach((group) => {
+      ;(group.suppliers || []).forEach((supplier) => {
+        ;(supplier.fabrics || []).forEach((fabric) => {
+          const ids = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
+          if (ids.some((id) => itemIds.includes(id))) fabric.quantity = quantity
+        })
+      })
+    })
+  }
+
+  /**
+   * 单行数量保存（沿用 /factory-summary/save，不新增写库通道）。
+   *
+   * 串行契约：同一时刻至多一个数量保存在途（qtySavingKey 非空时 UI 禁用保存按钮）；
+   * 版本快照在任务**真正发送前**读取，前一次成功先 applyServerItemsVersions 再发下一次。
+   * 失败契约：清草稿（显示回落到保存前的落库值）并抛出；409 额外 warning + 刷新汇总。
+   */
+  async function saveQtyRow(gi: number, si: number, fi: number): Promise<void> {
+    const key = qtyKey(gi, si, fi)
+    const raw = qtyDrafts.value[key]
+    if (raw === undefined || qtySavingKey.value !== null) return
+    const value = parseFloat(raw)
+    if (!Number.isFinite(value) || value < 0) {
+      toast.error('请输入有效的数量')
+      return
+    }
+    const fabric = factoryData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
+    if (!fabric) { cancelQtyEdit(gi, si, fi); return }
+    const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
+    if (itemIds.length === 0) {
+      toast.error('该物料不在采购明细中，无法保存')
+      cancelQtyEdit(gi, si, fi)
+      return
+    }
+    const newBase = unmagnifyByLossRate(value, rateForFabric(gi, si, fi))
+    const oldBase = parseFloat(String(fabric.quantity)) || 0
+    if (Math.abs(newBase - oldBase) < 1e-9) {
+      cancelQtyEdit(gi, si, fi)
+      return
+    }
+    const epochAtSend = qtyEpoch
+    qtySavingKey.value = key
+    const task = qtySaveChain.then(async () => {
+      try {
+        // 队列等待期间草稿被清（取消/409 刷新/关闭）→ 放弃本次保存
+        if (qtyEpoch !== epochAtSend || qtyDrafts.value[key] === undefined) return
+        // 版本快照必须在真正发送前取：前一次保存可能已前移 items_version
+        const versions = { ...itemsVersions.value }
+        const versionArgs: [Record<string, number>?] =
+          Object.keys(versions).length > 0 ? [versions] : []
+        const res = await purchaseApi.saveFactoryEdits(
+          [{ item_ids: itemIds, quantity: newBase }], undefined, orderIds.value, ...versionArgs,
+        ) as unknown as SaveFactoryEditsResponse
+        if (!res.success) throw new Error(res.message || '数量保存失败')
+        if (qtyEpoch !== epochAtSend) return
+        // 用户编辑数量也会递增 items_version：用响应里的新版本前移本地快照
+        applyServerItemsVersions(res)
+        applyQtyToFactoryData(itemIds, newBase)
+        cancelQtyEdit(gi, si, fi)
+      } catch (err) {
+        cancelQtyEdit(gi, si, fi)
+        if (qtyEpoch !== epochAtSend) return
+        if ((err as { response?: { status?: number } })?.response?.status === 409) {
+          toast.warning('BOM 已更新，采购明细已刷新，请重新编辑')
+          if (open.value && orderIds.value.length > 0) {
+            lossRateEpoch += 1
+            pendingRate = null
+            fabricPendingRates.clear()
+            qtyEpoch += 1
+            clearQtyDrafts()
+            await openSummary(orderIds.value, orderTime.value)
+          }
+        }
+        throw err
+      } finally {
+        if (qtySavingKey.value === key) qtySavingKey.value = null
+      }
+    })
+    qtySaveChain = task.catch(() => {})
+    return task
+  }
+
   async function openSummary(ids: number[], orderTimeValue?: string) {
     orderIds.value = ids
     orderTime.value = orderTimeValue || ''
+    // 重新拉汇总 = 旧编辑会话作废：草稿与在途保存的回写一并丢弃
+    qtyEpoch += 1
+    clearQtyDrafts()
     const [fRes, sRes] = await Promise.all([
       purchaseApi.factorySummary(ids) as unknown as FactorySummaryData,
       purchaseApi.supplierSummary(ids) as unknown as SupplierSummaryData,
@@ -834,7 +966,6 @@ export function useSummaryModal() {
     factoryData.value = structuredClone(fRes)
     factoryOriginalData.value = structuredClone(fRes)
     supplierData.value = structuredClone(sRes)
-    supplierOriginalData.value = structuredClone(sRes)
     // 明细版本快照：保存修改时原样带回（乐观锁）；旧后端无此字段 → 空对象 = 不传版本。
     itemsVersions.value = { ...(fRes.items_versions || {}) }
     const initOrder: string[] = []
@@ -843,7 +974,6 @@ export function useSummaryModal() {
       if (!initOrder.includes(s)) initOrder.push(s)
     })
     supplierOrder.value = initOrder
-    editMode.value = false
     // 逐布料行播种：优先取明细 loss_rate（有值则为该行已落库配置），
     // 否则回退到分组/订单级 spare_rate，保证旧订单零回归。
     const groups = fRes.groups || []
@@ -906,63 +1036,6 @@ export function useSummaryModal() {
     persistedLossRateMixed.value = lossRateMixed.value
     tab.value = 'factory'
     open.value = true
-  }
-
-  function toggleEditMode(enable: boolean) {
-    if (!enable) {
-      // 取消编辑只丢弃**尚未发出**的待转值；已在途的自动落库不能撤销
-      // （服务端可能已提交），其响应仍会同步基线并由输入框读回，保证与服务器一致。
-      pendingRate = null
-      fabricPendingRates.clear()
-      factoryData.value = cloneRaw(factoryOriginalData.value)
-      supplierData.value = cloneRaw(supplierOriginalData.value)
-      fabricLossRates.value = cloneRaw(fabricPersistedRates.value)
-      fabricLossRateMixed.value = cloneRaw(fabricLossRateMixedPersisted.value)
-      // 顶部统一损耗率同样回到服务端基线：此前漏了这一行，取消编辑后
-      // 输入框仍显示用户改过的值，而逐行率已按持久值计算（同屏两套口径）。
-      lossRate.value = persistedLossRate.value
-      lossRateMixed.value = persistedLossRateMixed.value
-      // 分组订单级率同样回到服务端基线（统一率交互随之丢弃）
-      groupSpareRates.value = seedGroupSpareRates(factoryOriginalData.value)
-      // 弹窗仍开着、服务端仍存着该率，故恢复到「已落库」基线而非清零，
-      // 否则「打开看到 5 → 自定义编辑 → 取消编辑」会自相矛盾地变成 0。
-      // 同时复位交互标记与保存反馈状态（saving/error 提示随之一并消失）。
-      lossRateTouched.value = false
-      lossRateSaveState.value = 'idle'
-    }
-    editMode.value = enable
-  }
-
-  /**
-   * 编辑态逐行改数量：就地更新 factoryData 中该布料的真实数量（并同步供应商汇总），
-   * 由「保存修改」统一落库。非编辑态展示的放大值不参与此处。
-   */
-  function updateFactoryQty(gi: number, si: number, fi: number, value: number) {
-    const fabric = factoryData.value?.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
-    if (!fabric) return
-    // 自定义编辑输入框加载的是「订单用量展示值」（原始值 × (1 + 损耗率‰)），
-    // 保存前必须按当前工序损耗率反推原始真值，避免把展示值固化入库。
-    const newBase = unmagnifyByLossRate(value, rateForFabric(gi, si, fi))
-    const oldQty = parseFloat(String(fabric.quantity)) || 0
-    const diff = newBase - oldQty
-    fabric.quantity = newBase
-
-    if (diff !== 0 && supplierData.value?.materials) {
-      const fabricName = fabric.fabric_name
-      const spec = fabric.specification || ''
-      const unit = fabric.unit || ''
-      const supplierName = factoryData.value?.groups?.[gi]?.suppliers?.[si]?.supplier_name
-      supplierData.value.materials.forEach((m) => {
-        if (
-          m.material_name === fabricName &&
-          (m.specification || '') === spec &&
-          (m.unit || '') === unit &&
-          (m.supplier_name || '未指定供应商') === (supplierName || '未指定供应商')
-        ) {
-          m.total_quantity = Math.round(((parseFloat(String(m.total_quantity)) || 0) + diff) * 100) / 100
-        }
-      })
-    }
   }
 
   /** 当前行级落库在途/待发的行 key（统一率回写要跳过这些行） */
@@ -1263,113 +1336,13 @@ export function useSummaryModal() {
     return run
   }
 
-  /**
-   * 编辑态「保存修改」：以 `factoryData` 与 `factoryOriginalData` 的**差异**组装 edits。
-   *
-   * 二者现在都只承载原始真值（损耗加放不再就地改写数量），因此 diff 只会得到
-   * 用户在编辑态真实改过的数量，天然不含任何「放大派生的伪编辑」。
-   * 本函数的 diff 逻辑无需为损耗率改动做任何调整。
-   */
-  async function saveFactoryEdits() {
-    const edits: { item_ids: number[]; quantity: number }[] = []
-    const current = factoryData.value
-    const original = factoryOriginalData.value
-    if (current?.groups && original?.groups) {
-      current.groups.forEach((group, gi) => {
-        ;(group.suppliers || []).forEach((supplier, si) => {
-          ;(supplier.fabrics || []).forEach((fabric, fi) => {
-            const origFabric = original.groups?.[gi]?.suppliers?.[si]?.fabrics?.[fi]
-            if (origFabric && fabric.quantity !== origFabric.quantity) {
-              const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
-              if (itemIds.length > 0) edits.push({ item_ids: itemIds, quantity: fabric.quantity })
-            }
-          })
-        })
-      })
-    }
-    const rateTouched = lossRateTouched.value
-    // 无任何布料改动且损耗率未被交互：无需请求（保持原直接退出行为）
-    if (edits.length === 0 && !rateTouched) {
-      editMode.value = false
-      return
-    }
-    // 损耗率仅在交互过时提交；未交互则不发送 spare_rate（避免用 0 覆盖已存率）
-    // items_versions 仅在拿到快照时作为第 4 参携带（旧后端/空快照保持 3 参调用）
-    const versionSnapshot = { ...itemsVersions.value }
-    const versionArgs: [Record<string, number>?] =
-      Object.keys(versionSnapshot).length > 0 ? [versionSnapshot] : []
-    let res: SaveFactoryEditsResponse
-    try {
-      res = await purchaseApi.saveFactoryEdits(
-        edits,
-        rateTouched ? lossRate.value : undefined,
-        orderIds.value,
-        ...versionArgs,
-      ) as unknown as SaveFactoryEditsResponse
-    } catch (err) {
-      // 409（ITEMS_VERSION_CONFLICT）：汇总打开期间 BOM 同步改写了明细。
-      // 提示 + 重新拉汇总（拿到最新明细与新版本），并继续抛出——
-      // 上层不得把这次失败显示成「修改已保存」。
-      if ((err as { response?: { status?: number } })?.response?.status === 409) {
-        toast.warning('BOM 已更新，采购明细已刷新，请重新编辑')
-        // 弹窗已关闭 / 无目标单：不得刷新（否则会用空 orderIds 重新打开空弹窗）
-        if (open.value && orderIds.value.length > 0) {
-          // 刷新会按新明细重建率基线数组；先作废在途自动落库的回写，否则迟到响应
-          // 会按旧 gi/si/fi 写到错位的行上（BOM 拆行后行序可能变化）并误置 saved。
-          // 与 close() 同款清理。
-          lossRateEpoch += 1
-          pendingRate = null
-          fabricPendingRates.clear()
-          await openSummary(orderIds.value, orderTime.value)
-        }
-      }
-      throw err
-    }
-    if (res.success) {
-      // 用户编辑（数量/损耗率/备品率）同样递增 items_version：用响应里的新版本
-      // 前移本地快照，同一弹窗内第二次「保存修改」才不会带过期版本被 409。
-      applyServerItemsVersions(res)
-      edits.forEach((edit) => {
-        factoryData.value?.groups?.forEach((group) => {
-          ;(group.suppliers || []).forEach((supplier) => {
-            ;(supplier.fabrics || []).forEach((fabric) => {
-              const itemIds = fabric.item_ids || (fabric.item_id ? [fabric.item_id] : [])
-              if (edit.item_ids.some((id) => itemIds.includes(id))) {
-                fabric.quantity = edit.quantity
-              }
-            })
-          })
-        })
-      })
-      if (rateTouched) {
-        // 2026-10-18 OCR 评审：本路径同样把 spare_rate 落库了，基线必须同步，
-        // 否则「保存修改」后再「取消编辑」会回滚到旧率；逐行基线也要同步。
-        // 顺序很关键：必须**先**让共享函数把 factoryData 刷成新率，**再** clone 成基线；
-        // 反过来的话 cloneRaw 会把尚未刷新的旧率固化进 factoryOriginalData，等于没同步。
-        syncPersistedLossRateBaseline(lossRate.value)
-        factoryOriginalData.value = cloneRaw(factoryData.value)
-      } else {
-        factoryOriginalData.value = cloneRaw(factoryData.value)
-      }
-      lossRateTouched.value = false
-      try {
-        const sRes = await purchaseApi.supplierSummary(orderIds.value) as unknown as SupplierSummaryData
-        if (sRes.success) {
-          supplierData.value = structuredClone(sRes)
-          supplierOriginalData.value = structuredClone(sRes)
-        }
-      } catch { /* 非关键，忽略 */ }
-      editMode.value = false
-      return res
-    }
-    throw new Error(res.message || '保存失败')
-  }
-
   function close() {
     open.value = false
     orderIds.value = []
-    // 作废在途自动落库的回写（关闭后响应到达也不得复活已清空的基线）
+    // 作废在途自动落库 / 数量保存的回写（关闭后响应到达也不得复活已清空的状态）
     lossRateEpoch += 1
+    qtyEpoch += 1
+    clearQtyDrafts()
     pendingRate = null
     supplierOrder.value = []
     orderTime.value = ''
@@ -1466,7 +1439,6 @@ export function useSummaryModal() {
     tab,
     factoryData,
     supplierData,
-    editMode,
     lossRate,
     persistedLossRate,
     lossRateMixed,
@@ -1478,14 +1450,18 @@ export function useSummaryModal() {
     orderIds,
     supplierGroups,
     itemsVersions,
+    qtyDrafts,
+    qtySavingKey,
+    hasUnsavedQtyEdits,
     openSummary,
     close,
-    toggleEditMode,
-    updateFactoryQty,
+    beginQtyEdit,
+    setQtyDraft,
+    cancelQtyEdit,
+    saveQtyRow,
     applyLossRate,
     applyLossRateAndSave,
     applyFabricLossRateAndSave,
-    saveFactoryEdits,
     printFactory,
     printSupplier,
     exportFactory,

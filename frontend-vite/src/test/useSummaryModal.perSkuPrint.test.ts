@@ -111,11 +111,12 @@ describe('E2b 打印对照块结构（与屏幕同源）', () => {
     expect(rowWidths(rows)).toEqual(rows.map(() => 11))
 
     // 横幅：单格跨 11 列，点名物料与两个数值（文案与数字格式须与屏幕逐字一致：
-    // 屏幕是「…与上方按 BOM 推算**的明细**不一致」，数字走 formatQty ⇒ '60.0' / '65.0'）
-    const banner = rows.find((tr) => (tr.textContent || '').includes('不一致'))!
+    // 屏幕是「以下物料含手工调整：上方「数量」已按实际下单值显示」，数字走 formatQty ⇒ '60.0' / '65.0'）
+    const banner = rows.find((tr) => (tr.textContent || '').includes('手工调整'))!
     expect(banner).toBeDefined()
     expect(banner.querySelector('td')!.getAttribute('colspan')).toBe('11')
-    expect(banner.textContent).toContain('与上方按 BOM 推算的明细不一致')
+    expect(banner.textContent).toContain('以下物料含手工调整')
+    expect(banner.textContent).toContain('上方「数量」已按实际下单值显示')
     expect(banner.textContent).toContain('共享布')
     expect(banner.textContent).toContain('60.0')
     expect(banner.textContent).toContain('65.0')

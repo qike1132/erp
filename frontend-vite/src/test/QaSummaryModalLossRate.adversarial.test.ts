@@ -260,28 +260,24 @@ describe('E. applyLossRate 不再就地放大 → 展示放大值绝不作为 ed
     api.saveFactoryEdits.mockResolvedValue({ success: true } as never)
   })
 
-  it('非编辑态输入损耗率 → 进入编辑态 → 保存修改：原始数量保持 10，edits 恒为空', async () => {
+  it('输入损耗率 → 自动落库：原始数量保持 10，edits 恒为空', async () => {
     const summary = useSummaryModal()
     await summary.openSummary([7, 8])
 
-    // 非编辑态输入损耗率
-    summary.applyLossRate(5)
+    // 非编辑态输入损耗率（自动落库）
+    await summary.applyLossRateAndSave(5)
 
     // 【失败态前置断言（已反转）】旧实现此处为 10.05（applyLossRate 就地放大）；
     // 新契约：applyLossRate 只记录「率」，原始数量保持落库真值 10。收紧：精确等于 10。
     expect(summary.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(10)
     expect(summary.lossRate).toBe(5)
-    expect(summary.lossRateTouched).toBe(true)
     // 展示派生仍会放大（10×1.005=10.05），但只是渲染派生、不写回 state
     expect(magnifyByLossRate(summary.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity, summary.lossRate)).toBeCloseTo(10.05, 5)
 
-    // 用户随后点「自定义编辑」再点「保存修改」
-    summary.toggleEditMode(true)
-    await summary.saveFactoryEdits()
-
-    const [editsArg] = vi.mocked(api.saveFactoryEdits).mock.calls[0]!
+    const [editsArg, rateArg] = vi.mocked(api.saveFactoryEdits).mock.calls[0]!
     // 新契约护栏（收紧）：edits 必须恒为空 —— 放大的展示值绝不作为真实数量提交。
     expect(editsArg).toEqual([])
+    expect(rateArg).toBe(5)
     // 显式排除旧缺陷的提交形态，防止未来回归为「10.05 落库」：
     expect(editsArg).not.toContainEqual({ item_ids: [101], quantity: 10.05 })
     expect(editsArg).not.toEqual([{ item_ids: [101], quantity: 10.05 }])

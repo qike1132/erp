@@ -117,42 +117,21 @@ describe('逐布料行差异化损耗率', () => {
     expect(m.fabricLossRateMixed[0]![0]![0]).toBe(false)
   })
 
-  it('自定义编辑按该行损耗率加载展示值，保存时反推原始真值（100‰：110 → 100）', async () => {
+  it('单行保存按该行损耗率反推原始真值（100‰：110→100；50‰：52.5→50）', async () => {
     expect(unmagnifyByLossRate(110, 100)).toBe(100)
 
     const m = useSummaryModal()
     await m.openSummary([7, 8])
 
-    m.updateFactoryQty(0, 0, 0, 110)
-    m.updateFactoryQty(1, 0, 0, 52.5)
+    m.beginQtyEdit(0, 0, 0, 110)
+    m.setQtyDraft(0, 0, 0, '110')
+    await m.saveQtyRow(0, 0, 0)
+    m.beginQtyEdit(1, 0, 0, 53)
+    m.setQtyDraft(1, 0, 0, '52.5')
+    await m.saveQtyRow(1, 0, 0)
 
     expect(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity).toBe(100)
     expect(m.factoryData!.groups[1]!.suppliers[0]!.fabrics[0]!.quantity).toBe(50)
-  })
-
-  it('取消编辑恢复各布料行已落库的损耗率基线', async () => {
-    const m = useSummaryModal()
-    await m.openSummary([7, 8])
-    await m.applyFabricLossRateAndSave(0, 0, 0, 120)
-
-    m.toggleEditMode(true)
-    m.toggleEditMode(false)
-
-    expect(m.fabricLossRates).toEqual([[[120]], [[50]]])
-  })
-
-  it('取消编辑同时恢复顶部统一损耗率与 mixed 基线（AUD-13）', async () => {
-    const m = useSummaryModal()
-    await m.openSummary([7, 8]) // spare_rate=null → 持久基线 0
-
-    m.toggleEditMode(true)
-    m.lossRate = 80
-    m.fabricLossRateMixed[0]![0]![0] = true
-
-    m.toggleEditMode(false)
-
-    expect(m.lossRate).toBe(0)
-    expect(m.fabricLossRateMixed[0]![0]![0]).toBe(false)
   })
 
   it('打印/导出 HTML 按逐布料行损耗率分别计算数量', () => {
@@ -171,7 +150,6 @@ describe('逐布料行差异化损耗率', () => {
       props: {
         factoryData: factorySummary(),
         supplierData: null,
-        editMode: false,
         lossRate: 0,
         fabricLossRates: [[[100]], [[50]]],
         fabricLossRateMixed: [[[false]], [[false]]],
@@ -192,12 +170,11 @@ describe('逐布料行差异化损耗率', () => {
     wrapper.unmount()
   })
 
-  it('自定义编辑输入框按该布料行损耗率加载最新订单用量（100‰ → 110）', async () => {
+  it('点击数量单元格进入编辑时，按该行损耗率预载最新用量（100‰→110、50‰→53）', async () => {
     const wrapper = mount(SummaryPanel, {
       props: {
         factoryData: factorySummary(),
         supplierData: null,
-        editMode: true,
         lossRate: 100,
         fabricLossRates: [[[100]], [[50]]],
         fabricLossRateMixed: [[[false]], [[false]]],
@@ -206,10 +183,13 @@ describe('逐布料行差异化损耗率', () => {
       },
     })
 
-    const inputs = wrapper.findAll('input[type="number"]')
-    expect((inputs[0]!.element as HTMLInputElement).value).toBe('110')
-    // 50 × 1.05 = 52.5 → 向上取整 53（编辑态与非编辑态同口径）
-    expect((inputs[1]!.element as HTMLInputElement).value).toBe('53')
+    const cells = wrapper.findAll('.sm-qty-cell')
+    expect(cells).toHaveLength(2)
+    await cells[0]!.trigger('click')
+    await cells[1]!.trigger('click')
+
+    // 首行 100 × 1.1 = 110；次行 50 × 1.05 = 52.5 → 向上取整 53（数量一律整数）
+    expect(wrapper.emitted('beginQtyEdit')).toEqual([[0, 0, 0, 110], [1, 0, 0, 53]])
 
     wrapper.unmount()
   })

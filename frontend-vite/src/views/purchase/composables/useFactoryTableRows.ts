@@ -16,14 +16,13 @@
 import { computed, ref, watch } from 'vue'
 import type { EmitFn } from 'vue'
 import { factoryQtyDisplayValue, buildSkuDisplayLines } from './useSummaryModal'
-import { buildPerSkuRows, materialKeyOf, computeQuantityDiff, buildStoredRows } from './perSkuRows'
+import { buildPerSkuRows, materialKeyOf, computeQuantityDiff, buildStoredRows, buildRowDisplayQuantities } from './perSkuRows'
 import type { PerSkuRow, StoredRow } from './perSkuRows'
 import type { FactorySummaryData, FactoryGroup, FabricItem, SkuDisplayLine } from './useSummaryModal'
 
 /** 组件 props（自 `SummaryFactoryTab.vue` 的 `defineProps` 逐字抽出，组件与本模块两处共用）。 */
 export interface FactoryTabProps {
   factoryData: FactorySummaryData
-  editMode: boolean
   lossRate: number
   orderCount: number
   /** 损耗率自动落库的可见反馈状态（缺省视为 idle；由 useSummaryModal 提供） */
@@ -36,15 +35,23 @@ export interface FactoryTabProps {
   fabricLossRateMixed?: boolean[][][]
   /** 每个分组的订单级损耗率（「备品数量」列的唯一口径），形状 [gi]；缺省回退 lossRate */
   groupSpareRates?: number[]
+  /** 数量单行编辑草稿（key = `${gi}-${si}-${fi}`），由 useSummaryModal 持有 */
+  qtyDrafts?: Record<string, string>
+  /** 当前在途保存的数量行 key；非空时所有保存按钮禁用 */
+  qtySavingKey?: string | null
 }
 
 /** 组件 emit（自 `SummaryFactoryTab.vue` 的 `defineEmits` 逐字抽出，组件与本模块两处共用）。
- *  2026-10-31 整页化第二轮：导出/打印/返回按钮移到 SummaryPanel 头部，
- *  close / exportFactory / printFactory 不再由本页签触发，从类型中删除。 */
+ *  2026-11-12 单元格就地编辑：数量改走行级草稿事件，不再有全局编辑态。 */
 export type FactoryTabEmit = {
-  toggleEditMode: [enable: boolean]
-  saveEdits: []
-  updateQty: [gi: number | string, si: number | string, fi: number | string, value: string]
+  /** 点击数量单元格进入编辑（initial = 编辑预载的落库展示值） */
+  beginQtyEdit: [gi: number, si: number, fi: number, initial: number]
+  /** 输入框内容变化（原始字符串，不自动保存） */
+  qtyDraftInput: [gi: number, si: number, fi: number, value: string]
+  /** Esc / 失焦未改动：丢弃草稿并还原 */
+  cancelQtyEdit: [gi: number, si: number, fi: number]
+  /** Enter / 保存按钮：只提交该行 */
+  saveQtyRow: [gi: number, si: number, fi: number]
   /** 统一损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
   lossRateInput: [rate: number]
   /** 单个布料行损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
@@ -66,6 +73,8 @@ type RowItem = {
   gi: number
   row: PerSkuRow
   group: FactoryGroup
+  /** 在 `buildPerSkuRows` 数组中的下标（用于取同源显示数量）；回退模式恒 -1 */
+  rowIdx: number
   /** 回退模式下由订单级物料合成的行；按 SKU 模式下恒为 null */
   legacy: { si: number; fi: number; fabric: FabricItem; supplierName: string } | null
 }
@@ -93,6 +102,23 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     (props.factoryData?.groups || []).map((g, gi) => buildSkuDisplayLines(g, spareRateForGroup(gi))),
   )
 
+  /** 原始 SKU 行模型（每组一份，供 flatRows 与显示数量数组共用，避免重复构建）。 */
+  const perSkuByGroup = computed<PerSkuRow[][]>(() =>
+    (props.factoryData?.groups || []).map((g, gi) => buildPerSkuRows(g, spareRateForGroup(gi))),
+  )
+
+  /**
+   * 每组逐行「数量」显示值（与工厂表 / 供应商页 / 打印**唯一同源**）。
+   * 仅当该组走按 SKU 模式时非空；回退模式由 legacy 行自行取落库量。
+   */
+  const groupDisplayQtys = computed<(number[] | null)[]>(() =>
+    (props.factoryData?.groups || []).map((g, gi) => {
+      const perSku = perSkuByGroup.value[gi] || []
+      if (!perSku.some((row) => !row.noBom)) return null
+      return buildRowDisplayQuantities(g, perSku, (si, fi) => rateForFabric(gi, si, fi))
+    }),
+  )
+
   /**
    * 行模型：优先「按 SKU 展开」（每个 SKU 一块物料）；数据不足时回退「订单级单块」——
    * 两条路径产出**同一形状**的行，模板只有一套（零回归靠回退路径保证）。
@@ -105,9 +131,9 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     const out: RowItem[] = []
 
     groups.forEach((group, gi) => {
-      const perSku = buildPerSkuRows(group, spareRateForGroup(gi))
+      const perSku = perSkuByGroup.value[gi] || []
       if (perSku.length > 0) {
-        perSku.forEach((row) => out.push({ gi, row, group, legacy: null }))
+        perSku.forEach((row, i) => out.push({ gi, row, group, rowIdx: i, legacy: null }))
         return
       }
       // 回退：订单级物料 + 逐 SKU 名堆叠（与改动前逐字一致）
@@ -118,7 +144,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
         ;(supplier.fabrics || []).forEach((fabric, fi) => {
           const lines = groupSkuLines.value[gi] || []
           out.push({
-            gi, group, legacy: { si, fi, fabric, supplierName: supplier.supplier_name },
+            gi, group, rowIdx: -1, legacy: { si, fi, fabric, supplierName: supplier.supplier_name },
             row: {
               skuIdx: 0,
               cellLines: lines,
@@ -163,35 +189,28 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
   /**
    * 每组的差异列表（按 SKU 模式下才有；回退模式恒为空 ⇒ 不渲染对照块）。
    *
-   * **编辑会话冻结**（2026-11-11 生产反馈：自定义编辑数量后横幅立即弹出）：
-   * `updateFactoryQty` 改写 factoryData 会让 diff 即时重算，用户本次编辑产生的
-   * 差异必然弹出。口径（owner 裁决）：只有「打开汇总时后端返回数据里已存在」
-   * 的差异才展示 —— 故进入编辑态的瞬间把当时的 diff 冻结为快照，整个编辑会话
-   * （含保存后未重开弹窗的窗口）都用快照；factoryData 被整体替换（重开弹窗 /
-   * 取消编辑回滚）时解冻，恢复实时重算。编辑态内横幅另由模板 `!editMode` 整体
-   * 不渲染（双保险：退出编辑态后快照仍保证不弹本次编辑的项）。
+   * **会话内冻结**（2026-11-11 owner 口径）：只有「打开汇总时后端返回数据里已存在」
+   * 的差异才展示 —— 用户本次保存产生/变化的差异不得在当前会话弹横幅。
+   * 单行数量保存只原地改 `factoryData` 中的数量、不替换对象引用，故快照保持不变；
+   * 重开汇总 / 409 刷新会整体替换 `factoryData` → 重新快照（新数据里已存在的差异
+   * 照常展示）。`computeQuantityDiff` 的比较口径未做任何改动。
    */
   const liveRowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() => {
     const map: Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]> = {}
     ;(props.factoryData?.groups || []).forEach((group, gi) => {
-      const rows = buildPerSkuRows(group, spareRateForGroup(gi))
+      const rows = perSkuByGroup.value[gi] || []
       map[gi] = rows.length > 0 ? computeQuantityDiff(group, rows) : []
     })
     return map
   })
 
-  /** 编辑会话内冻结的 diff 快照；null = 非编辑会话（用实时值） */
+  /** 打开/重开时冻结的 diff 快照；会话内的单行保存不更新它 */
   const frozenDiff = ref<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]> | null>(null)
 
-  watch(() => props.editMode, (enable, prev) => {
-    // 进入编辑态：冻结打开时的差异（含「已存在差异」）；再次触发不覆盖首份快照
-    if (enable && (!prev || !frozenDiff.value)) frozenDiff.value = liveRowDiffMap.value
-  }, { immediate: true })
-  // factoryData 整体替换 = 编辑会话结束（重开弹窗 / 取消编辑回滚）→ 解冻
-  watch(() => props.factoryData, () => { frozenDiff.value = null })
+  watch(() => props.factoryData, () => { frozenDiff.value = liveRowDiffMap.value }, { immediate: true })
 
   const rowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() =>
-    (props.editMode && frozenDiff.value) ? frozenDiff.value : liveRowDiffMap.value,
+    frozenDiff.value ?? liveRowDiffMap.value,
   )
 
   /**
@@ -250,13 +269,13 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
    *
    * 编辑态与展示态**刻意不同源**，这不是遗漏：
    * - 编辑态预载 = **落库真值**（`suppliers[si].fabrics[fi].quantity`）—— 同一物料在所有
-   *   SKU 块里是采购明细中的**同一行**、同一份状态；保存时 `updateFactoryQty` 把输入值
-   *   反推（unmagnify）后写回这**一行共享明细**。若预载改用该 SKU 的推算值，则
-   *   「输入框显示的是推算值、写入的却是共享真值」⇒ 静默写错：共享布推算 20/40、真值 60，
+   *   SKU 块里是采购明细中的**同一行**、同一份状态；保存时按损耗率反推（unmagnify）
+   *   后写回这**一行共享明细**。若预载改用该 SKU 的推算/分摊值，则
+   *   「输入框显示的是分摊值、写入的却是共享真值」⇒ 静默写错：共享布推算 20/40、真值 60，
    *   编辑框显示 21/41，用户把 A 的 21 改成 25，落库真值变成 24.75（25 反推后），
    *   B 的 40 份物料凭空消失，而行内展示仍来自推算值 ⇒ 用户无法自查。
-   * - 非编辑态展示 = 该 SKU 的**推算值**（BOM 单件用量 × 该 SKU 数量）—— 这是本特性的
-   *   核心价值，必须保留（见 `displayRowQty`，它仍用 `rowBaseQty`）。
+   * - 非编辑态展示 = `buildRowDisplayQuantities` 的权威值（手工调整时以落库为准并按
+   *   SKU 分摊；否则逐 SKU 推算）。
    *
    * 副作用（符合 spec §4.3）：同一物料跨 SKU 的编辑框因此显示**同一份真值**，改一处
    * 所有块同步 —— 与损耗率联动的体验同构，写入语义 = 「等价于编辑该订单级行」。
@@ -268,16 +287,24 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     return parseFloat(String(fabric.quantity)) || 0
   }
 
-  /** 编辑态数量输入框值（落库真值加放，保存时由 updateFactoryQty 反推真值）。 */
+  /** 编辑态数量输入框值（落库真值加放；保存时反推真值）。 */
   function editRowQty(item: RowItem): number {
     const c = rowCoord(item)
     return c ? factoryQtyDisplayValue(editBaseQty(item), rateForFabric(item.gi, c.si, c.fi), true) : editBaseQty(item)
   }
 
-  /** 非编辑态数量展示值（**该 SKU 的推算值**加放后向上取整）。 */
+  /**
+   * 非编辑态数量展示值（**唯一口径**）：按 SKU 模式取 `groupDisplayQtys` 同下标值
+   * （手工调整 → 落库加放并按 SKU 分摊；否则 BOM 推算）；回退模式取落库量加放。
+   */
   function displayRowQty(item: RowItem): number {
-    const c = rowCoord(item)
-    return c ? factoryQtyDisplayValue(rowBaseQty(item), rateForFabric(item.gi, c.si, c.fi), false) : rowBaseQty(item)
+    if (item.legacy) {
+      const c = rowCoord(item)
+      return c
+        ? factoryQtyDisplayValue(rowBaseQty(item), rateForFabric(item.gi, c.si, c.fi), false)
+        : rowBaseQty(item)
+    }
+    return groupDisplayQtys.value[item.gi]?.[item.rowIdx] ?? item.row.baseQuantity
   }
 
   /** 每个物料键在多少个行里出现（>1 ⇒ 跨 SKU 共用同一行明细，编辑会联动）。 */
@@ -329,11 +356,67 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     emit('fabricLossRateInput', item.gi, c.si, c.fi, Number.isNaN(val) || val < 0 ? 0 : Math.min(val, 1000))
   }
 
-  /** 数量提交：按坐标提交 —— 同一物料的多行共享同一坐标，故联动天然成立。 */
-  function onRowQtyChange(item: RowItem, e: Event): void {
+  /** 该行草稿的稳定键（落库坐标）；无坐标 → null。 */
+  function qtyDraftKey(item: RowItem): string | null {
+    const c = rowCoord(item)
+    return c ? `${item.gi}-${c.si}-${c.fi}` : null
+  }
+
+  /** 该行数量是否可编辑：有落库坐标、非多角色共用锁定、且有可写明细。 */
+  function canEditQty(item: RowItem): boolean {
+    return !!rowCoord(item) && !item.row.readonlyReason && item.row.itemIds.length > 0
+  }
+
+  function qtyDraftOf(item: RowItem): string | undefined {
+    const key = qtyDraftKey(item)
+    return key ? props.qtyDrafts?.[key] : undefined
+  }
+
+  /**
+   * 草稿是否真的改过：与**进入编辑时的预载值**比较（不是与分摊后的行值比较）。
+   * 共享物料预载的是落库总量，其行显示值只是分摊份额，二者本来不同。
+   */
+  function isQtyDraftDirty(item: RowItem): boolean {
+    const draft = qtyDraftOf(item)
+    if (draft === undefined) return false
+    const value = parseFloat(draft)
+    return Number.isFinite(value) && Math.abs(value - editRowQty(item)) > 1e-9
+  }
+
+  function isQtySaving(item: RowItem): boolean {
+    return props.qtySavingKey != null && props.qtySavingKey === qtyDraftKey(item)
+  }
+
+  function onQtyCellClick(item: RowItem): void {
+    if (!canEditQty(item)) return
+    const c = rowCoord(item)!
+    emit('beginQtyEdit', item.gi, c.si, c.fi, editRowQty(item))
+  }
+
+  function onQtyDraftInput(item: RowItem, e: Event): void {
     const c = rowCoord(item)
     if (!c) return
-    emit('updateQty', item.gi, c.si, c.fi, (e.target as HTMLInputElement).value)
+    emit('qtyDraftInput', item.gi, c.si, c.fi, (e.target as HTMLInputElement).value)
+  }
+
+  function onQtySave(item: RowItem): void {
+    // 任一数量保存在途时统一忽略（与保存按钮 disabled 同一口径）
+    if (props.qtySavingKey != null) return
+    const c = rowCoord(item)
+    if (!c) return
+    // 值未改动也提交：composable 检测到与落库相同会直接收起草稿（Enter 即退出编辑）
+    emit('saveQtyRow', item.gi, c.si, c.fi)
+  }
+
+  function onQtyEsc(item: RowItem): void {
+    const c = rowCoord(item)
+    if (!c) return
+    emit('cancelQtyEdit', item.gi, c.si, c.fi)
+  }
+
+  /** 失焦不保存：值未改动则自动收起；有改动则保留草稿直到确认/取消。 */
+  function onQtyBlur(item: RowItem): void {
+    if (!isQtyDraftDirty(item)) onQtyEsc(item)
   }
 
   return {
@@ -347,9 +430,17 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     rowRate,
     editRowQty,
     displayRowQty,
+    canEditQty,
+    qtyDraftOf,
+    isQtyDraftDirty,
+    isQtySaving,
+    onQtyCellClick,
+    onQtyDraftInput,
+    onQtySave,
+    onQtyEsc,
+    onQtyBlur,
     sharedMaterialTitle,
     isRowRateMixed,
     onRowRateInput,
-    onRowQtyChange,
   }
 }
