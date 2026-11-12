@@ -892,7 +892,9 @@ export function useSummaryModal() {
     const key = qtyKey(gi, si, fi)
     const raw = qtyDrafts.value[key]
     if (raw === undefined || qtySavingKey.value !== null) return
-    const value = parseFloat(raw)
+    // 输入框为 text（去步进箭头）→ 用 Number 严格校验，避免 parseFloat('12abc') 静默截断
+    const trimmed = raw.trim()
+    const value = trimmed === '' ? NaN : Number(trimmed)
     if (!Number.isFinite(value) || value < 0) {
       toast.error('请输入有效的数量')
       return
