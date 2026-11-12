@@ -59,7 +59,7 @@
             <th class="w-[180px]">布料名称</th>
             <th>规格型号</th>
             <th>损耗率</th>
-            <th>数量</th>
+            <th class="sm-qty-col">数量</th>
             <th>单位</th>
           </tr>
         </thead>
@@ -146,13 +146,14 @@
                   <span v-else class="text-text-muted" title="该物料不在采购明细中（BOM 生成后新增），无法在此修改">—</span>
                 </td>
                 <!-- 数量：点击数字就地编辑（只改该行对应采购明细，保存为行级操作）。
-                     多角色共用行锁编辑（明细是合并总量，此处只显示该角色的分配量）。 -->
-                <td>
+                     多角色共用行锁编辑（明细是合并总量，此处只显示该角色的分配量）。
+                     列宽固定，输入框/保存按钮不撑开列宽与行高。 -->
+                <td class="sm-qty-col">
                   <template v-if="canEditQty(item)">
                     <div v-if="qtyDraftOf(item) !== undefined" class="sm-qty-editor">
                       <input
-                        type="number" class="sm-qty-input w-20 text-right py-1 px-1.5 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-                        :value="qtyDraftOf(item)" min="0"
+                        type="text" inputmode="decimal" autocomplete="off" class="sm-qty-input text-right text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                        :value="qtyDraftOf(item)"
                         :title="sharedMaterialTitle(item)"
                         :disabled="isQtySaving(item)"
                         @input="onQtyDraftInput(item, $event)"
@@ -302,22 +303,39 @@ const {
   color: var(--color-text-muted);
 }
 
-/* 数量单元格就地编辑：输入框 + 行内保存按钮，不改变列宽节奏 */
+/* 数量列：固定列宽，编辑态输入框 + 保存按钮不撑开列宽/行高 */
+.sm-qty-col {
+  width: 150px;
+  min-width: 150px;
+  white-space: nowrap;
+}
 .sm-qty-editor {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-wrap: nowrap;
+}
+.sm-qty-input {
+  width: 80px;
+  height: 20px;
+  padding: 0 5px;
+  line-height: 18px;
+  font-family: inherit;
+  font-size: 14px;
+  box-sizing: border-box;
 }
 .sm-qty-save {
-  padding: 2px 6px;
+  height: 20px;
+  padding: 0 5px;
   font-size: 12px;
-  line-height: 16px;
+  line-height: 18px;
   color: var(--color-primary-600);
   border: 1px solid var(--color-primary-500);
   border-radius: 6px;
   background: white;
   cursor: pointer;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 .sm-qty-save:hover {
   background: var(--color-primary-50);

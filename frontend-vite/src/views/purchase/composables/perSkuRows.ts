@@ -470,6 +470,19 @@ function roundQty2(v: number): number {
 }
 
 /**
+ * 数量输入解析（唯一口径）：trim 后只接受十进制数字（含小数），空串/字母/负数/十六进制
+ * 一律返回 `null`。行模型用它判「草稿是否改动」，保存路径用它做落库前校验 ——
+ * 两处必须共用，否则会出现「判净被静默丢弃」或「parseFloat 截断 12abc→12」的口径分裂。
+ */
+export function parseQtyInput(raw: string): number | null {
+  const text = raw.trim()
+  if (!/^(\d+\.?\d*|\.\d+)$/.test(text)) return null
+  const value = Number(text)
+  if (!Number.isFinite(value) || value < 0) return null
+  return value
+}
+
+/**
  * 「手工调整」的唯一判定：某物料键的 BOM 推算合计与落库真值是否不一致。
  *
  * `computeQuantityDiff`（差异横幅）与 `buildRowDisplayQuantities`（数量展示）

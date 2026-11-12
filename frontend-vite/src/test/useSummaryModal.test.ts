@@ -473,6 +473,19 @@ describe('saveQtyRow 单行保存语义', () => {
     expect(toast.error).toHaveBeenCalledWith('请输入有效的数量')
     expect(m.qtyDrafts).toEqual({ '0-0-0': '-5' })
   })
+
+  it('文本输入夹杂非数字（12abc）：不静默截断为 12，保留草稿', async () => {
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    m.beginQtyEdit(0, 0, 0, 10)
+    m.setQtyDraft(0, 0, 0, '12abc')
+
+    await m.saveQtyRow(0, 0, 0)
+
+    expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('请输入有效的数量')
+    expect(m.qtyDrafts).toEqual({ '0-0-0': '12abc' })
+  })
 })
 
 /**
