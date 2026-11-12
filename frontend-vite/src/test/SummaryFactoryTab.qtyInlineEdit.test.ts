@@ -265,6 +265,18 @@ describe('数量单元格就地编辑（验收 a/b/f/g）', () => {
     wrapper.unmount()
   })
 
+  it('数量与损耗率输入共用尺寸类；数量文本居中（不再右对齐）', async () => {
+    const wrapper = await setup()
+    const input = await beginEdit(wrapper, 'A专有布')
+    expect(input.classes()).toContain('sm-inline-input')
+    expect(input.classes()).toContain('text-center')
+    expect(input.classes()).not.toContain('text-right')
+
+    const rateInput = rowOf(wrapper, 'A专有布').find('input[type="number"]')
+    expect(rateInput.classes()).toContain('sm-inline-input')
+    wrapper.unmount()
+  })
+
   it('b) Esc 取消后恢复原值，且不发起保存', async () => {
     const wrapper = await setup()
     const input = await beginEdit(wrapper, 'A专有布')

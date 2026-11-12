@@ -136,7 +136,7 @@
                 <td>
                   <template v-if="rowCoord(item)">
                     <input
-                      type="number" class="w-14 text-right py-1 px-1 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                      type="number" class="sm-inline-input text-right border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                       :value="rowRate(item)" min="0" max="1000" step="any"
                       :title="sharedMaterialTitle(item)"
                       @input="onRowRateInput(item, $event)"
@@ -152,7 +152,7 @@
                   <template v-if="canEditQty(item)">
                     <div v-if="qtyDraftOf(item) !== undefined" class="sm-qty-editor">
                       <input
-                        type="text" inputmode="decimal" autocomplete="off" class="sm-qty-input text-right text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
+                        type="text" inputmode="decimal" autocomplete="off" class="sm-qty-input sm-inline-input text-center border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                         :value="qtyDraftOf(item)"
                         :title="sharedMaterialTitle(item)"
                         :disabled="isQtySaving(item)"
@@ -311,24 +311,23 @@ const {
 }
 .sm-qty-editor {
   display: inline-flex;
-  align-items: center;
+  align-items: stretch;
   gap: 4px;
   flex-wrap: nowrap;
 }
-.sm-qty-input {
-  width: 80px;
-  height: 20px;
-  padding: 0 5px;
-  line-height: 18px;
+/* 损耗率与数量输入共用同一尺寸（用户要求两者一致；高度由行内率输入决定，不额外撑高） */
+.sm-inline-input {
+  width: 56px;
+  padding: 4px;
   font-family: inherit;
   font-size: 14px;
+  line-height: normal;
   box-sizing: border-box;
 }
 .sm-qty-save {
-  height: 20px;
-  padding: 0 5px;
+  padding: 0 6px;
   font-size: 12px;
-  line-height: 18px;
+  line-height: normal;
   color: var(--color-primary-600);
   border: 1px solid var(--color-primary-500);
   border-radius: 6px;
