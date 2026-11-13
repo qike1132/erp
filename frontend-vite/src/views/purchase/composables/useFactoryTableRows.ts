@@ -341,6 +341,17 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
       : ''
   }
 
+  /**
+   * 数量编辑入口的固定说明（2026-11-13 业务口径）：自定义值只落当前采购单，
+   * 不回写 BOM，也不影响后续新单。
+   */
+  const QTY_SCOPE_HINT = '自定义数量仅对当前采购订单生效，不写入 BOM；新订单仍按 BOM 用量计算'
+
+  function qtyEditTitle(item: RowItem): string {
+    const shared = sharedMaterialTitle(item)
+    return shared ? `${shared}\n${QTY_SCOPE_HINT}` : QTY_SCOPE_HINT
+  }
+
   /** 该行行率是否「各明细不一致」（落库快照 loss_rate_mixed）；只读/占位行恒 false。 */
   function isRowRateMixed(item: RowItem): boolean {
     const c = rowCoord(item)
@@ -447,6 +458,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     onQtyEsc,
     onQtyBlur,
     sharedMaterialTitle,
+    qtyEditTitle,
     isRowRateMixed,
     onRowRateInput,
   }

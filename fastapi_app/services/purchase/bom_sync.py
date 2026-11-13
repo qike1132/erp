@@ -3,6 +3,8 @@
 对 pending 采购单按当前 BOM（与生成路径同口径）整单重建明细：
 - 版本保护（``items_version`` 乐观锁，冲突抛 409）；
 - 旧行的损耗率/单价/备注按匹配键继承（精确键消费式 + 回退键复用）；
+  自定义数量仅按精确键继承，且要求该行 BOM 用量（unit_usage）未变
+  （2026-11-13 口径：用量变了说明 BOM 需求变了，BOM 优先重算）；
 - 规范序列无变化时不写库、不递增版本；
 - 写路径落 ModificationLog(field_name='bom_sync')，事务由调用方控制。
 - 产品级发现：来源订单链 + po_sku 快照名/条码解析受影响 pending 单；
@@ -48,7 +50,8 @@ class SyncResult:
     removed: int = 0
     removed_rows: list = field(default_factory=list)
     skipped_reason: str | None = None
-    # 目标明细（``build_expected_items`` 输出，含继承后的 loss_rate/unit_price/remark）：
+    # 目标明细（``build_expected_items`` 输出，含继承后的 loss_rate/unit_price/remark
+    # 与用量未变行的自定义数量）：
     # 供离线校正脚本（scripts/sync_pending_po_items.py）逐行输出「旧→新」报告与
     # 判定 suspected_manual（复用同一份目标键，不在脚本里重抄解析流水线）。
     # 仅在 changed=True 时填充；未变更/跳过时为空。
@@ -106,19 +109,35 @@ def _canonical(item: dict) -> tuple:
     )
 
 
+def _same_usage(old, new) -> bool:
+    """该行的 BOM 用量是否未变（按落库列精度 Numeric(10,4)）。"""
+    if old is None or new is None:
+        return False
+    return round(float(old), 4) == round(float(new), 4)
+
+
 def _inherit_fields(rows: list[PurchaseOrderItem], target: list[dict]) -> None:
-    """把旧行的 loss_rate/unit_price/remark 继承到目标行（原地修改）。
+    """把旧行的 loss_rate/unit_price/remark 与「自定义数量」继承到目标行（原地修改）。
 
     先按精确键消费式领取；未领到的行用「回退键可复用」的率/价
     （同一回退值应用到所有剩余行，不消费）。
+
+    数量继承（2026-11-13 口径）：
+    - 只按**精确键**（含 role_id/part_name）继承，绝不走回退键——业务范围是
+      「该 SKU + 该角色 + 该部位」，跨部位复用数量会把身体的自定义值糊到脚底；
+    - 仅当该行自己的 ``unit_usage``（BOM 用量快照）与目标行一致时继承。
+      用量变了说明 BOM 需求变了，BOM 优先重算（2026-11-11 实时同步裁决，
+      PO-2611 事故的前提）；用量未变而数量不同，只能是用户手工调整。
     """
     pool: dict[tuple, deque] = defaultdict(deque)
     for row in rows:
-        pool[_existing_key(row)].append((row.loss_rate, row.unit_price, row.remark))
+        pool[_existing_key(row)].append(
+            (row.loss_rate, row.unit_price, row.remark, row.quantity, row.unit_usage)
+        )
 
     fallback_pool: dict[tuple, tuple] = {}
     for key, entries in pool.items():
-        for loss_rate, unit_price, _remark in entries:
+        for loss_rate, unit_price, _remark, _quantity, _unit_usage in entries:
             if loss_rate is not None or unit_price is not None:
                 fb = _fallback_key(key)
                 if fb not in fallback_pool:
@@ -128,10 +147,12 @@ def _inherit_fields(rows: list[PurchaseOrderItem], target: list[dict]) -> None:
     for item in target:
         key = _target_key(item)
         if pool.get(key):
-            loss_rate, unit_price, remark = pool[key].popleft()
+            loss_rate, unit_price, remark, quantity, unit_usage = pool[key].popleft()
             item['loss_rate'] = loss_rate
             item['unit_price'] = unit_price
             item['remark'] = remark
+            if _same_usage(unit_usage, item.get('unit_usage')):
+                item['quantity'] = quantity
             assigned.add(id(item))
 
     reused: dict[tuple, tuple] = {}

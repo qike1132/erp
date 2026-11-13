@@ -59,7 +59,10 @@
             <th class="w-[180px]">布料名称</th>
             <th>规格型号</th>
             <th>损耗率</th>
-            <th class="sm-qty-col">数量</th>
+            <th
+              class="sm-qty-col"
+              title="自定义数量仅对当前采购订单生效，不写入 BOM；新订单仍按 BOM 用量计算"
+            >数量</th>
             <th>单位</th>
           </tr>
         </thead>
@@ -154,7 +157,7 @@
                       <input
                         type="text" inputmode="decimal" autocomplete="off" class="sm-qty-input sm-inline-input text-center border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                         :value="qtyDraftOf(item)"
-                        :title="sharedMaterialTitle(item)"
+                        :title="qtyEditTitle(item)"
                         :disabled="isQtySaving(item)"
                         @input="onQtyDraftInput(item, $event)"
                         @keydown.enter.prevent="onQtySave(item)"
@@ -171,7 +174,7 @@
                     </div>
                     <span
                       v-else class="sm-qty-cell" role="button" tabindex="0"
-                      :title="sharedMaterialTitle(item)"
+                      :title="qtyEditTitle(item)"
                       @click="onQtyCellClick(item)"
                     >{{ displayRowQty(item) }}</span>
                   </template>
@@ -246,7 +249,7 @@ function onLossRateInput(e: Event) {
 // 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
 const {
   flatRows, rowDiffMap, storedRowsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
-  displayRowQty, sharedMaterialTitle, isRowRateMixed, onRowRateInput,
+  displayRowQty, sharedMaterialTitle, qtyEditTitle, isRowRateMixed, onRowRateInput,
   canEditQty, qtyDraftOf, isQtyDraftDirty, isQtySaving, onQtyCellClick, onQtyDraftInput,
   onQtySave, onQtyEsc, onQtyBlur,
 } = useFactoryTableRows(props, emit)

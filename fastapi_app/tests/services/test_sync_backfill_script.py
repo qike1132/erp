@@ -96,8 +96,12 @@ async def _seed_base(db):
                 fabric_name='绿色超柔', fabric_spec='234', fabric_unit='码',
                 fabric_part='身体', fabric_supplier='美利达',
                 accessory_name='木棒按摩锤', old_rows=[
+                    # 旧快照的数量来自旧 BOM 用量（0.005 码/件）：unit_usage 与当前
+                    # BOM（1.0）不同 → 数量必须被 BOM 校正；若写成相同用量，该行在
+                    # 2026-11-13 口径下就是「用户手工调整」，会被保留（见
+                    # test_bom_sync_custom_quantity.py）。
                     _row('绿色超柔', '234', '码', qty=50, part='身体',
-                         supplier='美利达', category='fabric'),
+                         supplier='美利达', category='fabric', unit_usage=0.005),
                     _row('手工辅料', '', '个', qty=5, part=None,
                          supplier='某厂', category='accessory'),
                 ])
@@ -105,7 +109,7 @@ async def _seed_base(db):
                 fabric_name='红色绒', fabric_spec='556', fabric_unit='码',
                 fabric_supplier='供应商乙', old_rows=[
                     _row('红色绒', '556', '码', qty=10, supplier='供应商乙',
-                         category='fabric'),
+                         category='fabric', unit_usage=0.001),
                 ])
 
 
@@ -318,7 +322,10 @@ async def test_matched_unchanged_rows_not_reported_as_changed(db):
                 fabric_name='布A', fabric_spec='1', fabric_unit='码',
                 fabric_supplier='美利达', old_rows=[
                     _row('布A', '1', '码', qty=10000, supplier='美利达'),
-                    _row('布B', '2', '码', qty=1, supplier='美利达'),
+                    # 旧用量 0.0001 ≠ 当前 BOM 1.0：数量是旧 BOM 快照，须校正
+                    # （同用量而数量不同 = 手工调整，按新口径保留）。
+                    _row('布B', '2', '码', qty=1, supplier='美利达',
+                         unit_usage=0.0001),
                 ])
     db.add(ProductFabric(
         id=307 * 100 + 3, product_id=307, role_id=None, fabric_name='布B',
