@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { headerLabels } from './headerLabels'
 
 vi.mock('@/api', () => ({
   purchaseApi: {
@@ -131,7 +132,7 @@ function mountModal(group: FactoryGroup) {
 }
 
 function headerTexts(wrapper: ReturnType<typeof mountModal>): string[] {
-  return wrapper.findAll('thead th').map((th) => th.text())
+  return headerLabels(wrapper.findAll('thead th'))
 }
 
 /**

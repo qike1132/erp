@@ -24,6 +24,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { headerLabels } from './headerLabels'
 import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import {
   FACTORY_TABLE_HEAD,
@@ -167,7 +168,7 @@ function rowWidthsOf(trs: HTMLTableRowElement[]): number[] {
 describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
   it('R1 屏幕表头 12 列：角色名称在「产品名称」与「订单数量」之间', () => {
     const wrapper = mountModal(roleGroup())
-    const headers = wrapper.findAll('thead th').map((th) => th.text())
+    const headers = headerLabels(wrapper.findAll('thead th'))
     expect(headers).toEqual([
       '客户', '产品名称', '角色名称', '订单数量', '备品数量', '产品部位', '供应商',
       '布料名称', '规格型号', '损耗率', '数量', '单位',
@@ -318,7 +319,7 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
       ...m, role_display: '角色A',
     }))
     const wrapper = mountModal(single)
-    const headers = wrapper.findAll('thead th').map((th) => th.text())
+    const headers = headerLabels(wrapper.findAll('thead th'))
     expect(headers).toHaveLength(11)
     expect(headers).not.toContain('角色名称')
     // 屏幕每行有效列宽 11（隐藏角色列后仍全对齐）
@@ -338,7 +339,7 @@ describe('工厂内部订单 · 角色分类汇总与表格对齐', () => {
 
     // 多角色夹具（roleGroup）：列显示、12 列（回归：别把多角色也隐藏了）
     const multi = mountModal(roleGroup())
-    expect(multi.findAll('thead th').map((th) => th.text())).toContain('角色名称')
+    expect(headerLabels(multi.findAll('thead th'))).toContain('角色名称')
     expect(multi.findAll('thead th')).toHaveLength(12)
     multi.unmount()
   })

@@ -1,0 +1,84 @@
+// ============================================================================
+// 汇总下单 · 工厂表「损耗率」表头：列名 + 统一损耗率输入同格
+//
+// 2026-11-13 用户要求把顶部「统一损耗率（千分之几）」的输入框并入「损耗率」表头
+// 单元格，与表头融为一体。本文件只承载该格的排版与外观；表格边框/内边距/居中
+// 仍由 summary-tables.scss 提供（本文件不复制那套规则）。
+//
+// 一致性口径（与表头及表体输入框逐条对齐）：
+// - 字体/字号继承表头（14px 粗体，与 th 的 bold 同口径），颜色取正文色；
+// - 边框取表体输入框同一 token（--color-border）、同一圆角（4px）、白底：
+//   白底把输入区从灰色表头底上「托」出来，读作表头自带的一个字段；
+// - 数字右对齐、宽高取表体输入框同量级，输入框落在表体输入框正上方（同轴）；
+// - 格内不换行（字块 nowrap），窄屏随表格横向滚动，不溢出、不压字。
+//
+// 引入方式（SummaryFactoryTab.vue）：
+//   @use '@/styles/summary-factory-rate-head.scss' as *;
+// ============================================================================
+
+/* 表头格内两行：列名在上、字段行在下。
+   两行是刻意的取舍：单行排布会把该列撑宽 ~90px，把其它列的 4 字表头挤成竖排
+   （1440/1280 实测表头行高 35→56/101）；两行只把本行加高 ~20px，列宽与表体一致，
+   且输入框正好落在表体输入框正上方（同轴对齐）。 */
+.sm-rate-head {
+  white-space: nowrap;
+}
+.sm-rate-head__label {
+  display: block;
+  line-height: 1.3;
+}
+/* 「统一 + 输入框 + ‰」自成一组，水平居中对齐表体输入框 */
+.sm-rate-head__field {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+}
+/* 「统一」与「‰」是量纲说明，小字弱化，不抢表头主文案 */
+.sm-rate-head__cap,
+.sm-rate-head__unit {
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 1;
+  white-space: nowrap;
+}
+.sm-rate-head__cap {
+  color: var(--color-text-secondary);
+}
+.sm-rate-head__unit {
+  margin-left: 1px;
+  color: var(--color-text-muted);
+}
+.sm-rate-head__input {
+  width: 48px;
+  padding: 2px 5px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: normal;
+  color: var(--color-text);
+  text-align: right;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-sizing: border-box;
+  /* 表头常驻显示，原生步进箭头在 48px 窄格内只制造噪音（数字被挤左）；
+     点击聚焦即可直接键入，与表体行输入框的「输入」路径一致，仅去掉箭头。 */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.sm-rate-head__input::-webkit-outer-spin-button,
+.sm-rate-head__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* 聚焦态与表体输入框同口径：主色描边 + 2px 外描边 */
+.sm-rate-head__input:focus {
+  outline: none;
+  border-color: var(--color-primary-500);
+}
+.sm-rate-head__input:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+}

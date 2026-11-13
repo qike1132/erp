@@ -75,6 +75,7 @@ vi.mock('@/utils/print', async (importOriginal) => {
 })
 
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+import { headerLabels } from './headerLabels'
 import HubeiView from '@/views/hubei/HubeiView.vue'
 import BeileOrderRow from '@/views/beile-order/components/BeileOrderRow.vue'
 import { provideBeileOrders, NOT_ORDERED_TIP, NOT_ORDERED_TOAST } from '@/views/beile-order/composables/useBeileOrders'
@@ -175,7 +176,7 @@ describe('F. SummaryPanel 订单级 <td> 压缩后的渲染等价性', () => {
 
   it('表头 11 列（无角色名 → 隐藏角色列）：第 3 列为「订单数量」、第 4 列为「备品数量」、第 5 列为「产品部位」、第 6 列为「供应商」、第 9 列为「损耗率」', () => {
     const wrapper = mountModal()
-    const headers = wrapper.findAll('thead th').map((th) => th.text())
+    const headers = headerLabels(wrapper.findAll('thead th'))
     expect(headers).toHaveLength(11)
     expect(headers[2]).toBe('订单数量')
     expect(headers[3]).toBe('备品数量')

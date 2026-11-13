@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { headerLabels } from './headerLabels'
 
 // 隔离外部依赖：useSummaryModal.ts 顶层 import purchaseApi from '@/api'，
 // 测试不发起真实请求，用最小 stub 替换即可。
@@ -145,7 +146,7 @@ describe('SummaryPanel 数量口径（数据行）', () => {
 
   it('工厂表格表头含 11 列（无角色名 → 隐藏角色列）：第 3 列为「订单数量」、第 4 列为「备品数量」、第 5 列为「产品部位」、第 6 列为「供应商」、第 9 列为「损耗率」', () => {
     const wrapper = mountModal(0)
-    const headers = wrapper.findAll('thead th').map((th) => th.text())
+    const headers = headerLabels(wrapper.findAll('thead th'))
     expect(headers).toHaveLength(11)
     expect(headers[2]).toBe('订单数量')
     expect(headers[3]).toBe('备品数量')

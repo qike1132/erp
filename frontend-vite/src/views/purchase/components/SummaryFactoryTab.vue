@@ -4,40 +4,25 @@
        底部操作条已删（导出/打印/返回都在头部）。 -->
   <div class="smf-tab">
     <!-- 概要行（2026-10-31 用户嫌空白多）：删渐变底色大条，压成单行紧凑文字+操作。
-         「工厂内部采购订单汇总」标题删掉——页签已说明所在；只保留订单计数。 -->
+         「工厂内部采购订单汇总」标题删掉——页签已说明所在；只保留订单计数。
+         2026-11-13 用户要求：「统一损耗率」输入框并入表格「损耗率」表头，
+         本行不再承载输入控件，只留订单计数与（绝对定位的）落库状态提示。 -->
     <div class="smf-toolbar flex-shrink-0">
       <div class="text-[14px] text-text-secondary whitespace-nowrap">
         已选择 <strong class="text-primary-400">{{ factoryData.order_count || orderCount }}</strong> 个订单
       </div>
-      <div class="flex gap-2 items-center ml-auto">
-        <div class="relative flex flex-col items-end gap-0.5">
-          <div class="flex items-center gap-2">
-            <label class="text-xs text-text-secondary whitespace-nowrap">统一损耗率（千分之几）</label>
-            <input
-              type="number"
-              class="w-16 text-right py-1 px-1.5 text-[14px] border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
-              :value="lossRate"
-              min="0"
-              max="1000"
-              step="any"
-              @input="onLossRateInput"
-            />
-          </div>
-          <!--
-          提示位必须「不参与布局」：既不能内联在输入框后（文案出现/消失会改变行宽，
-          把整行左右推挤 → 输入一次数字抖动一次），也不能在列内占一行高度
-          （列变两行后会比左侧按钮高，items-center 居中会让输入框与按钮上下错位）。
-          故绝对定位在输入框下方，只做覆盖显示：行宽、行高、按钮与输入框的垂直居中都不变。
-        -->
-          <span
-            class="sm-loss-hint absolute right-0 top-full mt-0.5 text-[12px] leading-4 whitespace-nowrap"
-          >
-            <span v-if="lossRateSaveState === 'saving'" class="text-text-muted">保存中…</span>
-            <span v-else-if="lossRateSaveState === 'error'" class="text-danger-500">保存失败</span>
-            <span v-else-if="lossRateMixed" class="text-text-muted">各订单损耗率不一致</span>
-          </span>
-        </div>
-      </div>
+      <!--
+      提示位必须「不参与布局」：文案出现/消失若参与布局，会把左侧计数左右推挤。
+      故绝对定位在概览行右侧、垂直居中，只做覆盖显示：行宽、行高都不变。
+      （原先它挂在输入框下方；输入框迁到表头后，锚点改为概览行本身。）
+    -->
+      <span
+        class="sm-loss-hint absolute right-0 top-1/2 text-[12px] leading-4 whitespace-nowrap"
+      >
+        <span v-if="lossRateSaveState === 'saving'" class="text-text-muted">保存中…</span>
+        <span v-else-if="lossRateSaveState === 'error'" class="text-danger-500">保存失败</span>
+        <span v-else-if="lossRateMixed" class="text-text-muted">各订单损耗率不一致</span>
+      </span>
     </div>
 
     <div class="smf-scroll">
@@ -58,7 +43,29 @@
             <th>供应商</th>
             <th class="w-[180px]">布料名称</th>
             <th>规格型号</th>
-            <th>损耗率</th>
+            <!-- 损耗率表头 = 列名 + 「统一损耗率」输入**合成一格**（2026-11-13 用户要求「融为一体」）。
+                 两种率语义不同、数量级差 1-2 个（见文件头注释），故保留「统一」小字 +
+                 title 全量说明：本格是订单级率（驱动备品数量与供应商页放大），
+                 下方每行的「损耗率」才是该行材料率（只驱动该行数量）。 -->
+            <th class="sm-rate-head" :title="UNIFIED_RATE_TITLE">
+              <span class="sm-rate-head__label">损耗率</span>
+              <span class="sm-rate-head__field">
+                <span class="sm-rate-head__cap">统一</span>
+                <input
+                  type="number"
+                  class="sm-rate-head__input"
+                  :value="lossRate"
+                  min="0"
+                  max="1000"
+                  step="any"
+                  inputmode="decimal"
+                  aria-label="工厂内部订单统一损耗率（千分之几）"
+                  @input="onLossRateInput"
+                  @wheel="onRateWheel"
+                />
+                <span class="sm-rate-head__unit" aria-hidden="true">‰</span>
+              </span>
+            </th>
             <th
               class="sm-qty-col"
               title="自定义数量仅对当前采购订单生效，不写入 BOM；新订单仍按 BOM 用量计算"
@@ -246,6 +253,26 @@ function onLossRateInput(e: Event) {
   emit('lossRateInput', Math.min(val, 1000))
 }
 
+/**
+ * 表头输入获焦后，浏览器会把滚轮动作转成 number 的步进 → 表格滚动时静默改率并自动落库。
+ * 该格常驻在滚动区**顶部**，命中概率远高于表体行，故：滚动即失焦并吃掉这一次滚轮
+ * （仅影响「已聚焦」这一种状态，未聚焦时滚轮照常滚动表格）。
+ */
+function onRateWheel(e: WheelEvent) {
+  const el = e.currentTarget as HTMLInputElement
+  if (document.activeElement !== el) return
+  el.blur()
+  e.preventDefault()
+}
+
+/**
+ * 表头「统一损耗率」格的常驻说明（title）：用户悬停整格可见，含单位与
+ * 「不影响下方行率」的关键口径——两率混用会导致备品虚高（2026-09-30 生产实证）。
+ */
+const UNIFIED_RATE_TITLE =
+  '统一损耗率（千分之几）：按订单批量作用，决定「备品数量」与供应商页放大；'
+  + '表格内每行的「损耗率」是该行材料损耗率，只影响该行数量，两者不可混用'
+
 // 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
 const {
   flatRows, rowDiffMap, storedRowsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
@@ -257,6 +284,7 @@ const {
 
 <style scoped lang="scss">
 @use '@/styles/summary-tables.scss' as *;
+@use '@/styles/summary-factory-rate-head.scss' as *;
 
 /* 整页化后的页签骨架（与 SummarySupplierTab 对称）：
    自身 flex 列撑满父级 .sm-body，表格容器是唯一滚动区。 */
@@ -273,7 +301,19 @@ const {
   align-items: center;
   gap: 12px;
   margin-bottom: 6px;
+  /* 落库状态提示绝对定位在本行右侧，故本行是定位锚点 */
+  position: relative;
 }
+/* 提示位垂直居中锚定（水平/纵向定位由模板的 absolute right-0 top-1/2 给） */
+.sm-loss-hint {
+  transform: translateY(-50%);
+}
+
+/*
+  损耗率表头「列名 + 统一损耗率输入同格」的排版与外观见
+  `@/styles/summary-factory-rate-head.scss`（本 SFC 已接近 400 行门禁，故外置）。
+*/
+
 .smf-scroll {
   flex: 1;
   min-height: 0;
