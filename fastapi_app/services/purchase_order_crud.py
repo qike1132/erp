@@ -129,6 +129,7 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
         unit_price = Decimal(str(item_data.get('unit_price', 0)))
         quantity = Decimal(str(item_data.get('quantity', 0)))
         amount = unit_price * quantity
+        unit_usage = item_data.get('unit_usage')
 
         poi = PurchaseOrderItem(
             order_id=order.id,
@@ -139,6 +140,10 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
             unit_price=unit_price,
             quantity=quantity,
             total_price=amount,
+            # BOM 单件用量：生成路径（build_expected_items）已产出该值，必须落库——
+            # 否则行恒为默认 0，bom_sync 的「用量未变才继承自定义数量」判定失效
+            # （0 ≠ 真实用量 → 手工数量会在下次 BOM 保存时被覆盖）。
+            unit_usage=unit_usage if unit_usage is not None else 0,
             supplier_name=item_data.get('supplier_name') or supplier_name,
             customer_name=customer_name,
             material_category=item_data.get('category', ''),
