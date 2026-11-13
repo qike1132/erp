@@ -128,3 +128,55 @@ async def test_copy_bom_creates_new_role_by_name_on_real_session(real_db_session
         select(ProductRole).where(ProductRole.product_id == 2)
     )).scalars().all()
     assert {r.role_name for r in roles} == {'目标已有角色', '新角色X'}
+
+
+async def test_full_copy_from_role_only_source_copies_whole_structure(real_db_session):
+    """源产品的物料全挂在角色下时，整份复制必须把角色和物料一起搬到目标产品。
+
+    生产缺陷（2026-11-13）：源 SKU 6 个角色共 27 条物料、默认作用域为空；
+    前端把当前选中角色透传为 role_id 后，后端只搬默认作用域 → 复制 0 条仍返回
+    成功，页面显示「复制成功」后仍是「暂无物料」。修复后快速复制不再传 role_id，
+    走本用例覆盖的整份复制路径。
+    """
+    db = real_db_session
+    db.add_all([
+        Product(id=3, name='角色化源产品', price=1),
+        Product(id=4, name='目标产品', price=1),
+    ])
+    await db.flush()
+    source_role = ProductRole(product_id=3, role_name='香蕉')
+    target_role = ProductRole(product_id=4, role_name='默认')
+    db.add_all([source_role, target_role])
+    await db.flush()
+    db.add_all([
+        ProductFabric(
+            product_id=3, role_id=source_role.id, fabric_name='超柔',
+            specification='338#', quantity=Decimal('0.5'), unit='码',
+        ),
+        ProductAccessory(
+            product_id=3, role_id=source_role.id, accessory_name='拉链',
+            specification='白', quantity=Decimal('1'), unit='个',
+        ),
+    ])
+    await db.commit()
+
+    result = await bom_service.copy_bom(
+        db, 4, {'source_product_id': 3, 'overwrite': True}, 'tester',
+    )
+    await db.commit()
+
+    roles = (await db.execute(
+        select(ProductRole).where(ProductRole.product_id == 4)
+    )).scalars().all()
+    fabrics = (await db.execute(
+        select(ProductFabric).where(ProductFabric.product_id == 4)
+    )).scalars().all()
+    accessories = (await db.execute(
+        select(ProductAccessory).where(ProductAccessory.product_id == 4)
+    )).scalars().all()
+
+    assert {r.role_name for r in roles} == {'香蕉'}, '整份复制应重建源产品角色结构'
+    assert len(fabrics) == 1 and fabrics[0].fabric_name == '超柔'
+    assert len(accessories) == 1 and accessories[0].accessory_name == '拉链'
+    assert fabrics[0].role_id == roles[0].id
+    assert result['copied_count'] >= 3  # 角色 + 面料 + 辅料

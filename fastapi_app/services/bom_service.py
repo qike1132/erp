@@ -652,6 +652,19 @@ def _add_default_scope_items_to_role(
     return copied_count
 
 
+def _guard_role_copy_not_empty(copied_count: int) -> None:
+    """源产品物料全在角色下时，复制到指定角色会一条也搬不过来。
+
+    此前静默返回成功，前端只看到「复制成功」+ 空表格
+    （2026-11-13 生产：源产品 27 条物料全在 6 个角色下、默认作用域为空）。
+    """
+    if copied_count == 0:
+        raise ValueError(
+            '源产品的 BOM 全部分配在角色下，无法复制到指定角色；'
+            '请使用整份复制（不指定目标角色）'
+        )
+
+
 async def _copy_bom_into_role(
     db: AsyncSession,
     source_product,
@@ -720,9 +733,9 @@ async def _copy_bom_into_role(
         ))
 
     # c. 源产品默认作用域 → 目标角色（抽出为纯机械辅助函数，保持行为等价、降低本函数行数）
-    copied_count = _add_default_scope_items_to_role(
-        db, source_product, target_product_id, role_id,
-    )
+    copied_count = _add_default_scope_items_to_role(db, source_product, target_product_id, role_id)
+
+    _guard_role_copy_not_empty(copied_count)  # 源产品物料全在角色下时不得静默成功
 
     # 源产品角色级物料无法并入单一角色（会撞唯一约束），统计跳过数供前端提示
     skipped_role_items = (

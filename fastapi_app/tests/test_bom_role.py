@@ -544,6 +544,31 @@ class TestCopyBom:
         # 角色11面料 + 角色12辅料 + 角色12填充
         assert result['skipped_role_items'] == 3
 
+    async def test_copy_into_role_role_only_source_raises(self, mock_db):
+        """源产品物料全在角色下 → 复制到指定角色不得静默成功（2026-11-13 生产缺陷）。
+
+        生产实例：源产品 6 个角色共 27 条物料、默认作用域为空；前端把当前选中
+        角色透传为 role_id，后端只搬默认作用域 → 复制 0 条却返回成功，
+        页面显示「复制成功」后仍是「暂无物料」。
+        """
+        role = _mock_role(11, '香蕉', global_role_id=101)
+        fabric = MagicMock()
+        fabric.role_id = 11
+        fabric.fabric_name = '超柔'
+        fabric.quantity = 1
+        src = _mock_product(roles=[role], has_bom=True)
+        src.fabrics = [fabric]
+        src.accessories = []
+        src.material = None
+        self._setup_role(mock_db, src, [], target_role_id=21)
+
+        with pytest.raises(ValueError, match='全部分配在角色下'):
+            await bom_service.copy_bom(
+                mock_db, 2, {'source_product_id': 1, 'overwrite': True, 'role_id': 21}, 'tester',
+            )
+
+        assert self._added_of(mock_db, bom_service.ProductFabric) == []
+
     async def test_copy_into_role_overwrite_only_scoped_to_role(self, mock_db):
         """传 role_id + overwrite：只删该角色名下物料行，绝不删 ProductRole。"""
         src, src_materials = self._source_product()

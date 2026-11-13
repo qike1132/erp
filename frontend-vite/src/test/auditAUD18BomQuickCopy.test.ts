@@ -1,13 +1,15 @@
 /**
- * AUD-18 回归：BOM 快速复制在默认作用域覆盖前必须二次确认（2026-10-17 审计）。
+ * BOM 快速复制：整份复制语义（2026-11-13 owner 定）。
  *
- * 缺陷：快速复制把 overwrite 硬编码为 true 且全程零确认，点一下就把目标产品
- * 角色/面料/辅料/填充物四表全量删除替换，误操作不可从界面恢复。
+ * 背景缺陷：源 SKU 的物料全部挂在角色下时（生产实例：源 21397 有 6 个角色、
+ * 27 条物料，默认 BOM 为空），此前快速复制会把当前选中的目标角色透传给后端，
+ * 后端「复制到角色」只搬默认作用域物料 → 复制 0 条却返回成功，前端显示
+ * 「复制成功」后表格仍是「暂无物料」。
  *
- * 2026-10-18 OCR 复评补充两条：
- * - 角色作用域（roleId / roleName）同样 overwrite=true，后端只删该角色名下的物料，
- *   需要单独确认且文案区分「该角色」vs「整个产品」；
- * - 保存进行中（bomSaving）必须拒绝发起复制（两者都是全量替换语义）。
+ * 现在的契约：
+ * - 快速复制一律整份复制（默认 BOM + 源产品全部角色及其物料），不传 role 参数；
+ * - 目标已有物料或角色定义时，先做破坏性覆盖确认；
+ * - 后端 400 的 detail 必须透出给用户，而不是笼统的「复制失败」。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -30,23 +32,17 @@ vi.mock('@/api', () => ({
 vi.mock('@/composables/useToast', () => ({ showToast: mocks.showToast }))
 
 import { useBomQuickCopy } from '@/views/product/composables/useBomQuickCopy'
-import type { Role } from '@/views/product/composables/bomTypes'
 
 function mountQuickCopy(
   confirmOverwrite: () => Promise<boolean>,
-  confirmRoleOverwrite: () => Promise<boolean> = vi.fn(async () => true),
-  selectedRole: Role | null = null,
   isBusy: () => boolean = () => false,
 ) {
   const deps = {
     currentProductId: ref<number | null>(1),
     currentProductName: ref('目标产品'),
     reloadBom: vi.fn(async () => {}),
-    selectedRole: ref(selectedRole),
-    selectRoleById: vi.fn(),
     isBusy,
     confirmOverwrite,
-    confirmRoleOverwrite,
   }
   const Comp = defineComponent({
     setup() {
@@ -60,7 +56,7 @@ function mountQuickCopy(
   return { api, wrapper }
 }
 
-describe('AUD-18 BOM 快速复制覆盖确认', () => {
+describe('BOM 快速复制：整份复制与覆盖确认', () => {
   beforeEach(() => {
     mocks.loadBom.mockReset()
     mocks.copyBom.mockReset()
@@ -80,18 +76,33 @@ describe('AUD-18 BOM 快速复制覆盖确认', () => {
     expect(mocks.copyBom).not.toHaveBeenCalled()
   })
 
-  it('用户确认后才执行覆盖复制', async () => {
+  it('确认后执行整份复制：不传 role_id / role_name', async () => {
     const confirm = vi.fn(async () => true)
     const { api } = mountQuickCopy(confirm)
 
     await api.quickCopyBom()
 
     expect(confirm).toHaveBeenCalled()
-    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true, null, null)
+    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true)
+  })
+
+  it('目标只有角色定义（无物料）→ 仍需确认（整份复制会删除目标角色）', async () => {
+    mocks.loadBom.mockResolvedValue({
+      success: true,
+      materials: [],
+      product: { roles: [{ id: 5, name: '默认' }] },
+    })
+    const confirm = vi.fn(async () => true)
+    const { api } = mountQuickCopy(confirm)
+
+    await api.quickCopyBom()
+
+    expect(confirm).toHaveBeenCalledWith('目标产品')
+    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true)
   })
 
   it('目标没有 BOM 时不打扰用户', async () => {
-    mocks.loadBom.mockResolvedValue({ success: true, materials: [] })
+    mocks.loadBom.mockResolvedValue({ success: true, materials: [], product: { roles: [] } })
     const confirm = vi.fn(async () => true)
     const { api } = mountQuickCopy(confirm)
 
@@ -100,70 +111,21 @@ describe('AUD-18 BOM 快速复制覆盖确认', () => {
     expect(confirm).not.toHaveBeenCalled()
     expect(mocks.copyBom).toHaveBeenCalled()
   })
-})
 
-describe('AUD-18 BOM 快速复制：角色作用域覆盖确认（OCR 2026-10-18）', () => {
-  beforeEach(() => {
-    mocks.loadBom.mockReset()
-    mocks.copyBom.mockReset()
-    mocks.showToast.mockReset()
-    mocks.loadBom.mockResolvedValue({
-      success: true,
-      materials: [{ id: 9, category: 'fabric', name: '面料A', role_id: 5 }],
-      product: { roles: [{ id: 5, name: '大货' }] },
+  it('后端 400 detail 透出给用户（不再只剩宽泛的「复制失败」）', async () => {
+    mocks.loadBom.mockResolvedValue({ success: true, materials: [], product: { roles: [] } })
+    mocks.copyBom.mockRejectedValue({
+      response: { status: 400, data: { detail: '源产品没有配置BOM表' } },
     })
-    mocks.copyBom.mockResolvedValue({ success: true, target_role: { id: 5, name: '大货' } })
-  })
-
-  it('角色作用域已有物料 → 走角色确认（文案带角色名），不走产品级确认', async () => {
-    const confirmProduct = vi.fn(async () => true)
-    const confirmRole = vi.fn(async () => true)
-    const { api } = mountQuickCopy(confirmProduct, confirmRole, { id: 5, name: '大货' })
+    const { api } = mountQuickCopy(vi.fn(async () => true))
 
     await api.quickCopyBom()
 
-    expect(confirmProduct).not.toHaveBeenCalled()
-    expect(confirmRole).toHaveBeenCalledWith('大货')
-    // 确认后仍按原参数复制到该角色
-    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true, 5, null)
-  })
-
-  it('角色确认被拒绝 → 不调用复制接口', async () => {
-    const confirmRole = vi.fn(async () => false)
-    const { api } = mountQuickCopy(vi.fn(async () => true), confirmRole, { id: 5, name: '大货' })
-
-    await api.quickCopyBom()
-
-    expect(mocks.copyBom).not.toHaveBeenCalled()
-  })
-
-  it('该角色下没有物料 → 不打扰用户（其他角色的物料不算）', async () => {
-    mocks.loadBom.mockResolvedValue({
-      success: true,
-      materials: [{ id: 8, category: 'fabric', name: '面料B', role_id: 6 }],
-      product: { roles: [{ id: 6, name: '其他' }] },
-    })
-    const confirmRole = vi.fn(async () => true)
-    const { api } = mountQuickCopy(vi.fn(async () => true), confirmRole, { id: 5, name: '大货' })
-
-    await api.quickCopyBom()
-
-    expect(confirmRole).not.toHaveBeenCalled()
-    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true, 5, null)
-  })
-
-  it('新建未保存角色（roleName）：后端按名命中已有角色定义时也要确认', async () => {
-    const confirmRole = vi.fn(async () => true)
-    const { api } = mountQuickCopy(vi.fn(async () => true), confirmRole, { role_key: 'rk-1', name: '大货' })
-
-    await api.quickCopyBom()
-
-    expect(confirmRole).toHaveBeenCalledWith('大货')
-    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true, null, '大货')
+    expect(mocks.showToast).toHaveBeenCalledWith('源产品没有配置BOM表', 'error')
   })
 })
 
-describe('AUD-18 BOM 快速复制：保存进行中拒绝复制（OCR 2026-10-18）', () => {
+describe('BOM 快速复制：保存进行中拒绝复制（OCR 2026-10-18）', () => {
   beforeEach(() => {
     mocks.loadBom.mockReset()
     mocks.copyBom.mockReset()
@@ -173,24 +135,22 @@ describe('AUD-18 BOM 快速复制：保存进行中拒绝复制（OCR 2026-10-18
   })
 
   it('bomSaving 在途 → 不发复制请求、不弹确认', async () => {
-    const confirmProduct = vi.fn(async () => true)
-    const confirmRole = vi.fn(async () => true)
-    const { api } = mountQuickCopy(confirmProduct, confirmRole, null, () => true)
+    const confirm = vi.fn(async () => true)
+    const { api } = mountQuickCopy(confirm, () => true)
 
     await api.quickCopyBom()
 
     expect(mocks.copyBom).not.toHaveBeenCalled()
-    expect(confirmProduct).not.toHaveBeenCalled()
-    expect(confirmRole).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
     expect(mocks.showToast).toHaveBeenCalledWith('保存进行中，请稍候再复制', 'warning')
   })
 
   it('未在途 → 正常放行（证明上面的拦截不是恒真）', async () => {
-    const confirmProduct = vi.fn(async () => true)
-    const { api } = mountQuickCopy(confirmProduct, vi.fn(async () => true), null, () => false)
+    const confirm = vi.fn(async () => true)
+    const { api } = mountQuickCopy(confirm, () => false)
 
     await api.quickCopyBom()
 
-    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true, null, null)
+    expect(mocks.copyBom).toHaveBeenCalledWith(1, 2, true)
   })
 })

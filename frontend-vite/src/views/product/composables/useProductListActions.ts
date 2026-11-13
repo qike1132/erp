@@ -493,29 +493,20 @@ export function useProductListActions(
   }
 
   // ===== 快速复制 BOM（抽离至 useBomQuickCopy） =====
-  // 注入 selectedRole：复制物料归属到当前选中的角色（null = 默认 BOM 作用域）
-  // 注入 selectRoleById：复制成功后回选目标角色（新建角色落库后 id 会变）
+  // 2026-11-13（owner 定）：快速复制一律整份复制（默认 BOM + 源产品全部角色及其物料），
+  // 不再按当前选中的角色页签收敛作用域。目标已有物料/角色时先二次确认。
   const quickCopy = useBomQuickCopy({
     currentProductId,
     currentProductName: bomProductName,
     reloadBom: loadBomData,
-    selectedRole,
-    selectRoleById,
     // 2026-10-18 OCR 评审：bomSaving 只拦「再次点保存」，而同工具栏的「复制BOM」
     // 也是 overwrite=true 的破坏性操作（复制成功后 reloadBom 会把编辑基线整份重载，
     // 与在途保存的全量替换互相覆盖）。保存进行中一律拒绝发起复制。
     isBusy: () => bomSaving.value,
-    // 2026-10-17 审计 AUD-18：默认作用域覆盖前二次确认，避免误点清空目标 BOM
+    // 2026-10-17 审计 AUD-18：整份复制覆盖前二次确认，避免误点清空目标 BOM。
+    // 角色定义也算「已有 BOM」——整份复制会连目标角色一起删除重建。
     confirmOverwrite: (productName: string) => confirmDialog.confirm(
       `目标产品「${productName}」已有 BOM，快速复制将删除其全部角色/面料/辅料/填充物并替换为源产品 BOM。确定继续吗？`,
-      '此操作不可从界面恢复',
-      'danger',
-    ),
-    // 2026-10-18 OCR 评审：角色作用域同样 overwrite=true —— 后端 _copy_bom_into_role
-    // 会 delete 该 role_id 名下的面料/辅料/填充（bom_service.py:665-678）。
-    // 作用域窄（不碰默认 BOM 与其他角色）但同样是不可逆清空，文案必须与产品级区分。
-    confirmRoleOverwrite: (roleName: string) => confirmDialog.confirm(
-      `角色「${roleName}」已有 BOM，快速复制将删除该角色名下的全部物料并替换为源产品 BOM。确定继续吗？`,
       '此操作不可从界面恢复',
       'danger',
     ),
