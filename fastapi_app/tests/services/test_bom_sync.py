@@ -471,6 +471,53 @@ async def test_factory_save_bumps_items_version_on_quantity_edit(db):
     assert po.items_version == 1
 
 
+async def _item_quantity_logs(db, item_id: int = 1) -> list[ModificationLog]:
+    rows = (await db.execute(
+        select(ModificationLog).where(
+            ModificationLog.target_type == 'purchase_item',
+            ModificationLog.target_id == item_id,
+            ModificationLog.field_name == 'quantity',
+        ).order_by(ModificationLog.id)
+    )).scalars().all()
+    return list(rows)
+
+
+async def test_factory_save_logs_item_quantity_change(db):
+    """数量实际变化时按明细落审计：旧值/新值/操作人可追溯。"""
+    await _seed(db)                       # item 1: quantity=50
+    await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 60}], 'tester', order_ids=[8101],
+    )
+    logs = await _item_quantity_logs(db)
+    assert len(logs) == 1
+    assert float(logs[0].old_value) == 50.0
+    assert float(logs[0].new_value) == 60.0
+    assert logs[0].modifier_name == 'tester'
+
+
+async def test_factory_save_same_quantity_writes_no_log(db):
+    """同值重发不算修改：不得产生审计噪音。"""
+    await _seed(db)                       # item 1: quantity=50
+    await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 50}], 'tester', order_ids=[8101],
+    )
+    assert await _item_quantity_logs(db) == []
+
+
+async def test_factory_save_multi_item_split_logs_each_row(db):
+    """多明细分摊：每行按自己实际落库的旧/新值各记一条，Σ新值=用户输入总量。"""
+    await _seed(db)                       # item 1: 50, item 2: 890
+    await save_factory_summary_edits(
+        db, [{'item_ids': [1, 2], 'quantity': 200}], 'tester', order_ids=[8101],
+    )
+    logs_1 = await _item_quantity_logs(db, 1)
+    logs_2 = await _item_quantity_logs(db, 2)
+    assert len(logs_1) == 1 and len(logs_2) == 1
+    assert float(logs_1[0].old_value) == 50.0
+    assert float(logs_2[0].old_value) == 890.0
+    assert sum(float(log.new_value) for log in (logs_1[0], logs_2[0])) == pytest.approx(200.0)
+
+
 async def test_factory_save_bumps_items_version_on_loss_rate_only(db):
     await _seed(db)                       # item 1: loss_rate=30
     res = await save_factory_summary_edits(

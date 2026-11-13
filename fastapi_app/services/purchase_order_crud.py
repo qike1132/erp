@@ -712,9 +712,13 @@ def _apply_loss_rate_edit(
 
 async def _apply_item_edit_entries(
     db: AsyncSession, data: list, order_ids: list[int] | None,
-    changed_po_ids: set[int],
+    changed_po_ids: set[int], username: str = 'unknown',
 ) -> tuple[int, list[int], list[PurchaseOrderItem]]:
     """逐条应用数量/损耗率编辑。
+
+    数量**实际变化**时按明细写 ``ModificationLog``（target_type=purchase_item,
+    field_name=quantity, 旧值/新值/操作人）——该保存通道此前无任何审计，
+    事后只能看到 items_version 变了却查不到是谁改的（2026-11-13 生产反馈）。
 
     返回 ``(updated, involved_po_ids, touched_items)``；``changed_po_ids`` 收集
     实际发生变更的采购单 id（同值重发不算），供调用方决定是否递增版本。
@@ -739,7 +743,20 @@ async def _apply_item_edit_entries(
         involved_po_ids.extend(it.order_id for it in items)
         touched_items.extend(items)
         if new_quantity is not None:
+            old_quantities = {it.id: it.quantity for it in items}
             updated += _apply_quantity_edit(items, new_quantity, changed_po_ids)
+            for it in items:
+                old_quantity = old_quantities.get(it.id)
+                if old_quantity == it.quantity:
+                    continue
+                db.add(ModificationLog(
+                    target_type='purchase_item',
+                    target_id=it.id,
+                    field_name='quantity',
+                    old_value=str(old_quantity),
+                    new_value=str(it.quantity),
+                    modifier_name=username,
+                ))
         if new_loss_rate is not None:
             _apply_loss_rate_edit(items, new_loss_rate, changed_po_ids)
             updated += 1
@@ -795,7 +812,7 @@ async def save_factory_summary_edits(
     # 实际发生明细变更的采购单（数量/损耗率写前比对，同值重发不算）。
     changed_po_ids: set[int] = set()
     updated, involved_po_ids, touched_items = await _apply_item_edit_entries(
-        db, data, order_ids, changed_po_ids,
+        db, data, order_ids, changed_po_ids, username,
     )
 
     # 编辑应用完毕后，再批量覆盖写所涉采购单的损耗率 / 备品（一次查询，无 N+1）
