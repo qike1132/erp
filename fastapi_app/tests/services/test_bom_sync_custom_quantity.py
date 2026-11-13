@@ -253,6 +253,30 @@ async def test_custom_quantity_not_smeared_across_roles(db):
     assert by_role == {11: 2000.0, 12: 1000.0}
 
 
+async def test_force_quantity_rebuild_ignores_custom_quantity(db):
+    """盲盒配置变更等场景强制重算：即使 unit_usage 未变也不继承旧数量。
+
+    旧数量是上一套角色分配的结果，不是用户手工值；强制模式下必须按 BOM 重算。
+    损耗率/单价/备注仍按原口径继承（只关闭数量继承）。
+    """
+    await _seed(db)
+    row = await db.get(PurchaseOrderItem, 8521)
+    row.quantity = Decimal('20000')
+    row.loss_rate = Decimal('30')
+    row.unit_price = Decimal('2')
+    await db.commit()
+
+    res = await sync_purchase_order_items(db, 8501, force_quantity_from_bom=True)
+
+    assert res.changed is True
+    rebuilt = (await db.execute(
+        select(PurchaseOrderItem).where(PurchaseOrderItem.order_id == 8501)
+    )).scalars().one()
+    assert float(rebuilt.quantity) == 10000.0
+    assert float(rebuilt.loss_rate) == 30.0
+    assert float(rebuilt.unit_price) == 2.0
+
+
 async def test_manual_verification_sequence(db):
     """手工验证全链路：自定义 20000 → BOM 保存同步 → 仍 20000 → 完成下单
     → 完成单仍 20000 → 新 PO 为 10000。"""

@@ -380,6 +380,31 @@ async def _apply_name_change(
     product.name = name
 
 
+def _blind_box_triple(product: Product) -> tuple[bool, bool, int | None]:
+    """盲盒三件套的可比较快照（开关 / 隐藏款 / 配比）。"""
+    return (
+        bool(product.is_blind_box),
+        bool(product.has_hidden_role),
+        product.hidden_carton_ratio,
+    )
+
+
+def _schedule_blind_box_resync_if_changed(
+    db: AsyncSession, product: Product, product_id: int, before: tuple,
+) -> None:
+    """盲盒三件套实际变化时，注册提交后的 pending 单强制重算。
+
+    开关/隐藏款/配比决定「每个角色做多少个」，变更后旧数量全部作废；
+    未变化不触发，避免每次编辑产品都重建采购明细。
+    """
+    if _blind_box_triple(product) == before:
+        return
+    from fastapi_app.services.purchase._auto_generate import (
+        schedule_blind_box_changed_side_effects,
+    )
+    schedule_blind_box_changed_side_effects(db, product_id)
+
+
 def _apply_blind_box_fields(
     product: Product, *,
     hidden_carton_ratio: int | None,
@@ -451,6 +476,7 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
         product.image = strip_upload_signature(image)
     if factory is not None:
         product.factory = factory
+    blind_box_before = _blind_box_triple(product)
     _apply_blind_box_fields(
         product,
         hidden_carton_ratio=hidden_carton_ratio,
@@ -503,6 +529,7 @@ async def update_product(db: AsyncSession, product_id: int, name: str | None,
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY | CacheDomain.PRODUCT | CacheDomain.STOCKIN)
     _schedule_post_commit(db, _invalidate_product_list_cache)
     _schedule_post_commit(db, _invalidate_product_search_cache)
+    _schedule_blind_box_resync_if_changed(db, product, product_id, blind_box_before)
     logger.info(f'产品编辑成功：{product.name}')
     return product.to_dict()
 

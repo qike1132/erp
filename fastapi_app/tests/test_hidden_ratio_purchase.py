@@ -559,6 +559,72 @@ class TestProductBlindBoxMasterData:
         assert product.hidden_carton_ratio is None
 
     @pytest.mark.asyncio
+    async def test_blind_box_change_schedules_pending_resync(self, monkeypatch):
+        """盲盒开关实际变化 → 注册提交后强制重算 pending 单。"""
+        product = MagicMock()
+        product.name = '盲盒'
+        product.initial_stock = 0
+        product.current_stock = 0
+        product.hidden_carton_ratio = None
+        product.is_blind_box = True
+        product.has_hidden_role = False
+        product.to_dict.return_value = {'id': 1}
+        db = MagicMock()
+        db.info = {}
+        db.flush = AsyncMock()
+        db.refresh = AsyncMock()
+        monkeypatch.setattr(
+            product_service, 'get_product_for_update', AsyncMock(return_value=product),
+        )
+        monkeypatch.setattr(product_service.cache_mgr, 'invalidate', AsyncMock())
+        scheduled = []
+        monkeypatch.setattr(
+            'fastapi_app.services.purchase._auto_generate.'
+            'schedule_blind_box_changed_side_effects',
+            lambda _db, pid: scheduled.append(pid),
+        )
+
+        await product_service.update_product(
+            db, 1, name=None, barcode=None, image=None, initial_stock=None,
+            is_blind_box=False,
+        )
+
+        assert scheduled == [1]
+
+    @pytest.mark.asyncio
+    async def test_unchanged_blind_box_does_not_schedule_resync(self, monkeypatch):
+        """开关未变不触发重建：避免每次编辑产品都重算采购明细。"""
+        product = MagicMock()
+        product.name = '普通公仔'
+        product.initial_stock = 0
+        product.current_stock = 0
+        product.hidden_carton_ratio = None
+        product.is_blind_box = False
+        product.has_hidden_role = False
+        product.to_dict.return_value = {'id': 2}
+        db = MagicMock()
+        db.info = {}
+        db.flush = AsyncMock()
+        db.refresh = AsyncMock()
+        monkeypatch.setattr(
+            product_service, 'get_product_for_update', AsyncMock(return_value=product),
+        )
+        monkeypatch.setattr(product_service.cache_mgr, 'invalidate', AsyncMock())
+        scheduled = []
+        monkeypatch.setattr(
+            'fastapi_app.services.purchase._auto_generate.'
+            'schedule_blind_box_changed_side_effects',
+            lambda _db, pid: scheduled.append(pid),
+        )
+
+        await product_service.update_product(
+            db, 2, name=None, barcode=None, image=None, initial_stock=None,
+            is_blind_box=False,
+        )
+
+        assert scheduled == []
+
+    @pytest.mark.asyncio
     async def test_ratio_only_update_on_disabled_product_is_cleared(self, monkeypatch):
         """只提交配比、开关都未提交：非「盲盒 + 有隐藏款」时配比不得留存（OCR M5）。
 

@@ -154,3 +154,57 @@ def schedule_bom_saved_side_effects(session, product_id: int) -> None:
     if not isinstance(info, dict):
         return
     info.setdefault('post_commit_callbacks', []).append(partial(_run_bom_saved, product_id))
+
+
+async def _run_blind_box_changed(product_id: int) -> None:
+    """盲盒配置变更提交后：强制按 BOM 重算该产品 pending 单的明细数量。
+
+    盲盒开关/隐藏款/配比决定「每个角色做多少个」；变更后旧数量全部作废，必须
+    绕过 ``bom_sync`` 的「用量未变才继承自定义数量」保护——否则旧分配值会被
+    当成用户手工值保留（2026-11-13 生产实测：盲盒关掉后页面仍是 1667）。
+    产品无 BOM 时跳过：空目标行集合会把明细删光（与 BOM 保存回调同一守卫）。
+    失败只记日志，不影响产品保存本身。
+    """
+    try:
+        from fastapi_app.core.database import require_async_session_local
+        from fastapi_app.core.exceptions import db_transaction
+        from fastapi_app.services.purchase.bom_sync import (
+            product_has_bom,
+            sync_pending_items_for_product,
+        )
+
+        session_factory = require_async_session_local()
+        async with session_factory() as db:
+            async with db_transaction(db):
+                report = None
+                if await product_has_bom(db, product_id):
+                    report = await sync_pending_items_for_product(
+                        db, product_id, force_quantity_from_bom=True,
+                    )
+
+        await invalidate_purchase_caches()
+        if report is None:
+            logger.info('产品无 BOM，跳过盲盒配置变更后的采购明细同步: product=%s', product_id)
+        else:
+            synced = int(report.get('synced') or 0)
+            if synced:
+                logger.info(
+                    '盲盒配置变更同步采购明细: product=%s synced=%s', product_id, synced,
+                )
+    except Exception:  # broad-except: 同步失败不得影响产品保存本身
+        logger.warning('盲盒配置变更后同步采购明细失败（不影响本次保存）', exc_info=True)
+
+
+def schedule_blind_box_changed_side_effects(session, product_id: int) -> None:
+    """注册「盲盒配置变更提交成功后」的 pending 单强制重算。
+
+    与其它 ``schedule_*`` 同款：回调挂到 ``session.info['post_commit_callbacks']``，
+    由 ``db_transaction`` 在提交成功后执行。产品更新端点每次请求调用一次即可；
+    仅在盲盒三件套**实际变化**时才应调用（未变化不产生无谓重建）。
+    """
+    info = getattr(session, 'info', None)
+    if not isinstance(info, dict):
+        return
+    info.setdefault('post_commit_callbacks', []).append(
+        partial(_run_blind_box_changed, product_id),
+    )

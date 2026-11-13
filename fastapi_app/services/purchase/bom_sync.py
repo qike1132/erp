@@ -116,7 +116,10 @@ def _same_usage(old, new) -> bool:
     return round(float(old), 4) == round(float(new), 4)
 
 
-def _inherit_fields(rows: list[PurchaseOrderItem], target: list[dict]) -> None:
+def _inherit_fields(
+    rows: list[PurchaseOrderItem], target: list[dict], *,
+    inherit_quantity: bool = True,
+) -> None:
     """把旧行的 loss_rate/unit_price/remark 与「自定义数量」继承到目标行（原地修改）。
 
     先按精确键消费式领取；未领到的行用「回退键可复用」的率/价
@@ -128,6 +131,8 @@ def _inherit_fields(rows: list[PurchaseOrderItem], target: list[dict]) -> None:
     - 仅当该行自己的 ``unit_usage``（BOM 用量快照）与目标行一致时继承。
       用量变了说明 BOM 需求变了，BOM 优先重算（2026-11-11 实时同步裁决，
       PO-2611 事故的前提）；用量未变而数量不同，只能是用户手工调整。
+    - ``inherit_quantity=False``（强制重算）：盲盒配置变更等场景会整体改变每个
+      角色应做的数量，旧数值全部作废，不能当手工值保留；率/价/备注仍按原口径继承。
     """
     pool: dict[tuple, deque] = defaultdict(deque)
     for row in rows:
@@ -151,7 +156,7 @@ def _inherit_fields(rows: list[PurchaseOrderItem], target: list[dict]) -> None:
             item['loss_rate'] = loss_rate
             item['unit_price'] = unit_price
             item['remark'] = remark
-            if _same_usage(unit_usage, item.get('unit_usage')):
+            if inherit_quantity and _same_usage(unit_usage, item.get('unit_usage')):
                 item['quantity'] = quantity
             assigned.add(id(item))
 
@@ -403,11 +408,16 @@ def _po_for_update_stmt(po_id: int):
 async def sync_purchase_order_items(
     db: AsyncSession, po_id: int, *,
     expected_version: int | None = None, dry_run: bool = False,
+    force_quantity_from_bom: bool = False,
 ) -> SyncResult:
     """单张采购单按当前 BOM 整体重建明细。事务由调用方控制（本函数只 flush）。
 
     dry_run 不持行锁：批量预览若也 FOR UPDATE，会把所有匹配采购单锁到外层
     事务提交，阻塞用户编辑；dry-run 无写入，无锁读即可。
+
+    ``force_quantity_from_bom=True``：不继承旧数量，一律按 BOM 重算。用于盲盒
+    配置变更（开关/隐藏款/配比）这类「每个角色应做多少」整体失效的场景，避免
+    旧分配值被当成用户自定义数量保留。
     """
     if dry_run:
         order = await db.get(PurchaseOrder, po_id)
@@ -444,7 +454,7 @@ async def sync_purchase_order_items(
         .order_by(PurchaseOrderItem.id)
     )).scalars().all()
 
-    _inherit_fields(rows, target)
+    _inherit_fields(rows, target, inherit_quantity=not force_quantity_from_bom)
 
     existing_sig = sorted(
         (
@@ -552,6 +562,7 @@ async def find_pending_po_ids_for_product(
 
 async def sync_pending_items_for_product(
     db: AsyncSession, product_id: int, *, dry_run: bool = False,
+    force_quantity_from_bom: bool = False,
 ) -> dict:
     """同步所有覆盖该产品的 pending 采购单；逐单 savepoint，单张失败不污染其他单。"""
     matched, unresolved = await find_pending_po_ids_for_product(db, product_id)
@@ -567,7 +578,10 @@ async def sync_pending_items_for_product(
     for po_id in matched:
         try:
             async with db.begin_nested():
-                res = await sync_purchase_order_items(db, po_id, dry_run=dry_run)
+                res = await sync_purchase_order_items(
+                    db, po_id, dry_run=dry_run,
+                    force_quantity_from_bom=force_quantity_from_bom,
+                )
             results.append(res)
             if res.changed:
                 synced += 1
