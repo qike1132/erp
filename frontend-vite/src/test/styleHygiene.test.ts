@@ -50,7 +50,7 @@ function collectInlineStyles(): InlineStyle[] {
     const rel = file.replace(/\\/g, '/')
     if (rel.startsWith('src/test/')) continue
     const text = readFileSync(file, 'utf8')
-    for (const m of text.matchAll(/(?<!:)style\s*=\s*(["'])([\s\S]*?)\1/g)) {
+    for (const m of text.matchAll(/(?<![\w:-])style\s*=\s*(["'])([\s\S]*?)\1/g)) {
       const before = text.slice(0, m.index ?? 0)
       rows.push({
         file: rel,
@@ -81,7 +81,7 @@ describe('样式卫生棘轮（行内 style 只降不升）', () => {
   })
 
   it('基线不得虚高：总数明显低于基线时应同步下调', () => {
-    // 防止「删了 50 处但基线不动」→ 后续又长回来。容差 2 处：顺手删三处就该下调基线。
+    // 防止「删了一批但基线不动」→ 后续又长回来。容差 1 处：删两处以上就该下调基线。
     expect(all.length, `当前 ${all.length}，基线 ${BASELINE_TOTAL}，请下调 BASELINE_TOTAL`).toBeGreaterThan(
       BASELINE_TOTAL - 2,
     )

@@ -9,6 +9,7 @@
  *    不再按用户名 == '贝乐' 硬编码。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { ref } from 'vue'
 
 /** 当前测试用户被授予的权限点（用例可改写） */
@@ -451,5 +452,15 @@ describe('useOutsourceProcess 快速换单的请求序号（A-M35）', () => {
     await hook.handleBulkShip()
 
     expect(outsourceApi.shipProcessesBatch).toHaveBeenCalledWith(1, [{ process_id: 1, quantity: 6 }])
+  })
+
+  it('台账行 key 必须用主键 id —— 同一订单不同 SKU 可有同名工序', () => {
+    // 后端唯一索引是 (order_id, order_item_id, product_id, process_type)，
+    // 所以「两张 SKU 都做裁剪」时 remainingList 会出现两行同 process_type；
+    // 用 process_type 作 key 会重复。数据层已带 id，这条锁死模板不许改回去
+    // —— 只靠类型检查抓不到（id 存在 ≠ 模板用了它）。
+    const src = readFileSync('src/views/outsource/components/OutsourceProcessLedger.vue', 'utf8')
+    expect(src).toContain(':key="item.id"')
+    expect(src).not.toMatch(/:key="item\.process_type"/)
   })
 })
