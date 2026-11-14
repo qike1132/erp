@@ -44,7 +44,7 @@
           </span>
 
           <span class="nc-sku-summary">
-            <template v-for="(p, idx) in item._parsed.products" :key="idx">
+            <template v-for="(p, idx) in item._parsed.products" :key="`${p.name}×${p.quantity}`">
               <span v-if="idx > 0" class="nc-sku-sep">、</span>
               <span class="nc-sku-text">{{ p.name }} ×{{ p.quantity }}</span>
             </template>

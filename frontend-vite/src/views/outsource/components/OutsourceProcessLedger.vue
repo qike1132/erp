@@ -66,7 +66,8 @@
           <tr><th>工序</th><th>目标</th><th>已发</th><th>剩余</th></tr>
         </thead>
         <tbody>
-          <tr v-for="(item, i) in remainingList" :key="i">
+          <!-- key 用工序类型：remainingList 会随发货减少行，index 作 key 会让剩余数字串行 -->
+          <tr v-for="item in remainingList" :key="item.process_type">
             <td>{{ item.process_type }}</td>
             <td>{{ item.target }}</td>
             <td>{{ item.shipped }}</td>
