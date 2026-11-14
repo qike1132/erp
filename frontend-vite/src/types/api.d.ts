@@ -1395,10 +1395,16 @@ export interface MaterialRegistrationItemCreate {
   remark?: string | null
 }
 
+export interface MaterialRegistrationItemUpdate {
+  id: number
+  received_quantity?: number | null
+  remark?: string | null
+}
+
 export interface MaterialRegistrationUpdate {
   status?: string | null
   remark?: string | null
-  items?: Array<Record<string, unknown>> | null
+  items?: Array<MaterialRegistrationItemUpdate> | null
 }
 
 export interface MissingBomProduct {

@@ -27831,6 +27831,44 @@
         ],
         "title": "MaterialRegistrationItemCreate"
       },
+      "MaterialRegistrationItemUpdate": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Id"
+          },
+          "received_quantity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received Quantity"
+          },
+          "remark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remark"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "MaterialRegistrationItemUpdate",
+        "description": "明细增量更新：只允许改收货数量与备注（H5：禁止任意字段直写）。\n\n``received_quantity`` 的上界依赖明细自身的采购数量，Schema 只能保证非负；\n服务层在行锁内再做 ``<= ordered_quantity`` 校验。"
+      },
       "MaterialRegistrationUpdate": {
         "properties": {
           "status": {
@@ -27859,8 +27897,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/MaterialRegistrationItemUpdate"
                 },
                 "type": "array"
               },
