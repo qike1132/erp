@@ -40,11 +40,15 @@ def serialize_value(val):
     if isinstance(val, str):
         return val
     if isinstance(val, datetime):
-        return val.strftime('%Y-%m-%d %H:%M:%S')
+        # 精确到微秒并保留 UTC offset：旧实现 strftime('%Y-%m-%d %H:%M:%S') 会同时
+        # 丢掉微秒与 offset，timestamptz 恢复后可能跨日/改变瞬间（评审 M1）。
+        # 用 isoformat 而非固定格式，naive（timestamp without tz）与 aware 都能原样还原。
+        return val.isoformat(sep=' ', timespec='microseconds')
     if isinstance(val, date):
         return val.isoformat()
     if isinstance(val, Decimal):
-        return float(val)
+        # Decimal → float 会丢精度（金额/配比），改存字符串，恢复侧再转回 Decimal
+        return str(val)
     if isinstance(val, UUID):
         return str(val)
     if isinstance(val, (bytes, bytearray)):
@@ -67,11 +71,13 @@ def deserialize_value(val, col_type):
         return None
     if isinstance(col_type, DateTime):
         if isinstance(val, str):
+            # 新格式带微秒/offset（isoformat）；旧格式 "YYYY-MM-DD HH:MM:SS" 也能被
+            # fromisoformat 解析，失败再退回显式格式以兼容历史产物。
             try:
-                return datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
+                return datetime.fromisoformat(val)
             except ValueError:
                 try:
-                    return datetime.fromisoformat(val)
+                    return datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
                 except ValueError:
                     pass  # defensive: 可选 ValueError 静默处理,不影响主流程
         return val
@@ -100,6 +106,12 @@ def deserialize_value(val, col_type):
             return bool(val)
         return val
     if isinstance(col_type, Numeric):
+        if isinstance(val, str):
+            # 新格式 Decimal 以字符串存（保精度）；非数字字符串交给 DB 报错，不静默改 0
+            try:
+                return Decimal(val)
+            except (ArithmeticError, ValueError):
+                return val
         if isinstance(val, (int, float)):
             return Decimal(str(val))
         return val
@@ -359,6 +371,45 @@ def _encode_backup_json(backup_data: dict) -> bytes:
     return json.dumps(backup_data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
 
 
+def _validate_json_backup_payload(backup_data: dict) -> None:
+    """恢复前 fail-closed 校验：拒绝把「导出失败的表」当成空表恢复。
+
+    评审 B1：备份侧导出失败会写 ``{'error': ..., 'count': 0, 'rows': []}``，
+    旧恢复侧只认 columns/rows，先 DELETE 再插 0 行，最终行数校验 0==0 通过——
+    一次临时读失败就变成「合法地清空整表」。这里在任何 DELETE 之前中止。
+    """
+    tables = backup_data.get('tables')
+    if not isinstance(tables, dict) or not tables:
+        raise RestoreError(
+            'JSON 备份不含任何表数据（tables 为空），拒绝恢复：继续执行会清空现有库'
+        )
+    declared_failed = backup_data.get('failed_tables')
+    if declared_failed:
+        raise RestoreError(
+            f'JSON 备份自述存在导出失败的表（failed_tables={str(declared_failed)[:200]}），拒绝恢复'
+        )
+    coverage = backup_data.get('coverage')
+    if isinstance(coverage, dict) and coverage.get('complete') is False:
+        raise RestoreError('JSON 备份覆盖度自检未通过（coverage.complete=false），拒绝恢复')
+
+    broken: list[str] = []
+    for name, table_data in tables.items():
+        if not isinstance(table_data, dict):
+            broken.append(f'{name}(结构非法)')
+            continue
+        error = table_data.get('error')
+        if error:
+            broken.append(f'{name}({str(error)[:80]})')
+        elif 'rows' not in table_data and 'columns' not in table_data:
+            broken.append(f'{name}(缺少 rows/columns)')
+    if broken:
+        raise RestoreError(
+            'JSON 备份包含导出失败/不完整的表，拒绝恢复（否则会先清空该表再写入 0 行）：'
+            + '、'.join(broken[:10])
+            + (f' 等 {len(broken)} 张' if len(broken) > 10 else '')
+        )
+
+
 async def restore_database_from_json(zf, db: AsyncSession, task_id: str | None = None) -> dict:
     """从 dump.json 恢复数据库（Legacy JSON 格式）"""
     try:
@@ -368,6 +419,7 @@ async def restore_database_from_json(zf, db: AsyncSession, task_id: str | None =
         return {'status': 'error', 'error': f'读取 JSON 数据库备份失败: {e}'}
     if 'tables' not in backup_data:
         return {'status': 'error', 'error': 'JSON 备份缺少 tables 字段'}
+    _validate_json_backup_payload(backup_data)
     result = await restore_legacy_json(backup_data, db, task_id)
     return {
         'status': 'ok' if not result['errors'] else 'partial',
@@ -438,9 +490,17 @@ async def _verify_restored_json(db: AsyncSession, backup_data: dict) -> dict[str
 
     verification: dict[str, object] = {'overall_pass': True}
     try:
+        tables = backup_data.get('tables', {})
+        # 防御：即使上游漏拦，带 error 的表也绝不能按 0 行参与「通过」判定
+        errored = sorted(name for name, td in tables.items() if isinstance(td, dict) and td.get('error'))
+        if errored:
+            return {
+                'overall_pass': False,
+                'error': '备份中存在导出失败的表，无法校验恢复结果: ' + ', '.join(errored[:10]),
+            }
         manifest_tables = {
             tname: {'rows': td.get('count', len(td.get('rows', [])))}
-            for tname, td in backup_data.get('tables', {}).items()
+            for tname, td in tables.items()
         }
         # 2026-10-03 第八轮审计：此前用**独立连接** `_AsyncSessionLocal()` 校验，而此刻
         # 主事务只 `flush()` 未 `commit`（commit 在 strategies.py 的调用方）→ READ COMMITTED
@@ -595,6 +655,9 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         if task_id:
             await _upd_prog(task_id, 'restore_db', sub, detail)
             await asyncio.sleep(0)
+
+    # 二次防线：restore_legacy_json 也可能被其它入口直接调用，破坏性动作前必须再校验一次。
+    _validate_json_backup_payload(backup_data)
 
     # 计算需要恢复的表数量用于进度计算
     tables_to_restore = [t for t in Base.metadata.sorted_tables if str(t.name) in backup_data.get('tables', {})]

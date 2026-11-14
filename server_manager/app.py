@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from server_manager import git_guard, log_ops, windows_ops
+from server_manager import git_guard, log_ops, nssm_verify, windows_ops
 from server_manager.action_gate import _EMERGENCY_JOIN_SEC, ActionGate
 from server_manager.constants import (
     _API_PORT,
@@ -1265,61 +1265,37 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
         workers = self.hosting_workers_var.get().strip() or '4'
         self._gate.start('安装生产服务', self._install_services_flow, nssm, workers)
 
-    def _verify_installed_service_paths(self):
+    def _verify_installed_service_paths(self, expected_env: list[str] | None = None) -> list[str]:
         """安装后回读注册表，校验服务实际加载的模块与当前源码同源（P0-6）。
+
+        校验实现见 ``server_manager/nssm_verify.py``——本文件顶着 1600 行的规模
+        门禁（``tests/test_gates_cover_repo_root.py``），那段逻辑与 Tk 零耦合，
+        抽出去比在这里挤行数更安全。
 
         ★ 为什么必须有：2026-09-16 的部署漂移事故 —— 源码已修，线上服务却跑旧版
         约 10 小时无人发现，因为「安装成功」只证明命令返回 0，不证明**下次启动**
         会加载哪份代码。
 
-        ⚠️ **必须读 `Parameters\\Application`，不能读顶层 `ImagePath`**：
-        `ImagePath` 永远是 `C:\\nssm\\nssm.exe`（NSSM 自己是宿主进程），真正被拉起的
-        解释器存在 `<service>\\Parameters\\Application`。实测（本机真实注册表）
-        只看 `ImagePath` 会对 erp-prod / erp-arq **双双误报**「解释器不一致」，
-        把一个正确配置报成故障 —— 校验器自己成了噪声源。
+        H11（评审）：除 Application/AppDirectory，还要回读 AppParameters、
+        AppEnvironmentExtra、AppExit —— 只写了一半的配置同样是「装了但不可用」。
+        返回问题清单（空列表=全部一致），调用方据此决定是否显示「安装完成」。
         """
         if not _IS_WINDOWS:
-            return
+            return []
         if not _PYTHON_EXE:
             self.log_message('未定位到可用的 Python 解释器，跳过安装后指向校验', 'WARNING')
-            return
-        try:
-            import winreg
-        except ImportError:
-            self.log_message('无法校验服务指向（winreg 不可用），请手工核对服务参数', 'WARNING')
-            return
-        expected_app = str(_PYTHON_EXE)
-        expected_dir = str(_PROJECT_DIR)
-        for name in (_SVC_API, _SVC_ARQ):
-            actual_app, actual_params, actual_dir = None, None, None
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                    rf'SYSTEM\CurrentControlSet\Services\{name}', 0, winreg.KEY_READ) as key:
-                    with winreg.OpenKey(key, 'Parameters', 0, winreg.KEY_READ) as pk:
-                        with contextlib.suppress(OSError):
-                            actual_app = winreg.QueryValueEx(pk, 'Application')[0]
-                        with contextlib.suppress(OSError):
-                            actual_params = winreg.QueryValueEx(pk, 'AppParameters')[0]
-                        with contextlib.suppress(OSError):
-                            actual_dir = winreg.QueryValueEx(pk, 'AppDirectory')[0]
-            except OSError as e:
-                self.log_message(f'{name} 指向校验失败（读注册表出错）: {e}', 'WARNING')
-                continue
-            problems = []
-            if not actual_app:
-                problems.append(r'Parameters\Application 缺失（服务未正确配置）')
-            elif expected_app.lower() not in str(actual_app).lower():
-                problems.append(f'解释器={actual_app} 期望含 {expected_app}')
-            if actual_dir and str(actual_dir).lower() != expected_dir.lower():
-                problems.append(f'工作目录={actual_dir} 期望 {expected_dir}')
-            if problems:
-                self.log_message(
-                    f'{name} 安装后校验不一致，服务可能加载非当前源码：' + '；'.join(problems),
-                    'WARNING')
-            else:
-                self.log_message(
-                    f'{name} 指向校验通过（app={Path(actual_app).name if actual_app else "?"}，'
-                    f'params={(actual_params or "")[:80]}）')
+            return []
+        return nssm_verify.verify_installed_services(
+            names=(_SVC_API, _SVC_ARQ),
+            expected_tokens={
+                _SVC_API: 'fastapi_app.core.prod_runner',
+                _SVC_ARQ: 'fastapi_app.core.arq_app.WorkerSettings',
+            },
+            python_exe=str(_PYTHON_EXE),
+            project_dir=str(_PROJECT_DIR),
+            expected_env=expected_env,
+            log=self.log_message,
+        )
 
     def _install_services_flow(self, nssm, workers):
         # 逐项列表(不是空格拼接的整串)：_nssm_install 会把它作为多个 argv 元素传给
@@ -1355,12 +1331,20 @@ class ServerManagerApp(HostingViewMixin, LogViewMixin):
             ok3 = False
             self._msg_queue.put(('log', {'text': f'未找到 {_nginx_exe}，{_SVC_WEB} 未安装（前端仍可由旧方式托管）', 'level': 'WARNING'}))
         if ok1 and ok2 and ok3:
-            self._msg_queue.put(('log', {'text': '生产服务安装完成：erp-prod + erp-arq + erp-web（开机自启、按依赖顺序启动）'}))
+            # ★ 安装成功 ≠ 下次启动会加载当前这份源码/配置。先回读注册表核实
+            #   Application/AppParameters/AppDirectory/AppEnvironmentExtra/AppExit（P0-6 + H11），
+            #   有问题就**不能**再显示「安装完成」。
+            problems = self._verify_installed_service_paths(expected_env=env_extra)
+            if problems:
+                self._msg_queue.put(('log', {
+                    'text': f'生产服务配置校验未通过（{len(problems)} 项），请按上方日志修正后重试安装',
+                    'level': 'ERROR',
+                }))
+            else:
+                self._msg_queue.put(('log', {'text': '生产服务安装完成：erp-prod + erp-arq + erp-web（开机自启、按依赖顺序启动）'}))
         else:
             self._msg_queue.put(('log', {'text': '生产服务安装未完全成功，请查看上方日志', 'level': 'WARNING'}))
-        # ★ 安装成功 ≠ 下次启动会加载当前这份源码。回读注册表核实指向（P0-6）；
-        #   不一致只报 WARNING（安装动作本身已完成，问题是「生效目标」可能不是你以为的那份）。
-        self._verify_installed_service_paths()
+            self._verify_installed_service_paths(expected_env=env_extra)
         self._msg_queue.put(('hosting_refresh', {}))
 
     def _service_cmd_sync(self, verb):

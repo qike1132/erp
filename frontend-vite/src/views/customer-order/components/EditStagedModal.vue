@@ -6,7 +6,7 @@
     <template v-if="editStagedData">
       <div class="co-form-group">
         <label class="co-label">客户名称</label>
-        <UiSelect v-model="editStagedData.customer" style="width: 100%" :options="customerOptions" />
+        <UiSelect v-model="customerModel" style="width: 100%" :options="customerOptions" />
       </div>
       <div class="co-form-group">
         <label class="co-label">{{ editStagedData.type === 'order' ? '订单时间' : '备货时间' }}</label>
@@ -157,9 +157,29 @@ const props = defineProps<{
   editStockState: 'idle' | 'loading' | 'ready' | 'error'
   customerOptions: { label: string; value: string }[]
   saveEditStaged: () => void
+  /** 客户变更后重查可用备货（H9）：旧客户的数字对新客户无效，必须作废重查 */
+  refreshEditStock: () => void
 }>()
 
 const editStagedData = defineModel<StagedItem | null>('editStagedData')
+
+/**
+ * 客户选择：写入编辑副本后立刻通知上层重查可用备货。
+ *
+ * 不能只做 `v-model="editStagedData.customer"`：那样改完客户，弹窗里仍显示
+ * 旧客户的可用备货，保存校验也拿旧额度放行（后端 min() 静默截断）。
+ * 用 computed setter 而不是 watch，是为了只在「用户真的改了」时触发 ——
+ * 打开弹窗（null → 对象）与保存后清空（对象 → null）都不该发第二次查询。
+ */
+const customerModel = computed({
+  get: () => editStagedData.value?.customer ?? '',
+  set: (v: string) => {
+    const data = editStagedData.value
+    if (!data || !v || data.customer === v) return
+    data.customer = v
+    props.refreshEditStock()
+  },
+})
 
 /**
  * 抵扣数量输入框上限（A-M36）：查询未成功前不设上限，避免把「查询中/查询失败」

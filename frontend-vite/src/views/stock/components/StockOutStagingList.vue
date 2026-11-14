@@ -30,10 +30,10 @@
             </div>
           </div>
           <div class="so-staged-actions">
-            <button class="action-btn action-edit" aria-label="编辑" @click="emit('edit-item', idx)">
+            <button class="action-btn action-edit" aria-label="编辑" :disabled="disabled" @click="!disabled && emit('edit-item', idx)">
               <FontAwesomeIcon icon="edit" aria-hidden="true" />
             </button>
-            <button class="action-btn action-delete" aria-label="删除" @click="emit('remove-item', idx)">
+            <button class="action-btn action-delete" aria-label="删除" :disabled="disabled" @click="!disabled && emit('remove-item', idx)">
               <FontAwesomeIcon icon="trash" aria-hidden="true" />
             </button>
           </div>
@@ -49,6 +49,8 @@ import type { StagedStockout } from '@/types'
 defineProps<{
   staged: StagedStockout[]
   stagedTotalQty: number
+  /** 提交中禁用编辑/删除：在途增删会导致响应与暂存行错位（H6） */
+  disabled?: boolean
 }>()
 
 const emit = defineEmits<{

@@ -458,9 +458,17 @@ async def batch_create_orders(db: AsyncSession, orders_data: list, created_by: s
         from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
         schedule_auto_generate_purchase_orders(db)
 
+    created_count = len(created_order_ids)
+    failed_count = sum(1 for item in results if not item.get('success'))
+    # M3（评审）：旧实现顶层 success 恒为 True——所有客户组都失败、created_count=0
+    # 时调用方仍看到 success=True。约定：只要有输入，必须至少建成 1 单才算成功；
+    # 部分成功（0 < created_count < 分组数）仍为 True，但 failed_count 会非零，
+    # 调用方可逐条看 results。
+    success = created_count > 0
     return {
-        'success': True,
-        'created_count': len(created_order_ids),
+        'success': success,
+        'created_count': created_count,
+        'failed_count': failed_count,
         'results': results,
         'created_order_ids': created_order_ids,
     }

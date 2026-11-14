@@ -15,6 +15,23 @@ import type {
 import { getErrorStatus } from '@/types/errors'
 import { resolveSamplingErrorMessage } from './useSamplingErrors'
 
+/**
+ * 详情查询结果。
+ *
+ * 并发查询时「先发后到」很常见（点 A 卡片编辑、随即点 B 卡片）。旧实现把
+ * 任何一次响应都 `return res`，于是过期的那次也会被调用方当成「最新详情」拿去
+ * 打开编辑弹窗 —— 表单字段来自 A、保存却打到当前选中的 B，用户看不到任何异常。
+ * 所以把「被取代」显式建模成一种结果，调用方必须自己决定怎么处理（M9）。
+ *
+ * - `ok`    ：这次查询就是最新的一次，detail 可信
+ * - `stale` ：已被更新的查询取代，结果不可用；不是失败，不该报错
+ * - `error` ：请求失败（error/errorStatus 已写入 hook 状态）
+ */
+export type DetailFetchOutcome =
+  | { status: 'ok'; detail: ProjectDetailResponse }
+  | { status: 'stale' }
+  | { status: 'error' }
+
 export function useSamplingProject() {
   /** 当前选中项目详情 */
   const currentProject = ref<ProjectDetailResponse | null>(null)
@@ -37,29 +54,31 @@ export function useSamplingProject() {
   let detailFetchSeq = 0
 
   /**
-   * 获取打样项目详情（含部位布料 + 版本列表）
+   * 获取打样项目详情（含部位布料 + 版本列表）。
+   *
+   * 始终返回三态结果，绝不把过期响应当成有效详情交出去（M9）。
    */
-  async function fetchDetail(id: number): Promise<ProjectDetailResponse | null> {
+  async function fetchDetail(id: number): Promise<DetailFetchOutcome> {
     const seq = ++detailFetchSeq
     loading.value = true
     error.value = null
     errorStatus.value = undefined
     try {
       const res = await patternRoomApi.getProject(id)
-      if (seq === detailFetchSeq) {
-        currentProject.value = res
-      }
-      return res
+      // 已被更新的查询取代：结果丢弃，且不能返回给调用方（否则表单填的是别人的数据）
+      if (seq !== detailFetchSeq) return { status: 'stale' }
+      currentProject.value = res
+      return { status: 'ok', detail: res }
     } catch (e) {
       console.error('[useSamplingProject] 查询详情失败:', e)
       const message = resolveSamplingErrorMessage(e, '加载打样详情失败')
-      if (seq === detailFetchSeq) {
-        error.value = message
-        // 调用方靠 errorStatus 抑制 403 的重复 toast；不写会沿用上一次操作的状态码
-        errorStatus.value = getErrorStatus(e)
-        currentProject.value = null
-      }
-      return null
+      // 过期的失败同样不该覆盖最新一次的状态（否则新查询成功也会显示旧错误）
+      if (seq !== detailFetchSeq) return { status: 'stale' }
+      error.value = message
+      // 调用方靠 errorStatus 抑制 403 的重复 toast；不写会沿用上一次操作的状态码
+      errorStatus.value = getErrorStatus(e)
+      currentProject.value = null
+      return { status: 'error' }
     } finally {
       if (seq === detailFetchSeq) {
         loading.value = false

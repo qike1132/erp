@@ -208,7 +208,13 @@ async def update_registration(
     """
     try:
         async with db_transaction(db):
-            result = await mr_service.update_registration(db, reg_id, data.status, data.remark, data.items)
+            item_updates = (
+                [item.model_dump(exclude_unset=True) for item in data.items]
+                if data.items is not None else None
+            )
+            result = await mr_service.update_registration(
+                db, reg_id, data.status, data.remark, item_updates,
+            )
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.MATERIAL)
         try:
             await publish_stock_event(

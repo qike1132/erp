@@ -20,6 +20,25 @@ const fontAwesomeIconIncludes = [
   ...fontAwesomeLoaderSource.matchAll(/import\('@fortawesome\/free-solid-svg-icons\/([^']+)'\)/g),
 ].map((m) => `@fortawesome/free-solid-svg-icons/${m[1]}`)
 
+/**
+ * 开发/预览服务器的监听地址与 Host 白名单（M10）。
+ *
+ * 原配置是 `host: '0.0.0.0'` + `allowedHosts: true`：dev server 连同它的
+ * `/api` → `127.0.0.1:5002` 代理一起对整个局域网开放，且完全关闭 Host 头校验。
+ * 后者是 DNS rebinding 的入口——恶意页面把自己的域名解析到 127.0.0.1，浏览器
+ * 便会以「同源」身份读取 dev server 的响应（含被代理的后端接口）。
+ *
+ * 现默认只监听回环，需要手机或其它机器连开发机时显式放开：
+ *   VITE_DEV_HOST=0.0.0.0 npm run dev
+ * Host 白名单用逗号分隔增补：VITE_DEV_ALLOWED_HOSTS=localhost,dev.intra
+ * 注：IP 直连（如 http://192.168.0.95:5173）不受 Host 白名单限制，Vite 始终放行 IP 字面量。
+ */
+const devHost = process.env.VITE_DEV_HOST || '127.0.0.1'
+const devAllowedHosts = (process.env.VITE_DEV_ALLOWED_HOSTS || 'localhost,127.0.0.1,192.168.0.95')
+  .split(',')
+  .map((h) => h.trim())
+  .filter(Boolean)
+
 export default defineConfig(({ mode }) => {
   // P2（2026-10-24）：删除未使用的 loadEnv 调用（原 `const env = loadEnv(...)` 赋值后
   // 从未使用，且第三参 '' 是「加载全部 env 含非 VITE_ 前缀」的宽口径）。
@@ -218,9 +237,9 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      host: '0.0.0.0',
+      host: devHost,
       port: 3000,
-      allowedHosts: true,
+      allowedHosts: devAllowedHosts,
       // 构建交换目录必须排除出 watcher（vite 的 ignored 是追加语义，不动默认项）：
       // dev server 只忽略 build.outDir（默认 dist），而 build:atomic 的 --outDir dist-new 是
       // CLI 参数、dev server 解析不到 → chokidar 持有 dist-new 句柄，swap-dist.mjs 的 rename
@@ -260,8 +279,10 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: {
-      host: '0.0.0.0',
+      // 同 server：默认只监听回环，需要局域网访问时用 VITE_DEV_HOST 显式放开
+      host: devHost,
       port: 3000,
+      allowedHosts: devAllowedHosts,
       proxy: {
         '/api': {
           target: 'http://127.0.0.1:5002',

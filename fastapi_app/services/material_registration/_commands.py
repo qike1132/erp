@@ -4,7 +4,7 @@
 """
 import logging
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, selectinload
@@ -109,7 +109,26 @@ async def create_registration(db, purchase_order_id: int, user_id: int | None = 
 
 async def update_registration(db, reg_id: int, status: str | None = None,
                               remark: str | None = None, items: list[dict] | None = None) -> dict:
-    """更新来料登记"""
+    """更新来料登记。
+
+    评审 H5：旧实现只做无锁 ``db.get`` 后直接赋值 ``received_quantity``——任意超收/
+    负收都能写库，且与 ``receive_material`` 的 FOR UPDATE 不是同一互斥区间，
+    并发时后提交的旧绝对值会覆盖先完成的新值。现在：
+    1. 先锁登记行（串行化同一登记下的编辑/收货）；
+    2. 明细行按 id 升序一次性 ``FOR UPDATE``（单条 SQL，非逐行），
+       再在加锁后的值上校验 ``0 <= 数量 <= 采购数量``；
+    3. 与收货链共用同一数量边界，避免两套口径。
+    """
+    # 先锁登记行：同一登记的所有编辑请求在此串行化。此处只取 id，避免
+    # joinedload + FOR UPDATE 触到外连接不可加锁（PostgreSQL 限制）。
+    locked = await db.execute(
+        select(MaterialRegistration.id)
+        .where(MaterialRegistration.id == reg_id)
+        .with_for_update()
+    )
+    if locked.scalar_one_or_none() is None:
+        raise ValueError("来料登记不存在")
+
     result = await db.execute(
         select(MaterialRegistration)
         .options(
@@ -128,15 +147,41 @@ async def update_registration(db, reg_id: int, status: str | None = None,
         reg.remark = remark
 
     if items is not None:
+        # 明细行一次性按 id 升序加锁（避免循环内逐条 SELECT 的 N+1，也避免
+        # 两个请求以不同顺序加锁而死锁）。未提交 id 的明细不参与更新。
+        target_ids = [int(d['id']) for d in items if d.get('id')]
+        locked_items: dict[int, MaterialRegistrationItem] = {}
+        if target_ids:
+            locked_rows = await db.execute(
+                select(MaterialRegistrationItem)
+                .where(MaterialRegistrationItem.id.in_(target_ids))
+                .order_by(MaterialRegistrationItem.id)
+                .with_for_update()
+            )
+            locked_items = {row.id: row for row in locked_rows.scalars().all()}
+
         for item_data in items:
             item_id = item_data.get('id')
-            if item_id:
-                item = await db.get(MaterialRegistrationItem, item_id)
-                if item and item.registration_id == reg_id:
-                    if 'received_quantity' in item_data:
-                        item.received_quantity = Decimal(str(item_data['received_quantity']))
-                    if 'remark' in item_data:
-                        item.remark = item_data['remark']
+            if not item_id:
+                continue
+            item = locked_items.get(int(item_id))
+            if not item or item.registration_id != reg_id:
+                continue
+            if 'received_quantity' in item_data:
+                raw_qty = item_data['received_quantity']
+                try:
+                    new_qty = Decimal(str(raw_qty))
+                except (InvalidOperation, ValueError) as exc:
+                    raise ValueError("收货数量必须为数字") from exc
+                if new_qty < 0:
+                    raise ValueError("收货数量不能为负数")
+                if new_qty > (item.ordered_quantity or Decimal('0')):
+                    raise ValueError("收货数量不能超过采购数量")
+                # 校验用 Decimal（精确比较），落库前转回 float：模型把这两列声明为
+                # Mapped[float]，实际列类型是 Numeric(12,2)，PostgreSQL 入库时按 2 位小数取值
+                item.received_quantity = float(new_qty)
+            if 'remark' in item_data:
+                item.remark = item_data['remark']
 
     # 自动更新状态
     reg.update_status()

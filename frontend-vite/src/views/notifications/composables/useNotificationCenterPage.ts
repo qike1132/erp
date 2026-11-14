@@ -82,8 +82,36 @@ export function useNotificationCenterPage() {
     }
   }
 
+  /**
+   * 订单详情页 `/beile-order` 是 PC 专属路由：移动端路由表里没有它，push 会命中
+   * catch-all 再被兜回 `/dashboard` —— 用户看到的是「点了通知没反应」（M8）。
+   *
+   * 所以按「当前实际路由表」判断目标是否存在，而不是按设备类型分支：路由表就是
+   * 事实来源，设备判定（UA/触屏）改了也不会让这里悄悄失效。
+   */
+  const ORDER_DETAIL_PATH = '/beile-order'
+  /** 移动端订单入口（PC 上同样存在，作为详情页不可用时的退路） */
+  const ORDER_FALLBACK_PATH = '/customer-order'
+
+  /** 目标路径在当前路由表中是否有真实页面（非 catch-all 兜底） */
+  function routeExists(path: string): boolean {
+    const resolved = router.resolve(path)
+    return resolved.matched.length > 0 && !resolved.matched.some((r) => r.path.includes(':pathMatch'))
+  }
+
   function navigateToOrder(orderId: number) {
-    router.push({ path: '/beile-order', query: { order_id: String(orderId) } })
+    const query = { order_id: String(orderId) }
+    if (routeExists(ORDER_DETAIL_PATH)) {
+      router.push({ path: ORDER_DETAIL_PATH, query })
+      return
+    }
+    // 详情页在当前设备不可用：退到订单入口并说明原因，别静默丢回首页
+    if (routeExists(ORDER_FALLBACK_PATH)) {
+      toast.info('订单详情暂不支持手机端查看，已为你打开订单页面')
+      router.push({ path: ORDER_FALLBACK_PATH, query })
+      return
+    }
+    toast.info('订单详情暂不支持当前设备查看')
   }
 
   // 通知项点击：跳转订单页 + 标记已读并从列表移除

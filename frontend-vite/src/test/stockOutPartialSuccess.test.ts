@@ -20,6 +20,7 @@ vi.mock('@/api', () => ({
 vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
 
 import { useStockOutActions } from '@/views/stock/composables/useStockOutActions'
+import { showToast } from '@/composables/useToast'
 
 function stagedItem(over: Record<string, unknown> = {}) {
   return {
@@ -35,8 +36,8 @@ describe('出货批量提交部分成功处理', () => {
   })
 
   it('部分成功：只移除成功行，失败行留在暂存区', async () => {
-    const a = stagedItem({ product_id: '1' })
-    const b = stagedItem({ product_id: '2' })
+    const a = stagedItem({ id: 1, product_id: '1' })
+    const b = stagedItem({ id: 2, product_id: '2' })
     const staged = ref([a, b])
     batchSubmitStockouts.mockResolvedValue({
       success: true,
@@ -49,8 +50,22 @@ describe('出货批量提交部分成功处理', () => {
     expect(staged.value[0]?.product_id).toBe('2')
   })
 
+  it('行 id 撞号（绕开生成器）→ 不按 id 删任何行，保留全部并提示核对', async () => {
+    // 生产 id 由 StockOutTab.nextStagedId 保证唯一；这里模拟回归：撞号时按 id 删
+    // 会连带删掉同 id 的失败行，用户以为已出库而实际没出。
+    const staged = ref([stagedItem({ id: 7, product_id: '1' }), stagedItem({ id: 7, product_id: '2' })])
+    batchSubmitStockouts.mockResolvedValue({
+      success: true,
+      results: [{ success: true }, { success: false, error: '批次余量不足' }],
+    })
+    const { submitBatch } = useStockOutActions(staged, ref(false), () => {})
+    await submitBatch()
+    expect(staged.value).toHaveLength(2)
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('无法对齐'), 'warning')
+  })
+
   it('全部成功：清空暂存（原有行为不回归）', async () => {
-    const staged = ref([stagedItem(), stagedItem()])
+    const staged = ref([stagedItem({ id: 1 }), stagedItem({ id: 2 })])
     batchSubmitStockouts.mockResolvedValue({
       success: true,
       results: [{ success: true }, { success: true }],

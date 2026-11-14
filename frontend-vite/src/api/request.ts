@@ -150,7 +150,8 @@ export function createTrackedController(): AbortController {
 export function abortPendingRequests(): void {
   for (const controller of _pendingControllers) controller.abort()
   _pendingControllers.clear()
-  // 取消的请求不会 settle（见 _silenceCanceled），必须主动清掉去重表，避免永久持有
+  // 取消会以 CanceledError reject 并清空去重表；这里主动清一次，避免在
+  // finally 回调执行前，同 key 的并发 GET 复用已取消的 promise。
   _inflightGet.clear()
 }
 
@@ -159,15 +160,17 @@ export function isCanceledError(error: unknown): boolean {
 }
 
 /**
- * 路由切换取消的请求**不得**触发调用方的 catch/toast：
- * 返回一个永不 settle 的 Promise（调用方的 await 不再继续）。
- * 取消后无外部引用，整条 promise 链可被 GC；去重表由 abortPendingRequests 清空。
+ * 路由切换取消的请求**必须正常 settle**（reject 一个 CanceledError）。
+ *
+ * H8（评审）：旧实现返回永不 settle 的 Promise，调用方的 await 永久挂起 ——
+ * Vue Query 的 queryFn 因此不会 reject，旧查询的 fetchStatus 永远停在 fetching，
+ * 慢请求下「切走再切回」会一直显示加载中，刷新缓存也不能自愈。
+ *
+ * 展示层若不想把取消当失败提示，用 isCanceledError(error) 过滤即可；
+ * 这比让整条链路悬空安全得多。
  */
 export function _silenceCanceled<T>(promise: Promise<T>): Promise<T> {
-  return promise.catch((error: unknown) => {
-    if (isCanceledError(error)) return new Promise<T>(() => {})
-    throw error
-  })
+  return promise
 }
 
 function _dedupeKey(url: string, params?: Record<string, unknown>, routeCancel = true): string {
@@ -188,11 +191,8 @@ export function get<T>(
   // 读接口快速失败：单次请求（axios 15s 超时即抛错），不做网络重试。
   // 叠加重试会让 UI 的"加载中"最长挂约 48s；失败后由前端错误态 + 重试按钮兜底。
   // routeCancel=false：请求归「长生命周期缓存/单飞」所有（Vue Query 查询、store 预取），
-  // 不属于任何路由。这类请求若被 abortPendingRequests() 取消，_silenceCanceled 会把取消
-  // 变成永不 settle 的 Promise → 查询永久停在 fetching、单飞表残留死条目，用户侧表现是
-  // 「页面一直加载中且刷新无法自愈」（2026-10-22 登录后仪表盘/板房无数据事故）。
-  // 故不注册到 _pendingControllers，但**仍保留 GET 去重**——这正是逐端点绕开
-  // service.get() 会丢掉的东西。
+  // 不属于任何路由。这类请求不注册到 _pendingControllers，因此不会在导航时被取消；
+  // **仍保留 GET 去重**——这正是逐端点绕开 service.get() 会丢掉的东西。
   const controller = routeCancel ? createTrackedController() : new AbortController()
   if (options?.signal) {
     if (options.signal.aborted) controller.abort()

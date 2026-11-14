@@ -319,7 +319,17 @@ async def confirm_staging(db: AsyncSession, session_id: str, batch_id: str='', c
     conditions = [StagingPurchasePlan.session_id == session_id]
     if batch_id:
         conditions.append(StagingPurchasePlan.upload_batch_id == batch_id)
-    result = await db.execute(select(StagingPurchasePlan).where(*conditions))
+    # 评审 H4：确认必须先锁住待确认的暂存行，再读进内存。旧实现是普通 SELECT，
+    # 两个并发/双击请求都能读到同一批行，随后各自建明细——同一批数量翻倍，
+    # 而 DELETE 影响 0 行也发现不了。按 id 升序加锁，避免不同请求交叉持锁死锁。
+    # READ COMMITTED 下 FOR UPDATE 会等锁后重新求值 WHERE，已被前一个事务删掉的行
+    # 不会再返回，第二个请求自然落到「暂存区无数据」。
+    result = await db.execute(
+        select(StagingPurchasePlan)
+        .where(*conditions)
+        .order_by(StagingPurchasePlan.id)
+        .with_for_update()
+    )
     records = result.scalars().all()
     if not records:
         raise ValueError('暂存区无数据')

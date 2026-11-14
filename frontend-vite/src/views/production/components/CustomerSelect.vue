@@ -5,6 +5,7 @@
       :model-value="modelValue == null ? '' : String(modelValue)"
       :options="selectOptions"
       :placeholder="placeholder"
+      :disabled="disabled"
       label="客户"
       @update:model-value="onSelect"
       @keydown.esc.stop
@@ -14,7 +15,8 @@
       type="button"
       class="pr-customer-clear"
       aria-label="清除客户"
-      @click="emit('update:modelValue', null)"
+      :disabled="disabled"
+      @click="!disabled && emit('update:modelValue', null)"
     >
       ×
     </button>
@@ -36,9 +38,11 @@ const props = withDefaults(defineProps<{
   options: CustomerOption[]
   placeholder?: string
   id?: string
+  disabled?: boolean
 }>(), {
   placeholder: '客户（选填）',
   id: undefined,
+  disabled: false,
 })
 
 const emit = defineEmits<{

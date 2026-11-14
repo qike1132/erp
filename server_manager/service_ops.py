@@ -433,9 +433,15 @@ class ServiceOps:
                     return False
         if existed and 'RUNNING' in self.svc_state(name):
             self._log_message(f'{name} 正在运行，配置变更将在下次启动生效（可点『重启』立即生效）', 'WARNING')
+        # H11（评审）：关键配置写失败必须汇总为安装失败。旧实现逐项只 WARNING、
+        # 最终恒返回 True——AppEnvironmentExtra 没写进去时 worker 可能以开发配置启动，
+        # 界面却报「安装完成」。
+        critical_failures: list[str] = []
         # Step 2: 设置启动参数（NSSM AppParameters 接受空格分隔的完整命令行）
         if params:
-            self.run_capture([nssm, 'set', name, 'AppParameters', ' '.join(params)], timeout=15)
+            code, out = self.run_capture([nssm, 'set', name, 'AppParameters', ' '.join(params)], timeout=15)
+            if code != 0:
+                critical_failures.append(f'AppParameters({out.strip() or f"退出码 {code}"})')
         # Step 3: 设置其他属性
         #   Application 也一并写入：服务已存在时，这一步会把可执行文件路径纠正为当前值
         #   （换过 Python / 虚拟环境后，重新点『安装服务』即可修复指向）。
@@ -463,11 +469,19 @@ class ServiceOps:
             code, out = self.run_capture(args, timeout=15)
             if code != 0:
                 # 旧实现丢弃了全部返回码：某项没写进去也照样报「已注册」，无从判断。
-                self._log_message(f'{name} 设置 {key} 失败: {out.strip() or f"退出码 {code}"}', 'WARNING')
+                message = out.strip() or f"退出码 {code}"
+                self._log_message(f'{name} 设置 {key} 失败: {message}', 'WARNING')
+                if key in ('Application', 'AppDirectory', 'AppEnvironmentExtra', 'AppExit', 'Start'):
+                    critical_failures.append(f'{key}({message})')
         # Step 4: 依赖关系（开机由 SCM 串行保证启动顺序）
         #   只写已注册的依赖服务：依赖一个不存在的服务会让 SCM 直接拒绝启动本服务
         #   （错误 1068「依存服务或组无法启动」），比没有依赖更糟。
-        self.apply_depends(name, depends)
+        if not self.apply_depends(name, depends):
+            critical_failures.append('DependOnService')
+        if critical_failures:
+            self._log_message(
+                f'{name} 安装未完成：关键配置写入失败（{"; ".join(critical_failures)}）', 'ERROR')
+            return False
         self._log_message(f'{name} {"已存在，配置已更新" if existed else "已注册为 Windows 服务"}（开机自启 + 崩溃自动重启）')
         return True
 
@@ -538,30 +552,35 @@ class ServiceOps:
             return False, f'写后校验不一致：期望 {len(updated)} 项，回读 {got}'
         return True, f'{name} 已写入 {new_element}（重启该服务后生效）'
 
-    def apply_depends(self, name, depends):
-        """设置服务的 SCM 依赖关系（DependOnService）。"""
+    def apply_depends(self, name, depends) -> bool:
+        """设置服务的 SCM 依赖关系（DependOnService），返回是否写入成功。
+
+        返回 False 只表示「写入尝试失败」（nssm 与注册表回退都不成功），
+        由 nssm_install 汇总为安装失败；依赖服务不存在属环境前置条件缺失，
+        保持既有「告警并跳过」语义（不在此判死，避免把未装 Redis 的机器卡死）。
+        """
         if not depends:
-            return
+            return True
         missing = [d for d in depends if not self.svc_installed(d)]
         if missing:
             self._log_message(
                 f'{name} 跳过依赖设置：{", ".join(missing)} 服务不存在，'
                 f'请先安装 Redis 服务（依赖不存在的服务会导致本服务无法启动）', 'WARNING')
-            return
+            return True
         nssm = self.find_nssm()
         if not nssm:
-            return
+            return True
         code, out = self.run_capture([nssm, 'set', name, 'DependOnService', ' '.join(depends)], timeout=15)
         if code != 0:
             # 旧版 NSSM 无该参数，回退直接写注册表（SCM 实际读取的位置）
-            self._set_depends_registry(name, depends, out)
-        else:
-            self._log_message(f'{name} 依赖已设置: {", ".join(depends)}')
+            return self._set_depends_registry(name, depends, out)
+        self._log_message(f'{name} 依赖已设置: {", ".join(depends)}')
+        return True
 
-    def _set_depends_registry(self, name, depends, reason=''):
+    def _set_depends_registry(self, name, depends, reason='') -> bool:
         """回退路径：直接写 HKLM\\SYSTEM\\...\\Services\\<name>\\DependOnService (REG_MULTI_SZ)。"""
         if not _IS_WINDOWS:
-            return
+            return False
         try:
             import winreg
             key = winreg.OpenKey(
@@ -570,8 +589,10 @@ class ServiceOps:
             with key:
                 winreg.SetValueEx(key, 'DependOnService', 0, winreg.REG_MULTI_SZ, list(depends))
             self._log_message(f'{name} 依赖已写入注册表: {", ".join(depends)}')
+            return True
         except OSError as e:
             self._log_message(f'{name} 设置依赖失败（nssm: {reason.strip() or "非零退出"}）: {e}', 'WARNING')
+            return False
 
     def _clean_ports_if_injected(self):
         """启动前清 5002/3000 端口占用（能力由 app 注入；未注入则跳过）。

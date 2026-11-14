@@ -96,9 +96,16 @@ class TestSerializeValue:
         assert serialize_value('hello') == 'hello'
 
     def test_datetime(self):
+        # M1（评审）：旧实现 strftime('%Y-%m-%d %H:%M:%S') 直接丢微秒，
+        # 恢复后 create_time 之类的列会整体「归零到秒」。
         from datetime import datetime
         dt = datetime(2024, 1, 15, 10, 30, 0)
-        assert serialize_value(dt) == '2024-01-15 10:30:00'
+        assert serialize_value(dt) == '2024-01-15 10:30:00.000000'
+
+    def test_datetime_keeps_microseconds(self):
+        from datetime import datetime
+        dt = datetime(2024, 1, 15, 10, 30, 0, 123456)
+        assert serialize_value(dt).endswith('.123456')
 
     def test_date(self):
         from datetime import date
@@ -106,8 +113,11 @@ class TestSerializeValue:
         assert serialize_value(d) == '2024-01-15'
 
     def test_decimal(self):
+        # M1（评审）：旧实现 float(Decimal) 会把 12.30 变成 12.3、把 18 位金额
+        # 截成 15 位有效数字；字符串形式才能无损往返。
         from decimal import Decimal
-        assert serialize_value(Decimal('3.14')) == 3.14
+        assert serialize_value(Decimal('3.14')) == '3.14'
+        assert serialize_value(Decimal('12.30')) == '12.30'
 
     def test_uuid(self):
         from uuid import UUID
@@ -137,6 +147,27 @@ class TestDeserializeValue:
         from sqlalchemy import Boolean
         assert deserialize_value(1, Boolean()) is True
         assert deserialize_value(0, Boolean()) is False
+
+    def test_datetime_roundtrip_keeps_microseconds(self):
+        from sqlalchemy import DateTime
+        dt = datetime(2024, 1, 15, 10, 30, 0, 654321)
+        assert deserialize_value(serialize_value(dt), DateTime()) == dt
+
+    def test_legacy_datetime_without_microseconds_still_parses(self):
+        # 历史备份产物是 "%Y-%m-%d %H:%M:%S"（无微秒），改格式后必须继续可读
+        from sqlalchemy import DateTime
+        assert deserialize_value(
+            '2024-01-15 10:30:00', DateTime(),
+        ) == datetime(2024, 1, 15, 10, 30, 0)
+
+    def test_decimal_string_and_legacy_float_both_work(self):
+        from decimal import Decimal
+
+        from sqlalchemy import Numeric
+        # 新格式：字符串（无损）
+        assert deserialize_value('12.30', Numeric(12, 2)) == Decimal('12.30')
+        # 旧格式：JSON number（float），仍要能读
+        assert deserialize_value(3.14, Numeric(12, 2)) == Decimal('3.14')
 
 
 class TestBuildColumnTypeMap:

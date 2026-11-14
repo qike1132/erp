@@ -12,16 +12,27 @@ from collections.abc import Sequence
 from fastapi_app.shared_models import Order
 
 
-def build_shipment_summary(orders: Sequence[Order], shipped_map: dict[int, int]) -> dict:
+def build_shipment_summary(
+    orders: Sequence[Order],
+    shipped_map: dict[int, int],
+    quantity_by_order: dict[int, int] | None = None,
+) -> dict:
     """根据订单列表与已出货映射，组装可出货量汇总与订单明细。
 
     Args:
         orders: 已按 order_date 升序的订单列表（可能为空）
         shipped_map: {order_id: 净出货量}（已扣除退货，且排除入库抵扣）。
             只统计 orders 内的订单 —— 键超出 orders 的部分会被忽略。
+        quantity_by_order: {order_id: 该 SKU 的订单数量}（多 SKU 订单专用）。
+            缺省时回退 ``order.quantity``（旧单 SKU 兼容值）。
 
     Returns:
         dict: { order_quantity, shipped_quantity, available_quantity, orders }
+
+    多 SKU 口径（评审 H3）：``Order.quantity`` 是整单所有 SKU 的数量之和，
+    而 ``Order.product_id`` 只是首 item 的兼容值。按产品算可发量时若继续用
+    ``order.quantity``，首 SKU 会拿到整单总数（超发），非首 SKU 又查不到订单。
+    因此调用方必须为订单内每个 SKU 传入各自的订单数量；本函数只做纯计算。
 
     口径说明（两处有意不同，勿当成 bug 去"修"）：
       · ``available_quantity`` 是**业务可发货量** = ``max(0, 订单总量 - 已出货总量)``，
@@ -45,17 +56,21 @@ def build_shipment_summary(orders: Sequence[Order], shipped_map: dict[int, int])
     order_details = []
 
     for order in orders:
-        # TODO(multi-sku-order): 遍历累加 order.quantity 在多 SKU 下语义变更，
-        # 待后续 spec 改造为遍历 order.items；当前依赖兼容值。
-        total_order_quantity += order.quantity
+        # 多 SKU：向调用方要「本 SKU 的订单量」，缺省才回退兼容值 order.quantity
+        order_quantity = (
+            quantity_by_order.get(order.id, order.quantity)
+            if quantity_by_order is not None
+            else order.quantity
+        )
+        total_order_quantity += order_quantity
         non_deduction_shipped = shipped_map.get(order.id, 0)
 
         order_details.append({
             'order_id': order.id,
             'order_no': order.order_no,
-            'quantity': order.quantity,
+            'quantity': order_quantity,
             'shipped': non_deduction_shipped,
-            'available': order.quantity - non_deduction_shipped,
+            'available': order_quantity - non_deduction_shipped,
         })
 
     # 只累加 orders 内的单：shipped_map 若含 orders 之外的 order_id（当前唯一调用方

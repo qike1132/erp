@@ -14,16 +14,11 @@ describe('request abort', () => {
     expect(b.signal.aborted).toBe(true)
   })
 
-  it('silences canceled errors so callers do not toast', async () => {
-    let settled = false
-    const p = _silenceCanceled(Promise.reject({ code: 'ERR_CANCELED' }))
-    p.then(
-      () => { settled = true },
-      () => { settled = true },
-    )
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(settled).toBe(false)
+  it('取消必须正常 settle（reject），调用方才能结束 fetching', async () => {
+    // H8：旧实现返回永不 settle 的 Promise，Vue Query 会永久停在 fetching。
+    // 现在取消以 CanceledError reject，展示层自行用 isCanceledError 过滤。
+    const canceled = { code: 'ERR_CANCELED' }
+    await expect(_silenceCanceled(Promise.reject(canceled))).rejects.toBe(canceled)
   })
 
   it('passes through real errors', async () => {

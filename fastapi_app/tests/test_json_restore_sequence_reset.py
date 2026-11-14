@@ -82,7 +82,7 @@ async def test_restore_legacy_json_wires_sequence_reset(monkeypatch) -> None:
     db = AsyncMock()
     db.flush = AsyncMock()
 
-    result = await json_backup.restore_legacy_json({'tables': {}}, db)
+    result = await json_backup.restore_legacy_json({'tables': {'products': {'columns': ['id'], 'rows': [[1]]}}}, db)
 
     assert reset_mock.await_count == 1
     assert result['database']['sequences_reset'] == 1
@@ -108,7 +108,7 @@ async def test_sequence_reset_error_makes_status_partial(monkeypatch) -> None:
     db = AsyncMock()
     db.flush = AsyncMock()
 
-    result = await json_backup.restore_legacy_json({'tables': {}}, db)
+    result = await json_backup.restore_legacy_json({'tables': {'products': {'columns': ['id'], 'rows': [[1]]}}}, db)
 
     assert result['database']['status'] == 'partial'
     assert any('主键序列重置失败' in e for e in result['errors'])

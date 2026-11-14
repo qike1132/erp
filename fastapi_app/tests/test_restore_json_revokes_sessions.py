@@ -39,8 +39,14 @@ def _json_result() -> dict:
 
 
 def _revoke_spy(calls: list[str], label: str = 'revoke') -> AsyncMock:
-    async def _fake_revoke() -> None:
+    """H2 起 revoke 返回结构化结果，spy 必须给出成功结构。
+
+    旧实现只 ``await`` 不取返回值，mock 返回 None 也能过；现在端点/服务层要读
+    ``revocation['ok']`` 决定「完成」还是「完成但有警告」，缺键会直接 AttributeError。
+    """
+    async def _fake_revoke() -> dict:
         calls.append(label)
+        return {'ok': True, 'errors': [], 'warnings': []}
 
     return AsyncMock(side_effect=_fake_revoke)
 

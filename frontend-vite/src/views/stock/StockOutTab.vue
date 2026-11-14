@@ -30,6 +30,7 @@
           <StockOutStagingList
             :staged="staged"
             :staged-total-qty="stagedTotalQty"
+            :disabled="submitting"
             @remove-item="removeStagedItem"
             @edit-item="openEditStaged"
           />
@@ -210,6 +211,8 @@ const staged = ref<StagedStockout[]>([])
 const { fetchAvailableShipment, checkProductAvailability } = useStockOutAvailabilityGates(staged)
 
 async function removeStagedItem(idx: number) {
+  // H6：提交在途时禁止增删改，避免响应按下标回落时错位
+  if (submitting.value) return
   const ok = await confirmDialog.confirm('确定删除？', '此操作不可恢复', 'danger')
   if (!ok) return
   staged.value.splice(idx, 1)
@@ -250,6 +253,20 @@ function checkBatchAvailability(opts: {
   return true
 }
 
+/**
+ * 暂存行 id 生成器（H6）。
+ *
+ * 必须是**唯一**的：批量提交部分成功时按 id 移除已入库存的行（见
+ * useStockOutActions.dropSucceeded），撞号会把同 id 的失败行一起删掉——失败行
+ * 从暂存区消失、用户以为已出库，实际没出。原实现 `Date.now()` 在同一毫秒内
+ * 连加两行就会撞号。
+ */
+let stagedIdSeq = Date.now()
+function nextStagedId(): number {
+  stagedIdSeq += 1
+  return stagedIdSeq
+}
+
 async function addStaged() {
   if (!canAdd.value) {
     showToast('请选择客户和产品，并输入数量', 'warning')
@@ -276,7 +293,7 @@ async function addStaged() {
   })) return
 
   staged.value.push({
-    id: Date.now(),
+    id: nextStagedId(),
     product_id: form.productId,
     product_name: form.search,
     customer: form.customer,
@@ -305,7 +322,8 @@ function addOcrStaged(items: StagedStockout[]) {
     showToast(`OCR 行数量无效（${invalid.quantity}），请修正后再暂存`, 'warning')
     return
   }
-  staged.value.push(...items)
+  // 重新分配 id：OCR 侧生成的 id 不保证与已有暂存行不撞号，而暂存区按 id 标识行
+  staged.value.push(...items.map((it) => ({ ...it, id: nextStagedId() })))
 }
 
 // === 编辑暂存 ===
@@ -318,6 +336,7 @@ const editStagedForm = reactive({ customer: '', date: '', productName: '', quant
 const editSaving = ref(false) // 保存链路在途标记：双击守卫 + 弹窗保存按钮禁用（OCR-2 M1）
 
 function openEditStaged(idx: number) {
+  if (submitting.value) return
   editSessionId.v++
   editStagedIdx.value = idx
   const item = staged.value[idx]

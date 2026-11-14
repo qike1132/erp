@@ -213,3 +213,104 @@ describe('useStagedEdit 可用备货：保存前校验', () => {
     expect(hook.editStagedVisible.value).toBe(false)
   })
 })
+
+/**
+ * H9：编辑暂存条目时客户名可改，但「可用备货」是「客户 + 产品」两个维度的事实。
+ * 客户一变，旧数字就属于另一个客户 —— 若不重查，保存校验会拿旧客户的额度放行
+ * 新客户的抵扣量，后端 min(请求, 可用) 再静默截断（少扣且无提示）。
+ */
+describe('useStagedEdit 可用备货：客户变更后必须重查（H9）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('改客户 → 立刻作废旧数字并按新客户重查', async () => {
+    mocks.availableStockinsMock
+      .mockResolvedValueOnce([{ id: 1, quantity: 10, deducted: 0, available: 10 }])
+      .mockResolvedValueOnce([{ id: 2, quantity: 3, deducted: 0, available: 3 }])
+    const items = ref<StagedItem[]>([staged({ uid: 'a' })])
+    const hook = useStagedEdit(items)
+
+    hook.openEditStaged('a')
+    await flush()
+    expect(hook.editAvailableStock.value).toBe(10)
+
+    hook.editStagedData.value!.customer = '新客户'
+    hook.refreshEditStock()
+    // 响应回来之前，旧客户的 10 件必须先清掉（否则弹窗里显示的是别人的额度）
+    expect(hook.editAvailableStock.value).toBe(0)
+    expect(hook.editStockState.value).toBe('loading')
+
+    await flush()
+    expect(mocks.availableStockinsMock).toHaveBeenLastCalledWith({ product_id: 1, customer: '新客户' })
+    expect(hook.editAvailableStock.value).toBe(3)
+    expect(hook.editStockState.value).toBe('ready')
+  })
+
+  it('旧客户的迟到响应不得覆盖新客户的结果', async () => {
+    const first = deferred<AvailableStockinItem[]>()
+    const second = deferred<AvailableStockinItem[]>()
+    mocks.availableStockinsMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const items = ref<StagedItem[]>([staged({ uid: 'a' })])
+    const hook = useStagedEdit(items)
+
+    hook.openEditStaged('a')
+    hook.editStagedData.value!.customer = '新客户'
+    hook.refreshEditStock()
+
+    second.resolve([{ id: 2, quantity: 3, deducted: 0, available: 3 }])
+    await second.promise
+    first.resolve([{ id: 1, quantity: 99, deducted: 0, available: 99 }])
+    await first.promise
+    await flush()
+
+    expect(hook.editAvailableStock.value).toBe(3)
+  })
+
+  it('新客户还在查询中 → 带抵扣数量保存被拦（不拿占位 0 或旧额度放行）', () => {
+    mocks.availableStockinsMock.mockReturnValueOnce(new Promise(() => {}))
+    const items = ref<StagedItem[]>([staged({ uid: 'a', deductStock: true, deductQuantity: 3 })])
+    const hook = useStagedEdit(items)
+
+    hook.openEditStaged('a')
+    expect(hook.editStockState.value).toBe('loading')
+
+    hook.saveEditStaged()
+
+    expect(mocks.showToastMock).toHaveBeenCalledWith(
+      expect.stringContaining('仍在查询中'),
+      'warning',
+    )
+    // 暂存条目保持原值（保存被拦，什么都没写回）
+    expect(items.value[0]!.deductQuantity).toBe(3)
+    expect(hook.editStagedVisible.value).toBe(true)
+  })
+
+  it('新客户无备货 → 抵扣数量被拦（旧客户的额度不再作数）', async () => {
+    mocks.availableStockinsMock
+      .mockResolvedValueOnce([{ id: 1, quantity: 10, deducted: 0, available: 10 }])
+      .mockResolvedValueOnce([])
+    const items = ref<StagedItem[]>([staged({ uid: 'a' })])
+    const hook = useStagedEdit(items)
+
+    hook.openEditStaged('a')
+    await flush()
+    // 旧客户有 10 件，用户据此填了 5
+    hook.editStagedData.value!.deductQuantity = 5
+    hook.editStagedData.value!.deductStock = true
+
+    hook.editStagedData.value!.customer = '新客户'
+    hook.refreshEditStock()
+    await flush()
+    expect(hook.editStockState.value).toBe('ready')
+    expect(hook.editAvailableStock.value).toBe(0)
+
+    hook.saveEditStaged()
+
+    expect(mocks.showToastMock).toHaveBeenCalledWith(
+      expect.stringContaining('超过当前可用备货 0'),
+      'warning',
+    )
+    expect(items.value[0]!.deductQuantity).toBe(0)
+  })
+})

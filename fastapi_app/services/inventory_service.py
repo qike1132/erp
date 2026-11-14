@@ -10,13 +10,37 @@ TODO(multi-sku-order): 本模块多处 SQL 直接引用 Order.product_id/Order.q
 """
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared.shipment_calc import build_shipment_summary
-from fastapi_app.shared_models import Order, Product, StockOut
+from fastapi_app.shared_models import Order, OrderItem, Product, StockOut
 
 logger = logging.getLogger(__name__)
+
+
+async def _product_order_quantities(
+    db: AsyncSession, order_ids: list[int], product_id: int
+) -> dict[int, int]:
+    """返回 {order_id: 该产品在该订单中的数量}（多 SKU 订单的唯一权威口径）。
+
+    旧单（无 OrderItem 明细）不在结果里，调用方回退 ``order.quantity``。
+    """
+    if not order_ids:
+        return {}
+    result = await db.execute(
+        select(OrderItem.order_id, func.sum(OrderItem.quantity))
+        .where(
+            OrderItem.order_id.in_(order_ids),
+            OrderItem.product_id == product_id,
+        )
+        .group_by(OrderItem.order_id)
+    )
+    return {
+        order_id: int(total)
+        for order_id, total in result.all()
+        if order_id is not None and total is not None
+    }
 
 
 async def calculate_available_shipment_quantity(
@@ -34,12 +58,19 @@ async def calculate_available_shipment_quantity(
     lock_orders 默认对订单行加排他行锁（出货提交路径防超量竞态的依据，
     勿在写路径关闭）。仅展示类端点可传 lock_orders=False：其会话可能来自
     只读副本，热备副本处于只读模式，无法执行行锁查询。
+
+    多 SKU（评审 H3）：订单必须按 OrderItem 的 (order_id, product_id) 聚合。
+    旧实现按 ``Order.product_id == product_id`` 选单、再用整单 ``Order.quantity``
+    算量——批量下单把首 SKU 写进兼容列、把所有 item 数量之和写进 quantity，
+    于是首 SKU 能按整单总数超发，非首 SKU 直接「没有可用订单」。
     """
+    # 命中本产品的订单：有明细的按明细，旧单（无明细）回退兼容列
+    item_order_ids = select(OrderItem.order_id).where(OrderItem.product_id == product_id)
     where_clause = [
-        Order.product_id == product_id,
         Order.customer == customer,
         # 软删除订单不得计入可出货量，否则删除订单后仍能按已删订单的数量出货/抵扣
         Order.is_deleted.isnot(True),
+        or_(Order.product_id == product_id, Order.id.in_(item_order_ids)),
     ]
 
     if lock_orders:
@@ -66,13 +97,16 @@ async def calculate_available_shipment_quantity(
         select(StockOut.order_id, func.sum(StockOut.quantity - StockOut.returned_quantity))
         .where(
             StockOut.order_id.in_(order_ids),
-            StockOut.stockin_id.is_(None)
+            StockOut.stockin_id.is_(None),
+            # 多 SKU：已出货量必须按产品统计，否则 A 的出货会冲抵 B 的订单余量
+            StockOut.product_id == product_id,
         )
         .group_by(StockOut.order_id)
     )
     # order_id 列类型可空，查询已用 .in_(order_ids) 排除 NULL，守卫仅作类型收窄
     shipped_map = {o_id: total for o_id, total in shipped_result.all() if o_id is not None}
-    summary = build_shipment_summary(orders, shipped_map)
+    quantity_by_order = await _product_order_quantities(db, order_ids, product_id)
+    summary = build_shipment_summary(orders, shipped_map, quantity_by_order)
 
     # 实物封顶（2026-10-06 校准）：订单口径的可出货量不得超过产品净存量
     # （备货 + 生产 - 出库）。净存量无锁读取——写路径的原子负库存守卫

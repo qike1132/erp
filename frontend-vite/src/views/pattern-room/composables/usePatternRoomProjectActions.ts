@@ -97,15 +97,19 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
   async function onEditProjectFromCard(id: number) {
     if (!requireManage()) return
     selectedProjectId.value = id
-    const detail = await projectHook.fetchDetail(id)
-    if (!detail) {
-      // fetchDetail 吞异常返回 null：不提示的话「点了编辑毫无反应」，
-      // 用户无从判断是没权限、项目被删还是网络问题（同 AUD-12 的假成功缺口）
+    const outcome = await projectHook.fetchDetail(id)
+    // 已被更新的查询取代（用户连着点了另一张卡片）：这次结果不可用，静默放弃。
+    // 既不能拿它填表单（字段是别的项目的），也不该报错——最新那次查询会自己收尾。
+    if (outcome.status === 'stale') return
+    if (outcome.status === 'error') {
+      // 请求失败：不提示的话「点了编辑毫无反应」，用户无从判断是没权限、
+      // 项目被删还是网络问题（同 AUD-12 的假成功缺口）
       if (projectHook.errorStatus.value !== 403) {
         showToast(projectHook.error.value ?? '加载打样详情失败，请重试', 'error')
       }
       return
     }
+    const detail = outcome.detail
     projectFormMode.value = 'edit'
     formPatternMakerId.value = detail.pattern_maker_id ?? null
     pendingProjectImage.value = null

@@ -30,6 +30,7 @@
 import { ref, computed, h, defineComponent, markRaw, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { isNavPathAllowed } from '@/router/navAccess'
 import MobileTabBar from './components/MobileTabBar.vue'
 import MobileNotificationBell from './components/MobileNotificationBell.vue'
 
@@ -95,7 +96,8 @@ const _tabToItem = (t: TabDef) => ({ name: t.name, label: t.label, to: t.path, i
 const tabs = computed(() => [
   ..._tabDefs.slice(0, 2).map(_tabToItem),
   { name: 'quick', label: '快捷', center: true, icon: createSvgIcon(_quickSvg) },
-  // F3-06：「订单」tab 同样按白名单过滤（无 customer_order 权限不再显示）
+  // 「订单」按后端白名单过滤（无 customer_order 权限不显示）；
+  // 「我的」在路由表声明 navExempt，始终显示（否则非超管用户无处退出登录）
   ..._tabDefs.slice(2).filter((t) => pathAllowed(t.path)).map(_tabToItem),
 ])
 
@@ -119,21 +121,30 @@ const _quickDefs = [
 /** F3-06（2026-10-24 审计）：导航白名单路径扁平集（非超管时来自后端下发）。
  * 快捷面板与 TabBar 据此过滤——此前固定渲染全部入口，无权限用户点了被守卫
  * 静默弹回首页、零反馈（像「点了没反应」）。后端接口层 fail-closed 无越权。 */
-const allowedPaths = computed<Set<string>>(() => {
-  const paths = new Set<string>()
+const allowedPaths = computed<string[]>(() => {
+  const paths: string[] = []
   for (const section of authStore.filteredNavSections) {
     for (const item of section.items) {
-      if (item.path) paths.add(item.path)
+      if (item.path) paths.push(item.path)
     }
   }
   return paths
 })
 
+/**
+ * 单个入口是否可见（F3-06 / M7）。
+ *
+ * 白名单只管「后端下发的菜单」。移动端自有入口（/profile 我的、/shipment 出货、
+ * /incoming 来料登记）由本布局定义，后端导航数据里没有这些路径，因此路由表用
+ * `meta.navExempt` 显式声明豁免 —— 这里必须读路由 meta，而不是在本文件另存一份
+ * 路径表：两处名单一旦分叉，「我的」tab 就会在非超管账号下凭空消失（用户连
+ * 退出登录的入口都没有），而守卫那边却认为该路径合法。
+ */
 function pathAllowed(path: string): boolean {
   // 超管/白名单未加载时放行（后端接口层 fail-closed 兜底）；已加载则按白名单
   if (!authStore.isLoggedIn || !authStore.loaded) return true
-  if (allowedPaths.value.size === 0) return true
-  return allowedPaths.value.has(path)
+  if (allowedPaths.value.length === 0) return true
+  return isNavPathAllowed(path, allowedPaths.value, { navExempt: router.resolve(path).meta.navExempt === true })
 }
 
 const quickActions = computed<QuickAction[]>(() =>

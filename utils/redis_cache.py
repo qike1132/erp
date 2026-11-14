@@ -114,6 +114,11 @@ class RedisCacheManager:
         # 不能用全局 default_timeout —— 否则 set(timeout=30) 在降级路径下会
         # 按 300 秒过期（安全复审 2026-09-28 指出的真实缺陷）。
         self._fallback_timestamps: dict[str, float] = {}
+        # 失效墓碑（评审 M6）：Redis unlink/scan 失败时，本地记住「这些键已失效」，
+        # get 一律按 miss 处理并在下次 delete 成功时清除。否则 Redis 抖动期间删过的
+        # 缓存（导航/客户/商品/WS 票据）在恢复后会被本进程重新读到旧值。
+        self._invalidated_keys: dict[str, float] = {}
+        self._invalidated_prefixes: dict[str, float] = {}
         self._lock = asyncio.Lock()
         # --- 自愈重连状态（见类 docstring）---
         #: init_app 时记住的连接参数；为 None 表示从未初始化过，不可凭空重建。
@@ -317,6 +322,22 @@ class RedisCacheManager:
                 self._fallback_cache.pop(k, None)
                 del self._fallback_timestamps[k]
 
+    # 失效墓碑的最长保留时间：超过后按正常 TTL 也应已过期，不必再记忆。
+    _INVALIDATION_TTL = 3600.0
+
+    def _prune_invalidations(self) -> None:
+        now = time.time()
+        for store in (self._invalidated_keys, self._invalidated_prefixes):
+            for key, marked_at in list(store.items()):
+                if now - marked_at > self._INVALIDATION_TTL:
+                    del store[key]
+
+    def _is_invalidated(self, full_key: str) -> bool:
+        self._prune_invalidations()
+        if full_key in self._invalidated_keys:
+            return True
+        return any(full_key.startswith(prefix) for prefix in self._invalidated_prefixes)
+
     async def get(self, key: str) -> Any | None:
         full_key = self._make_key(key)
 
@@ -326,6 +347,9 @@ class RedisCacheManager:
                 value = await client.get(full_key)
                 self.note_command_success()
                 if value:
+                    if self._is_invalidated(full_key):
+                        # 删除失败留下的墓碑：宁可当 miss 回源，也不返回可能过期的值
+                        return None
                     return await _deserialize_async(value)
             except Exception as e:
                 logger.warning("Redis async get error: %s", e)
@@ -336,6 +360,8 @@ class RedisCacheManager:
             if expires_at is not None and time.time() > expires_at:
                 self._fallback_cache.pop(full_key, None)
                 del self._fallback_timestamps[full_key]
+                return None
+            if self._is_invalidated(full_key):
                 return None
             return self._fallback_cache.get(full_key)
 
@@ -363,23 +389,31 @@ class RedisCacheManager:
     async def delete(self, key: str) -> bool:
         full_key = self._make_key(key)
 
+        deleted = True
         client = self.ensure_client()
         if client:
             try:
                 await client.unlink(full_key)
                 self.note_command_success()
             except Exception as e:
+                deleted = False
                 logger.warning("Redis async unlink error: %s", e)
                 self.note_command_failure(e)
 
         async with self._lock:
             self._fallback_cache.pop(full_key, None)
             self._fallback_timestamps.pop(full_key, None)
-        return True
+            if deleted:
+                self._invalidated_keys.pop(full_key, None)
+            else:
+                # 远端可能仍留着旧值：立墓碑，本进程 get 一律 miss，直到下次真实删除成功
+                self._invalidated_keys[full_key] = time.time()
+        return deleted
 
     async def delete_pattern(self, pattern: str) -> int:
         full_pattern = self._make_key(pattern)
         deleted_count = 0
+        remote_ok = True
 
         client = self.ensure_client()
         if client:
@@ -400,6 +434,7 @@ class RedisCacheManager:
                 if iterations >= max_iterations:
                     logger.warning("delete_pattern 达到迭代上限 %d，模式: %s", max_iterations, full_pattern)
             except Exception as e:
+                remote_ok = False
                 logger.warning("Redis async delete_pattern error: %s", e)
                 self.note_command_failure(e)
 
@@ -410,6 +445,12 @@ class RedisCacheManager:
                 del self._fallback_cache[key]
                 self._fallback_timestamps.pop(key, None)
                 deleted_count += 1
+            if remote_ok:
+                for marked in [p for p in self._invalidated_prefixes if p.startswith(prefix)]:
+                    self._invalidated_prefixes.pop(marked, None)
+            else:
+                # 远端可能仍有匹配键：记前缀墓碑，本进程命中一律 miss
+                self._invalidated_prefixes[prefix] = time.time()
 
         return deleted_count
 

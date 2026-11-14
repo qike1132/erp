@@ -70,19 +70,23 @@ describe('页面级查询：导航离开再返回', () => {
     expect(state?.status).toBe('success')
   })
 
-  it('对照组：默认（参与路由取消）的查询仍会被守卫取消', async () => {
+  it('对照组：默认（参与路由取消）的查询在取消后必须 settle，不能永久 fetching', async () => {
     const spy = mockSlowAxios()
-    const qc = new QueryClient()
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
 
-    void qc.prefetchQuery({ queryKey: ['legacy'], queryFn: () => get('/legacy') })
+    void qc.prefetchQuery({ queryKey: ['legacy'], queryFn: () => get('/legacy') }).catch(() => {})
     await new Promise((r) => setTimeout(r, 0))
     abortPendingRequests()
-    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 10))
 
     const state = qc.getQueryState(['legacy'])
     spy.mockRestore()
 
-    // 守卫的既有语义必须保留：普通页面请求仍应被取消（这是 abortPendingRequests 的设计意图）
-    expect(state?.fetchStatus).toBe('fetching')
+    // H8：取消必须以 reject 结束（fetchStatus 回到 idle），否则 queryFn 永久挂起；
+    // 报错/静默由展示层用 isCanceledError 决定，而不是让整条链路悬空。
+    expect(state?.fetchStatus).toBe('idle')
+    expect(state?.status).toBe('error')
   })
 })

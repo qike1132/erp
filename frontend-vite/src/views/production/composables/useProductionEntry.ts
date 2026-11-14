@@ -40,6 +40,15 @@ export interface EntryRow {
   saving: boolean
 }
 
+/** 提交上下文快照：提交开始后不再读页头 live 值（H7） */
+interface SubmitContext {
+  department: string
+  customerId: number | null
+  customerName: string
+  date: string
+  isPackaging: boolean
+}
+
 /** 刚创建的记录（用于完成态清单与「撤销本批」） */
 export interface CreatedRecordSummary {
   id: number
@@ -525,22 +534,22 @@ export function useProductionEntry(
     return ok
   }
 
-  function payloadOf(row: EntryRow): Record<string, unknown> {
+  function payloadOf(row: EntryRow, context: SubmitContext): Record<string, unknown> {
     return {
-      department: formDept.value,
+      department: context.department,
       product_id: row.product_id,
-      customer_id: customerId.value,
+      customer_id: context.customerId,
       product_name: row.product_name,
       barcode: row.barcode,
       unit_price: row.unit_price || 0,
       quantity: row.quantity,
       production_value: Number((row.quantity || 0) * (row.unit_price || 0)),
-      production_date: selectedDateModel.value,
+      production_date: context.date,
       remark: row.remark,
       // batch_no 后端不限部门存储，客户要求时其它部门也要带上；
       // 定制字段仅包装部有意义，不传避免脏数据
       batch_no: row.batch_no.trim() || null,
-      ...(isPackaging.value
+      ...(context.isPackaging
         ? { is_custom: row.is_custom, custom_country: row.is_custom ? row.custom_country.trim() || null : null }
         : {}),
     }
@@ -561,23 +570,39 @@ export function useProductionEntry(
   async function submitBatch() {
     if (isSubmitting.value) return
     if (submitState.value === 'done') return
+    // H7：价格闸门必须在本体里，不能只靠按钮 disabled —— Ctrl+Enter 与粘贴导入
+    // 都直接调用本函数，绕过后会以 unit_price=0 入库、产值静默失真。
+    if (pendingPrice.value > 0) {
+      showToast('单价仍在加载，请稍候再提交（避免以 0 单价入库）', 'warning')
+      return
+    }
     if (!validateRows()) return
+    // H7：提交开始即固定部门/客户/日期与整批 payload。逐行串行 await 时若继续读
+    // live 值，在途改页头会把同一批记录写到不同部门/客户/日期，回执也会错标。
+    const context: SubmitContext = {
+      department: formDept.value,
+      customerId: customerId.value,
+      customerName: customerName.value,
+      date: selectedDateModel.value,
+      isPackaging: isPackaging.value,
+    }
+    const batch = [...rows.value].map(row => ({ row, payload: payloadOf(row, context) }))
     isSubmitting.value = true
     const created: CreatedRecordSummary[] = []
     const failed: EntryRow[] = []
-    for (const row of [...rows.value]) {
+    for (const { row, payload } of batch) {
       row.saving = true
       row.error = ''
       try {
-        const res = (await dailyProductionApi.createRecord(payloadOf(row))) as { id?: number | null } | null
+        const res = (await dailyProductionApi.createRecord(payload)) as { id?: number | null } | null
         const createdId = res?.id ?? null
         if (createdId == null) throw new Error('创建未返回记录 id')
         created.push({
           id: createdId,
           product_name: row.product_name,
-          department: formDept.value,
+          department: context.department,
           quantity: row.quantity,
-          customer_name: customerName.value,
+          customer_name: context.customerName,
           batch_no: row.batch_no,
           unit_price: row.unit_price,
         })
@@ -762,14 +787,22 @@ export function useProductionEntry(
       })
     })
     // 单价并行补齐；重复提示走缓存
-    await Promise.all(rows.value.filter((r) => !r.unit_price).map(async (r) => {
-      try {
-        const infoRes = await dailyProductionApi.productInfo(r.product_id)
-        if (infoRes?.data?.price && rows.value.includes(r) && !r.unit_price) r.unit_price = infoRes.data.price
-      } catch {
-        /* 单价失败可手填 */
-      }
-    }))
+    // H7：粘贴导入同样计入 pendingPrice——旧实现这条路径不计数，
+    // 「粘贴后立刻提交」会以 unit_price=0 入库、产值静默为 0。
+    const pendingRows = rows.value.filter((r) => !r.unit_price)
+    pendingPrice.value += pendingRows.length
+    try {
+      await Promise.all(pendingRows.map(async (r) => {
+        try {
+          const infoRes = await dailyProductionApi.productInfo(r.product_id)
+          if (infoRes?.data?.price && rows.value.includes(r) && !r.unit_price) r.unit_price = infoRes.data.price
+        } catch {
+          /* 单价失败可手填 */
+        }
+      }))
+    } finally {
+      pendingPrice.value = Math.max(0, pendingPrice.value - pendingRows.length)
+    }
     const dropped = matched.length - Math.min(matched.length, Math.max(0, room))
     const parts = [`已导入 ${Math.min(matched.length, Math.max(0, room))} 行`]
     if (unmatched.length) parts.push(`${unmatched.length} 行未精确匹配到产品`)

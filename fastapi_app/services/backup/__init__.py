@@ -106,6 +106,7 @@ from .restore import (
     release_restore_lock,
     renew_restore_lock,
     restore_from_zip,
+    restore_lock_heartbeat,
     restore_non_dependent_components,
 )
 
@@ -220,6 +221,7 @@ __all__ = [  # noqa: RUF022
     # filestore
     "restore_filestore",
     "restore_from_zip",
+    "restore_lock_heartbeat",
     "restore_legacy_json",
     "restore_meilisearch",
     "restore_non_dependent_components",

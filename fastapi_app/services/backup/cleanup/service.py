@@ -202,11 +202,23 @@ class BackupCleanupService:
         """
         from fastapi_app.services.backup.orchestration.policy_service import BackupPolicyService
 
-        policy = BackupPolicyService()._load_policy_config().get('retention', {})
-        strategy = policy.get('strategy', 'days')
+        # M5（评审）：旧实现读 policy['retention']['strategy']，但
+        # _load_policy_config() 产出的是**扁平**配置（只有 retention_days/count），
+        # 于是 strategy 恒为 'days'，份数上限永远不生效——BACKUP_RETENTION_COUNT
+        # 等于死配置，备份可吃满磁盘。
+        config = BackupPolicyService()._load_policy_config()
+        strategy = 'hybrid'
+        # BACKUP_DIR 可被测试替换成 py.path/tmp_path 一类的目录对象，不能直接 `/` 拼
+        policy_file = Path(str(BACKUP_DIR)) / 'backup_policy.json'
+        if policy_file.exists():
+            try:
+                with open(policy_file, encoding='utf-8') as f:
+                    strategy = str(json.load(f).get('retention', {}).get('strategy', 'hybrid'))
+            except (OSError, ValueError, AttributeError) as exc:
+                logger.warning('读取备份策略文件失败，按 hybrid 处理份数上限: %s', exc)
         if strategy not in ('count', 'hybrid'):
             return files_to_keep
-        ceiling = retention_count()
+        ceiling = int(config.get('retention_count') or retention_count())
         if ceiling <= 0 or len(backup_files) <= ceiling:
             return files_to_keep
         # mtime 倒序（backup_files 已按 mtime 倒序，防御式再排一次）

@@ -249,6 +249,12 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
 
     affected_order_ids, created_stockouts = await _allocate_ship_fifo(db, staging, product_id, shipment_info)
 
+    # M2（评审）：会话是 autoflush=False，_allocate_ship_fifo 只 db.add 了 StockOut。
+    # 状态计算走 compute_order_status_from_db 的 SUM SQL，必须在它之前 flush，
+    # 否则「本次出货」对 SQL 不可见——订单确认后仍停在待备货，出货完成事件也不发。
+    # 这也顺带给 InventoryLog 的 related_id 备好新建行 id。
+    await db.flush()
+
     # 统一写入口：带 version 守卫并递增 version（原先直写两者都不做，
     # 与走乐观锁的写入口并发时会丢失更新）。
     updated_product = await apply_stock_delta_locked(db, product, -staging.quantity)
@@ -277,8 +283,7 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
     # P2（2026-10-24）：流水补齐 quantity_before/after 与 related_id。
     # 原先手写 InventoryLog 时三列全空，/stock 流水与 inventory_reconcile 的
     # 「结存 vs 流水」追溯在这批行上只剩变动量，且 related_id='' 断开了出货行↔流水关联。
-    # 必须先 flush 拿到新建 StockOut 的 id（同 stock_out_service 的 ','.join 口径）。
-    await db.flush()
+    # StockOut 的 id 已在状态重算前 flush 拿到（见上方 M2 注释）。
     before, after = inventory_balance_bounds(updated_product.current_stock, -staging.quantity)
     log = InventoryLog(
         product_id=staging.product_id,
@@ -335,6 +340,11 @@ async def confirm_staging_stockouts(
             errors.append(f'出货{staging.customer}-{staging.product_name}确认失败: {_row_failure_message(e)}')
             staging.status = staging_machine.transition(staging.status, StagingAction.REJECT)
 
+    # M2（评审）：except 里把行改成 REJECTED 只是内存状态；会话 autoflush=False，
+    # 若此处不先 flush，DELETE 在库里仍按旧 PENDING 匹配 0 行——紧接着的 flush
+    # 反而把「本该清掉」的 REJECTED 行永久写回，列表又只查 PENDING，用户再也看不到/
+    # 重试不了这一行。与 stockin/order 路径的「改状态后显式 flush 再删」对齐。
+    await db.flush()
     await db.execute(
         delete(StagingStockOut).where(
             StagingStockOut.session_id == session_id,

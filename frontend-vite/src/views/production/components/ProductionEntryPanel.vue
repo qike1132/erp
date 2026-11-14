@@ -15,6 +15,7 @@
             :class="['pr-qe-seg-btn', { on: formDept === d.value }]"
             :data-dept="d.value"
             :aria-pressed="formDept === d.value"
+            :disabled="isSubmitting"
             @click="pickDept(d.value)"
           >
             <FontAwesomeIcon :icon="d.icon" aria-hidden="true" />{{ d.label }}
@@ -24,12 +25,13 @@
           data-test="qe-customer"
           :model-value="customerId"
           :options="customerOptions"
+          :disabled="isSubmitting"
           placeholder="客户（必选）"
           @update:model-value="selectCustomer"
         />
         <label class="pr-qe-date">
           <span>日期</span>
-          <input v-model="selectedDateModel" type="date" data-test="qe-date" aria-label="生产日期" />
+          <input v-model="selectedDateModel" type="date" data-test="qe-date" aria-label="生产日期" :disabled="isSubmitting" />
         </label>
         <div class="pr-qe-sp" />
         <span
@@ -40,7 +42,7 @@
         >
           批次 {{ batchFilledCount }}/{{ rows.length }}
         </span>
-        <button class="pr-qe-back" data-test="qe-close" title="返回生产日报（Esc）" @click="closeEntryDrawer">
+        <button class="pr-qe-back" data-test="qe-close" title="返回生产日报（Esc）" :disabled="isSubmitting" @click="closeEntryDrawer">
           <FontAwesomeIcon icon="arrow-left" aria-hidden="true" /> 返回生产日报
         </button>
       </div>

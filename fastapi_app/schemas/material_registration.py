@@ -23,10 +23,21 @@ class MaterialRegistrationCreate(BaseModel):
     items: list[MaterialRegistrationItemCreate] = Field(default_factory=list)
 
 
+class MaterialRegistrationItemUpdate(BaseModel):
+    """明细增量更新：只允许改收货数量与备注（H5：禁止任意字段直写）。
+
+    ``received_quantity`` 的上界依赖明细自身的采购数量，Schema 只能保证非负；
+    服务层在行锁内再做 ``<= ordered_quantity`` 校验。
+    """
+    id: int = Field(..., gt=0)
+    received_quantity: float | None = Field(default=None, ge=0)
+    remark: str | None = None
+
+
 class MaterialRegistrationUpdate(BaseModel):
     status: str | None = None
     remark: str | None = None
-    items: list[dict] | None = None  # partial update for items
+    items: list[MaterialRegistrationItemUpdate] | None = None  # partial update for items
 
 
 class ReceiveMaterialRequest(BaseModel):

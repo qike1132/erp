@@ -44,6 +44,30 @@ def _day_range_utc(day_str: str, *, end: bool = False) -> datetime:
         d = d.replace(hour=23, minute=59, second=59)
     return d.replace(tzinfo=_BUSINESS_TZ).astimezone(UTC)
 
+
+def _day_bound_or_raise(day_str: str, *, field_name: str, end: bool = False) -> datetime:
+    """严格解析日期筛选参数：非法输入必须报错，不能当成「未筛选」。
+
+    评审 M4：旧实现把 ``_day_range_utc`` 的 ValueError 逐处 ``except: pass``，
+    ``start_date=not-a-date`` 会返回 200 + 整表数据，导出/对账的人以为筛选生效。
+    """
+    try:
+        return _day_range_utc(day_str, end=end)
+    except ValueError as exc:
+        raise ValueError(f'{field_name} 格式非法（应为 YYYY-MM-DD）：{day_str}') from exc
+
+
+def _validated_day_range(
+    start_date: str | None, end_date: str | None,
+) -> tuple[datetime | None, datetime | None]:
+    """返回 (起, 止) 边界；任一侧非法或区间反向都抛 ValueError。"""
+    start = _day_bound_or_raise(start_date, field_name='start_date') if start_date else None
+    end = _day_bound_or_raise(end_date, field_name='end_date', end=True) if end_date else None
+    if start is not None and end is not None and start > end:
+        raise ValueError('start_date 不能晚于 end_date')
+    return start, end
+
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -99,18 +123,11 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
     conditions: list[ColumnElement[bool]] = []
     if customer:
         conditions.append(StockIn.customer.like(f'%{escape_like(customer)}%'))
-    if start_date:
-        try:
-            sd = _day_range_utc(start_date)
-            conditions.append(StockIn.stockin_date >= sd)
-        except ValueError:
-            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
-    if end_date:
-        try:
-            ed = _day_range_utc(end_date, end=True)
-            conditions.append(StockIn.stockin_date <= ed)
-        except ValueError:
-            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
+    sd, ed = _validated_day_range(start_date, end_date)
+    if sd is not None:
+        conditions.append(StockIn.stockin_date >= sd)
+    if ed is not None:
+        conditions.append(StockIn.stockin_date <= ed)
 
     base_where = select(StockIn.id)
     if factory:
@@ -180,18 +197,11 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
     conditions: list[ColumnElement[bool]] = [StockOut.stockin_id.is_(None)]
     if customer:
         conditions.append(StockOut.customer.like(f'%{escape_like(customer)}%'))
-    if start_date:
-        try:
-            sd = _day_range_utc(start_date)
-            conditions.append(StockOut.stockout_date >= sd)
-        except ValueError:
-            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
-    if end_date:
-        try:
-            ed = _day_range_utc(end_date, end=True)
-            conditions.append(StockOut.stockout_date <= ed)
-        except ValueError:
-            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
+    sd, ed = _validated_day_range(start_date, end_date)
+    if sd is not None:
+        conditions.append(StockOut.stockout_date >= sd)
+    if ed is not None:
+        conditions.append(StockOut.stockout_date <= ed)
 
     # 先用子查询过滤 + 分页取 ID，再按 ID 批量加载关联数据，避免 joinedload 与过滤 JOIN 冲突
     id_query = select(StockOut.id).where(*conditions)
@@ -259,20 +269,13 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
         conditions.append(StockReturn.stockout_id == stockout_id)
     if customer:
         conditions.append(StockReturn.customer.like(f'%{escape_like(customer)}%'))
-    if start_date:
-        try:
-            sd = _day_range_utc(start_date)
-            conditions.append(StockReturn.return_date >= sd)
-        except ValueError:
-            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
-    if end_date:
-        try:
-            # 左闭右开：end_date 当天整天都计入（含 23:59:59.x 的微秒记录，
-            # 退货时间由 business_now() 填充含微秒，23:59:59 口径会漏掉最后一秒内的单）
-            ed = _day_range_utc(end_date, end=True) + timedelta(days=1)
-            conditions.append(StockReturn.return_date < ed)
-        except ValueError:
-            pass  # defensive: 可选 ValueError 静默处理,不影响主流程
+    sd, ed = _validated_day_range(start_date, end_date)
+    if sd is not None:
+        conditions.append(StockReturn.return_date >= sd)
+    if ed is not None:
+        # 左闭右开：end_date 当天整天都计入（含 23:59:59.x 的微秒记录，
+        # 退货时间由 business_now() 填充含微秒，23:59:59 口径会漏掉最后一秒内的单）
+        conditions.append(StockReturn.return_date < ed + timedelta(days=1))
     total = (await db.execute(select(func.count(StockReturn.id)).where(*conditions))).scalar() or 0
     result = await db.execute(
         select(StockReturn)

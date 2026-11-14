@@ -510,12 +510,18 @@ async def _sync_stock_after_update(
     结余闸门必须在 flush **之前**用变更前结余判定：flush 后旧行贡献已扣除，
     再按 -delta 比较会把本次减量算两次，导致「减量 > 结余/2」的合法修数被误拒
     （2026-10-30 审计 A-M14）。调用方已预检的路径传 skip_balance_gate，避免二次判定。
+
+    H10（评审）：读结余前必须先拿产品行锁。出货链是「先锁产品再查结余」，
+    旧实现此处「先查结余、等 _apply_production_stock 才锁产品」——两者不在同一
+    互斥区间，并发出货可把结余扣成负数。锁序按 product_id 升序，避免与
+    其它双产品路径交叉死锁。
     """
     if old_product_id == record.product_id:
         delta = record.quantity - old_quantity
         if delta < 0 and (old_department or '') == 'packaging' and record.product_id is not None:
             from fastapi_app.services.stock_inventory_service import get_inventory_balance
 
+            await get_product_for_update(db, record.product_id)
             balance = await get_inventory_balance(db, record.product_id)
             if -delta > balance:
                 raise ValueError(
@@ -527,6 +533,9 @@ async def _sync_stock_after_update(
         await db.flush()
         await _apply_production_stock(db, record, delta=delta, skip_balance_gate=True)
     else:
+        # H10：换产品要动两行产品库存，先按 id 升序锁住，再各自结算
+        for pid in sorted({p for p in (old_product_id, record.product_id) if p is not None}):
+            await get_product_for_update(db, pid)
         await db.flush()
         await _apply_production_stock(
             db, record, delta=-old_quantity, product_id=old_product_id, skip_balance_gate=True,
@@ -583,6 +592,10 @@ async def update_record(
             and (record.department != 'packaging' or record.product_id != old_product_id)):
         from fastapi_app.services.stock_inventory_service import get_inventory_balance
 
+        # H10：把产品行锁放到结余读取之前，使「校验 + 扣减」与出货链处于同一互斥区间。
+        # 旧/新产品都锁并按 id 升序，避免与换产品的相反方向编辑交叉死锁。
+        for pid in sorted({p for p in (old_product_id, record.product_id) if p is not None}):
+            await get_product_for_update(db, pid)
         balance = await get_inventory_balance(db, old_product_id)
         if old_quantity > balance:
             raise ValueError(

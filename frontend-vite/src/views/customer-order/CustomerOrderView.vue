@@ -62,6 +62,7 @@
       :edit-stock-state="editStockState"
       :customer-options="customerOptions"
       :save-edit-staged="saveEditStaged"
+      :refresh-edit-stock="refreshEditStock"
     />
 
     <!-- 确认对话框 -->
@@ -126,6 +127,7 @@ const {
   editAvailableStock,
   editStockState,
   openEditStaged,
+  refreshEditStock,
   saveEditStaged,
   excelFile,
   importing,

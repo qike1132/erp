@@ -110,11 +110,15 @@ async def list_stock_returns(
     Returns:
         StockListResponse: 包含退货列表和分页信息的响应。
     """
-    result = await get_stockreturns(
-        db, page=page, per_page=per_page, customer=customer,
-        start_date=start_date, end_date=end_date,
-        factory=factory_scope_of(_user) or None,
-    )
+    try:
+        result = await get_stockreturns(
+            db, page=page, per_page=per_page, customer=customer,
+            start_date=start_date, end_date=end_date,
+            factory=factory_scope_of(_user) or None,
+        )
+    except ValueError as e:
+        # M4：非法日期/反向区间必须 400，不能当成「未筛选」返回整表
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return StockListResponse(
         data=result['items'], total=result['total'],
         page=result['page'], per_page=result['per_page'],

@@ -64,7 +64,7 @@ function makeProjectHook(overrides: Record<string, unknown> = {}) {
     submitting: ref(false),
     error: ref<string | null>(null),
     errorStatus: ref<number | undefined>(undefined),
-    fetchDetail: vi.fn(async () => null),
+    fetchDetail: vi.fn(async () => ({ status: 'error' as const })),
     create: vi.fn(async () => ({ id: 7, success: true })),
     update: vi.fn(async () => ({ success: true })),
     remove: vi.fn(async () => ({ success: true })),
@@ -309,7 +309,7 @@ describe('AUD-12 编排 Hook 的假成功缺口与 403 双弹', () => {
       const projectHook = makeProjectHook({
         error: ref('加载打样详情失败'),
         errorStatus: ref(500),
-        fetchDetail: vi.fn(async () => null),
+        fetchDetail: vi.fn(async () => ({ status: 'error' as const })),
       })
       const { actions } = buildProjectActions(projectHook)
 
@@ -324,12 +324,26 @@ describe('AUD-12 编排 Hook 的假成功缺口与 403 双弹', () => {
       const projectHook = makeProjectHook({
         error: ref('权限不足'),
         errorStatus: ref(403),
-        fetchDetail: vi.fn(async () => null),
+        fetchDetail: vi.fn(async () => ({ status: 'error' as const })),
       })
       const { actions } = buildProjectActions(projectHook)
 
       await actions.onEditProjectFromCard(7)
 
+      expect(mocks.showToast).not.toHaveBeenCalled()
+    })
+
+    it('详情响应已被更新的查询取代（stale）：不打开弹窗、也不报错（M9）', async () => {
+      // 用户连点两张卡片的「编辑」：先发的那次后到，其响应属于别的项目。
+      // 拿它填表单会把 A 的字段保存到 B 上，且用户毫无察觉。
+      const projectHook = makeProjectHook({
+        fetchDetail: vi.fn(async () => ({ status: 'stale' as const })),
+      })
+      const { actions } = buildProjectActions(projectHook)
+
+      await actions.onEditProjectFromCard(7)
+
+      expect(actions.projectFormVisible.value).toBe(false)
       expect(mocks.showToast).not.toHaveBeenCalled()
     })
   })

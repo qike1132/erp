@@ -11,12 +11,14 @@ P1-3(2026-08-23)：restore_from_zip 的还原内核切换为 DatabaseRestoreOrch
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import io
 import json
 import logging
 import time
 import zipfile
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, ClassVar
 
 from sqlalchemy import text
@@ -145,8 +147,8 @@ class _KernelProgressReporter:
             logger.warning(f'内核进度上报失败: {e}')
 
 
-async def revoke_all_sessions_after_restore() -> None:
-    """恢复后强制全员重登（B3）。
+async def revoke_all_sessions_after_restore() -> dict[str, Any]:
+    """恢复后强制全员重登（B3），返回可被调用方消费的结果。
 
     覆盖全部四类会把「撤销状态」回滚到备份时点的恢复路径：
     1. zip/orchestrator 整库（restore_from_zip 末尾）——DB 与 Redis RDB 一起回滚；
@@ -165,11 +167,17 @@ async def revoke_all_sessions_after_restore() -> None:
     失效，残留的黑名单条目只会多撤销、不会放行；而清空它们需要 SCAN 裸客户端，
     与「缓存读写必须走 wrapper」的约定冲突，收益却是零。
 
+    返回 ``{'ok': bool, 'errors': [...], 'warnings': [...]}``：
+    - token_version 更新失败 = 安全关键失败（ok=False，调用方必须降级为
+      completed_with_warnings 或 failed，不能继续报「恢复成功」）；
+    - 进程内缓存清理失败只记 warning（下次请求会重新加载，且 tv+1 已生效）。
+
     用独立 engine 事务而不是调用方 session：恢复内核已提交过，这里需要立即
-    生效的独立提交；任何一步失败都只记日志，不把恢复结果改判为失败。调用方
-    必须把本函数放在**提交点之后**——在调用方事务中途执行会与未释放的 user
-    表行锁互等（同一事件循环内即死锁）。幂等，多调无害（tv 多 +1 效果等价）。
+    生效的独立提交。调用方必须把本函数放在**提交点之后**——在调用方事务中途
+    执行会与未释放的 user 表行锁互等（同一事件循环内即死锁）。幂等，多调无害。
     """
+    errors: list[str] = []
+    warnings: list[str] = []
     try:
         from fastapi_app.core.database import require_async_engine
         engine = require_async_engine()
@@ -177,23 +185,78 @@ async def revoke_all_sessions_after_restore() -> None:
             await conn.execute(
                 text('UPDATE "user" SET token_version = COALESCE(token_version, 0) + 1')
             )
-    except Exception as e:  # defensive: 收尾失败需人工介入，但不改判恢复结果
-        logger.error(
-            '恢复后失效会话失败（需人工要求全员重新登录）: %s；'
+    except Exception as e:  # defensive: 安全关键失败必须汇总上报——此处数据库已还原完成，任何未枚举的驱动/连接异常都不许冒泡成 500，否则调用方会以为「恢复失败」而实际已落库
+        message = (
+            f'恢复后失效会话失败（需人工要求全员重新登录）: {e}；'
             '若日志含 token_version 列不存在，说明还原的是 109 之前的备份，'
-            '需先执行 alembic upgrade head 再重启',
-            e,
+            '需先执行 alembic upgrade head 再重启'
         )
+        logger.error(message)
+        errors.append(message)
     try:
         from fastapi_app.core.auth.blacklist import _LOCAL_REVOKED_JTIS
         _LOCAL_REVOKED_JTIS.clear()
-    except Exception as e:  # defensive: 缓存清理失败不影响恢复结果，记日志即可
+    except Exception as e:  # defensive: 缓存清理失败不影响 token 失效结论，记 warning
         logger.warning('清理本地撤销缓存失败: %s', e)
+        warnings.append(f'清理本地撤销缓存失败: {e}')
     try:
         from fastapi_app.core.deps import invalidate_user_permission_cache
         await invalidate_user_permission_cache(None)
-    except Exception as e:  # defensive: 缓存清理失败不影响恢复结果，记日志即可
+    except Exception as e:  # defensive: 缓存清理失败不影响 token 失效结论，记 warning
         logger.warning('清理权限缓存失败: %s', e)
+        warnings.append(f'清理权限缓存失败: {e}')
+    return {'ok': not errors, 'errors': errors, 'warnings': warnings}
+
+
+@contextlib.asynccontextmanager
+async def restore_lock_heartbeat(
+    task_id: str,
+    *,
+    interval: float = 600.0,
+    on_tick: Callable[[], Awaitable[None]] | None = None,
+    on_lost: Callable[[], None] | None = None,
+) -> AsyncIterator[None]:
+    """在还原执行期间周期性续期恢复锁；续期失败立即取消还原任务（H1）。
+
+    旧实现（评审 H1）：同步路径完全不续期，异步 watchdog 续期失败只 warning——
+    锁 TTL(3600s) 到期后第二个还原可拿到同一把锁，两个任务交替 DROP/导入。
+    续期失败（锁已易主 / Redis 不可用）说明本任务已不再独占，继续写库没有意义，
+    因此取消宿主任务，让上层按失败/中断收口。
+
+    同步端点也复用本助手：宿主即当前请求 task，取消后由端点的
+    ``except asyncio.CancelledError`` 转成 503，事务随之回滚。
+    """
+    owner = asyncio.current_task()
+
+    async def _beat() -> None:
+        while True:
+            await asyncio.sleep(interval)
+            if not await renew_restore_lock(task_id):
+                logger.error(
+                    '还原任务 %s 恢复锁续期失败（锁已易主或 Redis 不可用），中止本次还原以避免并发写库',
+                    task_id,
+                )
+                if on_lost is not None:
+                    try:
+                        on_lost()
+                    except Exception as exc:  # defensive: 通知失败不影响中止
+                        logger.warning('还原锁丢失回调失败: %s', exc)
+                if owner is not None and not owner.done():
+                    owner.cancel()
+                return
+            if on_tick is not None:
+                try:
+                    await on_tick()
+                except Exception as exc:  # defensive: 心跳/进度刷新失败不得中断还原
+                    logger.warning('还原心跳回调失败: %s', exc)
+
+    beat_task = asyncio.create_task(_beat())
+    try:
+        yield
+    finally:
+        beat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await beat_task
 
 
 async def restore_from_zip(
@@ -275,7 +338,10 @@ async def restore_from_zip(
         raise RestoreError(outcome.message or '恢复过程中出错')
 
     # B3：恢复会回滚 DB 与 Redis 里的撤销状态，必须强制全员重新登录。
-    await revoke_all_sessions_after_restore()
+    # H2：失败不能只写日志——结果里必须带出，让端点/进度降级为「有警告完成」。
+    revocation = await revoke_all_sessions_after_restore()
+    if not revocation.get('ok', True):
+        logger.error('恢复已完成但会话失效失败: %s', revocation.get('errors'))
 
     manifest_dict = outcome.manifest or {}
     raw_db = outcome.database.details.get('raw') or {
@@ -305,8 +371,11 @@ async def restore_from_zip(
         'errors': [*outcome.errors, *outcome.components.errors],
         'warnings': list(outcome.warnings),
         'verification': verification,
+        'session_revocation': revocation,
         '_manifest_tables': manifest_dict.get('tables', {}),
     }
+    if not revocation.get('ok', True):
+        results['errors'].extend(revocation.get('errors', []))
     if not outcome.verification.overall_pass:
         results['_verification_failed'] = True
     return results
@@ -349,7 +418,10 @@ async def _restore_components_only(
     # restore_from_zip 末尾的 revoke 覆盖，这里只补组件-only 包的缺口。
     redis_res = results.get('redis') or {}
     if isinstance(redis_res, dict) and redis_res.get('status') == 'ok':
-        await revoke_all_sessions_after_restore()
+        revocation = await revoke_all_sessions_after_restore()
+        results['session_revocation'] = revocation
+        if not revocation.get('ok', True):
+            results['errors'].extend(revocation.get('errors', []))
     try:
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         await invalidate_related_caches(CacheDomain.ALL)

@@ -142,6 +142,12 @@ async def test_restore_by_name_json_lock_first(monkeypatch, tmp_path: Path) -> N
         }),
     )
     monkeypatch.setattr(restore_mod.backup_service, 'release_restore_lock', AsyncMock())
+    # H2 起「会话失效失败」会让 success=False。本用例只验锁序，且测试进程没有
+    # 真实 DB 引擎（revoke 必然失败），必须给出成功结构，否则断言的是环境缺失。
+    monkeypatch.setattr(
+        restore_mod, 'revoke_all_sessions_after_restore',
+        AsyncMock(return_value={'ok': True, 'errors': [], 'warnings': []}),
+    )
 
     result = await restore_mod.restore_server_backup(
         filename='b.json', confirm=True, confirm_sensitive=False,
