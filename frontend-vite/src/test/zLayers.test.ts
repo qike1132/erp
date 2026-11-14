@@ -49,15 +49,34 @@ describe('Z 层级不变量', () => {
   })
 })
 
-/** 递归收集样式来源：.vue 的 style 块与独立 .css/.scss 都在此列 */
-function collectStyleSources(dir: string, out: string[] = []): string[] {
+/** 递归收集层级来源：样式块之外还要算 .ts，因为内联层级（驼峰 zIndex）就写在脚本里 */
+function collectSources(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
-    if (statSync(full).isDirectory()) collectStyleSources(full, out)
-    else if (/\.(vue|css|scss)$/.test(name)) out.push(full)
+    if (statSync(full).isDirectory()) collectSources(full, out)
+    else if (/\.(vue|css|scss|ts)$/.test(name) && !name.endsWith('.d.ts')) out.push(full)
   }
   return out
 }
+
+/** 三种裸写层级的形式：CSS 属性、JS 内联对象（驼峰）、Tailwind 任意值类 */
+const BARE_Z_PATTERNS = [/z-index:\s*(-?\d+)/g, /\bzIndex:\s*'?(-?\d+)'?/g, /z-\[\s*(-?\d+)\s*\]/g]
+
+/**
+ * 允许继续裸写的「文件 + 值」。每加一条都要在评审里给理由；
+ * 下方有反向断言要求这些值仍在，防止条目僵化后变成永久豁免。
+ */
+const BARE_ALLOWLIST: Record<string, number[]> = {
+  // 兜底提示的出现时机就是渲染已出问题，不能反过来依赖 app.css 的变量解析。
+  // 与 --z-error-fallback 同值，另有断言锁一致性。
+  'src/main.ts': [10000],
+  // 「透明遮罩 + 右键菜单」的同构实现，两条代码靠彼此的相对值工作，均 < --z-page-modal。
+  'src/views/pattern-room/components/RoleTabs.vue': [1000, 1001],
+  'src/views/product/components/BomEditor.css': [1000, 1001],
+}
+
+/** 最小全局令牌，也是「局部层叠」与「全局层」的分界线 */
+const MIN_GLOBAL_TOKEN = 200
 
 describe('Z 层级令牌化：新的层级必须走 --z-*，不得再裸写数字', () => {
   const primevueModal = readNumber(mainTs, /zIndex:\s*\{[^}]*\bmodal:\s*(\d+)/, 'main.ts zIndex.modal')
@@ -69,11 +88,16 @@ describe('Z 层级令牌化：新的层级必须走 --z-*，不得再裸写数�
   })
 
   it('自绘浮层三档各自匹配其上下文，不可互相替代', () => {
+    // 页面级下拉：高于外壳、刻意低于 page-modal，不会盖住随后打开的弹窗
+    expect(cssToken('z-page-float')).toBeGreaterThan(cssToken('z-shell-drawer'))
+    expect(cssToken('z-page-float')).toBeLessThan(cssToken('z-page-modal'))
     // 弹窗内下拉：要盖过 page-modal，但不能越过 PrimeVue（否则 PrimeVue 浮层被压）
     expect(cssToken('z-inline-float')).toBeGreaterThan(cssToken('z-page-modal'))
     expect(cssToken('z-inline-float')).toBeLessThan(primevueOverlay)
-    // teleport 到 body 的自绘面板：至少与 PrimeVue modal 齐平
-    expect(cssToken('z-float-raised')).toBeGreaterThanOrEqual(primevueModal)
+    // teleport 到 body 的自绘面板：必须严格高于 PrimeVue modal。同值(2100)时层级由
+    // DOM 插入顺序决定，面板打开期间再挂一个 PrimeVue 2100 层就会反超。
+    expect(cssToken('z-float-raised')).toBeGreaterThan(primevueModal)
+    expect(cssToken('z-float-raised')).toBeLessThan(cssToken('z-overlay-nested'))
     // 跨上下文兜底：高于所有弹窗与 toast
     expect(cssToken('z-float-fallback')).toBeGreaterThan(cssToken('z-toast'))
   })
@@ -84,39 +108,44 @@ describe('Z 层级令牌化：新的层级必须走 --z-*，不得再裸写数�
     expect(cssToken('z-skip-link')).toBeGreaterThan(cssToken('z-error-fallback'))
   })
 
-  // 扫描范围只含 .vue/.css/.scss：main.ts 的错误兜底条刻意硬编码（兜底提示不能在
-  // 样式系统失效时才依赖变量），这条断言负责让那处硬编码与令牌不漂移。
+  it('局部层叠的分界线是最小全局令牌', () => {
+    // 表格 sticky / 卡片浮起这类「局部值」多数不建层叠上下文，值一大会直接参与
+    // 根上下文比较，跟全局层抢；守住 200 这条线即守住它们的局部性。
+    expect(cssToken('z-dropdown')).toBeLessThan(MIN_GLOBAL_TOKEN)
+    expect(cssToken('z-sticky')).toBeLessThan(MIN_GLOBAL_TOKEN)
+    expect(cssToken('z-overlay')).toBeLessThan(MIN_GLOBAL_TOKEN)
+  })
+
   it('错误兜底条的硬编码值与 --z-error-fallback 保持一致', () => {
     const hardcoded = readNumber(mainTs, /z-index:(\d+);background:#fee2e2/, 'main.ts 错误兜底条 z-index')
     expect(hardcoded).toBe(cssToken('z-error-fallback'))
   })
 
-  // 页面内局部层叠：只在自身弹窗/滚动容器的层叠上下文里互相比较，
-  // 换成全局 token 反而会与参照页漂开（见 app.css 令牌区注释）。
-  const LOCAL_STACK_ALLOWLIST = [
-    'src/views/pattern-room/components/RoleTabs.vue',
-    'src/views/product/components/BomEditor.css',
-  ]
-
-  it('除局部层叠白名单外，源码里不得出现 ≥1000 的裸 z-index', () => {
+  it(`除白名单外，源码里不得出现 ≥${MIN_GLOBAL_TOKEN} 的裸层级（三种写法全查）`, () => {
     const offenders: string[] = []
-    for (const file of collectStyleSources('src')) {
+    for (const file of collectSources('src')) {
       const rel = file.replace(/\\/g, '/')
       if (rel.endsWith('src/styles/app.css')) continue
-      if (LOCAL_STACK_ALLOWLIST.some((allowed) => rel.endsWith(allowed))) continue
-      for (const m of readFileSync(file, 'utf8').matchAll(/z-index:\s*(-?\d+)/g)) {
-        const value = Number(m[1])
-        if (value >= 1000) offenders.push(`${rel}: z-index ${value}`)
+      if (rel.includes('/src/test/')) continue
+      const allowed = BARE_ALLOWLIST[rel] ?? []
+      const text = readFileSync(file, 'utf8')
+      for (const pattern of BARE_Z_PATTERNS) {
+        for (const m of text.matchAll(pattern)) {
+          const value = Number(m[1])
+          if (value >= MIN_GLOBAL_TOKEN && !allowed.includes(value)) {
+            offenders.push(`${rel}: ${value}（${m[0].trim()}）`)
+          }
+        }
       }
     }
     expect(offenders).toEqual([])
   })
 
-  it('白名单只容纳 1000/1001 成对的局部层，不得变成新全局层的避难所', () => {
-    for (const allowed of LOCAL_STACK_ALLOWLIST) {
-      const values = [...readFileSync(allowed, 'utf8').matchAll(/z-index:\s*(-?\d+)/g)].map((m) => Number(m[1]))
-      expect(values.length, allowed).toBeGreaterThan(0)
-      for (const value of values) expect([1000, 1001], allowed).toContain(value)
+  it('白名单条目不得僵化：所列值必须仍然存在', () => {
+    for (const [file, values] of Object.entries(BARE_ALLOWLIST)) {
+      const text = readFileSync(file, 'utf8')
+      const found = BARE_Z_PATTERNS.flatMap((pattern) => [...text.matchAll(pattern)].map((m) => Number(m[1])))
+      for (const value of values) expect(found, `${file} 的 ${value}`).toContain(value)
     }
   })
 

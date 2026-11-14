@@ -110,20 +110,31 @@
   /* Scrollbar */
   --color-scrollbar: #c1c1c1;
 
-  /* Z-Index scale
-   * 注意：PrimeVue 自己的浮层走另一套更高的数值 —— main.ts 里 zIndex.modal=2100 /
-   * overlay=2000。所以凡是「要盖在 PrimeVue 抽屉/下拉之上」的层级（nested 弹窗、
-   * Toast），都必须超过 2100，否则会被 PrimeVue 的遮罩压住。
-   * --z-page-modal 是项目自定义页面级弹窗（pd-overlay/pim-overlay 家族）的层级，
-   * 刻意低于 PrimeVue（2000+），使 PrimeVue 的下拉/抽屉能盖在其上；从这类弹窗
-   * 内新开的确认框等必须用 --z-*-nested（zLayers.test.ts 锁序）。
-   * 例外：页面内自绘的局部浮层（pattern-room RoleTabs 与 BOM 角色页签的右键菜单，
-   * 1000/1001）刻意用裸值、不走本表 token —— 它们只在弹窗自身（--z-page-modal=1050）
-   * 的层叠上下文里互相比较，换成 token 反而会与参照页漂开。 */
+  /* Z-Index scale —— 两个体系，不要混用
+   *
+   * A. 应用自己的层：本表令牌，10~10001。
+   * B. PrimeVue 的层：由 main.ts 的 zIndex 配置放大到 overlay=2000 / modal=2100。
+   *    凡是「要盖在 PrimeVue 抽屉/下拉之上」的层（nested 弹窗、Toast），
+   *    必须 > 2100，否则会被它的遮罩压住。
+   *
+   * 四条硬约束（zLayers.test.ts 锁死）：
+   * 1. --z-page-modal(1050) 刻意低于 PrimeVue，使 PrimeVue 的下拉/抽屉能盖在其上；
+   *    从这类弹窗内新开的确认框必须用 --z-*-nested。
+   * 2. --z-toast 必须高于 PrimeVue modal，否则 toast 在抽屉上方不可见。
+   * 3. 局部层叠（表格 sticky 表头、卡片内浮起、输入框内遮罩）不令牌化，但必须
+   *    < --z-shell-scrim(200)。它们多数不建层叠上下文，值一大会直接参与根上下文
+   *    比较、跟全局层抢，这才是「局部值必须小」的真实原因。
+   * 4. 页面级自绘浮层用 --z-page-float(1000)，刻意低于 --z-page-modal，使页面里的
+   *    下拉不会盖住随后打开的弹窗。
+   *
+   * 例外：pattern-room RoleTabs 与 BOM 角色页签的右键菜单（1000/1001）保持裸值。
+   * 它们是「透明遮罩 + 菜单」这对同构实现，两条代码靠彼此的相对值工作，换成 token
+   * 会与参照页漂开；两者均 < --z-page-modal。 */
   --z-dropdown: 10;
   --z-sticky: 20;
   --z-overlay: 30;
   --z-modal: 40;
+  --z-page-float: 1000;
   --z-page-modal: 1050;
   --z-overlay-nested: 2200;
   --z-modal-nested: 2210;
@@ -134,20 +145,23 @@
   --z-shell-scrim: 200;
   --z-shell-drawer: 300;
 
-  /* 自绘浮层的三档，数值由「要盖过谁」决定，不可互换：
+  /* 自绘浮层三档，数值由「要盖过谁」决定，不可互换：
    * --z-inline-float：page-modal 弹窗内部的下拉/选项面板，只需盖过 1050，
    *   刻意低于 PrimeVue（2000+），使 PrimeVue 浮层仍能压在其上。
    * --z-float-raised：teleport 到 body 的自绘面板（ProductCustomerSelect），
-   *   必须 ≥ PrimeVue modal，否则在 PrimeVue 抽屉里「渲染了但看不见」。
-   * --z-float-fallback：UiSelect 下拉的跨上下文兜底。它被多处复用，可能落在
-   *   普通页面 / page-modal / PrimeVue 抽屉任意祖先里，故取「高于一切弹窗」的
-   *   暴力值 —— 这是兜底而非设计档位，新代码按场景选上面两档，不要照抄。 */
+   *   必须**严格高于** PrimeVue modal —— 同值(2100)时层级由 DOM 插入顺序决定，
+   *   面板打开期间再挂一个 PrimeVue 2100 层就会反超，退回「渲染了但看不见」。
+   * --z-float-fallback：UiSelect 下拉的兜底。它被多处复用、祖先上下文未知，
+   *   故取一个高于所有弹窗的值；但 z-index 无法突破祖先层叠上下文 —— 宿主在
+   *   1050/2100 上下文里时，它只在那个上下文内比较。这是兜底不是设计档位，
+   *   新代码按场景选上面两档，不要照抄。 */
   --z-inline-float: 1500;
-  --z-float-raised: 2100;
+  --z-float-raised: 2150;
   --z-float-fallback: 9999;
 
-  /* 最高三档，顺序即语义：进度条不拦截点击、可被浮层盖过；错误兜底条要可点；
-   * skip-link 是无障碍第一站，必须永远能收到焦点，故最高。
+  /* 最高三档：进度条不拦截点击、可被浮层盖过；错误兜底条要可点、且在样式系统
+   * 出问题时仍要能显示；skip-link 必须视觉上永不被遮罩盖住（它能否获得焦点由
+   * 弹窗的焦点陷阱决定，与本值无关）。
    * --z-error-fallback 只是参照值：实际实现在 main.ts 里硬编码同数字（兜底提示
    * 不能在样式系统失效时才去依赖它的变量），改这里必须同步那儿，测试会锁一致性。 */
   --z-route-progress: 9000;

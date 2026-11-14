@@ -109,7 +109,9 @@ function getContainer(): HTMLElement {
       justifyContent: 'flex-start',
       paddingTop: '48px',
       pointerEvents: 'none',
-      zIndex: '99999',
+      // 与 --z-toast 同源：原先硬编码 99999 会盖过 skip-link 与路由进度条，
+      // 且调整 toast 令牌时这里不跟随（容器挂在 body，参与根上下文比较）
+      zIndex: 'var(--z-toast)',
       // Note: no `gap` here. Spacing between toasts is owned by each toast's
       // `marginTop` so it can be transitioned to 0 on exit — flex `gap` does
       // NOT collapse with item height, so a collapsing toast would leave a

@@ -126,7 +126,7 @@ const emit = defineEmits<{
   border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: 0 10px 32px rgba(16, 24, 40, 0.12);
-  z-index: var(--z-inline-float);
+  z-index: var(--z-page-float);
   max-height: 300px;
   overflow-y: auto;
 }
