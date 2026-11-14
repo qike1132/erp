@@ -39,7 +39,10 @@ app.config.errorHandler = (err, _instance, info) => {
   if (!document.getElementById('app-error-fallback')) {
     const el = document.createElement('div')
     el.id = 'app-error-fallback'
-    el.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;background:#fee2e2;color:#991b1b;padding:12px 16px;border-radius:8px;font-size:14px;max-width:400px;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:pointer;'
+    // 这里的 z-index 刻意硬编码、不走 --z-error-fallback：兜底提示的出现时机就是
+    // 「渲染已经出问题」，不能让它再依赖 app.css 的变量解析。10000 与令牌同值，
+    // 改令牌时同步这里（zLayers.test.ts 未把 .ts 纳入裸值扫描即因为此例外）。
+    el.style.cssText = 'position:fixed;top:10px;right:10px;z-index:10000;background:#fee2e2;color:#991b1b;padding:12px 16px;border-radius:8px;font-size:14px;max-width:400px;box-shadow:0 2px 8px rgba(0,0,0,0.15);cursor:pointer;'
     el.textContent = '页面渲染出现异常，请刷新页面重试'
     el.onclick = () => { el.remove(); location.reload() }
     document.body.appendChild(el)
@@ -123,9 +126,10 @@ async function bootstrap() {
         unstyled: true,
         pt: ptMod.plushCutePT,
         // PrimeVue 弹层(autocomplete/select/datepicker 面板等)的内联 z-index
-        // 从该起点递增。项目自定义弹窗(pd-overlay 等)硬编码 z-index: 1050,
-        // 默认 overlay 起点 1000 会被弹窗遮罩盖住 —— 弹窗内打开联想下拉
-        // 表现为"面板已渲染但不可见"(BOM 配置联想失效成因,2026-09-11 修复)。
+        // 从该起点递增。项目自定义页面级弹窗用 --z-page-modal(1050)，刻意低于此处，
+        // 使 PrimeVue 的下拉/抽屉能盖在其上；从这类弹窗内新开的确认框必须用
+        // --z-overlay-nested/--z-modal-nested（2200/2210，均 > 此处），否则被压住
+        // （BOM 联想下拉失效、明细抽屉确认框点不到的成因，见 zLayers.test.ts）。
         zIndex: { modal: 2100, overlay: 2000, menu: 2000, tooltip: 2100 },
         locale: {
           emptySearchMessage: '无匹配结果',

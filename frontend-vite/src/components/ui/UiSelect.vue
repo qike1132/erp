@@ -176,7 +176,7 @@ function onOpenChange(open: boolean) {
   left: 50%;
   transform: translateX(-50%);
   top: calc(100% + 4px);
-  z-index: 9999;
+  z-index: var(--z-float-fallback);
   min-width: 100%;
   width: max-content;
   max-width: 320px;

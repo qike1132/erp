@@ -113,7 +113,7 @@ const {
     position: fixed;
     top: 0;
     left: 0;
-    z-index: 300;
+    z-index: var(--z-shell-drawer);
     height: 100vh;
     margin: 0;
     border-radius: 0;

@@ -237,7 +237,7 @@ onBeforeUnmount(() => {
    面板作为 body 的兄弟会继承 → 选项点不动。显式恢复本子树可交互。 */
 .pcs-panel {
   position: fixed;
-  z-index: 2100;
+  z-index: var(--z-float-raised);
   pointer-events: auto;
   display: flex;
   flex-direction: column;

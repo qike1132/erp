@@ -72,7 +72,7 @@ onUnmounted(() => {
   position: absolute;
   top: 8px;
   left: 8px;
-  z-index: 300;
+  z-index: var(--z-skip-link);
   padding: 8px 14px;
   border-radius: 8px;
   background: var(--color-primary-700, #2d5ab8);
@@ -104,7 +104,7 @@ onUnmounted(() => {
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.4);
-  z-index: 200;
+  z-index: var(--z-shell-scrim);
   transition: opacity 0.3s ease;
 }
 

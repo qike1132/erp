@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
 }
 .bss-input:focus { border-color: var(--color-primary-400, #7aa2f7); box-shadow: 0 0 0 3px rgba(0, 148, 191, .1); }
 .bss-panel {
-  z-index: 1500; max-height: 240px; overflow-y: auto; background: #fff;
+  z-index: var(--z-inline-float); max-height: 240px; overflow-y: auto; background: #fff;
   border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 10px;
   box-shadow: 0 14px 34px rgba(15, 23, 42, .16); padding: 4px;
 }

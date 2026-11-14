@@ -301,7 +301,8 @@ onMounted(() => {
   border-radius: 10px;
   color: white;
   font-size: 14px;
-  z-index: 2000;
+  /* 与全局 toast 同档：原先硬编码 2000 会被 PrimeVue 抽屉遮罩（2100）压住 */
+  z-index: var(--z-toast);
   display: none;
   animation: mrSlide 0.3s ease;
 }

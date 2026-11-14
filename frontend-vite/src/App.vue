@@ -78,7 +78,7 @@ onUnmounted(() => {
   position: absolute;
   top: -100%;
   left: 0;
-  z-index: 99999;
+  z-index: var(--z-skip-link);
   padding: 8px 16px;
   background: var(--color-ocean);
   color: white;
@@ -98,7 +98,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   height: 3px;
-  z-index: 9999;
+  z-index: var(--z-route-progress);
   overflow: hidden;
   pointer-events: none;
 }

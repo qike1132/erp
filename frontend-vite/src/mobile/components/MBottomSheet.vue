@@ -35,7 +35,7 @@ function handleOverlayClick() {
 .m-sheet-overlay {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-shell-drawer);
   background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: flex-end;

@@ -129,6 +129,31 @@
   --z-modal-nested: 2210;
   --z-toast: 2300;
 
+  /* 外壳层：应用自己的 chrome（侧栏遮罩、移动端抽屉）。刻意低于 --z-page-modal，
+   * 外壳永远不该盖住业务弹窗；也刻意高于页面内容，越过它就等于把导航藏了。 */
+  --z-shell-scrim: 200;
+  --z-shell-drawer: 300;
+
+  /* 自绘浮层的三档，数值由「要盖过谁」决定，不可互换：
+   * --z-inline-float：page-modal 弹窗内部的下拉/选项面板，只需盖过 1050，
+   *   刻意低于 PrimeVue（2000+），使 PrimeVue 浮层仍能压在其上。
+   * --z-float-raised：teleport 到 body 的自绘面板（ProductCustomerSelect），
+   *   必须 ≥ PrimeVue modal，否则在 PrimeVue 抽屉里「渲染了但看不见」。
+   * --z-float-fallback：UiSelect 下拉的跨上下文兜底。它被多处复用，可能落在
+   *   普通页面 / page-modal / PrimeVue 抽屉任意祖先里，故取「高于一切弹窗」的
+   *   暴力值 —— 这是兜底而非设计档位，新代码按场景选上面两档，不要照抄。 */
+  --z-inline-float: 1500;
+  --z-float-raised: 2100;
+  --z-float-fallback: 9999;
+
+  /* 最高三档，顺序即语义：进度条不拦截点击、可被浮层盖过；错误兜底条要可点；
+   * skip-link 是无障碍第一站，必须永远能收到焦点，故最高。
+   * --z-error-fallback 只是参照值：实际实现在 main.ts 里硬编码同数字（兜底提示
+   * 不能在样式系统失效时才去依赖它的变量），改这里必须同步那儿，测试会锁一致性。 */
+  --z-route-progress: 9000;
+  --z-error-fallback: 10000;
+  --z-skip-link: 10001;
+
   /* Font */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
