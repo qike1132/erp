@@ -44,7 +44,9 @@
           </span>
 
           <span class="nc-sku-summary">
-            <template v-for="(p, idx) in item._parsed.products" :key="`${p.name}×${p.quantity}`">
+            <!-- 静态展示列表、无业务主键（后端 payload 未去重，name×quantity 可能重复），
+                 故保留 index 作 key——此列表只读、不增删排序，index 是稳定身份 -->
+            <template v-for="(p, idx) in item._parsed.products" :key="idx">
               <span v-if="idx > 0" class="nc-sku-sep">、</span>
               <span class="nc-sku-text">{{ p.name }} ×{{ p.quantity }}</span>
             </template>

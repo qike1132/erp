@@ -19,10 +19,10 @@ import { describe, expect, it } from 'vitest'
 /** 静态行内样式基线（2026-11-14 实测）。只降不升。 */
 const BASELINE_TOTAL = 223
 /** 其中装饰类基线：这类应走 class 或设计令牌，不该出现在行内。 */
-const BASELINE_DECO = 57
+const BASELINE_DECO = 58
 
 const DECO_RE =
-  /(?:^|;)\s*(?:color|background|background-color|border|border-color|border-radius|font-size|box-shadow)\s*:/
+  /(?:^|;)\s*(?:color|background(?:-\w+)?|border(?:-\w+)?|font-(?:size|weight)|box-shadow)\s*:/
 
 function collectVueFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -39,18 +39,25 @@ interface InlineStyle {
   decl: string
 }
 
-/** 静态行内 style（排除 `:style` 动态绑定：它承载的是计算值，本就无法用 class 表达） */
+/**
+ * 静态行内 style（排除 `:style` 动态绑定：它承载的是计算值，本就无法用 class 表达）。
+ * 整文件匹配而非逐行匹配 —— Vue 模板允许多行属性，逐行扫会漏掉
+ * `style="\n color: red\n"` 这种写法，棘轮就形同虚设。
+ */
 function collectInlineStyles(): InlineStyle[] {
   const rows: InlineStyle[] = []
   for (const file of collectVueFiles('src')) {
     const rel = file.replace(/\\/g, '/')
     if (rel.startsWith('src/test/')) continue
-    const lines = readFileSync(file, 'utf8').split(/\r?\n/)
-    lines.forEach((text, idx) => {
-      for (const m of text.matchAll(/(?<!:)style="([^"]*)"/g)) {
-        rows.push({ file: rel, line: idx + 1, decl: (m[1] ?? '').trim() })
-      }
-    })
+    const text = readFileSync(file, 'utf8')
+    for (const m of text.matchAll(/(?<!:)style\s*=\s*(["'])([\s\S]*?)\1/g)) {
+      const before = text.slice(0, m.index ?? 0)
+      rows.push({
+        file: rel,
+        line: before.split(/\r?\n/).length,
+        decl: (m[2] ?? '').replace(/\s+/g, ' ').trim(),
+      })
+    }
   }
   return rows
 }
@@ -74,9 +81,9 @@ describe('样式卫生棘轮（行内 style 只降不升）', () => {
   })
 
   it('基线不得虚高：总数明显低于基线时应同步下调', () => {
-    // 防止「删了 50 处但基线不动」→ 后续又长回来。留 10 处容差给正常波动。
+    // 防止「删了 50 处但基线不动」→ 后续又长回来。容差 2 处：顺手删三处就该下调基线。
     expect(all.length, `当前 ${all.length}，基线 ${BASELINE_TOTAL}，请下调 BASELINE_TOTAL`).toBeGreaterThan(
-      BASELINE_TOTAL - 10,
+      BASELINE_TOTAL - 2,
     )
   })
 })

@@ -66,8 +66,9 @@
           <tr><th>工序</th><th>目标</th><th>已发</th><th>剩余</th></tr>
         </thead>
         <tbody>
-          <!-- key 用工序类型：remainingList 会随发货减少行，index 作 key 会让剩余数字串行 -->
-          <tr v-for="item in remainingList" :key="item.process_type">
+          <!-- key 用工序主键：该表随发货减少行，index 会让剩余数量复用错的节点；
+               也不能用 process_type —— 同一订单的不同 SKU 可以同名工序 -->
+          <tr v-for="item in remainingList" :key="item.id">
             <td>{{ item.process_type }}</td>
             <td>{{ item.target }}</td>
             <td>{{ item.shipped }}</td>
@@ -84,6 +85,7 @@
 import type { OutsourceProcessFlow } from '@/api/outsource'
 
 export interface RemainingLedgerItem {
+  id: number
   process_type: string
   target: number
   shipped: number

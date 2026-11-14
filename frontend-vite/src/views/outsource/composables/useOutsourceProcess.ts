@@ -148,6 +148,10 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     processes.value
       .filter((p) => remainingShipQty(p) > 0)
       .map((p) => ({
+        // 带上主键作列表 key：同一订单内不同 SKU 可以有相同的 process_type
+        // （后端唯一索引是 order_id+order_item_id+product_id+process_type），
+        // 用 process_type 作 key 会重复。
+        id: p.id,
         process_type: p.process_type,
         target: skuQtyOf(p),
         shipped: p.shipped_quantity || 0,
