@@ -125,7 +125,8 @@
    *    < --z-shell-scrim(200)。它们多数不建层叠上下文，值一大会直接参与根上下文
    *    比较、跟全局层抢，这才是「局部值必须小」的真实原因。
    * 4. 页面级自绘浮层用 --z-page-float(1000)，刻意低于 --z-page-modal，使页面里的
-   *    下拉不会盖住随后打开的弹窗。
+   *    下拉不会盖住随后打开的 page-modal 弹窗（UiDialog 只有 30/40、比它还低，靠
+   *    打开前的 blur 收起下拉，不由本值兜底）。
    *
    * 例外：pattern-room RoleTabs 与 BOM 角色页签的右键菜单（1000/1001）保持裸值。
    * 它们是「透明遮罩 + 菜单」这对同构实现，两条代码靠彼此的相对值工作，换成 token
@@ -146,8 +147,9 @@
   --z-shell-drawer: 300;
 
   /* 自绘浮层三档，数值由「要盖过谁」决定，不可互换：
-   * --z-inline-float：page-modal 弹窗内部的下拉/选项面板，只需盖过 1050，
-   *   刻意低于 PrimeVue（2000+），使 PrimeVue 浮层仍能压在其上。
+   * --z-inline-float：弹窗/卡片内的下拉（PartFieldCombobox、BomSupplierSelect 都
+   *   teleport 到 body），必须压过宿主弹窗（page-modal 的 1050，或 UiDialog 的 30/40），
+   *   但刻意低于 PrimeVue（2000+），使 PrimeVue 浮层仍能压在其上。
    * --z-float-raised：teleport 到 body 的自绘面板（ProductCustomerSelect），
    *   必须**严格高于** PrimeVue modal —— 同值(2100)时层级由 DOM 插入顺序决定，
    *   面板打开期间再挂一个 PrimeVue 2100 层就会反超，退回「渲染了但看不见」。

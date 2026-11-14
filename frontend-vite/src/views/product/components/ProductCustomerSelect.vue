@@ -230,8 +230,9 @@ onBeforeUnmount(() => {
 
 /*
   坐标与最大高度由 placePanel() 内联给出；这里只管外观。
-  z-index 2100 与 PrimeVue 浮层同档：项目自定义弹窗是 1050，
-  低于 1050 的面板在弹窗里会「渲染了但看不见」。
+  z-index 用 --z-float-raised(2150)：必须**严格高于** PrimeVue modal(2100) ——
+  同值时层级由 DOM 插入顺序决定，面板打开期间再挂一个 2100 层就会反超；
+  也要高于项目自定义弹窗的 1050，否则在弹窗里「渲染了但看不见」。
 */
 /* 面板 teleport 到 body；reka-ui 模态弹窗（UiDialog）打开时会把 body 设为 pointer-events:none，
    面板作为 body 的兄弟会继承 → 选项点不动。显式恢复本子树可交互。 */

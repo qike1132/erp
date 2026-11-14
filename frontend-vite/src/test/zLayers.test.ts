@@ -59,8 +59,21 @@ function collectSources(dir: string, out: string[] = []): string[] {
   return out
 }
 
-/** 三种裸写层级的形式：CSS 属性、JS 内联对象（驼峰）、Tailwind 任意值类 */
-const BARE_Z_PATTERNS = [/z-index:\s*(-?\d+)/g, /\bzIndex:\s*'?(-?\d+)'?/g, /z-\[\s*(-?\d+)\s*\]/g]
+/** 四种裸写层级的形式：CSS 属性、JS 键/赋值（含驼峰）、setProperty、Tailwind 任意值 */
+const BARE_Z_PATTERNS = [
+  /z-index\s*:\s*(-?\d+)/g,
+  /\bzIndex\s*[:=]\s*['"]?(-?\d+)/g,
+  /setProperty\(\s*['"]z-index['"]\s*,\s*['"]?(-?\d+)/g,
+  /z-\[\s*(-?\d+)\s*\]/g,
+]
+
+/** 先剥注释再扫：注释里写「与 z-index: 2100 对齐」不应被当成真实现 */
+function stripComments(text: string): string {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/(^|\s)\/\/[^\n]*/g, '$1')
+}
 
 /**
  * 允许继续裸写的「文件 + 值」。每加一条都要在评审里给理由；
@@ -121,14 +134,14 @@ describe('Z 层级令牌化：新的层级必须走 --z-*，不得再裸写数�
     expect(hardcoded).toBe(cssToken('z-error-fallback'))
   })
 
-  it(`除白名单外，源码里不得出现 ≥${MIN_GLOBAL_TOKEN} 的裸层级（三种写法全查）`, () => {
+  it(`除白名单外，源码里不得出现 ≥${MIN_GLOBAL_TOKEN} 的裸层级（四种写法全查）`, () => {
     const offenders: string[] = []
     for (const file of collectSources('src')) {
       const rel = file.replace(/\\/g, '/')
       if (rel.endsWith('src/styles/app.css')) continue
-      if (rel.includes('/src/test/')) continue
+      if (rel.startsWith('src/test/')) continue
       const allowed = BARE_ALLOWLIST[rel] ?? []
-      const text = readFileSync(file, 'utf8')
+      const text = stripComments(readFileSync(file, 'utf8'))
       for (const pattern of BARE_Z_PATTERNS) {
         for (const m of text.matchAll(pattern)) {
           const value = Number(m[1])
@@ -143,7 +156,7 @@ describe('Z 层级令牌化：新的层级必须走 --z-*，不得再裸写数�
 
   it('白名单条目不得僵化：所列值必须仍然存在', () => {
     for (const [file, values] of Object.entries(BARE_ALLOWLIST)) {
-      const text = readFileSync(file, 'utf8')
+      const text = stripComments(readFileSync(file, 'utf8'))
       const found = BARE_Z_PATTERNS.flatMap((pattern) => [...text.matchAll(pattern)].map((m) => Number(m[1])))
       for (const value of values) expect(found, `${file} 的 ${value}`).toContain(value)
     }
