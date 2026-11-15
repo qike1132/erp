@@ -143,10 +143,13 @@ export const FACTORY_TABLE_HEAD =
  * 左侧三列（产品名称 / 订单数量 / 备品数量）按 SKU 块合并（rowspan = 该块行数），
  * 客户列跨**整组**（只在组首行渲染一次）—— 与屏幕 `SummaryFactoryTab.vue` 同构。
  * 返回空串表示数据不足（旧后端 / 无 BOM），调用方回退订单级单块（零回归）。
+ *
+ * `showRoleColumn` 必传、不给默认值：列形态必须与表头 `factoryTableHead(anyGroupMultiRole(data))`
+ * 同源；漏传时若默认 12 列而表头 11 列，就会重现 2026-11-15 修过的表头/表体错位。
  */
 function buildPerSkuGroupHtml(
-  group: FactoryGroup, gi: number, spareRate: number, lossRate: number, fabricRates?: number[][][],
-  showRoleColumn = true,
+  group: FactoryGroup, gi: number, spareRate: number, lossRate: number,
+  fabricRates: number[][][] | undefined, showRoleColumn: boolean,
 ): string {
   const perSkuRows = buildPerSkuRows(group, spareRate)
   if (perSkuRows.length === 0) return ''
@@ -256,7 +259,7 @@ function buildPerSkuGroupHtml(
  * 损耗率取该落库行快照率、数量为按该率加放派生值。无差异时返回空串（不渲染）。
  */
 function buildDiffBlockHtml(
-  group: FactoryGroup, perSkuRows: PerSkuRow[], spareRate: number, showRoleColumn = true,
+  group: FactoryGroup, perSkuRows: PerSkuRow[], spareRate: number, showRoleColumn: boolean,
 ): string {
   const diffs = computeQuantityDiff(group, perSkuRows)
   if (diffs.length === 0) return ''
