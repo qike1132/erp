@@ -20,7 +20,7 @@ import {
   buildStoredRows,
   allocateOrderDisplayQuantities,
 } from './perSkuRows'
-import type { PerSkuRow } from './perSkuRows'
+import type { PerSkuRow, QuantityDiff } from './perSkuRows'
 import type {
   FactoryGroup,
   FactorySummaryData,
@@ -43,6 +43,10 @@ export function getGroupOrderQty(group: FactoryGroup): number {
  *
  * 与工厂页「数量」列同源派生值配合使用：**不额外补 1 位小数**，否则
  * 「工厂编辑态 10.05 → 供应商 10.1」这类舍入会造成两页签假性不一致。
+ *
+ * 注意与 `@/utils/formatQty` 的 `fmtQty` **刻意不同源**：工厂表/差异块用 `fmtQty`
+ * （固定 1 位小数，如 `21.0`），本函数只服务供应商表（`21`）。统一成一套会让两页签
+ * 出现上面警告的假性不一致，勿「顺手统一」。
  */
 export function qtyDisplayText(val: unknown): string {
   const n = parseFloat(String(val ?? 0))
@@ -62,7 +66,11 @@ export function qtyDisplayText(val: unknown): string {
  * 4. 样式只保留一处来源（stylesheets），单元格不设内联对齐/边框样式，
  *    预览与打印渲染同一份文档、同一套规则，天然一致。
  * 5. print-color-adjust:exact —— 表头灰底在物理打印时不丢失。
- * 6. 字号 12px + 紧凑内边距，保证 9 列内容在 A4 纵向宽度内完整落纸。
+ * 6. 字号 12px + 紧凑内边距。**注意列数已从 9 列增至 11/12 列**（2026-11-08 加
+ *    「角色名称」）：nowrap + table-layout:auto 没有收缩路径，多角色 + 长拼接产品名时
+ *    右侧列可能横向溢出被纸边裁掉 —— 改动本样式前先打一张多角色单到 PDF 预览核验。
+ *    真溢出时二选一：名称列改 word-break 换行并启用 table-layout:fixed，
+ *    或按列数切 `@page { size: A4 landscape }`。
  */
 export const SUMMARY_PRINT_STYLE = `
   @page { size: A4; margin: 0; }
@@ -126,7 +134,7 @@ export function anyGroupMultiRole(data: FactorySummaryData): boolean {
  * 工厂表格表头（12 列 = 含角色名称列；11 列 = 单角色/无角色订单隐藏该列）。
  *
  * `FACTORY_TABLE_HEAD` 保留为「含角色名称」形态（多角色订单），供既有调用与测试复用；
- * 打印 / 导出按 `anyGroupMultiRole(data)` 选形态，保证屏幕与打印同列。
+ * 打印 / 导出**请用 `buildFactoryTable`**（表头与表体同一次判定），别在调用处再算一遍。
  */
 export function factoryTableHead(showRoleColumn: boolean): string {
   // 从「含角色列」形态派生，避免两处表头字面量各自漂移：加列时只改 FACTORY_TABLE_HEAD。
@@ -137,27 +145,38 @@ export const FACTORY_TABLE_HEAD =
   '<tr><th>客户</th><th>产品名称</th><th>角色名称</th><th>订单数量</th><th>备品数量</th>' +
   '<th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
 
+/** 供应商表格表头（6 列，与 `buildSupplierHtml` 的列序一一对应，无角色列形态）。 */
+export const SUPPLIER_TABLE_HEAD =
+  '<tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th><th>单位</th><th>来源订单</th></tr>'
+
 /**
  * 「按 SKU 展开」的组渲染：每 SKU 一块物料行，组末附差异对照块。
  *
- * 左侧三列（产品名称 / 订单数量 / 备品数量）按 SKU 块合并（rowspan = 该块行数），
+ * 产品名称格按 SKU 块合并（rowspan = 该块行数）；**订单数量 / 备品数量在
+ * `hasRoleQtySplit` 时按角色段拆格**（rowspan = 角色段行数），否则同样按块合并。
  * 客户列跨**整组**（只在组首行渲染一次）—— 与屏幕 `SummaryFactoryTab.vue` 同构。
  * 返回空串表示数据不足（旧后端 / 无 BOM），调用方回退订单级单块（零回归）。
  *
- * `showRoleColumn` 必传、不给默认值：列形态必须与表头 `factoryTableHead(anyGroupMultiRole(data))`
- * 同源；漏传时若默认 12 列而表头 11 列，就会重现 2026-11-15 修过的表头/表体错位。
+ * `showRoleColumn` 必传、不给默认值：列形态必须与表头同源；漏传时若默认 12 列而表头
+ * 11 列，就会重现 2026-11-15 修过的表头/表体错位。同源由 `buildFactoryTable` 保证。
+ *
+ * `diffs` 由调用方按「屏幕那份快照」传入（见 `perSkuRows.computeDiffSnapshot`）；
+ * 传 undefined 才退回实时计算（仅为既有 `buildFactoryHtml` 调用与单测保持零回归）。
  */
 function buildPerSkuGroupHtml(
   group: FactoryGroup, gi: number, spareRate: number, lossRate: number,
   fabricRates: number[][][] | undefined, showRoleColumn: boolean,
+  diffs?: QuantityDiff[],
 ): string {
   const perSkuRows = buildPerSkuRows(group, spareRate)
   if (perSkuRows.length === 0) return ''
+  // 该组「按 [供应商][布料] 取损耗率」的唯一写法：屏幕上同一个率由调用方预先算成数组传入，
+  // 这里两处（数量派生 / 率列展示）必须共用它 —— 各写一遍三层下标，日后加一层就会
+  // 出现「率显示一个值、数量按另一个率算」的口径分裂。
+  const rateOf = (si: number, fi: number) => fabricRates?.[gi]?.[si]?.[fi] ?? lossRate
   // 数量列与屏幕/供应商同源：手工调整 → 落库真值加放并按 SKU 分摊；
   // 否则逐 SKU BOM 推算（唯一判定见 perSkuRows.buildRowDisplayQuantities）。
-  const displayQtys = buildRowDisplayQuantities(
-    group, perSkuRows, (si, fi) => fabricRates?.[gi]?.[si]?.[fi] ?? lossRate,
-  )
+  const displayQtys = buildRowDisplayQuantities(group, perSkuRows, rateOf)
 
   let tableHtml = ''
   let cursor = 0
@@ -228,8 +247,7 @@ function buildPerSkuGroupHtml(
       tableHtml += `<td>${escapeHtml(row.materialName)}</td>`
       tableHtml += `<td>${escapeHtml(row.specification)}</td>`
       if (row.coord) {
-        const rowRate = fabricRates?.[gi]?.[row.coord.si]?.[row.coord.fi] ?? lossRate
-        tableHtml += `<td>${escapeHtml(String(rowRate))}</td>`
+        tableHtml += `<td>${escapeHtml(String(rateOf(row.coord.si, row.coord.fi)))}</td>`
         tableHtml += `<td>${displayQty}</td>`
       } else {
         // 无落库坐标（BOM 生成后新增的物料）：**必须与屏幕同源** —— 屏幕
@@ -245,7 +263,8 @@ function buildPerSkuGroupHtml(
   }
 
   // 差异对照块：与屏幕同源（打印件不能对差异保持沉默）。
-  tableHtml += buildDiffBlockHtml(group, perSkuRows, spareRate, showRoleColumn)
+  tableHtml += buildDiffBlockHtml(group, perSkuRows, spareRate, showRoleColumn, diffs)
+  // ↑ `diffs` 是调用方传入的**屏幕快照**；未传时 buildDiffBlockHtml 才实时计算。
   return tableHtml
 }
 
@@ -257,11 +276,15 @@ function buildPerSkuGroupHtml(
  * + 布料名称/规格型号/损耗率/数量/单位 5 格；隐藏角色列时合计 11 列（横幅 colspan=11）。
  * 行数据来自 `buildStoredRows` —— 与屏幕**同一个纯函数**，故两边天然同构：
  * 损耗率取该落库行快照率、数量为按该率加放派生值。无差异时返回空串（不渲染）。
+ *
+ * `diffs`：**屏幕那份快照**（`computeDiffSnapshot` 产出）。不传才实时计算 —— 实时重算
+ * 会让「屏幕无横幅、打印有横幅」在同一会话内同时成立（用户改完数量立刻打印即可复现）。
  */
 function buildDiffBlockHtml(
   group: FactoryGroup, perSkuRows: PerSkuRow[], spareRate: number, showRoleColumn: boolean,
+  snapshot?: QuantityDiff[],
 ): string {
-  const diffs = computeQuantityDiff(group, perSkuRows)
+  const diffs = snapshot ?? computeQuantityDiff(group, perSkuRows)
   if (diffs.length === 0) return ''
 
   const detail = diffs
@@ -299,13 +322,57 @@ function buildDiffBlockHtml(
   return tableHtml
 }
 
+/** 打印/导出整表：表头与表体成对产出（列形态只判定一次）。 */
+export interface FactoryTableHtml {
+  /** 表头 `<tr>`（列数与 `body` 同源，天然对齐） */
+  head: string
+  /** 表体各行（不含 `<tbody>` 包裹） */
+  body: string
+}
+
+/**
+ * 打印/导出整表（表头 + 表体）。
+ *
+ * **列形态只判定一次**，同一个值喂给表头与表体 —— 调用方不得再自己写
+ * `factoryTableHead(anyGroupMultiRole(data))`：那是两次独立判定，一旦有人拿
+ * 「筛选后的数据」只喂给其中一处，就会重现 2026-11-15 修过的表头/表体错列
+ * （且不报错，只是整张纸串列）。
+ *
+ * `diffSnapshot`（可选）：**屏幕那份差异快照**。传入则打印与屏幕对「有没有差异」
+ * 给出同一个答案（owner 口径：本次会话自己改出来的差异不弹横幅）；不传则实时计算
+ * （仅既有调用/单测，会与屏幕不一致，勿在打印路径使用）。
+ */
+export function buildFactoryTable(
+  data: FactorySummaryData, lossRate: number, fabricRates?: number[][][], groupRates?: number[],
+  diffSnapshot?: Record<number, QuantityDiff[]>,
+): FactoryTableHtml {
+  const showRoleColumn = anyGroupMultiRole(data)
+  return {
+    head: factoryTableHead(showRoleColumn),
+    body: buildFactoryBody(data, lossRate, fabricRates, groupRates, showRoleColumn, diffSnapshot),
+  }
+}
+
+/**
+ * 兼容入口：只返回表体（既有调用与测试沿用此签名，行为逐字不变）。
+ * 需要表头时用 `buildFactoryTable`，别自己拼 —— 理由见上。
+ */
 export function buildFactoryHtml(
   data: FactorySummaryData, lossRate: number, fabricRates?: number[][][], groupRates?: number[],
+  diffSnapshot?: Record<number, QuantityDiff[]>,
+): string {
+  return buildFactoryTable(data, lossRate, fabricRates, groupRates, diffSnapshot).body
+}
+
+function buildFactoryBody(
+  data: FactorySummaryData, lossRate: number, fabricRates: number[][][] | undefined,
+  groupRates: number[] | undefined, showRoleColumn: boolean,
+  diffSnapshot?: Record<number, QuantityDiff[]>,
 ): string {
   let tableHtml = ''
-  // 角色名称列是**整表级**判定（与分组无关）：循环外算一次，表头选形态与表体渲染共用同一个值，
-  // 避免每组重算 O(物料数) 的 Set 重建（G 个分组 → O(G²·物料)），也杜绝两处各改一半。
-  const showRoleColumn = anyGroupMultiRole(data)
+  // 角色名称列是**整表级**判定（与分组无关）：由 `buildFactoryTable` 判定一次后传入，
+  // 因此这里不再重算 —— 既省掉每组 O(物料数) 的 Set 重建（G 个分组 → O(G²·物料)），
+  // 也杜绝了「表头算一次、表体再算一次」各改一半的可能。
   data.groups?.forEach((group, gi) => {
     const suppliers: SupplierGroup[] = group.suppliers || []
     // 备品口径（A）：只用该分组的订单级率；分组未提供时回退传入的统一率
@@ -313,7 +380,9 @@ export function buildFactoryHtml(
     const spareRate = typeof groupRate === 'number' && Number.isFinite(groupRate) ? groupRate : lossRate
 
     // 优先「按 SKU 展开」：每 SKU 一块物料 + 组末差异对照块；数据不足则回退订单级单块。
-    const perSkuHtml = buildPerSkuGroupHtml(group, gi, spareRate, lossRate, fabricRates, showRoleColumn)
+    const perSkuHtml = buildPerSkuGroupHtml(
+      group, gi, spareRate, lossRate, fabricRates, showRoleColumn, diffSnapshot?.[gi],
+    )
     if (perSkuHtml !== '') {
       tableHtml += perSkuHtml
       return

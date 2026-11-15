@@ -11,6 +11,7 @@
         :fabric-loss-rates="summary.fabricLossRates"
         :fabric-loss-rate-mixed="summary.fabricLossRateMixed"
         :group-spare-rates="summary.groupSpareRates"
+        :diff-snapshot="summary.diffSnapshot"
         :qty-drafts="summary.qtyDrafts"
         :qty-saving-key="summary.qtySavingKey"
         :has-unsaved-qty-edits="summary.hasUnsavedQtyEdits"

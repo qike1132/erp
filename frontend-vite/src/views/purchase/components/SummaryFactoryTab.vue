@@ -199,8 +199,9 @@
             </tr>
 
             <!-- 数量差异对照块：仅该组最后一行、且打开汇总时已存在「推算 vs 落库」差异时渲染。
-                 2026-11-11 owner 口径：本次会话保存产生的差异不弹横幅（rowDiffMap 在
-                 factoryData 整体替换时重新快照；单行数量保存原地改数量不更新快照）。 -->
+                 2026-11-11 owner 口径：本次会话保存产生的差异不弹横幅 —— 快照由
+                 useSummaryModal 在 openSummary 时算一次（prop `diffSnapshot`），
+                 打印/导出读同一份，故屏幕与打印件不会各说各话。 -->
             <SummaryDiffBlock
               v-if="rowDiffMap[item.gi] && rowDiffMap[item.gi]!.length > 0 && isLastRowOfGroup(item.gi, ri)"
               :diffs="rowDiffMap[item.gi]!"

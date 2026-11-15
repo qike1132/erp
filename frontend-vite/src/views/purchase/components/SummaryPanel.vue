@@ -88,6 +88,7 @@
         :fabric-loss-rates="fabricLossRates"
         :fabric-loss-rate-mixed="fabricLossRateMixed"
         :group-spare-rates="groupSpareRates"
+        :diff-snapshot="diffSnapshot"
         :qty-drafts="qtyDrafts"
         :qty-saving-key="qtySavingKey"
         @begin-qty-edit="(gi, si, fi, initial) => $emit('beginQtyEdit', gi, si, fi, initial)"
@@ -143,6 +144,11 @@ defineProps<{
   fabricLossRateMixed?: boolean[][][]
   /** 每个分组的订单级损耗率（「备品数量」列唯一口径，由 useSummaryModal 提供） */
   groupSpareRates?: number[]
+  /**
+   * 「数量差异」快照（gi → 差异行，打开汇总时算一次）。
+   * 屏幕与打印/导出共用同一份，故两边不会对「有没有差异」各说各话。
+   */
+  diffSnapshot?: Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>
   /** 数量单行编辑草稿（key = `${gi}-${si}-${fi}`） */
   qtyDrafts?: Record<string, string>
   /** 当前在途保存的数量行 key */

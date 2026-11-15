@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick, reactive } from 'vue'
 
 vi.mock('@/api', () => ({
   purchaseApi: {
@@ -21,6 +22,7 @@ vi.mock('@/api', () => ({
 }))
 
 import SummaryFactoryTab from '@/views/purchase/components/SummaryFactoryTab.vue'
+import { computeDiffSnapshot } from '@/views/purchase/composables/perSkuRows'
 import type { FactoryGroup, FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 const stubs = { FontAwesomeIcon: true }
@@ -55,11 +57,14 @@ function dataOf(g: FactoryGroup): FactorySummaryData {
 }
 
 function mountTab(g: FactoryGroup, opts: { qtyDrafts?: Record<string, string> } = {}) {
+  const data = dataOf(g)
   return mount(SummaryFactoryTab, {
     props: {
-      factoryData: dataOf(g), lossRate: 10, orderCount: 1,
+      factoryData: data, lossRate: 10, orderCount: 1,
       groupSpareRates: [10],
       fabricLossRates: [[[5, 0], [0, 0, 0]]],  // [供应商][布料]：共享布 5‰、A/B专有 0、新加布 0
+      // 差异快照由会话层（useSummaryModal）在打开汇总时算一次后传入；组件只读不算
+      diffSnapshot: computeDiffSnapshot(data, () => 10),
       qtyDrafts: opts.qtyDrafts ?? {},
     },
     global: { stubs },
@@ -251,6 +256,27 @@ describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
     expect(w.text()).not.toContain('实际下单')
     expect(w.findAll('tbody [data-diff="true"]')).toHaveLength(0)
     expect(w.findAll('tbody tr.sm-diff-row')).toHaveLength(0)
+  })
+})
+
+/**
+ * P11 会话内改数量**不弹横幅**（owner 口径 2026-11-11 + 评审 A1：屏幕与打印共用冻结快照）。
+ *
+ * 用 `reactive` 数据源模拟生产：单行保存是「原地改 factories[si].fabrics[fi].quantity」，
+ * 若有人把 `rowDiffMap` 改回实时计算，本次改动会让横幅立即出现 → 本用例变红。
+ */
+describe('P11 会话内改数量不弹横幅（快照冻结）', () => {
+  it('打开时无差异 → 改落库数量后仍无横幅', async () => {
+    const g = reactive(group())
+    const w = mountTab(g as unknown as FactoryGroup)
+    expect(w.text()).not.toContain('实际下单')
+
+    // 生产等价动作：单行数量保存后原地改写落库真值（对象引用不变）
+    g.suppliers![0]!.fabrics[0]!.quantity = 65
+    await nextTick()
+
+    expect(w.text()).not.toContain('实际下单')
+    expect(w.findAll('tbody [data-diff="true"]')).toHaveLength(0)
   })
 })
 

@@ -19,7 +19,7 @@
  * （`buildStoredRows` 需要按率加放取整，而它必须是叶子纯函数 —— 故这两个函数
  * 必须住在这里，不能反过来从 useSummaryModal.ts 取。）
  */
-import type { FactoryGroup } from './useSummaryModal'
+import type { FactoryGroup, FactorySummaryData } from './useSummaryModal'
 
 export interface SkuMaterial {
   supplier_name: string
@@ -589,9 +589,16 @@ export function buildRowDisplayQuantities(
  *
  * 容差 0.005 —— 数量落库为 2 位小数，避免浮点尾差误报。返回空数组表示无差异。
  */
+export interface QuantityDiff {
+  materialName: string
+  partName: string
+  perSku: number
+  stored: number
+}
+
 export function computeQuantityDiff(
   group: FactoryGroup, rows: PerSkuRow[],
-): { materialName: string; partName: string; perSku: number; stored: number }[] {
+): QuantityDiff[] {
   if (rows.length === 0) return []
   const stored = buildStoredIndex(group)
   const nameOfStoredKey = (key: string) => key.split('\u0000')[1] || ''
@@ -608,7 +615,7 @@ export function computeQuantityDiff(
     summed.set(key, (summed.get(key) ?? 0) + r.baseQuantity)
   })
 
-  const diffs: { materialName: string; partName: string; perSku: number; stored: number }[] = []
+  const diffs: QuantityDiff[] = []
   // 1) 遍历按 SKU 侧的键：既覆盖「两侧都有」的键，也覆盖「只在 BOM 侧」的新增物料
   //    （落库没有 → 不是差异，跳过）。
   summed.forEach((perSku, key) => {
@@ -634,6 +641,32 @@ export function computeQuantityDiff(
     }
   })
   return diffs
+}
+
+/**
+ * 「数量差异」快照（gi → 该组差异行）：**打开汇总时算一次**，屏幕与打印/导出共用同一份。
+ *
+ * 为什么必须共用一份（2026-11-15 评审 A1）：屏幕按 owner 口径把差异**冻结在打开那一刻**
+ * （本次会话里自己改出来的差异不弹横幅，避免用户以为系统在报警）；打印若实时重算，
+ * 就会出现「屏幕没有横幅、打印件突然冒出对照块」的同屏两说。故快照在此产出一次，
+ * 屏幕（`useFactoryTableRows.rowDiffMap`）与打印（`buildFactoryTable` 的 `diffSnapshot`）
+ * 都只读它，永不各自计算。
+ *
+ * `spareRateForGroup` 只影响 per-SKU 行的「备品」文本，**不影响差异判定**
+ * （`computeQuantityDiff` 只比较基准量与落库量），故取不到率时也不会算错。
+ */
+export function computeDiffSnapshot(
+  data: FactorySummaryData | null | undefined,
+  spareRateForGroup: (gi: number) => number,
+): Record<number, QuantityDiff[]> {
+  const snapshot: Record<number, QuantityDiff[]> = {}
+  ;(data?.groups || []).forEach((group, gi) => {
+    const rows = buildPerSkuRows(group, spareRateForGroup(gi))
+    // 无逐 SKU 数据（旧后端/无 BOM）→ 该组不可能有差异，留空数组（不是 undefined：
+    // undefined 在渲染侧表示「没有快照」，会退回实时计算）
+    snapshot[gi] = rows.length > 0 ? computeQuantityDiff(group, rows) : []
+  })
+  return snapshot
 }
 
 /**

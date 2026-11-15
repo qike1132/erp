@@ -8,7 +8,7 @@
  *   E4 无落库坐标的行（BOM 生成后新增）→ 打印与屏幕同源：率 '—'、数量取基准量（不加放）
  */
 import { describe, it, expect } from 'vitest'
-import { buildFactoryHtml } from '@/views/purchase/composables/useSummaryModal'
+import { buildFactoryHtml, buildFactoryTable } from '@/views/purchase/composables/useSummaryModal'
 import type { FactoryGroup, FactorySummaryData } from '@/views/purchase/composables/useSummaryModal'
 
 function perSkuGroup(): FactoryGroup {
@@ -100,7 +100,7 @@ describe('E2 差异 → 对照块同源输出', () => {
 })
 
 describe('E2b 打印对照块结构（与屏幕同源）', () => {
-  it('数据行恰好 12 列；率取快照率、数量为加放派生值', () => {
+  it('数据行与主表同列；率取快照率、数量为加放派生值', () => {
     const g = perSkuGroup()
     g.suppliers![0]!.fabrics[0]!.quantity = 65      // 落库 65 ≠ 推算 60 → 有差异
     g.suppliers![0]!.fabrics[0]!.loss_rate = 500    // 快照率 500‰（传入的实时率是 200‰）
@@ -122,7 +122,7 @@ describe('E2b 打印对照块结构（与屏幕同源）', () => {
     expect(banner.textContent).toContain('65.0')
 
     // 数据行首行：标签 colspan=2（跨本块全部行：客户/产品名称）+ 订单(空) + 备品(空)
-    // + 部位(空) + 供应商(rowspan) + 后 5 格 = 9 格 / 有效 11 列（本文件夹具无角色名 → 隐藏角色列）
+    // + 部位(空) + 供应商(rowspan) + 后 5 格 = 10 个 td / 有效 11 列（本夹具无角色名 → 隐藏角色列）
     const dataRow = rows.find((tr) => tr.querySelector('td[colspan="2"]'))!
     const cells = Array.from(dataRow.querySelectorAll('td'))
     expect(cells).toHaveLength(10)
@@ -172,6 +172,87 @@ describe('E4 无落库坐标行：打印必须与屏幕同源', () => {
     // 无坐标行**不加放**：率 '—'、数量 = 基准量 5。
     // （曾误为回退 lossRate 10 并 ceil(5 × 1.01) = 6 → 屏幕「— / 5」而打印「10 / 6」。）
     expect(cells.map((td) => td.textContent)).toEqual(['', '新加布', 'S9', '—', '5', '米'])
+  })
+})
+
+/**
+ * E6 表头与表体必须由**同一次**列形态判定产出（2026-11-15 评审 A2）。
+ *
+ * 原实现里表体在 `buildFactoryHtml` 内部算 `anyGroupMultiRole(data)`、表头由调用处
+ * 再算一遍——两次独立判定。现在 `buildFactoryTable` 一次判定并成对返回，本用例锁住
+ * 「head 的 th 数 === 每个数据行的有效列数」，任何一侧被单独改动都会变红。
+ */
+describe('E6 表头/表体同源', () => {
+  /** 把表头 + 表体包成完整表格，返回表头 th 数与每行有效列数。 */
+  function headAndRowWidths(head: string, body: string) {
+    const doc = new DOMParser().parseFromString(
+      `<table><thead>${head}</thead><tbody>${body}</tbody></table>`, 'text/html',
+    )
+    return {
+      thCount: doc.querySelectorAll('thead th').length,
+      widths: rowWidths([...doc.querySelectorAll('tbody tr')] as HTMLTableRowElement[]),
+    }
+  }
+
+  it('单角色/无角色 → 表头 11 列，每行也恰好 11 列', () => {
+    const { head, body } = buildFactoryTable(dataOf(perSkuGroup()), 10)
+    const { thCount, widths } = headAndRowWidths(head, body)
+    expect(thCount).toBe(11)
+    expect(widths.every((w) => w === 11)).toBe(true)
+  })
+
+  it('多角色 → 表头 12 列，每行也恰好 12 列（角色列由同一个判定打开）', () => {
+    const g = perSkuGroup()
+    g.skus![0]!.materials = [
+      { supplier_name: '供应商甲', material_name: '布A', specification: 'S1', unit: '米', quantity: 10, role_display: '角色A', role_id: 1 },
+      { supplier_name: '供应商甲', material_name: '布B', specification: 'S1', unit: '米', quantity: 10, role_display: '角色B', role_id: 2 },
+    ]
+    g.suppliers![0]!.fabrics = [
+      { fabric_name: '布A', specification: 'S1', unit: '米', quantity: 10, item_ids: [1], role_display: '角色A', role_id: 1 },
+      { fabric_name: '布B', specification: 'S1', unit: '米', quantity: 10, item_ids: [2], role_display: '角色B', role_id: 2 },
+    ]
+    const { head, body } = buildFactoryTable(dataOf(g), 10)
+    const { thCount, widths } = headAndRowWidths(head, body)
+
+    expect(thCount).toBe(12)
+    expect(widths.every((w) => w === 12)).toBe(true)
+  })
+})
+
+/**
+ * E7 打印必须读「屏幕那份差异快照」，不得实时重算（2026-11-15 评审 A1）。
+ *
+ * 场景（生产可复现）：打开汇总 → 在表格里手改某行数量并保存（落库值变、快照不变）
+ * → 立刻点打印。旧实现打印实时重算，于是「屏幕没有横幅、打印件却出现对照块」。
+ * 修复后两侧同读 `diffSnapshot`，本用例从两个方向钉死该行为。
+ */
+describe('E7 打印读快照而非实时计算', () => {
+  /** 构造「落库 65 ≠ 推算 60」的真实差异（实时算会命中）。 */
+  function groupWithLiveDiff(): FactoryGroup {
+    const g = perSkuGroup()
+    g.suppliers![0]!.fabrics[0]!.quantity = 65
+    return g
+  }
+
+  it('快照为空（屏幕无横幅）→ 即使实时算有差异，打印也不得出现对照块', () => {
+    const rows = tbodyText(buildFactoryHtml(dataOf(groupWithLiveDiff()), 10, undefined, undefined, { 0: [] }))
+
+    expect(rows.some((t) => t.includes('实际下单'))).toBe(false)
+    expect(rows.some((t) => t.includes('手工调整'))).toBe(false)
+  })
+
+  it('快照有差异（屏幕有横幅）→ 即使实时算没有差异，打印也照常输出对照块', () => {
+    const snapshot = { 0: [{ materialName: '共享布', partName: '', perSku: 60, stored: 65 }] }
+    const rows = tbodyText(buildFactoryHtml(dataOf(perSkuGroup()), 10, undefined, undefined, snapshot))
+
+    expect(rows.some((t) => t.includes('实际下单'))).toBe(true)
+    expect(rows.some((t) => t.includes('手工调整'))).toBe(true)
+  })
+
+  it('不传快照（既有调用路径）→ 维持实时计算，零回归', () => {
+    const rows = tbodyText(buildFactoryHtml(dataOf(groupWithLiveDiff()), 10))
+
+    expect(rows.some((t) => t.includes('实际下单'))).toBe(true)
   })
 })
 

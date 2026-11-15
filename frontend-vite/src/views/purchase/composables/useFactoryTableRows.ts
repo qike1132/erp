@@ -13,11 +13,11 @@
  * 依赖方向（**务必保持单向**）：本模块从 `useSummaryModal`（类型 + 既有纯函数）与
  * `perSkuRows`（Task 2 冻结行模型）取值；二者均不反向依赖本模块，无环。
  */
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import type { EmitFn } from 'vue'
 import { factoryQtyDisplayValue, buildSkuDisplayLines } from './useSummaryModal'
-import { buildPerSkuRows, materialKeyOf, computeQuantityDiff, buildStoredRows, buildRowDisplayQuantities, parseQtyInput } from './perSkuRows'
-import type { PerSkuRow, StoredRow } from './perSkuRows'
+import { buildPerSkuRows, materialKeyOf, buildStoredRows, buildRowDisplayQuantities, parseQtyInput } from './perSkuRows'
+import type { PerSkuRow, QuantityDiff, StoredRow } from './perSkuRows'
 import type { FactorySummaryData, FactoryGroup, FabricItem, SkuDisplayLine } from './useSummaryModal'
 
 /** 组件 props（自 `SummaryFactoryTab.vue` 的 `defineProps` 逐字抽出，组件与本模块两处共用）。 */
@@ -39,6 +39,13 @@ export interface FactoryTabProps {
   qtyDrafts?: Record<string, string>
   /** 当前在途保存的数量行 key；非空时所有保存按钮禁用 */
   qtySavingKey?: string | null
+  /**
+   * 「数量差异」快照（gi → 差异行），由 `useSummaryModal` 在打开汇总时算一次。
+   *
+   * **本组件只读它、不再自己算**：打印/导出读的是同一个对象，故屏幕与打印件对
+   * 「有没有差异」永远给同一个答案（2026-11-15 评审 A1）。缺省 = 空（无横幅）。
+   */
+  diffSnapshot?: Record<number, QuantityDiff[]>
 }
 
 /** 组件 emit（自 `SummaryFactoryTab.vue` 的 `defineEmits` 逐字抽出，组件与本模块两处共用）。
@@ -189,29 +196,15 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
   /**
    * 每组的差异列表（按 SKU 模式下才有；回退模式恒为空 ⇒ 不渲染对照块）。
    *
-   * **会话内冻结**（2026-11-11 owner 口径）：只有「打开汇总时后端返回数据里已存在」
-   * 的差异才展示 —— 用户本次保存产生/变化的差异不得在当前会话弹横幅。
-   * 单行数量保存只原地改 `factoryData` 中的数量、不替换对象引用，故快照保持不变；
-   * 重开汇总 / 409 刷新会整体替换 `factoryData` → 重新快照（新数据里已存在的差异
-   * 照常展示）。`computeQuantityDiff` 的比较口径未做任何改动。
+   * **只读外部快照**（2026-11-11 owner 口径 + 2026-11-15 评审 A1）：只有「打开汇总时
+   * 后端返回数据里已存在」的差异才展示 —— 用户本次保存产生/变化的差异不得在当前会话
+   * 弹横幅。快照由 `useSummaryModal` 在 openSummary 时用 `computeDiffSnapshot` 算一次，
+   * 并作为 prop 传入；**打印/导出读的是同一个对象**，因此屏幕与打印件不会各说各话。
+   *
+   * 本组件不再自己算（原先的 live+frozen 双路已删）：两处各算一次正是「屏幕没有横幅、
+   * 打印件冒出横幅」的成因。
    */
-  const liveRowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() => {
-    const map: Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]> = {}
-    ;(props.factoryData?.groups || []).forEach((group, gi) => {
-      const rows = perSkuByGroup.value[gi] || []
-      map[gi] = rows.length > 0 ? computeQuantityDiff(group, rows) : []
-    })
-    return map
-  })
-
-  /** 打开/重开时冻结的 diff 快照；会话内的单行保存不更新它 */
-  const frozenDiff = ref<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]> | null>(null)
-
-  watch(() => props.factoryData, () => { frozenDiff.value = liveRowDiffMap.value }, { immediate: true })
-
-  const rowDiffMap = computed<Record<number, { materialName: string; partName: string; perSku: number; stored: number }[]>>(() =>
-    frozenDiff.value ?? liveRowDiffMap.value,
-  )
+  const rowDiffMap = computed<Record<number, QuantityDiff[]>>(() => props.diffSnapshot ?? {})
 
   /**
    * 该组落库真值（压平供应商维度，供对照块列出），率/数量已按主表口径算好。

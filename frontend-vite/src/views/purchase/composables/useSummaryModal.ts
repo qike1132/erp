@@ -2,7 +2,8 @@ import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
-import { summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, allocateOrderDisplayQuantities, parseQtyInput } from './perSkuRows'
+import { summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, allocateOrderDisplayQuantities, parseQtyInput, computeDiffSnapshot } from './perSkuRows'
+import type { QuantityDiff } from './perSkuRows'
 
 // 这些纯函数已移入 perSkuRows.ts —— 本模块要用它的 buildPerSkuRows，
 // 若此处再定义它们就构成互相 import（Vite/vitest 下会拿到 undefined 绑定）。
@@ -13,16 +14,17 @@ export { calcSpareQuantity, summaryMaterialKey, magnifyByLossRate, ceilMagnified
 // 依赖方向：summaryPrintHtml → perSkuRows（叶子）；本模块 → summaryPrintHtml，无运行时环
 // （summaryPrintHtml 对本文件的引用是 type-only，编译期擦除）。
 import {
-  buildFactoryHtml,
+  buildFactoryTable,
   buildSupplierHtml,
-  factoryTableHead,
-  anyGroupMultiRole,
   SUMMARY_PRINT_STYLE,
+  SUPPLIER_TABLE_HEAD,
 } from './summaryPrintHtml'
 // 重导出保持既有导入路径（组件 / 既有测试）逐字不变，行为不变。
 export {
   FACTORY_TABLE_HEAD,
+  SUPPLIER_TABLE_HEAD,
   buildFactoryHtml,
+  buildFactoryTable,
   buildSkuDisplayLines,
   buildSupplierHtml,
   factoryTableHead,
@@ -309,6 +311,16 @@ export function useSummaryModal() {
   const fabricLossRateMixedPersisted = ref<boolean[][][]>([])
   /** 每个布料行对应的明细 item_ids，用于按行保存损耗率 */
   const fabricItemIds = ref<number[][][][]>([])
+
+  /**
+   * 「数量差异」快照（gi → 该组差异行）：**打开汇总时算一次**，屏幕与打印/导出共用。
+   *
+   * owner 口径（2026-11-11）：本次会话里自己改出来的差异不在当前会话弹横幅，故不能实时算。
+   * 此状态是唯一来源 —— 屏幕（`useFactoryTableRows.rowDiffMap`）读它渲染对照块，
+   * 打印把它传给 `buildFactoryTable(..., diffSnapshot)`。两边对「有没有差异」永远同一个
+   * 答案；此前屏幕冻结、打印实时，用户改完数量立刻打印就会出现「屏幕没有、打印件有」。
+   */
+  const diffSnapshot = ref<Record<number, QuantityDiff[]>>({})
 
   /**
    * 数量「点击单元格就地编辑」的草稿（key = fabricKey(gi,si,fi)，值 = 输入框原串）。
@@ -651,6 +663,11 @@ export function useSummaryModal() {
     lossRateSaveState.value = 'idle'
     lossRateMixed.value = fRes.spare_rate_mixed === true
     persistedLossRateMixed.value = lossRateMixed.value
+    // 差异快照：播种完分组率之后算一次（此后会话内的编辑**不**刷新它 —— owner 口径）。
+    // 屏幕与打印都只读这一份，故「有没有差异」两边永远一致。
+    diffSnapshot.value = computeDiffSnapshot(
+      factoryData.value, (gi) => groupSpareRates.value[gi] ?? lossRate.value,
+    )
     tab.value = 'factory'
     open.value = true
   }
@@ -985,16 +1002,21 @@ export function useSummaryModal() {
     fabricRateVersions.clear()
     // 保存反馈随弹窗关闭复位（状态由下一次输入或关闭重置，不使用定时器）
     lossRateSaveState.value = 'idle'
+    // 差异快照随会话结束清空：下次 openSummary 会按新数据重新算，避免旧单的横幅串到新单
+    diffSnapshot.value = {}
   }
 
   function printFactory() {
     if (!factoryData.value) return
-    const tableHtml = buildFactoryHtml(
+    // 表头与表体由 buildFactoryTable 一次判定列形态（别再自己算 anyGroupMultiRole —— 那是
+    // 第二次独立判定，数据一旦不是同一份就会 11/12 列错位，且不报错）。
+    const table = buildFactoryTable(
       factoryData.value, lossRate.value, fabricLossRates.value, groupSpareRates.value,
+      diffSnapshot.value,
     )
     printHtml(
       '工厂内部采购订单汇总',
-      `${orderTimeLabel(orderTime.value)}<table><thead>${factoryTableHead(anyGroupMultiRole(factoryData.value))}</thead><tbody>${tableHtml}</tbody></table>`,
+      `${orderTimeLabel(orderTime.value)}<table><thead>${table.head}</thead><tbody>${table.body}</tbody></table>`,
       SUMMARY_PRINT_STYLE,
     )
   }
@@ -1004,17 +1026,18 @@ export function useSummaryModal() {
     const tableHtml = buildSupplierHtml(supplierGroups.value)
     printHtml(
       '供应商采购订单汇总',
-      `${orderTimeLabel(orderTime.value)}<table><thead><tr><th>供应商</th><th>物料名称</th><th>规格型号</th><th>数量</th><th>单位</th><th>来源订单</th></tr></thead><tbody>${tableHtml}</tbody></table>`,
+      `${orderTimeLabel(orderTime.value)}<table><thead>${SUPPLIER_TABLE_HEAD}</thead><tbody>${tableHtml}</tbody></table>`,
       SUMMARY_PRINT_STYLE,
     )
   }
 
   function exportFactory() {
     if (!factoryData.value) return
-    const tableHtml = buildFactoryHtml(
+    const table = buildFactoryTable(
       factoryData.value, lossRate.value, fabricLossRates.value, groupSpareRates.value,
+      diffSnapshot.value,
     )
-    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead>${factoryTableHead(anyGroupMultiRole(factoryData.value))}</thead><tbody>${tableHtml}</tbody></table>`
+    const html = `<div style="text-align:center;margin-bottom:20px"><h2>工厂内部采购订单汇总</h2></div><table><thead>${table.head}</thead><tbody>${table.body}</tbody></table>`
     downloadAsXls(html, '工厂内部采购汇总.xls')
   }
 
@@ -1064,6 +1087,7 @@ export function useSummaryModal() {
     fabricLossRates,
     fabricLossRateMixed,
     groupSpareRates,
+    diffSnapshot,
     lossRateTouched,
     lossRateSaveState,
     orderIds,
