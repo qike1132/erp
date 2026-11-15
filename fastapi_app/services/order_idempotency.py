@@ -43,7 +43,10 @@ def validate_key(key: str | None) -> str | None:
     非法键在**开事务之前**就失败（BusinessError → 400），免得为一个注定失败的
     请求去抢 advisory lock、等行锁。
     """
-    if key is None:
+    # 直接调用端点函数（单测/内部）时，FastAPI 的 Header 默认值会原样传进来，
+    # 它不是 str；生产请求里 FastAPI 只会给 str 或 None。按「未提供」处理，
+    # 避免 len(Header) 抛 TypeError。
+    if key is None or not isinstance(key, str):
         return None
     if not (KEY_MIN_LENGTH <= len(key) <= KEY_MAX_LENGTH):
         raise BusinessError(

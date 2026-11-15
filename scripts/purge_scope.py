@@ -97,6 +97,8 @@ CORE_CLEAR_TABLES = (
     'order_outsource_process',
     'outsource_process_type',
     # 核心业务 - 订单
+    # 幂等登记表随订单一起清：留着旧键会让「清库后重放」返回已不存在的订单结果
+    'order_create_attempt',
     'order_item',
     'order_status_log',
     'order_batch_audit_log',

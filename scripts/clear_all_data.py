@@ -256,6 +256,8 @@ def clear_core_business(db: Session, dry_run: bool = True) -> dict:
     results['approval_request'] = affected_rows(db, "DELETE FROM approval_request", dry_run=dry_run)
     results['order_status_log'] = affected_rows(db, "DELETE FROM order_status_log WHERE target_type = 'unprocessed_order'", dry_run=dry_run)
     # P1-35：订单明细显式删除（原先依赖 order 的外键级联；显式化后口径可见、dry-run 有数）
+    # 幂等登记表：与订单同批清，避免清库后同键重放返回已删除订单的结果
+    results['order_create_attempt'] = affected_rows(db, "DELETE FROM order_create_attempt", dry_run=dry_run)
     results['order_item'] = affected_rows(db, "DELETE FROM order_item", dry_run=dry_run)
     results['order'] = affected_rows(db, "DELETE FROM \"order\"", dry_run=dry_run)
 
