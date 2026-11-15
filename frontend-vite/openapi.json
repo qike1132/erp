@@ -14943,7 +14943,7 @@
           "采购计划"
         ],
         "summary": "Download Template",
-        "description": "下载出货计划导入模板。\n\nArgs:\n    _user: 当前操作用户（用于权限校验）。\n\nReturns:\n    Response: Excel 文件流（含 Content-Disposition 头）。\n\nRaises:\n    HTTPException: 模板文件不存在返回 404；读取失败返回 500。",
+        "description": "下载出货计划导入模板（按解析器列序即时生成）。\n\n此前固定下发 `static/files/purchase_order_template.xlsx`（实际是「附件5采购订单」），\n用户按它填数再上传会解析出空数据，且报错不会指向「模板拿错了」。改为按\n`services/purchase_plan_staging._parse_excel_row` 的列序生成，模板与解析器同源。\n\nArgs:\n    _user: 当前操作用户（用于权限校验）。\n\nReturns:\n    Response: Excel 文件流（含 Content-Disposition 头）。",
         "operationId": "download_template_api_v1_plans_template_download_get",
         "responses": {
           "200": {
