@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
+from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.shared_models.order import VALID_ORDER_STATUSES
 from fastapi_app.utils import calc_total_pages, parse_date_strict
@@ -76,6 +77,14 @@ async def _query_logs_generic(
 
     data_sql = data_sql_template.format(where_sql=where_sql)
     results = (await db.execute(text(data_sql), params)).fetchall()
+
+    # 越界页（筛选后数据变少、用户仍停在第 5 页）：COUNT(*) OVER() 在没有结果行时
+    # 取不到值，total 会变成 0，前端分页器归零且没有可点页。此时回退到第 1 页重查，
+    # 既拿到真实 total 也给用户一页数据。
+    if not results and page > 1:
+        params['offset'] = 0
+        results = (await db.execute(text(data_sql), params)).fetchall()
+        page = 1
 
     total = results[0].total_count if results else 0
     logs = [row_mapper(row) for row in results]
@@ -179,14 +188,21 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         item_where_clauses.append(cond)
         params['product'] = f'%{escape_like(product)}%'
     if factory:
-        where_clauses.append("p.factory = :factory")
-        item_where_clauses.append("p.factory = :factory")
+        # 与库存/出货侧同口径（stock_inventory_service._factory_match）：未分配工厂的
+        # 历史产品也算本厂，否则同一批数据在 /stock 看得到、在报表里消失。
+        factory_cond = "(p.factory = :factory OR p.factory IS NULL OR p.factory = '')"
+        where_clauses.append(factory_cond)
+        item_where_clauses.append(factory_cond)
         params['factory'] = factory
     if status:
-        valid = VALID_ORDER_STATUSES
-        if status in valid:
-            where_clauses.append("o.status = :status")
-            params['status'] = status
+        # 非法状态必须报错：静默忽略会返回全量，用户以为筛选生效（导出给客户的流水
+        # 会包含全部状态）。与同文件「非法日期必须报错」保持一致。
+        # 用 BusinessError 而不是 ValueError：只有导出端点把 ValueError 映射成 400，
+        # 列表端点会让它变成 500。
+        if status not in VALID_ORDER_STATUSES:
+            raise BusinessError(f'状态参数无效: {status}')
+        where_clauses.append("o.status = :status")
+        params['status'] = status
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
         where_clauses.append("o.order_date >= :start_date")

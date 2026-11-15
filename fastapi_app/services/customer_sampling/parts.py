@@ -169,6 +169,10 @@ async def update_part(
     elif supplier_name is not None and supplier_name != part.supplier_name:
         # 允许直接更新供应商名称（不通过 supplier_id）
         part.supplier_name = supplier_name
+        if not supplier_name:
+            # 清空名称时同步清外键：否则下游仍按 supplier_id 取回旧供应商，
+            # 表现为「清空了但打印/导出还是原来那家」。
+            part.supplier_id = None
 
     # 更新可选字段
     if sort_order is not None:

@@ -101,6 +101,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useQuery, keepPreviousData, isCancelledError } from '@tanstack/vue-query'
+import { download } from '@/api/request'
+import { getErrorStatus } from '@/types/errors'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { reportApi } from '@/api'
 import { useCatalogStore } from '@/stores/catalog'
@@ -305,7 +307,7 @@ function onPageChange(event: { page: number; rows: number }) {
   perPage.value = event.rows
 }
 
-function exportReport() {
+async function exportReport() {
   // 草稿与已提交快照不一致时先同步提交（OCR-4 Low:247）：「导出」与「查询」一样是
   // 显式动作，立即生效不等防抖——导出文件必须与输入框当前所见一致；提交后挂起的
   // 防抖到期发现快照已一致，自然 no-op，不会二次请求。
@@ -315,12 +317,23 @@ function exportReport() {
   ) {
     commitFilters()
   }
-  const params = new URLSearchParams()
-  params.set('report_type', activeTab.value)
+  const params: Record<string, string> = { report_type: activeTab.value }
   // 导出与查询同口径：读已提交的筛选快照，而非用户可能还在改的草稿输入（P1-24）
-  if (appliedFilters.value.customer) params.set('customer', appliedFilters.value.customer)
-  if (appliedFilters.value.product) params.set('product', appliedFilters.value.product)
-  window.open(`/api/v1/reports/export?${params.toString()}`, '_blank')
+  if (appliedFilters.value.customer) params.customer = appliedFilters.value.customer
+  if (appliedFilters.value.product) params.product = appliedFilters.value.product
+  // 走 axios 下载而不是 window.open：后者绕过 401 刷新与 403 提示，
+  // token 过期/导出被拒时用户只会看到新标签页里一坨裸 JSON。
+  try {
+    await download('/reports/export', `流水查询_${activeTab.value}.xlsx`, params)
+  } catch (e) {
+    const status = getErrorStatus(e)
+    showToast(
+      status === 400
+        ? '导出失败：数据量超过上限，请缩小筛选范围后重试'
+        : '导出失败，请稍后重试',
+      'error',
+    )
+  }
 }
 </script>
 

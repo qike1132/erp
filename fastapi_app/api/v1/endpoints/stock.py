@@ -382,7 +382,9 @@ async def list_stockout_records(
         StockListResponse: 匹配的明细行（带 id/数量/客户/日期/备注等）。
     """
     items = await get_stockout_records(db, kind=kind, nos=nos, product=product, factory=_factory_scope(_user))
-    return StockListResponse(data=items, total=len(items), page=1, per_page=len(items))
+    # per_page 用结果条数反填时，空集会返回 0（分页器把「每页 0 条」当合法值）；
+    # 该端点不分页，空集统一按 1 报，避免下游除零/渲染异常。
+    return StockListResponse(data=items, total=len(items), page=1, per_page=len(items) or 1)
 
 
 @router.get('/inventory', response_model=InventoryResponse)

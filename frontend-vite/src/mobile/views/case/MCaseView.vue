@@ -115,6 +115,7 @@ import { caseApi } from '@/api'
 import { MOBILE_LIST_PAGE_SIZE } from '@/mobile/constants'
 import type { CaseSearchItem, CaseItem, CaseMovementPayload, CaseProduct } from '@/api/case'
 import { showToast } from '@/composables/useToast'
+import { getErrorStatus } from '@/types/errors'
 import { toISODate } from '@/utils/format'
 import { useCaseSettings, type PartsFilter } from '@/views/case/composables/useCaseSettings'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
@@ -154,9 +155,11 @@ async function onSearch() {
     const res = await caseApi.search(q)
     if (seq !== searchSeq) return
     results.value = res
-  } catch {
+  } catch (e) {
     if (seq !== searchSeq) return
     results.value = []
+    // 失败与「无匹配」必须区分：静默成空列表会让操作工以为皮套没建档、重复建档
+    showToast(getErrorStatus(e) === 403 ? '没有皮套查看权限' : '搜索失败，请重试', 'error')
   }
 }
 
@@ -186,8 +189,15 @@ async function submit() {
     productQuery.value = ''
     quantity.value = 1
     note.value = ''
-  } catch {
-    showToast('提交失败', 'error')
+    // 提交后必须刷新库存：否则「库存 xx」一直是提交前的数字，
+    // 连续出库会按旧库存操作，直到刷新页面才发现超发。
+    void loadInventory()
+  } catch (e) {
+    // 403 时全局拦截器已提示「权限不足」，这里给可操作文案，不再泛化成「提交失败」
+    showToast(
+      getErrorStatus(e) === 403 ? '没有皮套操作权限，请联系管理员授权' : '提交失败，请重试',
+      'error',
+    )
   } finally {
     submitting.value = false
   }

@@ -112,7 +112,9 @@ export function useOutsourceUnshipped() {
     runExport(() => {
       const thead = `<tr>${UNSHIPPED_HEADERS.map((h, i) => `<th style="width:${UNSHIPPED_COL_WIDTHS[i]}px">${h}</th>`).join('')}</tr>`
       const tbody = buildUnshippedTbody(items)
-      const date = new Date().toISOString().slice(0, 10)
+      // 文件名日期必须用本地（北京）年月日：toISOString 恒为 UTC，早班导出差一天
+      const now = new Date()
+      const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
       const html = `<div style="text-align:center;margin-bottom:20px;"><h2>湖北未到货明细（${items.length} 条）</h2></div><table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`
       downloadXls(html, `湖北未到货明细_${date}.xls`)
     })

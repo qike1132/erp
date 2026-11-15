@@ -5,6 +5,7 @@
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,8 +136,11 @@ async def _fetch_completed_items_and_arrived(db: AsyncSession, order_ids: list[i
     for item in all_items:
         items_by_order[item.order_id].append(item)
 
+    # 到货量必须按「采购单 + 物料」聚合：同一物料名/编码可能同时出现在多张采购单里，
+    # 只按物料聚合会把各单到货量相加后重复计入每一张单（显示「已到货、欠料 0」）。
     regs_result = await db.execute(
         select(
+            MaterialRegistration.purchase_order_id,
             MaterialRegistrationItem.material_name,
             MaterialRegistrationItem.material_code,
             func.sum(MaterialRegistrationItem.received_quantity).label('total'),
@@ -146,21 +150,24 @@ async def _fetch_completed_items_and_arrived(db: AsyncSession, order_ids: list[i
             MaterialRegistration.purchase_order_id.in_(order_ids),
             MaterialRegistration.status.in_(('pending', 'partial', 'completed')),
         ).group_by(
+            MaterialRegistration.purchase_order_id,
             MaterialRegistrationItem.material_name,
             MaterialRegistrationItem.material_code,
         )
     )
     arrived_map = {
-        (r.material_name, r.material_code or ''): int(r.total or 0)
+        (r.purchase_order_id, r.material_name, r.material_code or ''): (r.total or Decimal('0'))
         for r in regs_result
     }
     return items_by_order, arrived_map
 
 def _serialize_completed_item(item, arrived_map: dict, order=None) -> dict:
-    required = int(item.quantity or 0)
-    # 与 arrived_map 构建侧同构归一（material_code 可空 → ''），否则 NULL 明细永远查不中
-    key = (item.material_name, item.material_code or '')
-    arrived = arrived_map.get(key, 0)
+    # 数量列是 Numeric，不得 int() 截断：0.5 米的采购行被截成 0 后会恒判「未到货且不欠料」。
+    required = item.quantity if item.quantity is not None else Decimal('0')
+    # 与 arrived_map 构建侧同构归一（purchase_order_id + material_code 可空 → ''），
+    # 漏掉 purchase_order_id 会让同名物料跨单串算。
+    key = (item.order_id, item.material_name, item.material_code or '')
+    arrived = arrived_map.get(key) or Decimal('0')
     data = _serialize_po_item(item)
     # P1（2026-10-24）：数量与金额必须同源。金额（item.total_price）按「加放损耗后的
     # 计价数量」计算，而列表原先下发落库原值 → spare_rate>0 时页面必现
@@ -175,7 +182,7 @@ def _serialize_completed_item(item, arrived_map: dict, order=None) -> dict:
         **data,
         # 到货判定仍用落库原值：material_registration.ordered_quantity 也是原值口径
         'is_arrived': required > 0 and arrived >= required,
-        'deficit': max(0, required - arrived) if required > 0 else 0,
+        'deficit': float(max(Decimal('0'), required - arrived)) if required > 0 else 0,
     }
 
 def _serialize_completed_order(order, items, arrived_map: dict, source_order_no: str, sku_items: list[dict] | None = None) -> dict:

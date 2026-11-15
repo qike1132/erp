@@ -253,10 +253,15 @@ async function executeWriteWithRetry<T>(
 export function post<T>(
   url: string,
   data?: unknown,
-  opts?: { retryable?: boolean; headers?: Record<string, string> },
+  opts?: { retryable?: boolean; headers?: Record<string, string>; timeout?: number },
 ): Promise<T> {
   return executeWriteWithRetry(
-    () => service.post(url, data, { headers: opts?.headers }) as Promise<T>,
+    () => service.post(url, data, {
+      headers: opts?.headers,
+      // 长任务（Excel 校验/建单）必须由调用方放宽：默认 15s 会把「后端仍在处理」
+      // 判成失败，调用方再清暂存/重试就会与真实结果错位。
+      ...(opts?.timeout ? { timeout: opts.timeout } : {}),
+    }) as Promise<T>,
     opts?.retryable === true,
   )
 }

@@ -431,6 +431,9 @@ def _set_auth_cookies(
 
 
 @router.post("/refresh")
+# 刷新端点同样吃未认证输入并会轮换/吊销 token，必须限流：否则被窃的 refresh token
+# 可无限次尝试，也能高频轮换把合法客户端挤下线（grace 窗口只有 30s）。
+@limiter.limit("60/minute", key_func=rate_limit_key)
 async def api_refresh_token(
     request: Request,
     response: Response,

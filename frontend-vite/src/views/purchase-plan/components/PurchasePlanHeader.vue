@@ -20,6 +20,7 @@
       <PurchasePlanToolbar
         v-model:global-kw="globalKw"
         :view-tab="viewTab"
+        :can-manage="canManage"
         @export="emit('export')"
         @create="emit('create')"
       />
@@ -42,11 +43,14 @@ import PurchasePlanToolbar from './PurchasePlanToolbar.vue'
 import PurchasePlanMonthNav from './PurchasePlanMonthNav.vue'
 import PurchasePlanKpiStrip from './PurchasePlanKpiStrip.vue'
 
-defineProps<{
+// Boolean prop 缺省会被 Vue 转成 false，这里显式默认 true（旧调用方/单测保持原行为）
+withDefaults(defineProps<{
   y: number
   m: number
   factories: string[]
   factoryTotals: Record<string, number>
+  /** 写权限（透传给工具栏，控制「新建计划」是否展示） */
+  canManage?: boolean
   kpi: {
     planQty: number
     producedQty: number
@@ -58,7 +62,7 @@ defineProps<{
     riskExpiring: number
     riskQty: number
   }
-}>()
+}>(), { canManage: true })
 
 const viewTab = defineModel<'daily' | 'summary'>('viewTab', { required: true })
 const factory = defineModel<string>('factory', { required: true })

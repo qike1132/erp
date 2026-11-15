@@ -15,7 +15,7 @@
           </span>
           <span class="csd-import-hint">选文件后点「导入」直接落库；没有表格也可以跳过，直接在下面逐行填写</span>
         </div>
-        <ImportPanel :open="open" @imported="$emit('imported', $event)" />
+        <ImportPanel :open="open" :can-manage="canManage" @imported="$emit('imported', $event)" />
       </section>
 
       <div class="csd-divider" role="separator"><span>或手工填写</span></div>
@@ -57,7 +57,11 @@ import ManualPlanForm from './ManualPlanForm.vue'
 import ImportPanel from './ImportPanel.vue'
 import { useCreateShipmentPlan } from '../composables/useCreateShipmentPlan'
 
-const props = defineProps<{ open: boolean }>()
+const props = withDefaults(defineProps<{
+  open: boolean
+  /** 写权限（production_plan_manage）：透传给导入面板，控制上传入口是否展示 */
+  canManage?: boolean
+}>(), { canManage: true })
 const emit = defineEmits<{
   'update:open': [value: boolean]
   /** 手动创建**全部成功**（调用方据此关闭对话框） */
@@ -70,8 +74,10 @@ const emit = defineEmits<{
 
 // 表单状态 / 产品建议 / 校验 / 提交逻辑抽至 composables/useCreateShipmentPlan.ts
 /** 明细区一行都没填时禁用「确认创建」：导入成功后按钮常显，空表单点它会报「第 1 行…」 */
+// customer_id 是字符串、未选时初始为 ''，`'' != null` 恒为 true（只排除 null/undefined），
+// 必须与空串比较，否则这个「空表单禁用」形同虚设。
 const hasDetail = computed(() =>
-  form.details.some((d) => d.customer_id != null || d.product_name.trim() !== ''),
+  form.details.some((d) => d.customer_id !== '' || d.product_name.trim() !== ''),
 )
 
 const {

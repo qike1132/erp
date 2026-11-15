@@ -202,7 +202,9 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
       // 载荷与本地 patch 均从字段元数据派生，新增字段无需改动此处
       const payload: PartUpdateRequest = {
         version: part.version ?? 0,
-        ...Object.fromEntries(PART_EDIT_FIELDS.map((f) => [f.key, data[f.key] || null])),
+        // 空值必须发空串而不是 null：后端用 `is not None` 判「本次未提供」，
+        // null 会被当成没改 → 用户清空字段后界面显示已清空、库里仍是旧值。
+        ...Object.fromEntries(PART_EDIT_FIELDS.map((f) => [f.key, data[f.key] ?? ''])),
       }
       const res = await patternRoomApi.updatePart(part.id, payload)
       if (res.success) {

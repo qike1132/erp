@@ -185,8 +185,17 @@ export function useBatchQuery() {
   async function confirmComplete() {
     completing.value = true
     try {
-      await orderBatchApi.completeBatch({ batch_no: completingBatchNo.value })
-      showToast('批次已完成', 'success')
+      const res = await orderBatchApi.completeBatch({ batch_no: completingBatchNo.value })
+      const failed = res?.failed_orders?.length ?? 0
+      const done = res?.completed_count ?? 0
+      // 后端对「状态不是已出货」的单只塞进 failed_orders，不能一律报「已完成」
+      if (res?.success === false || (done === 0 && failed > 0)) {
+        showToast(`未归档任何订单：${failed} 单状态不符（需先出货）`, 'warning')
+      } else if (failed > 0) {
+        showToast(`已归档 ${done} 单，另有 ${failed} 单状态不符未归档`, 'warning')
+      } else {
+        showToast('批次已完成', 'success')
+      }
       showCompleteModal.value = false
       refetch()
     } catch {

@@ -891,8 +891,16 @@ export function useSummaryModal() {
   async function sendFabricLossRate(
     itemIds: number[], rate: number,
   ): Promise<SaveFactoryEditsResponse> {
+    // 版本快照必须随行级损耗率一起带上：BOM 同步会「删旧行 + 插新行」换掉明细 id，
+    // 只带旧 id 时后端逐条跳过、仍返回 200，用户以为存上了其实零写入。
+    const versions = { ...itemsVersions.value }
+    const versionArgs: [Record<string, number>?] =
+      Object.keys(versions).length > 0 ? [versions] : []
     const res = await purchaseApi.saveFactoryEdits(
       [{ item_ids: itemIds, loss_rate: rate }],
+      undefined,
+      orderIds.value,
+      ...versionArgs,
     ) as unknown as SaveFactoryEditsResponse
     if (!res.success) {
       throw new Error(res.message || '布料损耗率保存失败')

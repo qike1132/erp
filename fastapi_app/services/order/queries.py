@@ -11,6 +11,7 @@ from sqlalchemy import ColumnElement, delete, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.business_time import business_day_range
 from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
@@ -101,13 +102,13 @@ def _parse_date_condition(date_str: str | None, is_end: bool = False):
     if not date_str:
         return None
     try:
-        if is_end:
-            end_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=UTC)
-            return Order.order_date <= end_dt
-        start_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=UTC)
-        return Order.order_date >= start_dt
+        day = datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
         raise BusinessError(f"{'结束' if is_end else '开始'}日期格式错误，应为 YYYY-MM-DD") from None
+    # 日界必须按业务时区（北京时间）解释：order_date 是 timestamptz，按 UTC 组装
+    # 边界会让北京 00:00–08:00 的单据落到前一天（查今天漏单、查昨天多单）。
+    start_dt, end_dt = business_day_range(day)
+    return Order.order_date < end_dt if is_end else Order.order_date >= start_dt
 
 def _build_order_filters(customer: str | None, product_id: int | None,
                          status: str | None,

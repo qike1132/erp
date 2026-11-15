@@ -24,6 +24,13 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _version_order_key(version_no: str | None) -> tuple[int, str]:
+    """版本号数值序：字符串序会把 T10 排到 T2 前面。"""
+    raw = (version_no or '').strip().upper()
+    digits = raw[1:] if raw.startswith('T') else raw
+    return (int(digits), raw) if digits.isdigit() else (0, raw)
+
 class _UnsetType(Enum):
     """"未传参"哨兵类型（枚举字面量便于类型收窄）。
 
@@ -400,9 +407,13 @@ async def get_project_detail(db: AsyncSession, project_id: int) -> dict:
             CustomerSamplingFabricVersion.reason,
         )
         .where(CustomerSamplingFabricVersion.project_id == project_id)
-        .order_by(CustomerSamplingFabricVersion.version_no)
     )
-    version_rows = versions_result.all()
+    # 版本号是 'T1'..'T10' 这类字符串，直接在 SQL 里排序会得到 T1,T10,T2…
+    # 在 Python 侧按数值排序（与 parts.py / version_diff.py 同口径）。
+    version_rows = sorted(
+        versions_result.all(),
+        key=lambda row: _version_order_key(row.version_no),
+    )
 
     # 部位按 sort_order 升序（relationship 已配置 order_by，但显式排序更安全）
     parts_sorted = sorted(project.parts or [], key=lambda p: p.sort_order)

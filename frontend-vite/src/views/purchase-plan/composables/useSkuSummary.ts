@@ -68,6 +68,10 @@ export function useSkuSummary(opts: {
 
   // Reset page when filters/sort/search change
   watch([custFilter, skuSortField, skuSortDir, globalKw], () => { skuPage.value = 1; });
+  // 换月/导入后数据整体替换也必须归位：否则停在第 3 页而新数据只有 1 页时，
+  // slice(60,90) 取到空数组，且 SkuSummaryTable 在 totalPages<=1 时隐藏分页器，
+  // 用户看到空白表格且没有任何翻回入口。
+  watch(skuSummary, () => { skuPage.value = 1; });
 
   // O(1) 索引查找，替代原来打开详情时遍历全量 plans_by_date
   const skuDateDetail = computed<SkuDateItem[]>(() => {

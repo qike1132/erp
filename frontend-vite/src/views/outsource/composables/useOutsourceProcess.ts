@@ -16,10 +16,18 @@ export interface ProcessGroup {
 /** 订单外发工序弹窗的业务逻辑 */
 export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null>, emit: (event: 'refresh') => void) {
   const authStore = useAuthStore()
+  /**
+   * 当前弹窗打开的是否为「备货」行。
+   *
+   * 外发列表把 Order 与 StockIn 混排，两者 id 是独立自增序列、会撞号；弹窗却统一用
+   * `item.id` 调「按订单查工序」。备货行必须整体拦掉，否则撞号时会打开并操作到
+   * **另一张订单**的工序（一键发货/收货把数量记到别人单上）。
+   */
+  const isStockinRecord = computed(() => detailDataProp.value?.record_type === 'stockin')
   /** 发货权限点：外协方账号授权（替代原先按用户名 == '贝乐' 的硬编码判断） */
-  const canShip = computed(() => authStore.hasPermission('outsource_ship'))
+  const canShip = computed(() => !isStockinRecord.value && authStore.hasPermission('outsource_ship'))
   /** 收货权限点：收货账号授权（替代原先按用户名 == '贝乐' 的硬编码判断） */
-  const canReceive = computed(() => authStore.hasPermission('outsource_receive'))
+  const canReceive = computed(() => !isStockinRecord.value && authStore.hasPermission('outsource_receive'))
 
   const processes = ref<OrderOutsourceProcess[]>([])
   const loadingProcesses = ref(false)
@@ -50,8 +58,6 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
   const bulkReceiving = ref(false)
 
   const detailData = toRef(detailDataProp, 'value')
-
-  const isStockinRecord = computed(() => detailData.value?.record_type === 'stockin')
 
   const totalProcesses = computed(() => processes.value.length)
   const completedProcesses = computed(() => processes.value.filter((p) => p.status === 'received').length)
@@ -173,6 +179,12 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
     // 清空数量草稿，避免跨订单/重载后残留旧值
     for (const k of Object.keys(shipQtyDrafts)) delete shipQtyDrafts[Number(k)]
     for (const k of Object.keys(receiveQtyDrafts)) delete receiveQtyDrafts[Number(k)]
+    // 备货行没有外发工序，且 StockIn.id 与 Order.id 会撞号：绝不能拿它去查订单工序
+    if (isStockinRecord.value) {
+      processes.value = []
+      loadingProcesses.value = false
+      return
+    }
     try {
       const res = await outsourceApi.orderProcesses(orderId)
       // 已被更新的请求取代：丢弃这份（可能属于上一张单）的数据，也不要动 loading
@@ -191,6 +203,11 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
 
   async function loadFlows(orderId: number) {
     const seq = ++flowSeq
+    // 同上：备货行不查订单流水
+    if (isStockinRecord.value) {
+      flows.value = []
+      return
+    }
     try {
       const res = await outsourceApi.orderFlows(orderId)
       if (seq !== flowSeq) return

@@ -54,8 +54,10 @@ export const planApi = {
   shipmentProgress: (planId: number) => get<ShipmentRecord[]>(`/plans/shipment/progress?plan_id=${planId}`),
   upload: (formData: FormData) => upload<PlanUploadResult>('/plans/upload', formData, undefined, PLAN_IMPORT_TIMEOUT),
   stagingList: () => get<StagingOrder[]>('/plans/staging/list'),
-  stagingValidate: () => post<PlanStagingValidateResult>('/plans/staging/validate'),
-  stagingConfirm: (data: { batch_id?: string; selected_ids?: number[] | null }) => post<PlanStagingConfirmResult>('/plans/staging/confirm', data),
+  // 校验/确认会做全量客户/产品/订单余量校验并建单，远超全局 15s；与 upload 同口径放宽，
+  // 否则前端先判失败、后端仍在提交，形成「已落库但报失败」。
+  stagingValidate: () => post<PlanStagingValidateResult>('/plans/staging/validate', undefined, { timeout: PLAN_IMPORT_TIMEOUT }),
+  stagingConfirm: (data: { batch_id?: string; selected_ids?: number[] | null }) => post<PlanStagingConfirmResult>('/plans/staging/confirm', data, { timeout: PLAN_IMPORT_TIMEOUT }),
   stagingClear: () => del('/plans/staging/clear'),
   validateBarcode: (q: string) => get<{ valid: boolean }>('/plans/validate-barcode', { q }),
   downloadTemplate: () => download('/plans/template/download', '出货计划导入模板.xlsx'),

@@ -173,10 +173,23 @@ async def complete_batch(
     """
     async with db_transaction(db):
         result = await order_batch_service.complete_batch(db, batch_no=data.batch_no, user=user)
+    completed_count = result['completed_count']
+    failed_count = len(result['failed_orders'])
+    # 一单都没归档时不能返回 success=True：调用方（含脚本）无法区分「全部完成」与
+    # 「全部因状态不符被跳过」，会误判批次已归档。
+    if completed_count == 0 and failed_count > 0:
+        message = f"未归档任何订单：{failed_count} 单状态不是「已出货」，请先出货后再完成批次"
+    elif failed_count > 0:
+        message = (
+            f"批次完成，{completed_count}个订单、{result.get('completed_stockins', 0)}条备货已归档；"
+            f"另有 {failed_count} 单状态不符未归档"
+        )
+    else:
+        message = f"批次完成，{completed_count}个订单、{result.get('completed_stockins', 0)}条备货已归档"
     return BatchCompleteResponse(
-        success=True,
-        message=f"批次完成，{result['completed_count']}个订单、{result.get('completed_stockins', 0)}条备货已归档",
-        completed_count=result['completed_count'],
+        success=completed_count > 0,
+        message=message,
+        completed_count=completed_count,
         completed_stockins=result.get('completed_stockins', 0),
         failed_orders=result['failed_orders'],
     )

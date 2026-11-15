@@ -112,7 +112,12 @@ describe('逐布料行差异化损耗率', () => {
     await m.applyFabricLossRateAndSave(0, 0, 0, 120)
 
     expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledTimes(1)
-    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith([{ item_ids: [101], loss_rate: 120 }])
+    // 第三参是目标采购单 id（无它时后端无法定位版本）；版本快照在响应无 items_versions 时不传
+    expect(purchaseApi.saveFactoryEdits).toHaveBeenCalledWith(
+      [{ item_ids: [101], loss_rate: 120 }],
+      undefined,
+      [7, 8],
+    )
     expect(m.fabricLossRates).toEqual([[[120]], [[50]]])
     expect(m.fabricLossRateMixed[0]![0]![0]).toBe(false)
   })

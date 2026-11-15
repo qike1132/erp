@@ -13,7 +13,7 @@
         <span v-if="file" class="csd-file-selected"><FontAwesomeIcon icon="check-circle" aria-hidden="true" />{{ file.name }}</span>
         <span v-else>拖拽文件到此处或点击选择 · 仅支持 .xlsx</span>
       </div>
-      <div class="csd-upload-buttons">
+      <div v-if="canManage !== false" class="csd-upload-buttons">
         <button class="csd-inline-btn" aria-label="模板" @click.stop="dlTpl">模板</button>
         <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" aria-label="导入" @click.stop="doUpload">
           <FontAwesomeIcon v-if="!uploading" icon="upload" aria-hidden="true" />
@@ -70,10 +70,14 @@
 import { computed, ref, watch } from 'vue'
 import { planApi, type StagingErrorItem } from '@/api'
 import { showToast } from '@/composables/useToast'
-import { getErrorMessage } from '@/types/errors'
+import { getErrorMessage, getErrorStatus } from '@/types/errors'
 import { downloadCsv, buildCsvRow } from '@/utils/csv'
 
-const props = defineProps<{ open: boolean }>()
+const props = withDefaults(defineProps<{
+  open: boolean
+  /** 写权限：上传/导入/模板下载后端都要求 production_plan_manage；缺省视为可写 */
+  canManage?: boolean
+}>(), { canManage: true })
 
 const emit = defineEmits<{
   /** 导入完成（含部分失败）。参数为数据所属月份 YYYY-MM，供列表跳转 */
@@ -184,15 +188,25 @@ async function doUpload() {
     } else {
       emit('imported')
     }
+    // 有失败行时不能用绿色成功样式：用户会以为全部入库
     showUpMsg(
       failCount
-        ? `导入完成：成功 ${outcome.value.successCount} 条，失败 ${failCount} 条（明细见下方）`
+        ? `导入完成：成功 ${outcome.value.successCount} 条，失败 ${failCount} 条（失败行未写入，请先在下方导出留存）`
         : `导入成功，共 ${outcome.value.successCount} 条`,
-      true,
+      failCount === 0,
     )
   } catch (e: unknown) {
-    await safeClearStaging()
-    showUpMsg(getErrorMessage(e, '导入失败'), false)
+    // 超时/5xx 时无法确定后端是否已提交；此时清暂存会抹掉失败行、也会让用户
+    // 在「已成功」的情况下重试（拿到 409）。只有 4xx（明确被拒）才清。
+    const status = getErrorStatus(e)
+    const resultUnknown = status === undefined || status >= 500
+    if (!resultUnknown) await safeClearStaging()
+    showUpMsg(
+      resultUnknown
+        ? `${getErrorMessage(e, '导入失败')}（结果未知：请先刷新列表确认是否已生成，再决定是否重试）`
+        : getErrorMessage(e, '导入失败'),
+      false,
+    )
   } finally {
     uploading.value = false
   }

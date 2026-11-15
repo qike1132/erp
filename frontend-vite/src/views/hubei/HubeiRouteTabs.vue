@@ -7,7 +7,7 @@
       <UiTabTrigger v-if="canOutsource" value="shipments" :active="activeTab === 'shipments'">
         <FontAwesomeIcon icon="truck-fast" aria-hidden="true" /> 发货单
       </UiTabTrigger>
-      <UiTabTrigger v-if="canOutsource && !isBeile" value="presets" :active="activeTab === 'presets'">
+      <UiTabTrigger v-if="canOutsource" value="presets" :active="activeTab === 'presets'">
         <FontAwesomeIcon icon="cogs" aria-hidden="true" /> 工序预设
       </UiTabTrigger>
     </UiTabs>
@@ -40,9 +40,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const canOutsource = computed(() => authStore.hasAnyPermission(['outsource_manage', 'outsource_view']))
-
-/** 贝乐账号：只收货不发货 */
-const isBeile = computed(() => authStore.user?.username === '贝乐')
+// 不再按用户名隐藏 Tab：「贝乐只收货」由 outsource_receive 权限点保证，
+// 用户名硬编码会让新增收货员/超管小号按权限也进不去工序预设。
 
 const TAB_PATHS: Record<string, string> = {
   orders: '/outsource',

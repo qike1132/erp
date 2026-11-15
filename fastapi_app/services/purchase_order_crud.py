@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import delete, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, or_, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import ConflictError, ItemsVersionConflict
@@ -24,12 +24,14 @@ from fastapi_app.services.purchase_utils import (
     calc_spare_quantity,
     magnified_purchase_qty,
     normalize_spare_rate,
+    parse_source_order_ids,
     resolve_item_loss_rate,
 )
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
     ModificationLog,
+    Order,
     PurchaseOrder,
     PurchaseOrderItem,
     PurchaseOrderSku,
@@ -421,6 +423,93 @@ async def update_purchase_order(db: AsyncSession, order_id: int, data: dict, use
     return order.to_dict()
 
 
+async def _po_source_order_ids(db: AsyncSession, order: PurchaseOrder) -> set[int]:
+    """该采购单引用到的**客户订单** id（逐 SKU 快照优先，主表字段兜底）。
+
+    只取 ``source_record_type='order'``：``order.id`` 与 ``stock_in.id`` 会撞号，
+    裸 id 匹配会把备货来源误当成客户订单。
+    """
+    ids: set[int] = set()
+    # 取到局部变量再判空：getattr 不会收窄 ORM 属性类型，直接 int(None) 过不了 mypy
+    single_source = order.source_order_id
+    if single_source:
+        ids.add(int(single_source))
+    ids.update(parse_source_order_ids(order.source_order_ids))
+    try:
+        rows = await db.execute(
+            select(PurchaseOrderSku.source_order_id).where(
+                PurchaseOrderSku.po_id == order.id,
+                PurchaseOrderSku.source_record_type == 'order',
+            )
+        )
+        ids.update(int(x) for x in rows.scalars().all() if x)
+    except SQLAlchemyError:
+        # 快照表在旧库可能不存在（迁移 047 之前）：退回主表字段即可
+        logger.warning('读取采购单 %s 的 SKU 来源失败，退回主表字段', order.id, exc_info=True)
+    return ids
+
+
+async def _orders_still_covered_by_po(db: AsyncSession, order_ids: set[int]) -> set[int]:
+    """这些客户订单是否仍被**其它**采购单引用（含已完成单）。"""
+    if not order_ids:
+        return set()
+    covered: set[int] = set()
+    try:
+        rows = await db.execute(
+            select(PurchaseOrderSku.source_order_id).where(
+                PurchaseOrderSku.source_record_type == 'order',
+                PurchaseOrderSku.source_order_id.in_(order_ids),
+            )
+        )
+        covered.update(int(x) for x in rows.scalars().all() if x)
+    except SQLAlchemyError:
+        logger.warning('读取 SKU 来源快照失败，仅按主表字段判断覆盖关系', exc_info=True)
+    rows = await db.execute(
+        select(PurchaseOrder.source_order_id, PurchaseOrder.source_order_ids).where(
+            or_(
+                PurchaseOrder.source_order_id.in_(order_ids),
+                PurchaseOrder.source_order_ids.isnot(None),
+            )
+        )
+    )
+    for single, many in rows.all():
+        if single:
+            covered.add(int(single))
+        covered.update(parse_source_order_ids(many))
+    return covered & set(order_ids)
+
+
+async def _reset_uncovered_source_orders(db: AsyncSession, order_ids: set[int]) -> int:
+    """删除采购单后，把**已无任何采购单覆盖**的来源订单状态重算回真实值。
+
+    生成采购单时会把来源订单直接置为「已备货」；只删单不重算，订单就永远卡在
+    「已备货」——既不在待生成列表里，也会被生成前置校验拦住。仍被其它采购单
+    覆盖的订单不动（否则会被重复下单）。
+    """
+    if not order_ids:
+        return 0
+    covered = await _orders_still_covered_by_po(db, order_ids)
+    to_reset = set(order_ids) - covered
+    if not to_reset:
+        return 0
+    from fastapi_app.services.order_utils import compute_order_statuses_batch
+
+    orders = list((await db.execute(
+        select(Order).where(Order.id.in_(to_reset), Order.is_deleted.isnot(True))
+    )).scalars().all())
+    if not orders:
+        return 0
+    status_map = await compute_order_statuses_batch(db, orders)
+    changed = 0
+    for order in orders:
+        new_status = status_map.get(order.id)
+        if new_status and new_status != order.status:
+            order.status = new_status
+            changed += 1
+    await db.flush()
+    return changed
+
+
 async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
     # B1-05（2026-10-24 审计）：删除与 complete 一样先读后写，无行锁时并发
     # 删除/完成同单可同时通过状态校验（update 已于 2026-10-24 接行锁）。
@@ -438,6 +527,9 @@ async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
     if has_registration is not None:
         raise ConflictError(f'采购单{order.order_no}存在来料登记，无法删除')
 
+    # 删除前先记下来源客户订单：删完要判断它们是否还有别的采购单覆盖
+    source_order_ids = await _po_source_order_ids(db, order)
+
     try:
         # 子表（明细 + 逐 SKU 快照）统一由 purge 显式批量删除：
         # 两者都是 lazy='raise' + delete-orphan，靠 ORM 级联会在 flush 时抛
@@ -448,6 +540,10 @@ async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
         await db.flush()
     except IntegrityError as e:
         raise ConflictError(f'采购单{order.order_no}被来料登记等记录引用，无法删除') from e
+
+    # 生成采购单时把来源订单置为「已备货」；删单后没有任何采购单覆盖的订单
+    # 必须回退到真实状态，否则永远回不到待生成列表（历史缺陷：删错单只能改库）。
+    await _reset_uncovered_source_orders(db, source_order_ids)
     return {'id': order_id, 'order_no': order.order_no}
 
 

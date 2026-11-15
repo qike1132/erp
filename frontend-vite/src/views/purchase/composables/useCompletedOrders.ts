@@ -4,7 +4,7 @@ import { purchaseApi, type CompletedOrderExportRow } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import type { PurchaseOrder } from '@/types'
-import { escapeHtml } from '@/utils/print'
+import { escapeHtml, excelCell } from '@/utils/print'
 import { downloadXls } from '@/utils/xls'
 
 /** Vue Query 缓存 key */
@@ -65,7 +65,7 @@ function buildExportTable(rows: CompletedOrderExportRow[]): string {
   const head = EXPORT_COLUMNS.map((col) => '<th>' + escapeHtml(col.header) + '</th>').join('')
   const body = rows
     .map((row) => {
-      const cells = EXPORT_COLUMNS.map((col) => '<td>' + escapeHtml(toCellText(row[col.key])) + '</td>').join('')
+      const cells = EXPORT_COLUMNS.map((col) => '<td>' + excelCell(toCellText(row[col.key])) + '</td>').join('')
       return '<tr>' + cells + '</tr>'
     })
     .join('')

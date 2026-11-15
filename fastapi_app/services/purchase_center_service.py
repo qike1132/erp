@@ -161,13 +161,20 @@ async def get_purchase_orders_with_items(db: _AsyncSession, ids: list[int]) -> l
     return list(result.scalars().unique().all())
 
 
-async def get_purchase_orders_by_source_ids(db: _AsyncSession, source_order_ids: list[int]) -> list[_PurchaseOrder]:
-    """按系统订单来源 ID 列表获取关联采购订单（预加载明细项）"""
-    result = await db.execute(
-        _select(_PurchaseOrder).where(
-            _PurchaseOrder.source_order_id.in_(source_order_ids)
-        ).options(_selectinload(_PurchaseOrder.items))
+async def get_purchase_orders_by_source_ids(
+    db: _AsyncSession, source_order_ids: list[int], statuses: list[str] | None = None,
+) -> list[_PurchaseOrder]:
+    """按系统订单来源 ID 列表获取关联采购订单（预加载明细项）。
+
+    ``statuses`` 用于把范围收窄到仍有效的状态：汇总打印/导出必须只并**未完成**的
+    同源采购单，否则撤销后重新生成时会把上一张已完成的单一起合计（数量翻倍）。
+    """
+    stmt = _select(_PurchaseOrder).where(
+        _PurchaseOrder.source_order_id.in_(source_order_ids)
     )
+    if statuses:
+        stmt = stmt.where(_PurchaseOrder.status.in_(statuses))
+    result = await db.execute(stmt.options(_selectinload(_PurchaseOrder.items)))
     return list(result.scalars().unique().all())
 
 

@@ -13,6 +13,7 @@ from fastapi_app.shared_models import (
     CaseMovement,
     Customer,
     CustomerAccessLog,
+    DailyProductionRecord,
     Order,
     PackagingRecord,
     ProductCustomer,
@@ -21,6 +22,7 @@ from fastapi_app.shared_models import (
     PurchasePlan,
     StockIn,
     StockOut,
+    StockReturn,
 )
 
 logger = logging.getLogger(__name__)
@@ -190,6 +192,13 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
             select(func.count()).where(
                 or_(PurchasePlan.customer_id == customer_id, PurchasePlan.customer_name == customer.name)
             ).scalar_subquery().label('purchase_plans'),
+            # 退货流水按客户名过滤（report_service / stock_inventory_service 都读这张表）；
+            # 漏查会让删除成功，但退货流水仍按该客户名可查 → 「看得见、筛不了」。
+            select(func.count()).where(StockReturn.customer == customer.name).scalar_subquery().label('stock_returns'),
+            # 日生产记录也带客户名，库存 CTE 会按它补 (产品,客户) 行。
+            select(func.count()).where(
+                DailyProductionRecord.customer_name == customer.name
+            ).scalar_subquery().label('daily_production'),
             select(func.count()).where(PackagingRecord.customer == customer.name).scalar_subquery().label('packaging_records'),
             select(func.count()).where(ProductionPlan.customer_name == customer.name).scalar_subquery().label('production_plans'),
             select(func.count()).where(CaseMovement.customer == customer.name, CaseMovement.direction == 'in').scalar_subquery().label('case_stockins'),
@@ -207,6 +216,8 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
         '客户访问日志': row.access_logs,
         '采购订单': row.purchase_orders,
         '采购计划': row.purchase_plans,
+        '退货记录': row.stock_returns,
+        '生产记录': row.daily_production,
         '包装记录': row.packaging_records,
         '生产计划': row.production_plans,
         '皮套入仓': row.case_stockins,

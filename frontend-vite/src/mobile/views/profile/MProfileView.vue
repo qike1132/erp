@@ -68,6 +68,9 @@ onUnmounted(() => {
 async function onLogout() {
   try {
     await authApi.logout()
+  } catch {
+    // 接口失败也要清本地态并跳登录页；这里显式吞掉，避免 unhandledrejection
+    // 冒到全局监控（本地会话已在 finally 清干净）。
   } finally {
     authStore.logout()
     router.replace('/login')

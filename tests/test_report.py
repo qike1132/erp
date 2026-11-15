@@ -147,12 +147,17 @@ class TestGetOrderLogs:
         assert any('o.status = :status' in c for c in where)
 
     @pytest.mark.asyncio
-    async def test_invalid_status_ignored(self, mock_async_db):
-        """非法状态值被忽略（不进 where）"""
-        with _patch_generic() as m:
+    async def test_invalid_status_rejected(self, mock_async_db):
+        """非法状态值必须报错，不能静默返回全量。
+
+        原用例（test_invalid_status_ignored）锁定的正是缺陷行为：前端传了脏值
+        （如移动端历史英文键）时接口 200 + 全量数据，用户以为筛选生效，
+        导出给客户的流水会包含全部状态。改为与「非法日期必须报错」同口径。
+        """
+        from fastapi_app.core.exceptions import BusinessError
+
+        with pytest.raises(BusinessError):
             await get_order_logs(mock_async_db, status='非法状态')
-        where = m.call_args.kwargs['base_where']
-        assert not any('o.status' in c for c in where)
 
     @pytest.mark.asyncio
     async def test_per_page_clamped(self, mock_async_db):

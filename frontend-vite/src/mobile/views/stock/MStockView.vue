@@ -43,6 +43,7 @@
         </MCard>
       </div>
 
+      <MEmpty v-else-if="loadError" :title="loadError" />
       <MEmpty v-else :title="searchQuery ? '未找到匹配物料' : '暂无库存数据'" />
 
       <UiPagination
@@ -71,6 +72,8 @@ import { showToast } from '@/composables/useToast'
 
 const stockItems = ref<InventoryItem[]>([])
 const loading = ref(true)
+/** 加载失败文案：与「暂无库存数据」区分，避免后端 500 被当成业务事实 */
+const loadError = ref('')
 const searchQuery = ref('')
 const selectedTab = ref('all')
 const page = ref(1)
@@ -130,6 +133,8 @@ async function loadStock() {
     // 2026-10-18 OCR 评审：清空行但保留 totalItems——旧筛选/旧页的行不能顶着新
     // chip 展示，同时分页器不消失、用户可重试。
     stockItems.value = []
+    // 失败必须留下持久错误态：只弹 3 秒 toast 时页面与「真的没数据」完全一致
+    loadError.value = '库存加载失败，请检查网络后重试'
     showToast('库存加载失败，请重试', 'error')
   } finally {
     // 过期请求的 finally 不能关掉新请求的 loading

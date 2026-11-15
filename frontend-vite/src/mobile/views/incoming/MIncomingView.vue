@@ -90,16 +90,23 @@ function errorText(e: unknown, fallback: string) {
   return (e as { response?: { status?: number } })?.response?.status === 403 ? '无查看权限' : fallback
 }
 
+let overviewSeq = 0
+
 async function loadOverview() {
+  // 与 loadRecords 同款序号守卫：错误态连点「重试」时，先发的慢响应不能覆盖新结果
+  const seq = ++overviewSeq
   loading.value = true
   overviewError.value = ''
   try {
-    overview.value = (await materialApi.overview()).overview
+    const res = await materialApi.overview()
+    if (seq !== overviewSeq) return
+    overview.value = res.overview
   } catch (e) {
+    if (seq !== overviewSeq) return
     overview.value = null
     overviewError.value = errorText(e, '概览加载失败，请点击重试')
   } finally {
-    loading.value = false
+    if (seq === overviewSeq) loading.value = false
   }
 }
 

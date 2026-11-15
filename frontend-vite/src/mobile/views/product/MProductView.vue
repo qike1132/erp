@@ -35,6 +35,7 @@
         </MCard>
       </div>
 
+      <MEmpty v-else-if="loadError" :title="loadError" />
       <MEmpty v-else :title="searchQuery ? '未找到匹配产品' : '暂无产品数据'" />
 
       <UiPagination
@@ -62,6 +63,8 @@ import { showToast } from '@/composables/useToast'
 
 const products = ref<Product[]>([])
 const loading = ref(true)
+/** 加载失败文案：与「暂无产品数据」区分 */
+const loadError = ref('')
 const searchQuery = ref('')
 const page = ref(1)
 const totalItems = ref(0)
@@ -96,6 +99,8 @@ async function loadProducts() {
     // 等于用旧数据冒充新条件的查询结果。保留 totalItems：分页器不消失，
     // 用户可退回上一页重试。
     products.value = []
+    // 失败必须留下持久错误态，否则与「暂无产品数据」无法区分
+    loadError.value = '产品加载失败，请检查网络后重试'
     showToast('产品加载失败，请重试', 'error')
   } finally {
     // 过期请求的 finally 不能关掉新请求的 loading

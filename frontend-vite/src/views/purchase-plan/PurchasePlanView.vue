@@ -13,6 +13,7 @@
           :factories="availableFactories"
           :factory-totals="factoryTotals"
           :kpi="kpi"
+          :can-manage="canManage"
           @prev="prevMonth"
           @next="nextMonth"
           @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
@@ -64,7 +65,13 @@
     </div>
   </div>
 
-  <CreateShipmentPlanDialog v-model:open="showCreate" @created="onCreated" @succeeded="refreshPlans" @imported="onImported" />
+  <CreateShipmentPlanDialog
+    v-model:open="showCreate"
+    :can-manage="canManage"
+    @created="onCreated"
+    @succeeded="refreshPlans"
+    @imported="onImported"
+  />
 </template>
 
 <script setup lang="ts">
@@ -79,6 +86,7 @@ import PurchasePlanDailyTab from './components/PurchasePlanDailyTab.vue';
 import PurchasePlanHeader from './components/PurchasePlanHeader.vue';
 import { usePurchasePlanData } from './composables/usePurchasePlanData';
 import { useSkuSummary } from './composables/useSkuSummary';
+import { useAuthStore } from '@/stores/auth';
 import { useFactorySplit, type FactoryFilter } from './composables/useFactorySplit';
 import { useDefaultTodaySelection } from './composables/useDefaultTodaySelection';
 import type { CustSumItem } from './components/types';
@@ -88,6 +96,10 @@ const CreateShipmentPlanDialog = defineAsyncComponent(() => import('./components
 const SkuDetailDialog = defineAsyncComponent(() => import('./components/SkuDetailDialog.vue'));
 
 const qc = useQueryClient();
+
+const authStore = useAuthStore();
+/** 新建/导入/模板下载后端都要求 production_plan_manage：只读用户不该看到入口后白填一遍 */
+const canManage = computed(() => authStore.hasPermission('production_plan_manage'));
 
 const t = new Date();
 const y = ref(t.getFullYear());

@@ -61,16 +61,27 @@ export function useDashboardMobileData() {
     })
   }
 
+  /**
+   * 请求序号：右上刷新按钮、下拉刷新、错误态重试可能并发触发，
+   * 没有序号时后到的旧响应会把新数据盖回去。其余移动端视图都有同款守卫，
+   * 唯独仪表盘此前漏了。
+   */
+  let loadSeq = 0
+
   async function loadData() {
+    const seq = ++loadSeq
     error.value = null
     try {
-      data.value = await dashboardApi.mobile()
+      const res = await dashboardApi.mobile()
+      if (seq !== loadSeq) return
+      data.value = res
       lastRefreshTime.value = Date.now()
     } catch (e: unknown) {
+      if (seq !== loadSeq) return
       error.value = e instanceof Error ? e.message : '网络请求失败'
       console.warn('[DashboardMobile] load error:', e)
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 

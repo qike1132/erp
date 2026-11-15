@@ -7,6 +7,7 @@
       <MFilterChips v-model="statusFilter" :chips="statusChips" />
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
+      <MEmpty v-else-if="loadError" :title="loadError" subtitle="请检查网络后重试" />
       <MEmpty v-else-if="!groups.length" title="暂无批次数据" subtitle="输入关键词搜索" />
 
       <div v-else class="m-batch-groups">
@@ -72,6 +73,8 @@ const statusChips = [
 ]
 const rawList = ref<BatchItem[]>([])
 const loading = ref(false)
+/** 加载失败文案：与「暂无批次数据」区分 */
+const loadError = ref('')
 const page = ref(1)
 const totalItems = ref(0)
 let loadSeq = 0
@@ -107,6 +110,8 @@ async function handleSearch() {
     // 2026-10-18 OCR 评审：保留 totalItems（分页器不消失、可回退），
     // 只清空列表并提示；不要清 total 造成「被困空页」。
     rawList.value = []
+    // 失败必须留下持久错误态：只弹 toast 时「暂无批次数据」会被当成业务事实
+    loadError.value = '批次查询失败'
     showToast('批次查询失败，请重试', 'error')
   } finally {
     // 过期请求的 finally 不能关掉新请求的 loading

@@ -376,7 +376,7 @@ async def export_records(
         )
         return Response(
             content=content,
-            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.xlsx',
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={'Content-Disposition': 'attachment; filename=production_report.xlsx'},
         )
     except InvalidDateRangeError as e:

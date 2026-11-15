@@ -144,7 +144,8 @@ async def list_return_records(
         StockListResponse: 匹配的退货明细行（带 id/数量/客户/日期/原因/备注等）。
     """
     items = await get_stockreturn_records(db, nos=nos)
-    return StockListResponse(data=items, total=len(items), page=1, per_page=len(items))
+    # 同 stock/out/records：空集不能返回 per_page=0
+    return StockListResponse(data=items, total=len(items), page=1, per_page=len(items) or 1)
 
 
 @router.post('/create', response_model=StockActionResponse)

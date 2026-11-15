@@ -25,7 +25,7 @@ from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.purchase_center import SupplierSummaryResponse
 from fastapi_app.services import purchase_center_service as svc
-from fastapi_app.shared_models import PurchaseOrderItem
+from fastapi_app.shared_models import PurchaseOrderItem, PurchaseOrderStatus
 
 router = APIRouter()
 
@@ -39,7 +39,10 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
         if format_type in ['factory', 'supplier']:
             source_order_ids = list({o.source_order_id for o in orders if o.source_order_id})
             if source_order_ids:
-                related = await svc.get_purchase_orders_by_source_ids(db, source_order_ids)
+                # 只并**未完成**的同源采购单：已完成的是历史单，并进来会把数量/金额翻倍
+                related = await svc.get_purchase_orders_by_source_ids(
+                    db, source_order_ids, statuses=[PurchaseOrderStatus.PENDING],
+                )
                 all_order_ids = list(set(ids) | {o.id for o in related})
             else:
                 all_order_ids = list(ids)

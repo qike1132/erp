@@ -12,7 +12,6 @@
 """
 import asyncio
 import logging
-import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -537,37 +536,57 @@ async def validate_barcode(q: str=Query(..., min_length=1, description='69码'),
 
 @router.get('/template/download')
 async def download_template(_user: User=Depends(require_permission('production_plan_manage'))):
-    """下载出货计划导入模板。
+    """下载出货计划导入模板（按解析器列序即时生成）。
+
+    此前固定下发 `static/files/purchase_order_template.xlsx`（实际是「附件5采购订单」），
+    用户按它填数再上传会解析出空数据，且报错不会指向「模板拿错了」。改为按
+    `services/purchase_plan_staging._parse_excel_row` 的列序生成，模板与解析器同源。
 
     Args:
         _user: 当前操作用户（用于权限校验）。
 
     Returns:
         Response: Excel 文件流（含 Content-Disposition 头）。
-
-    Raises:
-        HTTPException: 模板文件不存在返回 404；读取失败返回 500。
     """
     from urllib.parse import quote
 
     from fastapi.responses import Response
 
-    template_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))), 'static', 'files', 'purchase_order_template.xlsx')
-    if not os.path.exists(template_path):
-        raise HTTPException(status_code=404, detail='模板文件不存在')
-    try:
+    def _build_template() -> bytes:
+        from io import BytesIO
 
-        def _read_file():
-            with open(template_path, 'rb') as f:
-                return f.read()
-        file_content = await asyncio.to_thread(_read_file)
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '出货计划'
+        # 列序必须与 purchase_plan_staging._parse_excel_row 逐列对齐：
+        # row[0] 客户名称 / row[1] 产品名称 / row[2] 数量 / row[3] 计划日期 / row[4] 备注
+        ws.append(['客户名称', '产品名称', '数量', '计划日期', '备注'])
+        ws.append(['示例客户（导入前请删除本行）', '示例产品', 100, '2026-01-15', '示例备注'])
+        for col, width in zip('ABCDE', (28, 28, 10, 14, 24), strict=False):
+            ws.column_dimensions[col].width = width
+        buf = BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    try:
+        file_content = await asyncio.to_thread(_build_template)
         if not file_content:
-            raise HTTPException(status_code=500, detail='模板文件为空')
+            raise HTTPException(status_code=500, detail='模板生成失败')
         filename = '出货计划导入模板.xlsx'
         encoded_filename = quote(filename)
-        return Response(content=file_content, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}", 'Content-Length': str(len(file_content)), 'Cache-Control': 'no-cache, no-store, must-revalidate'})
+        return Response(
+            content=file_content,
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f"attachment; filename*=UTF-8''{encoded_filename}",
+                'Content-Length': str(len(file_content)),
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+            },
+        )
     except HTTPException:
         raise
     except (OSError, ValueError) as e:
-        logger.error('模板读取失败: %s', e, exc_info=True)
-        raise HTTPException(status_code=500, detail='模板读取失败') from e
+        logger.error('模板生成失败: %s', e, exc_info=True)
+        raise HTTPException(status_code=500, detail='模板生成失败') from e

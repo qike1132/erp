@@ -210,7 +210,19 @@ def _diff_counts(rows, target: list[dict]) -> tuple[int, int, int, list[int]]:
     added = sum((target_keys - existing_keys).values())
     removed = sum((existing_keys - target_keys).values())
     updated = sum((existing_keys & target_keys).values())
-    removed_rows = [r.id for r in rows if r.id is not None]
+    # 只收**真正会被删除**的行 id：原实现把全部有 id 的行都算进去（含更新行），
+    # 接这个字段做对账/清理的人会拿到一组含保留行的 id。
+    per_key_removed = {
+        key: max(0, count - target_keys.get(key, 0)) for key, count in existing_keys.items()
+    }
+    removed_rows: list[int] = []
+    for row in rows:
+        if row.id is None:
+            continue
+        key = _existing_key(row)
+        if per_key_removed.get(key, 0) > 0:
+            per_key_removed[key] -= 1
+            removed_rows.append(row.id)
     return added, updated, removed, removed_rows
 
 
@@ -360,9 +372,25 @@ async def _resolve_sku_pids(
     if pid_name_map is None:
         pid_name_map = await _load_product_names(db, pids) if pids else {}
     allowed = set(pids)
-    name_to_pid = {
-        _norm(name): pid for pid, name in pid_name_map.items() if pid in allowed
-    }
+    # 同名产品不能压成一对一（字典推导会静默保留最后一个）：一张采购单覆盖两个同名
+    # SKU 时，另一个产品的物料会整块缺席且不报 unresolved。歧义名一律不按名称解析，
+    # 交给条码回退并记日志。
+    name_to_pid: dict[str, int] = {}
+    ambiguous_names: set[str] = set()
+    for pid, name in pid_name_map.items():
+        if pid not in allowed:
+            continue
+        key = _norm(name)
+        if key in name_to_pid and name_to_pid[key] != pid:
+            ambiguous_names.add(key)
+        name_to_pid[key] = pid
+    for key in ambiguous_names:
+        name_to_pid.pop(key, None)
+    if ambiguous_names:
+        logger.warning(
+            'bom_sync 产品名重复、无法按名称唯一解析（改为按条码回退）: %s',
+            sorted(ambiguous_names),
+        )
 
     unresolved = [line for line in sku_lines if _norm(line.get('product_name')) not in name_to_pid]
     if not unresolved:
@@ -575,6 +603,7 @@ async def sync_pending_items_for_product(
     results: list[SyncResult] = []
     synced = 0
     skipped = len(unresolved)
+    failed = 0
     for po_id in matched:
         try:
             async with db.begin_nested():
@@ -592,9 +621,16 @@ async def sync_pending_items_for_product(
             results.append(SyncResult(po_id=po_id, changed=False,
                                       skipped_reason='version_conflict'))
         except Exception:  # defensive: 逐单隔离，单张失败回滚该单并继续其余采购单
-            skipped += 1
+            # 失败必须与「无变化」分开计数：混进 skipped 后，上游 BOM 保存照常返回
+            # 成功，某几张 pending 单仍挂旧 BOM，只有翻日志才能发现。
+            failed += 1
             logger.exception('BOM 同步失败 po_id=%s（该单已回滚）', po_id)
             results.append(SyncResult(po_id=po_id, changed=False,
                                       skipped_reason='error'))
-    return {'synced': synced, 'skipped': skipped,
+    if failed:
+        logger.warning(
+            'BOM 同步部分失败: synced=%s skipped=%s failed=%s（失败单仍持有旧物料）',
+            synced, skipped, failed,
+        )
+    return {'synced': synced, 'skipped': skipped, 'failed': failed,
             'unresolved_po_ids': unresolved, 'results': results}

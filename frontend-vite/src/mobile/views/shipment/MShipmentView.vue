@@ -27,7 +27,15 @@
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
 
       <!-- 空态 -->
-      <MEmpty v-else-if="loadError" :title="loadError" />
+      <MEmpty v-else-if="loadError" :title="loadError" subtitle="请检查网络后重试">
+        <template #action>
+          <button
+            type="button"
+            style="margin-top: 12px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--m-border, #dbe3ef); background: #fff; font: inherit;"
+            @click="loadData()"
+          >重试</button>
+        </template>
+      </MEmpty>
       <MEmpty v-else-if="!selectedPlans.length" title="该日期暂无出货计划" />
 
       <!-- 日期汇总卡片 -->

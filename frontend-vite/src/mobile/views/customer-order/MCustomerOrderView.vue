@@ -43,6 +43,7 @@ import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
 import { showToast } from '@/composables/useToast'
+import { getErrorStatus } from '@/types/errors'
 
 const activeTab = ref('all')
 // 2026-10-17 审计 AUD-20：筛选值必须是后端中文状态（shared_models/order.py
@@ -83,7 +84,7 @@ async function handleSearch() {
     orders.value = res?.data || []
     total.value = res?.total || 0
     loadedPage = page.value
-  } catch {
+  } catch (e) {
     if (seq !== loadSeq) return
     // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知。
     // 2026-10-18 OCR 评审：保留 total（分页器不消失），仅清空列表并提示。
@@ -91,7 +92,12 @@ async function handleSearch() {
     // 2026-10-18 OCR 复评：只有「翻页失败」才回退页码。切 tab / 提交搜索会先把
     // page 重置为 1，失败时若也回退，会把页码拨回上一个条件的成功页。
     if (page.value !== 1) page.value = loadedPage
-    showToast('订单查询失败，请重试', 'error')
+    // 403 与网络失败必须分开提示：仓管/车间账号没有 order_manage 时，
+    // 统一显示「查询失败，请重试」会让人以为是系统坏了、反复重试。
+    showToast(
+      getErrorStatus(e) === 403 ? '没有订单查看权限，请联系管理员授权' : '订单查询失败，请重试',
+      'error',
+    )
   } finally {
     // 过期请求的 finally 不能关掉新请求的 loading
     if (seq === loadSeq) loading.value = false

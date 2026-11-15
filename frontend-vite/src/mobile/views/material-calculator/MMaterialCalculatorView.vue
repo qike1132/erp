@@ -155,6 +155,7 @@ import {
   CALC_CATEGORY_LIST,
   clampQuantity,
 } from '@/composables/useMaterialCalculator'
+import { showToast } from '@/composables/useToast'
 import { scopeKeyOf, scopeNameOf } from '@/utils/scope'
 import { deriveCalcSummary, type SummaryRow } from '@/utils/calcSummary'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
@@ -197,18 +198,29 @@ function summaryCat(category: string): SummaryRow[] {
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+/** 搜索请求序号：只认最后一次输入的结果（防抖不防乱序） */
+let searchSeq = 0
 watch(searchQuery, (q) => {
   // F-FE-MOBILE-01：结果渲染在底部抽屉里，而 searchSheetVisible 全文件无置 true
   // 之处——抽屉永不打开，移动端无法添加产品。有关键词即打开。
   searchSheetVisible.value = !!q
   if (searchTimer) clearTimeout(searchTimer)
   if (!q) { searchResults.value = []; return }
+  const seq = ++searchSeq
   searchTimer = setTimeout(async () => {
     searchLoading.value = true
     try {
       const res = await purchaseApi.searchSuggestions(q)
+      // 只认最后一次输入的结果：防抖不防乱序，AB 的慢响应会覆盖 ABC 的结果
+      if (seq !== searchSeq) return
       searchResults.value = res.suggestions ?? []
-    } catch { searchResults.value = [] } finally { searchLoading.value = false }
+    } catch {
+      if (seq !== searchSeq) return
+      searchResults.value = []
+      showToast('搜索失败，请重试', 'error')
+    } finally {
+      if (seq === searchSeq) searchLoading.value = false
+    }
   }, 300)
 })
 

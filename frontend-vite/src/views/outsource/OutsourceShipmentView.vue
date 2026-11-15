@@ -10,7 +10,7 @@
           :status-filter="statusFilter"
           :exporting="exporting"
           :unshipped-loading="unshippedLoading"
-          :can-ship="canShip && !isBeile"
+          :can-ship="canShip"
           @set-status="setStatus"
           @export="handleExport"
           @print="handlePrint"
@@ -28,6 +28,13 @@
           <div class="osv-body">
             <div v-if="loading && shipments.length === 0" class="osv-empty">
               <UiSpinner />
+            </div>
+            <!-- 失败态必须与空态区分：否则 5xx 被显示成「暂无待收货发货单」，
+                 收货人以为无货可收，单据实际积压 -->
+            <div v-else-if="loadError" class="osv-empty">
+              <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+              <span>{{ loadError }}</span>
+              <button type="button" class="osv-action-btn" @click="load()">重试</button>
             </div>
             <div v-else-if="shipments.length === 0" class="osv-empty">
               <FontAwesomeIcon icon="truck-fast" aria-hidden="true" />
@@ -62,7 +69,7 @@
                             <FontAwesomeIcon icon="eye" aria-hidden="true" /> 明细
                           </button>
                           <button
-                            v-if="isBeile && canReceive && s.status === 'shipped'"
+                            v-if="canReceive && s.status === 'shipped'"
                             type="button"
                             class="osv-action-btn osv-action-btn--primary"
                             :disabled="receivingId === s.id"
@@ -131,8 +138,9 @@ const PAGE_SIZE_OPTIONS = [20, 50, 100, 200]
 const authStore = useAuthStore()
 const canShip = computed(() => authStore.hasPermission('outsource_ship'))
 const canReceive = computed(() => authStore.hasPermission('outsource_receive'))
-/** 贝乐账号：只收货不发货（与后端授权脚本 add_outsource_ship_receive_perms.py 的 BEILE_USERNAME 一致） */
-const isBeile = computed(() => authStore.user?.username === '贝乐')
+// 说明：不再按用户名 '贝乐' 做二次门控。「贝乐只收货不发货」由权限点保证
+// （add_outsource_ship_receive_perms.py 只给它 outsource_receive）；
+// 硬编码用户名会让新增收货员看不到「确认收货」、超管小号也无法按权限操作。
 
 // ===== 列表状态 =====
 const statusFilter = ref<'shipped' | 'received'>('shipped')
@@ -165,12 +173,15 @@ async function loadUnshippedQty() {
 }
 
 let loadSeq = 0
+/** 列表加载失败文案：与「暂无发货单」区分开，并提供重试入口 */
+const loadError = ref('')
 
 async function load() {
   // 请求序号：快速切换状态/翻页时丢弃过期响应，防止旧结果覆盖新结果
   const seq = ++loadSeq
   loading.value = shipments.value.length === 0
   isFetching.value = true
+  loadError.value = ''
   try {
     const res = await outsourceApi.shipments({
       status: statusFilter.value,
@@ -183,7 +194,9 @@ async function load() {
     shippedCount.value = res.shipped_count
     receivedCount.value = res.received_count
   } catch {
-    if (seq === loadSeq) toast.error('加载发货单列表失败')
+    if (seq !== loadSeq) return
+    loadError.value = '加载发货单列表失败，请检查网络后重试'
+    toast.error('加载发货单列表失败')
   } finally {
     if (seq === loadSeq) {
       loading.value = false

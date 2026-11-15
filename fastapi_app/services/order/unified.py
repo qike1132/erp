@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import desc, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
-from fastapi_app.core.business_time import fmt_business
+from fastapi_app.core.business_time import business_day_range, fmt_business
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.services import escape_like
 from fastapi_app.services.order.queries import _batch_item_factories, _parse_date_condition
@@ -30,7 +30,9 @@ from fastapi_app.shared_models import Order, OrderItem, Product, StockIn
 
 logger = logging.getLogger(__name__)
 
-_PER_PAGE_MAX = 500
+# 与端点契约（list_unified_records: per_page le=200）保持一致，避免服务层放宽到 500
+# 而接口层先 422，调用方无法从任一侧确定真实上限。
+_PER_PAGE_MAX = 200
 
 
 def _parse_stockin_date_condition(date_str: str | None, is_end: bool = False):
@@ -41,15 +43,12 @@ def _parse_stockin_date_condition(date_str: str | None, is_end: bool = False):
     if not date_str:
         return None
     try:
-        if is_end:
-            end_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(
-                hour=23, minute=59, second=59, tzinfo=UTC
-            )
-            return StockIn.stockin_date <= end_dt
-        start_dt = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=UTC)
-        return StockIn.stockin_date >= start_dt
+        day = datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
         raise BusinessError(f"{'结束' if is_end else '开始'}日期格式错误，应为 YYYY-MM-DD") from None
+    # 同 _parse_date_condition：日界按业务时区解释，避免北京早班记录落错天
+    start_dt, end_dt = business_day_range(day)
+    return StockIn.stockin_date < end_dt if is_end else StockIn.stockin_date >= start_dt
 
 
 def _build_order_part(

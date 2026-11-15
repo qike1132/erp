@@ -8,7 +8,12 @@
       />
     </div>
     <button class="sp-action-btn" aria-label="导出" @click="emit('export')">导出</button>
-    <button class="sp-action-btn sp-action-btn-primary" aria-label="新建" @click="emit('create')">
+    <button
+      v-if="canManage !== false"
+      class="sp-action-btn sp-action-btn-primary"
+      aria-label="新建"
+      @click="emit('create')"
+    >
       <FontAwesomeIcon icon="plus" aria-hidden="true" />新建计划
     </button>
   </div>
@@ -20,9 +25,13 @@
 // 「新建」加「计划」二字并独占主按钮，与导出拉开主次。
 import UiSearchInput from '@/components/ui/UiSearchInput.vue'
 
-defineProps<{
+// Vue 会把缺省的 Boolean prop 转成 false，必须显式默认 true，否则旧调用方/单测里
+// 「新建」按钮会凭空消失。
+withDefaults(defineProps<{
   viewTab: 'daily' | 'summary'
-}>()
+  /** 写权限（production_plan_manage）：由页面传入；缺省视为可写 */
+  canManage?: boolean
+}>(), { canManage: true })
 
 const emit = defineEmits<{
   'update:globalKw': [v: string]

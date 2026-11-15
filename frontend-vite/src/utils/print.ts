@@ -13,6 +13,19 @@ export function escapeHtml(value: unknown): string {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/**
+ * Excel 单元格取值：HTML 转义 + 打断公式/DDE 前缀。
+ *
+ * 导出的 .xls 本质是 HTML 表格，Excel 打开时会把手写 `= + - @` 开头的文本当公式
+ * 解析（供应商 Excel 导入的物料名/规格天然带这些字符）。前缀单引号可强制按文本
+ * 处理，与后端 `report_exporter._sanitize_excel_value` 同口径。
+ */
+export function excelCell(value: unknown): string {
+  const text = String(value ?? '')
+  const guarded = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
+  return escapeHtml(guarded)
+}
+
 const PRINT_STYLE = `
   body { font-family: SimSun, 宋体; padding: 20px; }
   table { width: 100%; border-collapse: collapse; }

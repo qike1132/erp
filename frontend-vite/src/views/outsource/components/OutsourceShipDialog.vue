@@ -14,6 +14,13 @@
       <!-- ===== 加载中 ===== -->
       <div v-if="loading" class="osw-empty osw-empty--fill"><UiSpinner /></div>
 
+      <!-- ===== 加载失败：必须与「待发货 0 项」区分 ===== -->
+      <div v-else-if="loadError" class="osw-empty osw-empty--fill">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        <span>{{ loadError }}</span>
+        <UiButton variant="outline" @click="load()">重试</UiButton>
+      </div>
+
       <!-- ===== 结果态（成功/失败，子组件） ===== -->
       <OutsourceShipResultView v-else-if="result" :result="result" />
 
@@ -142,6 +149,8 @@ const cartProducts = ref<string[]>([])
 /** 合并工序的填写状态，键=产品名||工序名（跨重算保持稳定，避免输入被重置） */
 const mergedInputs = ref(new Map<string, MergedInput>())
 const loading = ref(false)
+/** 待发货清单加载失败文案（与「0 项」空态区分，附重试） */
+const loadError = ref('')
 const submitting = ref(false)
 const keyword = ref('')
 const mobileTab = ref<'pick' | 'cart'>('pick')
@@ -161,12 +170,16 @@ async function load() {
   rows.value = []
   orders.value = []
   pickGroups.value = []
+  loadError.value = ''
   try {
     const list = await outsourceApi.shippable()
     rows.value = list
     orders.value = buildOrderOptions(list)
     pickGroups.value = buildPickGroups(list)
   } catch {
+    // 失败必须留下可见错误态：此前只弹一次 toast，面板落到「待发货 0 项」，
+    // 用户会判断「全都发完了」，实际待发货一件没动。
+    loadError.value = '加载待发货工序失败，请重试'
     toast.error('加载待发货工序失败')
   } finally {
     loading.value = false

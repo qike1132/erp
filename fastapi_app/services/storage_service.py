@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+import re
 import uuid
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
@@ -175,9 +176,18 @@ def get_storage() -> StorageBackend:
     return _backend
 
 
+_EXT_SAFE_CHARS = re.compile(r'[^a-z0-9]')
+
+
 def _generate_key(filename: str, prefix: str = '') -> str:
-    """生成唯一存储 key"""
+    """生成唯一存储 key。
+
+    扩展名必须白名单化：`filename` 来自客户端（`UploadFile.filename`），可能带
+    `/`、`..`。原实现直接拼接，`Path(base_dir) / key` 会跳出上传根目录
+    （`target.parent.mkdir(parents=True)` 还会顺手建目录），构成认证后任意路径写入。
+    """
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'bin'
+    ext = _EXT_SAFE_CHARS.sub('', ext)[:8] or 'bin'
     date_prefix = datetime.now(UTC).strftime('%Y%m%d')
     key = f'{prefix}{date_prefix}/{uuid.uuid4().hex}.{ext}' if prefix else f'{date_prefix}/{uuid.uuid4().hex}.{ext}'
     return key
