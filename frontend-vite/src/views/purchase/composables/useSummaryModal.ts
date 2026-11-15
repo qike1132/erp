@@ -47,7 +47,6 @@ function orderTimeLabel(orderTime: string): string {
   return `<div style="text-align:right;font-size:12px;color:#555;margin-bottom:10px;">订单时间：${value}</div>`
 }
 
-
 // `magnifyByLossRate` / `ceilMagnifiedByLossRate` 已移入 `perSkuRows.ts`
 // （`buildStoredRows` 需要它们做加放取整，而那个模块必须是叶子纯函数）；
 // 由文件顶部的 re-export 保持既有导入路径可用，行为逐字不变。
@@ -69,7 +68,6 @@ export function factoryQtyDisplayValue(baseQty: number, lossRate: number, _editi
   return ceilMagnifiedByLossRate(baseQty, lossRate)
 }
 
-
 /**
  * 损耗加放的逆运算：把「数量列展示的订单用量（已按损耗率放大）」还原为落库真值。
  *
@@ -84,7 +82,6 @@ export function unmagnifyByLossRate(total: number, lossRate: number): number {
   if (factor <= 0) return v
   return Math.round((v / factor) * 100) / 100
 }
-
 
 function downloadAsXls(html: string, filename: string) {
   const bom = '\uFEFF'
@@ -167,7 +164,6 @@ export interface SkuDisplayLine {
   /** 订单级「合计」子行（仅多 SKU 时追加） */
   isTotal: boolean
 }
-
 
 export interface FactoryGroup {
   customer_name: string

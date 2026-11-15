@@ -253,3 +253,22 @@ describe('P8 数量差异对照块接线（仅差异时渲染）', () => {
     expect(w.findAll('tbody tr.sm-diff-row')).toHaveLength(0)
   })
 })
+
+/**
+ * P10 无 BOM 占位行的 colspan（2026-11-15 OCR 评审发现的错列，屏幕与打印同源）。
+ *
+ * 占位行前面已渲染「客户 + 产品名称 + 订单数量 + 备品数量」4 格（角色列显示时 5 格），
+ * 剩余 7 列固定不变；原写法 `showRoleColumn ? 7 : 8` 在隐藏角色列时宽出一列，
+ * 与 11 列表头错位。本用例与 useSummaryModal.perSkuPrint.test.ts 的 E5 成对。
+ */
+describe('P10 无 BOM 占位行的列数', () => {
+  it('隐藏角色列时占位行 colspan=7', () => {
+    const g = group()
+    g.skus![0]!.materials = []          // 首块无 BOM → 占位行
+    const w = mountTab(g)
+
+    const cell = w.findAll('tbody td').find((td) => td.text() === '无 BOM 明细')
+    expect(cell).toBeDefined()
+    expect(cell!.attributes('colspan')).toBe('7')
+  })
+})

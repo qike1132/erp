@@ -130,8 +130,11 @@
               >{{ formatQty(item.row.roleSpare) }}</td>
 
               <!-- 该 SKU 无 BOM：占位行（保留块结构，不隐藏该 SKU；角色格已渲染空占位，
-                   剩余 部位/供应商/布料/规格/损耗率/数量/单位 = 7 列；隐藏角色列时 8 列） -->
-              <td v-if="item.row.noBom" :colspan="showRoleColumn ? 7 : 8" class="text-text-muted">无 BOM 明细</td>
+                   剩余 部位/供应商/布料/规格/损耗率/数量/单位 = 7 列，与是否显示角色列无关：
+                   角色列显示时本行多渲染角色格、表头也同步多 1 列；客户格只在组首块渲染，
+                   但带 rowspan 覆盖到本行，占用照算。
+                   与打印/导出侧 summaryPrintHtml.buildPerSkuGroupHtml 同一口径。 -->
+              <td v-if="item.row.noBom" colspan="7" class="text-text-muted">无 BOM 明细</td>
 
               <template v-else>
                 <!-- 列序：产品部位（逐行）→ 供应商（子段首行 + rowspan）。

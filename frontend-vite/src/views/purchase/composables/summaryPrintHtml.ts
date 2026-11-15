@@ -129,11 +129,8 @@ export function anyGroupMultiRole(data: FactorySummaryData): boolean {
  * 打印 / 导出按 `anyGroupMultiRole(data)` 选形态，保证屏幕与打印同列。
  */
 export function factoryTableHead(showRoleColumn: boolean): string {
-  if (!showRoleColumn) {
-    return '<tr><th>客户</th><th>产品名称</th><th>订单数量</th><th>备品数量</th>' +
-      '<th>产品部位</th><th>供应商</th><th>布料名称</th><th>规格型号</th><th>损耗率</th><th>数量</th><th>单位</th></tr>'
-  }
-  return FACTORY_TABLE_HEAD
+  // 从「含角色列」形态派生，避免两处表头字面量各自漂移：加列时只改 FACTORY_TABLE_HEAD。
+  return showRoleColumn ? FACTORY_TABLE_HEAD : FACTORY_TABLE_HEAD.replace('<th>角色名称</th>', '')
 }
 
 export const FACTORY_TABLE_HEAD =
@@ -211,9 +208,11 @@ function buildPerSkuGroupHtml(
         tableHtml += `<td rowspan="${row.roleRowSpan}">${escapeHtml(fmtQty(row.roleSpare ?? 0))}</td>`
       }
       if (row.noBom) {
-        // 占位行：角色格已渲染（空，隐藏角色列时不渲染），剩余
-        // 部位/供应商/布料/规格/损耗率/数量/单位 = 7 列（隐藏角色列时 8 列）
-        tableHtml += `<td colspan="${showRoleColumn ? 7 : 8}" style="color:#8e8e93;">无 BOM 明细</td>`
+        // 占位行：剩余 部位/供应商/布料/规格/损耗率/数量/单位 = **7 列**（两种列形态下都恒为 7）。
+        // 角色列显示时本行多渲染一个角色格、表头也同步多 1 列，缺口不变；
+        // 客户格虽然只在组首块渲染，但它带 rowspan=perSkuRows.length 覆盖到本行，占用照算。
+        // （原写法 `showRoleColumn ? 7 : 8` 在隐藏角色列时宽出一列，屏幕 SummaryFactoryTab.vue 同款需同步。）
+        tableHtml += '<td colspan="7" style="color:#8e8e93;">无 BOM 明细</td>'
         tableHtml += '</tr>'
         return
       }
@@ -250,8 +249,9 @@ function buildPerSkuGroupHtml(
 /**
  * 差异对照块（打印/导出版，结构镜像屏幕 `SummaryDiffBlock.vue`）。
  *
- * 列数必须仍是 **12**：标签跨「客户/产品名称/订单数量/备品数量」4 列（`colspan=4`，
- * 跨本块全部行）+ 角色名称 + 产品部位 + 供应商（段内 rowspan）+ 布料名称/规格型号/损耗率/数量/单位 5 格。
+ * 列数必须仍是 **12**：标签跨 2 列（客户/产品名称，`colspan=2`，跨本块全部行）+ 订单数量/备品数量
+ * 两个空格（落库侧无此两值，留空对齐列位）+ 角色名称（显示时）+ 产品部位 + 供应商（段内 rowspan）
+ * + 布料名称/规格型号/损耗率/数量/单位 5 格；隐藏角色列时合计 11 列（横幅 colspan=11）。
  * 行数据来自 `buildStoredRows` —— 与屏幕**同一个纯函数**，故两边天然同构：
  * 损耗率取该落库行快照率、数量为按该率加放派生值。无差异时返回空串（不渲染）。
  */
@@ -300,20 +300,31 @@ export function buildFactoryHtml(
   data: FactorySummaryData, lossRate: number, fabricRates?: number[][][], groupRates?: number[],
 ): string {
   let tableHtml = ''
+  // 角色名称列是**整表级**判定（与分组无关）：循环外算一次，表头选形态与表体渲染共用同一个值，
+  // 避免每组重算 O(物料数) 的 Set 重建（G 个分组 → O(G²·物料)），也杜绝两处各改一半。
+  const showRoleColumn = anyGroupMultiRole(data)
   data.groups?.forEach((group, gi) => {
     const suppliers: SupplierGroup[] = group.suppliers || []
     // 备品口径（A）：只用该分组的订单级率；分组未提供时回退传入的统一率
     const groupRate = groupRates?.[gi]
     const spareRate = typeof groupRate === 'number' && Number.isFinite(groupRate) ? groupRate : lossRate
 
-    // 角色名称列：整份数据任一分组多角色才显示（单角色/无角色订单隐藏该列，2026-11-08 用户要求）。
-    const showRoleColumn = anyGroupMultiRole(data)
     // 优先「按 SKU 展开」：每 SKU 一块物料 + 组末差异对照块；数据不足则回退订单级单块。
     const perSkuHtml = buildPerSkuGroupHtml(group, gi, spareRate, lossRate, fabricRates, showRoleColumn)
     if (perSkuHtml !== '') {
       tableHtml += perSkuHtml
       return
     }
+
+    // 回退模式（旧后端 / 无逐 SKU 数据）：整组共用一份行数与「产品名称/订单数量/备品数量」文本。
+    // 原先在同一个 `globalFabricIdx === 0` 分支里逐字算了两遍（rowCount 还多一次 O(fabrics) 求和），
+    // 改列时容易只改一处 —— 这里提前算好复用，输出逐字不变。
+    const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
+    const skuLines = buildSkuDisplayLines(group, spareRate)
+    const cell = (pick: (l: SkuDisplayLine) => string) =>
+      skuLines
+        .map((l) => (l.isTotal ? `<strong>${escapeHtml(pick(l))}</strong>` : escapeHtml(pick(l))))
+        .join('<br>')
 
     let globalFabricIdx = 0
     suppliers.forEach((supplier, si: number) => {
@@ -323,14 +334,8 @@ export function buildFactoryHtml(
         const rate = typeof rowRate === 'number' && Number.isFinite(rowRate) ? rowRate : lossRate
         tableHtml += '<tr>'
         if (globalFabricIdx === 0) {
-          const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
           tableHtml += `<td rowspan="${rowCount}" style="font-weight:bold;">${escapeHtml(group.customer_name)}</td>`
           // 产品名称 / 订单数量 / 备品数量：与屏幕表格同源逐 SKU 分行（单 SKU 时即一行）。
-          const skuLines = buildSkuDisplayLines(group, spareRate)
-          const cell = (pick: (l: SkuDisplayLine) => string) =>
-            skuLines
-              .map((l) => (l.isTotal ? `<strong>${escapeHtml(pick(l))}</strong>` : escapeHtml(pick(l))))
-              .join('<br>')
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => l.name)}</td>`
           // 列序（2026-11-08）：角色名称在订单数量左边——角色格逐行渲染（回退模式无角色段），
           // 订单数量/备品数量随客户/产品一起按整块 rowspan。
@@ -339,12 +344,6 @@ export function buildFactoryHtml(
           tableHtml += `<td>${escapeHtml(fabric.role_display || '')}</td>`
         }
         if (globalFabricIdx === 0) {
-          const rowCount = suppliers.reduce((s: number, sup: SupplierGroup) => s + (sup.fabrics?.length || 0), 0)
-          const skuLines = buildSkuDisplayLines(group, spareRate)
-          const cell = (pick: (l: SkuDisplayLine) => string) =>
-            skuLines
-              .map((l) => (l.isTotal ? `<strong>${escapeHtml(pick(l))}</strong>` : escapeHtml(pick(l))))
-              .join('<br>')
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.qty))}</td>`
           tableHtml += `<td rowspan="${rowCount}">${cell((l) => fmtQty(l.spare))}</td>`
         }

@@ -174,3 +174,41 @@ describe('E4 无落库坐标行：打印必须与屏幕同源', () => {
     expect(cells.map((td) => td.textContent)).toEqual(['', '新加布', 'S9', '—', '5', '米'])
   })
 })
+
+/**
+ * E5 无 BOM 占位行的 colspan 必须补齐列数（2026-11-15 OCR 评审发现的真实错列）。
+ *
+ * 原写法 `colspan = showRoleColumn ? 7 : 8`：隐藏角色列时表头是 11 列，而占位行已渲染
+ * 「客户 + 产品名称 + 订单数量 + 备品数量」= 4 格，再 colspan=8 得到 12 列 → 宽出一列，
+ * A4 打印/导出出现错位。缺口恒为 7（角色列显示时本行多渲染角色格，表头也同步 +1）。
+ */
+describe('E5 无 BOM 占位行的列数', () => {
+  it('隐藏角色列（表头 11 列）→ 占位行 colspan=7，全表有效列数恒为 11', () => {
+    const g = perSkuGroup()
+    g.skus![0]!.materials = []           // 首块无 BOM → 占位行
+    const rows = tbodyRows(buildFactoryHtml(dataOf(g), 10))
+
+    const noBomRow = rows.find((tr) => (tr.textContent || '').includes('无 BOM 明细'))!
+    expect(noBomRow).toBeDefined()
+    // 占位格不是行内首格（前面还有客户/名称/数量格），按文本定位
+    const noBomCell = [...noBomRow.querySelectorAll('td')].find((td) => td.textContent === '无 BOM 明细')!
+    expect(noBomCell.getAttribute('colspan')).toBe('7')
+    expect(rowWidths(rows)).toEqual(rows.map(() => 11))
+  })
+
+  it('显示角色列（表头 12 列）且非首块无 BOM → 占位行 colspan 仍为 7，全表有效列数恒为 12', () => {
+    const g = perSkuGroup()
+    g.skus![0]!.materials = [
+      { supplier_name: '供应商甲', material_name: '布A', specification: 'S1', unit: '米', quantity: 10, role_display: '角色A' },
+      { supplier_name: '供应商甲', material_name: '布B', specification: 'S1', unit: '米', quantity: 10, role_display: '角色B' },
+    ]
+    g.skus![1]!.materials = []           // 非首块无 BOM → 占位行
+    const rows = tbodyRows(buildFactoryHtml(dataOf(g), 10))
+
+    const noBomRow = rows.find((tr) => (tr.textContent || '').includes('无 BOM 明细'))!
+    expect(noBomRow).toBeDefined()
+    const noBomCell = [...noBomRow.querySelectorAll('td')].find((td) => td.textContent === '无 BOM 明细')!
+    expect(noBomCell.getAttribute('colspan')).toBe('7')
+    expect(rowWidths(rows)).toEqual(rows.map(() => 12))
+  })
+})
