@@ -3,8 +3,14 @@
  * 避免 window.open 弹窗被拦截，且无需离开当前页面。
  */
 
-export function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+/**
+ * HTML 转义。**形参收 unknown**：后端字段为空时（null/undefined）不得让拼打印 HTML 的
+ * 调用方抛 `TypeError` —— 那样屏幕一切正常、点「打印/导出」却毫无反应（异常被事件
+ * 处理器吞掉，页面上没有任何线索）。空值一律转成空串，与屏幕 `{{ x || '' }}` 同口径。
+ */
+export function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 const PRINT_STYLE = `
