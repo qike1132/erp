@@ -184,20 +184,24 @@ class TestGetOrders:
 
     @pytest.mark.asyncio
     async def test_get_orders_with_date_range(self, async_db_session):
-        """日期边界包含当天，范围外订单必须真实排除。"""
+        """日期边界包含当天，范围外订单必须真实排除。
+
+        日界按业务时区（北京时间）解释：2024-06-15 当天 = UTC 06-14 16:00 ~ 06-15 16:00。
+        故「当天最后一秒」是 UTC 15:59:59，「次日零点」是 UTC 16:00:00（北京 06-16 00:00）。
+        """
         tag = uuid4().hex[:8]
         customer = f"日期客户-{tag}"
         expected = await _seed_order(
             async_db_session,
             tag=f"A{tag}",
             customer=customer,
-            order_date=datetime(2024, 6, 15, 23, 59, 59, tzinfo=UTC),
+            order_date=datetime(2024, 6, 15, 15, 59, 59, tzinfo=UTC),
         )
         await _seed_order(
             async_db_session,
             tag=f"B{tag}",
             customer=customer,
-            order_date=datetime(2024, 6, 16, 0, 0, 0, tzinfo=UTC),
+            order_date=datetime(2024, 6, 15, 16, 0, 0, tzinfo=UTC),
         )
 
         result = await get_orders(
