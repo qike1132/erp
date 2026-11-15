@@ -188,9 +188,10 @@ export function useBatchQuery() {
       const res = await orderBatchApi.completeBatch({ batch_no: completingBatchNo.value })
       const failed = res?.failed_orders?.length ?? 0
       const done = res?.completed_count ?? 0
-      // 后端对「状态不是已出货」的单只塞进 failed_orders，不能一律报「已完成」
-      // 只有备货可归档时 success 也可能为 true、done 为 0：不能按「状态不符」提示
-      if (failed > 0 && (res?.success === false || done === 0)) {
+      const stockins = res?.completed_stockins ?? 0
+      // 后端对「状态不是已出货」的单只塞进 failed_orders，不能一律报「已完成」。
+      // 只有备货可归档时 success=true、done=0 但 stockins>0 —— 不能按「状态不符」提示。
+      if (failed > 0 && (res?.success === false || (done === 0 && stockins === 0))) {
         showToast(`未归档任何订单：${failed} 单状态不符（需先出货）`, 'warning')
       } else if (failed > 0) {
         showToast(`已归档 ${done} 单，另有 ${failed} 单状态不符未归档`, 'warning')

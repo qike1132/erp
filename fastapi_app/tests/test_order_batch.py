@@ -139,21 +139,17 @@ class TestCompleteBatch:
         mock_db.execute.return_value = mock_scalar
 
         with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock):
-            with patch(
-                'fastapi_app.services.order_utils.compute_order_statuses_batch',
-                new_callable=AsyncMock, return_value={1: '批次已完成'},
-            ) as m_batch:
-                result = await order_batch_service.complete_batch(mock_db, batch_no="BATCH-001", user=mock_user)
+            result = await order_batch_service.complete_batch(mock_db, batch_no="BATCH-001", user=mock_user)
 
         assert result['completed_count'] == 1
         assert result['failed_orders'] == []
+        # 批次完成直接落「批次已完成」：batch_completed_at 已置位，派生状态必然是它，
+        # 再查一次 stock_out 聚合只会得到同一个值（评审 2026-11-15 已去掉该冗余查询）。
         assert mock_order.status == "批次已完成"
-        # A-M13：N 张单只允许一次聚合计算，不能退回逐单 2 条 SQL
-        assert m_batch.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_status_computed_once_for_whole_batch(self, mock_db, mock_user):
-        """多张已出货订单共用一次批量状态计算（A-M13 回归）。"""
+    async def test_status_set_for_whole_batch(self, mock_db, mock_user):
+        """多张已出货订单一次性置为「批次已完成」（A-M13 回归：不逐单计算）。"""
         orders = []
         for oid in (1, 2, 3):
             o = MagicMock(spec=Order)
@@ -168,16 +164,9 @@ class TestCompleteBatch:
         mock_db.execute.return_value = mock_scalar
 
         with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock):
-            with patch(
-                'fastapi_app.services.order_utils.compute_order_statuses_batch',
-                new_callable=AsyncMock,
-                return_value={1: '批次已完成', 2: '批次已完成', 3: '批次已完成'},
-            ) as m_batch:
-                result = await order_batch_service.complete_batch(mock_db, batch_no="BATCH-001", user=mock_user)
+            result = await order_batch_service.complete_batch(mock_db, batch_no="BATCH-001", user=mock_user)
 
         assert result['completed_count'] == 3
-        assert m_batch.await_count == 1
-        assert len(m_batch.await_args.args[1]) == 3
         assert all(o.status == '批次已完成' for o in orders)
 
     @pytest.mark.asyncio

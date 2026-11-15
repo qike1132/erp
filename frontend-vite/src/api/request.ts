@@ -16,7 +16,7 @@ let isShowing403 = false
 let _csrfCache: string | null = null
 
 // 401 刷新令牌单飞：并发多个 401 共享同一个 refresh 请求，避免重复刷新
-let _refreshPromise: Promise<boolean | 'rate_limited'> | null = null
+let _refreshPromise: Promise<boolean | 'rate_limited' | 'transient'> | null = null
 
 /** 清空 CSRF 缓存（注销时调用） */
 export function clearCsrfCache(): void {
@@ -51,7 +51,11 @@ type RetryableAxiosConfig = InternalAxiosRequestConfig & {
  * Web 端：后端用 refresh_token cookie 校验并自动回写新 access_token cookie。
  * 成功返回 true，失败返回 false（由调用方决定是否登出）。
  */
-async function refreshAccessToken(): Promise<boolean | 'rate_limited'> {
+/** 刷新被限流后的冷却截止时间：冷却期内直接复用结论，不再往同一个桶里加计数 */
+let _refreshBlockedUntil = 0
+
+async function refreshAccessToken(): Promise<boolean | 'rate_limited' | 'transient'> {
+  if (Date.now() < _refreshBlockedUntil) return 'rate_limited'
   if (!_refreshPromise) {
     _refreshPromise = (async () => {
       try {
@@ -60,8 +64,16 @@ async function refreshAccessToken(): Promise<boolean | 'rate_limited'> {
         } as RetryableAxiosConfig)
         return true
       } catch (e) {
-        // 429 不是「会话失效」：刷新端点有 IP 级限流，误伤时不能把在线用户踢下线
-        return axios.isAxiosError(e) && e.response?.status === 429 ? 'rate_limited' : false
+        const status = axios.isAxiosError(e) ? e.response?.status : undefined
+        if (status === 429) {
+          // 刷新端点有 IP 级限流：误伤时不能把在线用户踢下线
+          _refreshBlockedUntil = Date.now() + 10_000
+          return 'rate_limited'
+        }
+        // 无响应 / 5xx 是后端重启、网关抖动一类的瞬态故障，同样不能当成会话失效，
+        // 否则一次发布就会把所有在线用户集体登出
+        if (status === undefined || status >= 500) return 'transient'
+        return false
       } finally {
         _refreshPromise = null
       }
@@ -111,8 +123,9 @@ service.interceptors.response.use(
             // 重放仍失败：继续走登出逻辑
           }
         }
-        if (refreshed === 'rate_limited') {
-          // 刷新被限流 ≠ 会话失效：保持登录态，把错误交给调用方，避免强制踢下线
+        if (refreshed === 'rate_limited' || refreshed === 'transient') {
+          // 限流/瞬态故障 ≠ 会话失效：保持登录态，打标记后交给调用方按「稍后重试」处理
+          ;(error as AxiosError & { __authRefreshDeferred?: boolean }).__authRefreshDeferred = true
           return Promise.reject(error)
         }
       }
@@ -287,7 +300,11 @@ export function del<T>(url: string, opts?: { retryable?: boolean }): Promise<T> 
  * timeout 可覆盖全局 15s（Excel 解析 + 写暂存通常远超 15s，导入场景需显式放宽）。
  */
 export function upload<T>(url: string, formData: FormData, headers?: Record<string, string>, timeout?: number): Promise<T> {
-  return service.post(url, formData, { headers, ...(timeout ? { timeout } : {}) }) as Promise<T>
+  // 与 post 同口径：timeout:0 == 不限时，不能被真值判断改回默认 15s
+  return service.post(url, formData, {
+    headers,
+    ...(timeout !== undefined ? { timeout } : {}),
+  }) as Promise<T>
 }
 
 /** POST 请求下载文件（用于需要 POST body 的文件下载场景） */

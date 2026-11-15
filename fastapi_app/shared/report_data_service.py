@@ -26,6 +26,7 @@ from fastapi_app.shared_models.order import (
 logger = logging.getLogger(__name__)
 
 
+from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.sanitizer import escape_like
 
 _YIELD_PER_BATCH = 500
@@ -156,10 +157,11 @@ def _apply_order_filters(query, customer, product, status, start_date, end_date,
         )
     query = _apply_factory_filter(query, factory)
     if status:
-        # 与屏幕端（report_service.get_order_logs）同口径：非法状态必须报错，
-        # 静默忽略会让导出返回全量状态（端点已把 ValueError 映射成 400）。
+        # 与屏幕端（report_service.get_order_logs）同口径：非法状态必须报错。
+        # 必须用 BusinessError：本函数外层的 get_all_logs_data 会吞掉 ValueError
+        # 并返回空结果，端点拿不到 400，只会导出一个空 Excel。
         if status not in VALID_ORDER_STATUSES:
-            raise ValueError(f'状态参数无效: {status}')
+            raise BusinessError(f'状态参数无效: {status}')
         query = query.where(Order.status == status)
     return _apply_date_filters(query, Order.order_date, start_date, end_date)
 

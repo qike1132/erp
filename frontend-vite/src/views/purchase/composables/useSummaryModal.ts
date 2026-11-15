@@ -975,6 +975,11 @@ export function useSummaryModal() {
         if (getErrorStatus(err) === 409) {
           // 行级率现在带 items_version：弹窗期间任一采购单的 BOM 被同步就会 409。
           // 不刷新快照的话，之后每次改行级率都会继续 409，只能关掉重开。
+          // 刷新前先作废本轮待发值：否则刷新窗口内输入的行级率会留在队列里，
+          // 下一次编辑时被当作待发值二次发送，旧值反而覆盖新输入。
+          lossRateEpoch += 1
+          pendingRate = null
+          fabricPendingRates.clear()
           await openSummary(orderIds.value, orderTime.value)
           const conflictError = new Error('BOM 已更新，采购明细已刷新，请重新编辑损耗率')
           conflictError.cause = err

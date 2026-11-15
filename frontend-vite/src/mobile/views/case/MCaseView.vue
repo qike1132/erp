@@ -11,6 +11,10 @@
           <div class="m-form-group">
             <label class="m-form-label">皮套 / 产品</label>
             <MSearchBar v-model="productQuery" placeholder="搜索皮套名称 / 69码" @search="onSearch" />
+            <!-- 权限/网络失败要留常驻提示：全局 403 toast 有 3 秒去重，可能一次都不弹 -->
+            <p v-if="searchError" style="margin: 6px 0 0; color: var(--m-danger, #d93025); font-size: 13px;">
+              {{ searchError }}
+            </p>
             <div v-if="results.length" class="m-results">
               <MListItem
                 v-for="r in results"
@@ -147,10 +151,13 @@ const submitting = ref(false)
 // 2026-10-17 审计 P1-27：搜索框改为显式提交（@search），并加请求序号——
 // 旧请求后到不得覆盖新关键词的结果。
 let searchSeq = 0
+/** 搜索失败/无权限的常驻提示（不依赖会被去重的全局 403 toast） */
+const searchError = ref('')
 
 async function onSearch() {
   const seq = ++searchSeq
   const q = productQuery.value.trim()
+  searchError.value = ''
   if (!q) { results.value = []; return }
   try {
     const res = await caseApi.search(q)
@@ -161,10 +168,10 @@ async function onSearch() {
     // 换页/切 tab 会 abort 在途 GET，这不是失败，不能在新页面弹错
     if (isCanceledError(e)) return
     results.value = []
-    // 403 已由 axios 拦截器统一提示「权限不足」，展示层不重复弹
-    if (getErrorStatus(e) === 403) return
-    // 失败与「无匹配」必须区分：静默成空列表会让操作工以为皮套没建档、重复建档
-    showToast('搜索失败，请重试', 'error')
+    // 403 也留页面内提示：全局拦截器的 403 toast 有 3 秒去重，可能被前一个请求吃掉
+    const status = getErrorStatus(e)
+    searchError.value = status === 403 ? '没有皮套查看权限，请联系管理员' : '搜索失败，请重试'
+    if (status !== 403) showToast('搜索失败，请重试', 'error')
   }
 }
 

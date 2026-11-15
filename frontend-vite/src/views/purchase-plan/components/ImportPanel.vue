@@ -18,7 +18,7 @@
         <span v-if="file" class="csd-file-selected"><FontAwesomeIcon icon="check-circle" aria-hidden="true" />{{ file.name }}</span>
         <span v-else>拖拽文件到此处或点击选择 · 仅支持 .xlsx</span>
       </div>
-      <div v-if="canManage" class="csd-upload-buttons">
+      <div class="csd-upload-buttons">
         <button class="csd-inline-btn" aria-label="模板" @click.stop="dlTpl">模板</button>
         <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" aria-label="导入" @click.stop="doUpload">
           <FontAwesomeIcon v-if="!uploading" icon="upload" aria-hidden="true" />

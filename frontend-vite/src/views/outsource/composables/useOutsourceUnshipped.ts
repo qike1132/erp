@@ -8,7 +8,7 @@ import { ref } from 'vue'
 import { outsourceApi, type UnshippedProcessItem } from '@/api/outsource'
 import { useExport } from '@/composables/useExport'
 import { downloadXls } from '@/utils/xls'
-import { escapeHtml, printHtml } from '@/utils/print'
+import { EXCEL_TEXT_ATTR, escapeHtml, printHtml } from '@/utils/print'
 import { toast } from '@/composables/useToast'
 
 /** 未到货明细表头（导出 XLS = 打印预览同源；按用户确认样式，不含「订单号」列） */
@@ -24,7 +24,8 @@ export const UNSHIPPED_COL_WIDTHS = [130, 130, 220, 130, 90, 90, 90, 90]
  * 显示成科学计数法（6.97895E+12）且丢失精度；强制文本格式保证完整显示。
  * 浏览器（打印预览）会忽略该 CSS，无副作用。
  */
-const EXCEL_TEXT_STYLE = ` style="mso-number-format:'\\@'"`
+// 共享常量：与采购中心导出同源，避免两处字符串各自漂移
+const EXCEL_TEXT_STYLE = EXCEL_TEXT_ATTR
 
 /**
  * 未到货明细分组键：同一订单 + 同一 SKU 的多道工序合并前 4 列

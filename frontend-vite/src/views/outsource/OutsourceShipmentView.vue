@@ -41,6 +41,15 @@
               <span>暂无{{ statusFilter === 'shipped' ? '待收货' : '已完成' }}发货单</span>
             </div>
             <template v-else>
+              <!-- 刷新失败但仍有旧数据：必须常驻提示，否则用户会把上一筛选条件的行当成本次结果 -->
+              <div
+                v-if="loadError"
+                role="alert"
+                style="margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: #fff7e6; color: #8a5300; font-size: 13px; display: flex; align-items: center; gap: 10px;"
+              >
+                <span>{{ loadError }}（下方仍是上次成功加载的数据）</span>
+                <button type="button" class="osv-action-btn" @click="load()">重试</button>
+              </div>
               <div v-if="isFetching" class="osv-fetching-bar"><div class="osv-fetching-progress" /></div>
               <div class="osv-table-wrap">
                 <table class="osv-table">
@@ -146,7 +155,8 @@ const canReceive = computed(() => authStore.hasPermission('outsource_receive'))
  * 权限码后再改为纯权限点门控。与 scripts/add_outsource_ship_receive_perms.py 的
  * BEILE_USERNAME 保持一致。
  */
-const isBeile = computed(() => authStore.user?.username === '贝乐')
+// trim：账号名带空格时精确相等会恒为 false，等于把「确认收货」入口整个弄丢
+const isBeile = computed(() => (authStore.user?.username || '').trim() === '贝乐')
 
 // ===== 列表状态 =====
 const statusFilter = ref<'shipped' | 'received'>('shipped')

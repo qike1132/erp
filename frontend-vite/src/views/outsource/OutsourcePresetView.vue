@@ -54,12 +54,24 @@
  * 产品搜索框置于卡片头部，与 Tab 导航同一行；搜索选中但尚无预设的
  * 产品由本页维护并下发给子组件（保证能直接为其配置工序）。
  */
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import OutsourcePresetTab from '@/views/outsource/components/OutsourcePresetTab.vue'
 import HubeiRouteTabs from '@/views/hubei/HubeiRouteTabs.vue'
 import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import { outsourceApi } from '@/api'
 import type { HubeiProductSearchItem } from '@/api/outsource'
+import { useAuthStore } from '@/stores/auth'
+
+// 路由直达兜底：Tab 只对贝乐隐藏，但收藏/手输 URL 仍能进来，而贝乐持有
+// outsource_manage（预设读写接口都放行）。这里直接踢回外发进度页。
+const authStore = useAuthStore()
+const router = useRouter()
+onMounted(() => {
+  if ((authStore.user?.username || '').trim() === '贝乐') {
+    void router.replace('/outsource')
+  }
+})
 
 /** 已搜索选中但尚无预设的产品（保证能直接为其配置） */
 const pendingProducts = ref<{ product_id: number; product_name: string; product_barcode: string | null; factory: string | null }[]>([])

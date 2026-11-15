@@ -464,7 +464,9 @@ async def test_qa_invalidate_orders_cache_covers_beile(monkeypatch):
     patterns = [c.args[0] for c in mock.await_args_list]
     assert 'orders:p*' in patterns
     assert 'orders:beile:*' in patterns
-    assert mock.await_count == 2
+    # 删单会重算来源客户订单状态 → 客户订单列表（orders:list*）也必须失效
+    assert 'orders:list*' in patterns
+    assert mock.await_count == 3
 
 
 async def test_qa_local_ttl_zero_disables_l1(db):

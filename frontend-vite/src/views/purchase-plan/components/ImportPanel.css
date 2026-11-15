@@ -18,6 +18,18 @@
 .csd-upload-area:hover {
   border-color: var(--color-primary-300);
 }
+
+/* 只读态：无「导入」权限时该块只是说明文案，不能看起来可点 */
+.csd-upload-readonly {
+  cursor: default;
+  color: var(--color-text-secondary, #64748b);
+  font-size: 13px;
+  justify-content: center;
+}
+
+.csd-upload-readonly:hover {
+  border-color: var(--color-border-light, #e2e8f0);
+}
 .csd-upload-label {
   display: flex;
   align-items: center;

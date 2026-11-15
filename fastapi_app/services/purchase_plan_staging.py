@@ -60,7 +60,9 @@ def _load_excel_rows(file_content: bytes) -> list[tuple]:
     except (OSError, ValueError) as e:
         raise ValueError(f'Excel文件解析失败: {e}') from e
     try:
-        ws = wb.active
+        # 优先按表名取「出货计划」：Excel/WPS 保存时会把**当前查看的页签**记为 active，
+        # 用户停在模板的「填写示例」页签上保存时，按 active 解析会把示例行当成首个数据行。
+        ws = wb['出货计划'] if '出货计划' in wb.sheetnames else wb.active
         rows = list(clip_iter_rows(ws))
     finally:
         wb.close()

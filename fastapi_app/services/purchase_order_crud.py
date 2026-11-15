@@ -447,8 +447,8 @@ async def _po_source_order_ids(db: AsyncSession, order: PurchaseOrder) -> set[in
     if snapshot_ids:
         return snapshot_ids
 
-    candidates: set[int] = set(parse_source_order_ids(order.source_order_ids))
-    single_source = order.source_order_id
+    candidates: set[int] = set(parse_source_order_ids(getattr(order, 'source_order_ids', None)))
+    single_source = getattr(order, 'source_order_id', None)
     if single_source:
         candidates.add(int(single_source))
     return await _drop_ambiguous_ids(db, candidates)
@@ -551,7 +551,7 @@ async def delete_purchase_order(db: AsyncSession, order_id: int) -> dict:
     if has_registration is not None:
         raise ConflictError(f'采购单{order.order_no}存在来料登记，无法删除')
 
-    # 删除前先记下来源客户订单：删完要判断它们是否还有别的采购单覆盖
+    # 记下来源客户订单（删完要判断它们是否还有别的采购单覆盖）
     source_order_ids = await _po_source_order_ids(db, order)
 
     try:

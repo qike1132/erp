@@ -61,14 +61,39 @@ async def batch_delete_purchase_orders(db: AsyncSession, order_ids: list, userna
 
     # 批删与单删同口径：删完把「已无采购单覆盖」的来源订单状态重算回真实值，
     # 否则来源订单会永久停在「已备货」（历史缺陷在批量入口同样存在）。
+    # 一次查询取全部 SKU 快照（不要逐单查，删单事务的持锁时间会被拉长）。
     from fastapi_app.services.purchase_order_crud import (
-        _po_source_order_ids,
+        _drop_ambiguous_ids,
         _reset_uncovered_source_orders,
     )
+    from fastapi_app.services.purchase_utils import parse_source_order_ids
+    from fastapi_app.shared_models import PurchaseOrderSku
+
+    snapshot_rows = (await db.execute(
+        select(PurchaseOrderSku.po_id, PurchaseOrderSku.source_order_id).where(
+            PurchaseOrderSku.po_id.in_([o.id for o in orders_to_delete]),
+            PurchaseOrderSku.source_record_type == 'order',
+        )
+    )).all()
+    snapshot_map: dict[int, set[int]] = {}
+    for po_id, source_order_id in snapshot_rows:
+        if source_order_id:
+            snapshot_map.setdefault(int(po_id), set()).add(int(source_order_id))
 
     batch_source_order_ids: set[int] = set()
+    fallback_ids: set[int] = set()
     for order in orders_to_delete:
-        batch_source_order_ids |= await _po_source_order_ids(db, order)
+        hit = snapshot_map.get(order.id)
+        if hit:
+            batch_source_order_ids |= hit
+        else:
+            fallback_ids |= set(parse_source_order_ids(getattr(order, 'source_order_ids', None)))
+            single = getattr(order, 'source_order_id', None)
+            if single:
+                fallback_ids.add(int(single))
+    if fallback_ids:
+        # 主表字段没有类型信息：与 stock_in 撞号的 id 不采信
+        batch_source_order_ids |= await _drop_ambiguous_ids(db, fallback_ids)
 
     deleted_info = []
     deleted_order_nos: list[str] = []

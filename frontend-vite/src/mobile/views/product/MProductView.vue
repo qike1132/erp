@@ -36,7 +36,7 @@
       </div>
 
       <MEmpty v-else-if="loadError" :title="loadError">
-        <template #action>
+        <template v-if="loadErrorRetryable" #action>
           <button
             type="button"
             style="margin-top: 12px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--m-border, #dbe3ef); background: #fff; font: inherit;"
@@ -68,11 +68,15 @@ import MBadge from '@/mobile/components/MBadge.vue'
 import MSkeleton from '@/mobile/components/MSkeleton.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import { showToast } from '@/composables/useToast'
+import { getErrorStatus } from '@/types/errors'
+import { isCanceledError } from '@/api/request'
 
 const products = ref<Product[]>([])
 const loading = ref(true)
 /** 加载失败文案：与「暂无产品数据」区分 */
 const loadError = ref('')
+/** 当前错误是否值得重试：403 重试只会再吃一次 403 */
+const loadErrorRetryable = ref(true)
 const searchQuery = ref('')
 const page = ref(1)
 const totalItems = ref(0)
@@ -104,13 +108,17 @@ async function loadProducts() {
     totalItems.value = res.total ?? 0
   } catch (e) {
     if (seq !== loadSeq) return
+    // 切路由会 abort 在途 GET：这不是失败，不能把 toast 弹到新页面上
+    if (isCanceledError(e)) return
     console.error('[MProductView] load failed:', e)
     // 2026-10-18 OCR 评审：失败时清空行——page/searchQuery 已是新值，旧行留着
     // 等于用旧数据冒充新条件的查询结果。保留 totalItems：分页器不消失，
     // 用户可退回上一页重试。
     products.value = []
     // 失败必须留下持久错误态，否则与「暂无产品数据」无法区分
-    loadError.value = '产品加载失败，请检查网络后重试'
+    const status = getErrorStatus(e)
+    loadErrorRetryable.value = status !== 403
+    loadError.value = status === 403 ? '无查看权限，请联系管理员' : '产品加载失败，请检查网络后重试'
     showToast('产品加载失败，请重试', 'error')
   } finally {
     // 过期请求的 finally 不能关掉新请求的 loading

@@ -120,8 +120,11 @@ describe('useCompletedOrders 导出', () => {
     expect(html).toContain('<td>CG-20260927-0012</td>')
     expect(html).toContain('<td>10.5</td>')
     // 单元格必须转义，避免物料名里的尖括号/& 破坏表格结构
-    expect(html).toContain('<td>甲&amp;乙</td>')
-    expect(html).toContain('<td>供&lt;应&gt;商</td>')
+    expect(html).toContain('甲&amp;乙</td>')
+    expect(html).toContain('供&lt;应&gt;商</td>')
+    // 文本列必须带 Excel「按文本」属性：=+-@ 开头的物料名不能被当公式
+    expect(html).toContain(`mso-number-format:'\\@'`)
+    expect(html).toMatch(/<td style="mso-number-format:'\\@'">甲&amp;乙<\/td>/)
   })
 
   it('空 rows 抛错且不触发下载', async () => {
