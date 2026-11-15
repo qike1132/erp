@@ -25,6 +25,8 @@
   color: var(--color-text-secondary, #64748b);
   font-size: 13px;
   justify-content: center;
+  /* 只读态不该保留「拖拽目标」的虚线暗示 */
+  border-style: solid;
 }
 
 .csd-upload-readonly:hover {

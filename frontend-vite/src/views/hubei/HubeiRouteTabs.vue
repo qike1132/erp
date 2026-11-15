@@ -34,6 +34,7 @@ import { useRoute, useRouter } from 'vue-router'
 import UiTabs from '@/components/ui/UiTabs.vue'
 import UiTabTrigger from '@/components/ui/UiTabTrigger.vue'
 import { useAuthStore } from '@/stores/auth'
+import { isBeileUser } from '@/utils/beile'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,7 +49,7 @@ const canOutsource = computed(() => authStore.hasAnyPermission(['outsource_manag
  * beile_order_view 授予），而预设页的读接口要 outsource_view、写接口要 outsource_manage，
  * 放开后会真的能增删工序预设。等预设维护有独立权限码后再移除这个用户名门控。
  */
-const isBeile = computed(() => (authStore.user?.username || '').trim() === '贝乐')
+const isBeile = computed(() => isBeileUser(authStore.user?.username))
 
 const TAB_PATHS: Record<string, string> = {
   orders: '/outsource',

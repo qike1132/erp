@@ -48,7 +48,11 @@ class _Scalar:
 
 
 def _order(order_id: int, order_no: str):
-    return SimpleNamespace(id=order_id, order_no=order_no, supplier_name='', customer_name='')
+    # source_* 是模型上的真实列：删除守卫直接读属性（不 getattr），假单必须补齐
+    return SimpleNamespace(
+        id=order_id, order_no=order_no, supplier_name='', customer_name='',
+        source_order_id=None, source_order_ids=None,
+    )
 
 
 def _fake_db() -> AsyncMock:

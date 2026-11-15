@@ -109,8 +109,16 @@ function handleStatsError(err: unknown): { msg: string; detail: string } {
   if (axiosError.response) {
     const status = axiosError.response.status ?? 0
     if (status === 401) {
-      msg = '登录已过期，正在跳转...'
-      detail = '请重新登录后查看数据'
+      // 刷新被限流/后端瞬态故障时不代表会话失效（拦截器也不会派发 auth:expired），
+      // 这里不能提示「正在跳转」——那是一条永远不会兑现的提示。
+      const deferred = (err as { __authRefreshDeferred?: boolean }).__authRefreshDeferred === true
+      if (deferred) {
+        msg = '系统繁忙，请稍后重试'
+        detail = '登录态刷新暂时失败，已保留登录'
+      } else {
+        msg = '登录已过期，正在跳转...'
+        detail = '请重新登录后查看数据'
+      }
     } else if (status === 403) {
       msg = '权限不足，无法访问仪表盘数据'
     } else if (status >= 500) {

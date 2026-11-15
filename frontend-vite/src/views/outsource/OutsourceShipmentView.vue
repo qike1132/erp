@@ -139,6 +139,7 @@ import OutsourceShipmentStrip from '@/views/outsource/components/OutsourceShipme
 import OutsourceShipmentActions from '@/views/outsource/components/OutsourceShipmentActions.vue'
 import { outsourceApi, type Shipment } from '@/api/outsource'
 import { useAuthStore } from '@/stores/auth'
+import { isBeileUser } from '@/utils/beile'
 import { useOutsourceUnshipped } from '@/views/outsource/composables/useOutsourceUnshipped'
 import { toast } from '@/composables/useToast'
 
@@ -155,8 +156,7 @@ const canReceive = computed(() => authStore.hasPermission('outsource_receive'))
  * 权限码后再改为纯权限点门控。与 scripts/add_outsource_ship_receive_perms.py 的
  * BEILE_USERNAME 保持一致。
  */
-// trim：账号名带空格时精确相等会恒为 false，等于把「确认收货」入口整个弄丢
-const isBeile = computed(() => (authStore.user?.username || '').trim() === '贝乐')
+const isBeile = computed(() => isBeileUser(authStore.user?.username))
 
 // ===== 列表状态 =====
 const statusFilter = ref<'shipped' | 'received'>('shipped')

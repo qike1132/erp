@@ -119,7 +119,8 @@ async function loadProducts() {
     const status = getErrorStatus(e)
     loadErrorRetryable.value = status !== 403
     loadError.value = status === 403 ? '无查看权限，请联系管理员' : '产品加载失败，请检查网络后重试'
-    showToast('产品加载失败，请重试', 'error')
+    // 403 已由全局拦截器提示，且页面已隐藏「重试」，不再弹「请重试」自相矛盾
+    if (status !== 403) showToast('产品加载失败，请重试', 'error')
   } finally {
     // 过期请求的 finally 不能关掉新请求的 loading
     if (seq === loadSeq) loading.value = false

@@ -447,8 +447,8 @@ async def _po_source_order_ids(db: AsyncSession, order: PurchaseOrder) -> set[in
     if snapshot_ids:
         return snapshot_ids
 
-    candidates: set[int] = set(parse_source_order_ids(getattr(order, 'source_order_ids', None)))
-    single_source = getattr(order, 'source_order_id', None)
+    candidates: set[int] = set(parse_source_order_ids(order.source_order_ids))
+    single_source = order.source_order_id
     if single_source:
         candidates.add(int(single_source))
     return await _drop_ambiguous_ids(db, candidates)

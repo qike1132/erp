@@ -1,5 +1,8 @@
 <template>
-  <div class="hu-container">
+  <div v-if="blocked" class="hu-container">
+    <p style="padding: 24px; color: var(--color-text-secondary, #64748b);">该页面不对当前账号开放。</p>
+  </div>
+  <div v-else class="hu-container">
     <div class="page-card page-card-main">
       <!-- 卡片头部：Tab 导航与搜索框同一行（Tab 靠左，搜索靠右） -->
       <div class="page-card-header">
@@ -54,7 +57,7 @@
  * 产品搜索框置于卡片头部，与 Tab 导航同一行；搜索选中但尚无预设的
  * 产品由本页维护并下发给子组件（保证能直接为其配置工序）。
  */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import OutsourcePresetTab from '@/views/outsource/components/OutsourcePresetTab.vue'
 import HubeiRouteTabs from '@/views/hubei/HubeiRouteTabs.vue'
@@ -62,15 +65,16 @@ import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import { outsourceApi } from '@/api'
 import type { HubeiProductSearchItem } from '@/api/outsource'
 import { useAuthStore } from '@/stores/auth'
+import { isBeileUser } from '@/utils/beile'
 
 // 路由直达兜底：Tab 只对贝乐隐藏，但收藏/手输 URL 仍能进来，而贝乐持有
-// outsource_manage（预设读写接口都放行）。这里直接踢回外发进度页。
+// outsource_manage（预设读写接口都放行）。必须用渲染级门控（v-if）挡住子组件，
+// 只在 onMounted 里跳转来不及——子组件 setup 时已经发出读了。
 const authStore = useAuthStore()
 const router = useRouter()
+const blocked = computed(() => isBeileUser(authStore.user?.username))
 onMounted(() => {
-  if ((authStore.user?.username || '').trim() === '贝乐') {
-    void router.replace('/outsource')
-  }
+  if (blocked.value) void router.replace('/outsource')
 })
 
 /** 已搜索选中但尚无预设的产品（保证能直接为其配置） */

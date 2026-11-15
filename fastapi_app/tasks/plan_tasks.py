@@ -160,7 +160,10 @@ def _run_import_plans_impl(file_path: str, user_id: int, job_id: str,
             )
             assert_zip_budget(file_path)
             wb = openpyxl.load_workbook(file_path, read_only=True)
-            ws = wb.active
+            # 与 services/purchase_plan_staging._load_excel_rows 同口径：优先按表名取
+            # 「出货计划」。Excel 会把保存时正在查看的页签记为 active，停在模板的
+            # 「填写示例」页保存时按 active 解析会把示例行当首条数据。
+            ws = wb['出货计划'] if '出货计划' in wb.sheetnames else wb.active
             rows = list(clip_iter_rows(ws))
             wb.close()
             # 第十轮审计：原无行数上界（对照 material_registration 5000 / case 20000）——

@@ -7,7 +7,7 @@
       </template>
       <UiDescriptions
         :rows="[
-          { label: '系统版本', key: 'version', value: systemVersion },
+          { label: '系统版本', key: 'version', value: SYSTEM_VERSION },
           { label: '前端框架', key: 'framework', value: 'Vue 3 + Vite' },
           { label: 'UI 组件库', key: 'ui', value: 'Reka UI + Tailwind CSS 4' },
           { label: '后端框架', key: 'backend', value: 'FastAPI' },
@@ -23,10 +23,7 @@
 <script setup lang="ts">
 import UiCard from '@/components/ui/UiCard.vue'
 import UiDescriptions from '@/components/ui/UiDescriptions.vue'
-import { APP_VERSION } from '@/constants/brand'
-
-// 构建期注入的真实版本优先（与 sentry 同源），常量只作兜底，避免页面显示与部署版本不符
-const systemVersion = (import.meta.env.VITE_APP_VERSION as string | undefined) || APP_VERSION
+import { SYSTEM_VERSION } from '@/constants/brand'
 </script>
 
 <style scoped>

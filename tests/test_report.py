@@ -146,6 +146,21 @@ class TestGetOrderLogs:
         assert any('COALESCE(p.name, oi.product_name) LIKE :product' in c for c in where)
         assert any('o.status = :status' in c for c in where)
 
+    def test_export_filter_invalid_status_raises(self):
+        """导出链路的非法状态必须抛 BusinessError（不能被 get_all_logs_data 吞成空结果）。
+
+        若改回 ValueError，外层 `except (ValueError, TypeError, OSError)` 会把它吞掉，
+        端点拿不到 400，只会导出一个空 Excel——与屏幕端 400 的行为分叉。
+        """
+        from sqlalchemy import select
+
+        from fastapi_app.core.exceptions import BusinessError
+        from fastapi_app.shared.report_data_service import _apply_order_filters
+        from fastapi_app.shared_models import Order
+
+        with pytest.raises(BusinessError):
+            _apply_order_filters(select(Order), '', '', 'bogus', '', '', '')
+
     @pytest.mark.asyncio
     async def test_invalid_status_rejected(self, mock_async_db):
         """非法状态值必须报错，不能静默返回全量。

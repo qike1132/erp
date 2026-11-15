@@ -191,14 +191,15 @@ export function useBatchQuery() {
       const stockins = res?.completed_stockins ?? 0
       // 后端对「状态不是已出货」的单只塞进 failed_orders，不能一律报「已完成」。
       // 只有备货可归档时 success=true、done=0 但 stockins>0 —— 不能按「状态不符」提示。
+      const archived = `已归档 ${done} 单${stockins > 0 ? `、${stockins} 条备货` : ''}`
       if (failed > 0 && (res?.success === false || (done === 0 && stockins === 0))) {
         showToast(`未归档任何订单：${failed} 单状态不符（需先出货）`, 'warning')
       } else if (failed > 0) {
-        showToast(`已归档 ${done} 单，另有 ${failed} 单状态不符未归档`, 'warning')
+        showToast(`${archived}，另有 ${failed} 单状态不符未归档`, 'warning')
       } else if (res?.success === false) {
         showToast(res.message || '批次完成失败', 'warning')
       } else {
-        showToast('批次已完成', 'success')
+        showToast(stockins > 0 ? `批次已完成，${archived}` : '批次已完成', 'success')
       }
       showCompleteModal.value = false
       refetch()

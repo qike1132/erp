@@ -46,14 +46,19 @@ type RetryableAxiosConfig = InternalAxiosRequestConfig & {
   _skipAuthRefresh?: boolean
 }
 
-/**
- * 尝试用 refresh_token 刷新 access_token（单飞）。
- * Web 端：后端用 refresh_token cookie 校验并自动回写新 access_token cookie。
- * 成功返回 true，失败返回 false（由调用方决定是否登出）。
- */
 /** 刷新被限流后的冷却截止时间：冷却期内直接复用结论，不再往同一个桶里加计数 */
 let _refreshBlockedUntil = 0
 
+/**
+ * 尝试用 refresh_token 刷新 access_token（单飞）。
+ * Web 端：后端用 refresh_token cookie 校验并自动回写新 access_token cookie。
+ *
+ * 返回值：
+ * - true：刷新成功，可重放原请求；
+ * - false：会话确实失效（应登出）；
+ * - 'rate_limited' / 'transient'：限流或后端重启/网关抖动一类的瞬态故障，
+ *   **不得登出**，由调用方按「稍后重试」处理。
+ */
 async function refreshAccessToken(): Promise<boolean | 'rate_limited' | 'transient'> {
   if (Date.now() < _refreshBlockedUntil) return 'rate_limited'
   if (!_refreshPromise) {

@@ -981,6 +981,12 @@ export function useSummaryModal() {
           pendingRate = null
           fabricPendingRates.clear()
           await openSummary(orderIds.value, orderTime.value)
+          // 刷新在途期间表格仍可输入：那批值会重新入队/启动新 drain，必须再作废一次，
+          // 否则刷新后它们会被当成待发值二次发送（旧值覆盖新输入），
+          // 且窗口期内请求的响应会把刷新拿到的 items_version 覆盖回过期值。
+          lossRateEpoch += 1
+          pendingRate = null
+          fabricPendingRates.clear()
           const conflictError = new Error('BOM 已更新，采购明细已刷新，请重新编辑损耗率')
           conflictError.cause = err
           throw conflictError
