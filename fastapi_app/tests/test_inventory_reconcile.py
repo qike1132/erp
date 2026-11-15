@@ -236,3 +236,147 @@ def test_new_modules_are_read_only_by_ast() -> None:
     # 任务模块只做装配：读路径全部落在服务的单条 select() 上
     # 任务模块只做装配：读路径全部落在服务的单条 select() 上
     assert 'reconcile_inventory' in _source_paths()[1].read_text(encoding='utf-8')
+
+
+class TestDemandLogsExcludedFromBaseline:
+    """订单需求类流水不进对账基准（2026-11-15 P0）。
+
+    背景：``create_order`` 写 ``change_type='订单'`` 的需求流水但**不改**
+    ``product.current_stock``，而期望值是 ``SUM(inventory_log.change_quantity)``
+    —— 于是每个有订单的产品都永久负漂移（订单越多账面越低）。
+
+    这里用真实 SQLite 跑 ``build_reconcile_statement()`` 的**真实 SQL**（不是喂
+    构造行），因为要验证的正是 join 条件里的排除语义。
+    """
+
+    @staticmethod
+    async def _session(tmp_path):
+        """真实 SQLite：只建对账语句用到的 product / inventory_log 两表。
+
+        列集合刻意只取语句实际读取的列，并让 ``change_type`` 可空——生产列是
+        NOT NULL，但历史/外部导入行可能为空，``NOT IN`` 遇 NULL 会静默漏计，
+        这条分支必须显式可测。
+        """
+        from sqlalchemy import Column, Integer, MetaData, String, Table
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        metadata = MetaData()
+        Table(
+            'product', metadata,
+            Column('id', Integer, primary_key=True),
+            Column('name', String(100)),
+            Column('initial_stock', Integer),
+            Column('current_stock', Integer),
+        )
+        Table(
+            'inventory_log', metadata,
+            Column('id', Integer, primary_key=True),
+            Column('product_id', Integer),
+            Column('change_type', String(20), nullable=True),
+            Column('change_quantity', Integer, nullable=False),
+        )
+        engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "reconcile_demand.db"}')
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+        yield async_sessionmaker(engine, expire_on_commit=False), engine
+        await engine.dispose()
+
+    @staticmethod
+    async def _log_sums(session) -> dict[str, int]:
+        """直接跑对账语句，返回 {产品名: 期望值(log_sum)}。"""
+        rows = (await session.execute(svc.build_reconcile_statement())).all()
+        return {row[1]: int(row[4]) for row in rows}
+
+    async def test_demand_log_excluded_real_stock_log_counted(self, tmp_path) -> None:
+        """1 条「订单」需求日志 + 1 条真实「出库」日志 → 期望值只等于后者。"""
+        from sqlalchemy import text
+
+        agen = self._session(tmp_path)
+        sf, _engine = await agen.__anext__()
+
+        async with sf() as db:
+            await db.execute(text(
+                "INSERT INTO product (id, name, initial_stock, current_stock) "
+                "VALUES (1, '需求+出库', 0, 0)"
+            ))
+            await db.execute(text(
+                "INSERT INTO inventory_log (product_id, change_type, change_quantity) "
+                "VALUES (1, '订单', 100)"
+            ))
+            await db.execute(text(
+                "INSERT INTO inventory_log (product_id, change_type, change_quantity) "
+                "VALUES (1, '出库', -30)"
+            ))
+            await db.commit()
+
+            # 期望值只取物理流水：100 件需求不计入
+            assert await self._log_sums(db) == {'需求+出库': -30}
+
+            # 走完整对账：账面 0 − 期望(-30) = +30（旧口径会算成 0−70 = −70，
+            # 即「产品一有订单就报负漂移」的就是这条）。
+            report = await svc.reconcile_inventory(db)
+            assert report['checked_products'] == 1
+            assert report['positive_count'] == 1
+            assert report['diffs'][0]['log_sum'] == -30
+            assert report['diffs'][0]['diff'] == 30
+
+    async def test_null_change_type_rows_still_counted(self, tmp_path) -> None:
+        """``change_type IS NULL`` 的历史行必须仍计入（NOT IN 遇 NULL 会漏掉）。"""
+        from sqlalchemy import text
+
+        agen = self._session(tmp_path)
+        sf, _engine = await agen.__anext__()
+
+        async with sf() as db:
+            await db.execute(text(
+                "INSERT INTO product (id, name, initial_stock, current_stock) "
+                "VALUES (2, '类型为空', 0, 25)"
+            ))
+            await db.execute(text(
+                "INSERT INTO inventory_log (product_id, change_type, change_quantity) "
+                "VALUES (2, NULL, 25)"
+            ))
+            await db.commit()
+
+            assert await self._log_sums(db) == {'类型为空': 25}
+
+    async def test_every_audited_demand_type_is_excluded(self, tmp_path) -> None:
+        """审计确认的 6 个「只登记需求」类型逐个被排除（回归锚点，防被误删）。"""
+        from sqlalchemy import text
+
+        agen = self._session(tmp_path)
+        sf, _engine = await agen.__anext__()
+
+        async with sf() as db:
+            await db.execute(text(
+                "INSERT INTO product (id, name, initial_stock, current_stock) VALUES (3, '全需求类型', 0, 0)"
+            ))
+            for idx, change_type in enumerate(svc.DEMAND_ONLY_CHANGE_TYPES, start=1):
+                await db.execute(
+                    text(
+                        "INSERT INTO inventory_log (product_id, change_type, change_quantity) "
+                        "VALUES (3, :change_type, :qty)"
+                    ),
+                    {'change_type': change_type, 'qty': idx * 10},
+                )
+            await db.commit()
+
+            assert await self._log_sums(db) == {'全需求类型': 0}
+
+
+def test_demand_only_set_never_includes_stock_moving_types() -> None:
+    """排除集里绝不能出现真正改物理库存的类型（否则会反向漂移）。
+
+    逐个核对过写入点（见 ``inventory_reconcile.DEMAND_ONLY_CHANGE_TYPES`` 注释）：
+    这些类型都走 ``apply_stock_delta_locked`` / ``update_stock_with_optimistic_lock``。
+    """
+    stock_moving = {
+        '出库', '出库修改', '出库删除',
+        '备货', '备货入库',
+        '入库', '入库修改', '入库删除',
+        '退货', '退货取消',
+        '订单抵扣', '取消抵扣', '抵扣修改', '抵扣删除', '抵扣回滚',
+        '生产入库', '生产入库冲销',
+        '初始库存', '初始库存调整',
+    }
+    assert not stock_moving & set(svc.DEMAND_ONLY_CHANGE_TYPES)

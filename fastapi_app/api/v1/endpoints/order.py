@@ -10,7 +10,7 @@
 import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +35,7 @@ from fastapi_app.schemas.order import (
     OrderListResponse,
     OrderUpdate,
 )
-from fastapi_app.services import order_batch_service, order_crud, order_service
+from fastapi_app.services import order_batch_service, order_crud, order_idempotency, order_service
 from fastapi_app.services.order.unified import get_unified_records
 from fastapi_app.services.order_service import PermissionDeniedError
 from fastapi_app.shared.factory_scope import assert_product_factory_scoped
@@ -298,28 +298,56 @@ async def get_order(
 @router.post("/create", response_model=OrderActionResponse)
 async def create_order(
     data: OrderCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission("order_manage")),
 ) -> OrderActionResponse:
     """创建订单。
 
+    请求级幂等（P0）：客户端可选带 ``Idempotency-Key`` 头。同一用户 + 同键 +
+    同内容的重试直接重放首次结果、不再建单；同键不同内容返回 409；不带该头时
+    行为与旧版本完全一致（不强制客户端改造）。
+
     事务提交后再失效缓存，避免并发请求用旧数据回填缓存。
 
     Args:
-        data: 订单创建参数（产品、数量、客户、类型等）。
+        data: 订单创建参数（产品、数量、客户、备注等）。
+        idempotency_key: 可选的幂等键（8-64 个 [A-Za-z0-9._:-] 字符）。
         db: 异步数据库会话（读写主库）。
         user: 当前登录用户，作为订单创建人。
 
     Returns:
         OrderActionResponse: 包含成功标志和提示消息的响应。
+
+    Raises:
+        HTTPException 400: 幂等键格式非法（BusinessError，早于任何写操作）。
+        HTTPException 409: 同一幂等键被用于不同的下单内容。
     """
+    # 非法键在开事务前就失败：不值得为注定失败的请求去抢锁
+    key = order_idempotency.validate_key(idempotency_key)
+    fingerprint = (
+        order_idempotency.request_hash(data.product_id, data.quantity, data.customer, data.note)
+        if key else ''
+    )
     async with db_transaction(db):
+        if key:
+            # 先串行化同键请求再查登记，否则两个并发重试都读不到记录、各建一张单
+            await order_idempotency.acquire_key_lock(db, user.id, key)
+            replay = await order_idempotency.load_replay(db, user.id, key, fingerprint)
+            if replay is not None:
+                # 命中重放：本次不写任何数据，也不需要失效缓存（数据没变）
+                return OrderActionResponse(**replay)
         # 工厂隔离：创建与编辑/删除同口径，厂绑定用户不得跨厂下单
         await assert_product_factory_scoped(db, data.product_id, user, what="产品")
         await order_service.create_order(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, note=data.note or '', current_user=user,
         )
+        if key:
+            # 与订单写入同一事务登记：订单回滚则登记一起消失
+            await order_idempotency.save_result(db, user.id, key, fingerprint, {
+                'success': True, 'message': '订单添加成功！',
+            })
     # 事务提交后再失效缓存，避免并发请求用旧数据回填缓存
     await cache_mgr.invalidate_dashboard()
     return OrderActionResponse(success=True, message="订单添加成功！")

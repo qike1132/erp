@@ -4928,17 +4928,35 @@
           "订单管理"
         ],
         "summary": "Create Order",
-        "description": "创建订单。\n\n事务提交后再失效缓存，避免并发请求用旧数据回填缓存。\n\nArgs:\n    data: 订单创建参数（产品、数量、客户、类型等）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，作为订单创建人。\n\nReturns:\n    OrderActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "创建订单。\n\n请求级幂等（P0）：客户端可选带 ``Idempotency-Key`` 头。同一用户 + 同键 +\n同内容的重试直接重放首次结果、不再建单；同键不同内容返回 409；不带该头时\n行为与旧版本完全一致（不强制客户端改造）。\n\n事务提交后再失效缓存，避免并发请求用旧数据回填缓存。\n\nArgs:\n    data: 订单创建参数（产品、数量、客户、备注等）。\n    idempotency_key: 可选的幂等键（8-64 个 [A-Za-z0-9._:-] 字符）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，作为订单创建人。\n\nReturns:\n    OrderActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException 400: 幂等键格式非法（BusinessError，早于任何写操作）。\n    HTTPException 409: 同一幂等键被用于不同的下单内容。",
         "operationId": "create_order_api_v1_orders_create_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OrderCreate"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {

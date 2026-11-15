@@ -27,7 +27,7 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.shared_models import InventoryLog, Product
@@ -41,6 +41,43 @@ DEFAULT_DIFF_LIMIT = 200
 STATUS_MATCHED = 'matched'
 STATUS_POSITIVE = 'positive'
 STATUS_NEGATIVE = 'negative'
+
+#: **只登记「订单需求」、不代表物理库存变动**的 change_type：对账时必须排除。
+#:
+#: 对账期望值是 ``SUM(change_quantity)``，而物理库存只由走统一写入口
+#: （``apply_stock_delta_locked`` / ``update_stock_with_optimistic_lock``）的写点
+#: 改变。下列类型把「客户要多少」记进流水但**不动** ``product.current_stock``，
+#: 计入 SUM 会让每个有订单的产品永久负漂移（订单越多账面越低）。
+#:
+#: 逐个核对过的写入点（2026-11-15 审计，``grep -rn "change_type" fastapi_app``）：
+#:   - ``订单``：``services/order/commands.py`` create_order（docstring 明示「不影响
+#:     物理库存」）、``services/batch_import_core.py:870``（注释写明订单不改库存）、
+#:     ``services/batch_import_service.py:418``、``services/staging/order.py:190``
+#:     （2026-10-24 P0 已删掉该处 +quantity 的库存写）——四处均无库存写调用；
+#:   - ``订单创建``：``services/order_batch_create.py``、``tasks/batch_tasks.py:293``
+#:     ——同文件 0 处 ``current_stock`` / ``apply_stock_delta_locked``；
+#:   - ``订单修改``：``services/order/commands.py``（明细改量 / 明细删除 / 整单改量）
+#:     ——该文件全篇无库存写调用；
+#:   - ``订单修改(审批)``：``services/approval_service.py:377``（审批通过改单量，同上）；
+#:   - ``订单删除``：``shared/order_stock_rollback.py:113`` 的订单级汇总行——真实物理
+#:     变动已由同函数逐个产品的 ``抵扣回滚`` 行（``apply_stock_delta_locked``）记账，
+#:     这行是同额汇总，计入即重复计数；
+#:   - ``订单删除(审批)``：``services/approval_service.py:557``——同上（审批删单自写
+#:     汇总，rollback 的汇总行被显式关掉），同样重复计数。
+#:
+#: 刻意**不**排除的相邻类型（它们真的改了 ``current_stock``，排除会造成反向漂移）：
+#: ``订单抵扣`` / ``取消抵扣``（``services/order/deduction.py``、
+#: ``services/order_deduction_service.py`` 都调 ``update_stock_with_optimistic_lock``）、
+#: ``抵扣回滚``（``shared/order_stock_rollback.py:97`` 走 ``apply_stock_delta_locked``）、
+#: ``备货`` / ``备货入库`` / ``出库`` / ``入库*`` / ``退货*`` / ``生产入库*`` / ``初始库存*``。
+DEMAND_ONLY_CHANGE_TYPES: tuple[str, ...] = (
+    '订单',
+    '订单创建',
+    '订单修改',
+    '订单修改(审批)',
+    '订单删除',
+    '订单删除(审批)',
+)
 
 _TRUTHY = frozenset({'1', 'true', 'yes', 'on'})
 
@@ -69,8 +106,16 @@ def build_reconcile_statement() -> Select:
 
     一次 GROUP BY 拿到全部产品（含无流水产品，SUM 为空时 coalesce 为 0），
     避免逐产品查流水 —— 单条集合式查询，无 N+1。
+
+    join 条件里排除 :data:`DEMAND_ONLY_CHANGE_TYPES`（订单需求类流水）：
+    ``change_type IS NULL`` 的历史行必须仍计入——``NULL NOT IN (...)`` 结果是
+    NULL（既非真也非假），只写 ``NOT IN`` 会把这些行静默漏掉，所以显式 OR 一支。
     """
     log_sum = func.coalesce(func.sum(InventoryLog.change_quantity), 0).label('log_sum')
+    counts_toward_stock = or_(
+        InventoryLog.change_type.is_(None),
+        ~InventoryLog.change_type.in_(DEMAND_ONLY_CHANGE_TYPES),
+    )
     return (
         select(
             Product.id,
@@ -80,7 +125,10 @@ def build_reconcile_statement() -> Select:
             log_sum,
         )
         .select_from(Product)
-        .outerjoin(InventoryLog, InventoryLog.product_id == Product.id)
+        .outerjoin(
+            InventoryLog,
+            and_(InventoryLog.product_id == Product.id, counts_toward_stock),
+        )
         .group_by(Product.id, Product.name, Product.initial_stock, Product.current_stock)
         .order_by(Product.id)
     )

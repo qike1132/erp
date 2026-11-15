@@ -15,6 +15,6 @@
     "pip_audit": 0,
     "nosec_budget": 80,
     "bandit": 21,
-    "semantic_guards": 51
+    "semantic_guards": 50
   }
 }

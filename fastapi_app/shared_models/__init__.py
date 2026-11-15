@@ -50,6 +50,7 @@ from fastapi_app.shared_models.numbering_audit import NumberingAudit
 from fastapi_app.shared_models.numbering_counter import NumberingCounter
 from fastapi_app.shared_models.order import Order
 from fastapi_app.shared_models.order_batch_audit import OrderBatchAuditLog
+from fastapi_app.shared_models.order_create_attempt import OrderCreateAttempt
 from fastapi_app.shared_models.order_item import OrderItem
 from fastapi_app.shared_models.order_status_log import OrderStatusLog
 from fastapi_app.shared_models.order_sync import OrderSyncConfig, OrderSyncRecord, SyncRetryQueue
@@ -134,6 +135,7 @@ __all__ = [
     'NumberingCounter',
     'Order',
     'OrderBatchAuditLog',
+    'OrderCreateAttempt',
     'OrderItem',
     'OrderOutsourceProcess',
     'OrderOutsourceProcessFlow',
