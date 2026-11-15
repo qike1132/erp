@@ -101,7 +101,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useQuery, keepPreviousData, isCancelledError } from '@tanstack/vue-query'
-import { download } from '@/api/request'
 import { getErrorStatus } from '@/types/errors'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { reportApi } from '@/api'
@@ -324,7 +323,7 @@ async function exportReport() {
   // 走 axios 下载而不是 window.open：后者绕过 401 刷新与 403 提示，
   // token 过期/导出被拒时用户只会看到新标签页里一坨裸 JSON。
   try {
-    await download('/reports/export', `流水查询_${activeTab.value}.xlsx`, params)
+    await reportApi.exportReport(params, `流水查询_${activeTab.value}.xlsx`)
   } catch (e) {
     const status = getErrorStatus(e)
     showToast(

@@ -45,11 +45,7 @@
 
       <MEmpty v-else-if="loadError" :title="loadError">
         <template v-if="loadErrorRetryable" #action>
-          <button
-            type="button"
-            style="margin-top: 12px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--m-border, #dbe3ef); background: #fff; font: inherit;"
-            @click="loadStock()"
-          >重试</button>
+          <button type="button" class="m-empty-retry" @click="loadStock()">重试</button>
         </template>
       </MEmpty>
       <MEmpty v-else :title="searchQuery ? '未找到匹配物料' : '暂无库存数据'" />
@@ -256,6 +252,16 @@ onMounted(loadStock)
   margin-top: 8px;
   padding-top: 8px;
   border-top: var(--m-border-subtle);
+}
+
+/* 错误态重试按钮（错误文案下方） */
+.m-empty-retry {
+  margin-top: 12px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--m-border, #dbe3ef);
+  background: var(--m-bg, #fff);
+  font: inherit;
 }
 
 </style>

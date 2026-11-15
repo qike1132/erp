@@ -33,11 +33,7 @@
         :subtitle="loadErrorRetryable ? '请检查网络后重试' : '请联系管理员开通生产计划查看权限'"
       >
         <template v-if="loadErrorRetryable" #action>
-          <button
-            type="button"
-            style="margin-top: 12px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--m-border, #dbe3ef); background: #fff; font: inherit;"
-            @click="loadData()"
-          >重试</button>
+          <button type="button" class="m-empty-retry" @click="loadData()">重试</button>
         </template>
       </MEmpty>
       <MEmpty v-else-if="!selectedPlans.length" title="该日期暂无出货计划" />
@@ -327,4 +323,14 @@ onMounted(() => { loadData() })
 .m-sts-done { background: rgba(16, 185, 129, 0.1); color: #059669; }
 .m-sts-partial { background: rgba(245, 158, 11, 0.1); color: #d97706; }
 .m-sts-pending { background: rgba(148, 163, 184, 0.1); color: #64748b; }
+
+/* 错误态重试按钮（错误文案下方） */
+.m-empty-retry {
+  margin-top: 12px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--m-border, #dbe3ef);
+  background: var(--m-bg, #fff);
+  font: inherit;
+}
 </style>

@@ -1,6 +1,6 @@
 <template>
   <div v-if="blocked" class="hu-container">
-    <p style="padding: 24px; color: var(--color-text-secondary, #64748b);">该页面不对当前账号开放。</p>
+    <p class="hu-blocked-tip">该页面不对当前账号开放。</p>
   </div>
   <div v-else class="hu-container">
     <div class="page-card page-card-main">
@@ -161,4 +161,6 @@ function onPickProduct(p: ProductSuggestion) {
 }
 .preset-ac-name { color: var(--color-text); font-weight: 500; font-size: 14px; }
 .preset-ac-barcode { color: var(--color-text-muted); font-size: 12px; font-family: var(--font-mono); }
+/* 贝乐账号直达该路由时的说明（不挂载预设子组件） */
+.hu-blocked-tip { padding: 24px; color: var(--color-text-secondary, #64748b); }
 </style>

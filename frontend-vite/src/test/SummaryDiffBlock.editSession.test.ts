@@ -113,6 +113,9 @@ function mountModal(m: ReturnType<typeof useSummaryModal>) {
       groupSpareRates: m.groupSpareRates,
       qtyDrafts: m.qtyDrafts,
       qtySavingKey: m.qtySavingKey,
+      // 差异快照由 composable 在 openSummary 时算一次后传入（屏幕与打印同源）；
+      // 组件自身不再回退实时计算，故这里必须接线，等价 PurchaseView 的写法。
+      diffSnapshot: m.diffSnapshot,
       hasUnsavedQtyEdits: m.hasUnsavedQtyEdits,
       orderCount: 1,
       supplierGroups: m.supplierGroups,

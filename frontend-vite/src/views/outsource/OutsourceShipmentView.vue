@@ -42,11 +42,7 @@
             </div>
             <template v-else>
               <!-- 刷新失败但仍有旧数据：必须常驻提示，否则用户会把上一筛选条件的行当成本次结果 -->
-              <div
-                v-if="loadError"
-                role="alert"
-                style="margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: #fff7e6; color: #8a5300; font-size: 13px; display: flex; align-items: center; gap: 10px;"
-              >
+              <div v-if="loadError" class="osv-stale-banner" role="alert">
                 <span>{{ loadError }}（下方仍是上次成功加载的数据）</span>
                 <button type="button" class="osv-action-btn" @click="load()">重试</button>
               </div>
@@ -347,4 +343,17 @@ loadUnshippedQty()
   animation: osv-progress-slide 1s ease-in-out infinite;
 }
 @keyframes osv-progress-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+
+/* 刷新失败但仍有旧数据时的常驻提示 */
+.osv-stale-banner {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--color-warning-50, #fff7e6);
+  color: var(--color-warning-700, #8a5300);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 </style>

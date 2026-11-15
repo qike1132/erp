@@ -1,4 +1,4 @@
-import { get } from './request'
+import { download, get } from './request'
 import type { QueryParams, PickRequired } from '@/types'
 import type { ReportLogItem as GenReportLogItem } from '@/types/api'
 
@@ -25,4 +25,10 @@ export const reportApi = {
   stockoutLogs: (params?: QueryParams) => get<ReportLogResponse>('/reports/stockout-logs', params),
   deductionLogs: (params?: QueryParams) => get<ReportLogResponse>('/reports/deduction-logs', params),
   returnLogs: (params?: QueryParams) => get<ReportLogResponse>('/reports/return-logs', params),
+  /**
+   * 导出流水（xlsx）。走 axios 而非直开新标签页：401 刷新、403 提示、
+   * 「导出超上限」的 400 文案都依赖请求层统一处理。
+   */
+  exportReport: (params: Record<string, string>, filename: string) =>
+    download('/reports/export', filename, params),
 }

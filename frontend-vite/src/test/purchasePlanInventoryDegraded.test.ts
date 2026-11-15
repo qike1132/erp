@@ -23,6 +23,15 @@ beforeAll(async () => {
 
 const monthlyAggregated = vi.fn()
 
+// 采购计划页按 production_plan_manage 门控「新建/导入/模板」入口，
+// 会读 auth store；本用例只验降级横幅，直接给一个有权限的假 store。
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    user: { username: 'tester', permissions: ['production_plan_manage'] },
+    hasPermission: (code: string) => code === 'production_plan_manage',
+  }),
+}))
+
 vi.mock('@/api', () => ({
   planApi: {
     monthlyAggregated: (...args: unknown[]) => monthlyAggregated(...args),

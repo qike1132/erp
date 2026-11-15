@@ -12,7 +12,7 @@
             <label class="m-form-label">皮套 / 产品</label>
             <MSearchBar v-model="productQuery" placeholder="搜索皮套名称 / 69码" @search="onSearch" />
             <!-- 权限/网络失败要留常驻提示：全局 403 toast 有 3 秒去重，可能一次都不弹 -->
-            <p v-if="searchError" role="alert" style="margin: 6px 0 0; color: var(--m-accent-red, #d93025); font-size: 13px;">
+            <p v-if="searchError" role="alert" class="m-case-search-error">
               {{ searchError }}
             </p>
             <div v-if="results.length" class="m-results">
@@ -327,4 +327,5 @@ onMounted(() => {
 .m-part-del { height: 32px; padding: 0 12px; border: none; border-radius: 8px; background: var(--color-danger-50); color: var(--color-danger-600); font-size: 13px; font-weight: 600; cursor: pointer; }
 .m-part-empty { padding: 16px 0; text-align: center; color: var(--m-text-secondary); font-size: 14px; }
 .m-part-add { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.m-case-search-error { margin: 6px 0 0; color: var(--m-accent-red, #d93025); font-size: 13px; }
 </style>

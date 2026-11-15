@@ -22,17 +22,13 @@ import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 const mocks = vi.hoisted(() => ({
   orderLogs: vi.fn(),
-  download: vi.fn(),
+  exportReport: vi.fn(),
 }))
-
-// 导出已从 window.open 改为 axios 下载（401/403 才能走统一错误通道），
-// 这里 mock 下载函数以断言「导出与查询同口径」。
-vi.mock('@/api/request', () => ({ download: mocks.download }))
 
 // ReportView 经 useReportConfig 的 ENDPOINT_MAP 以「orderLogs」等枚举名取 reportApi 方法
 // （reportApi.orderLogs → GET /reports/order-logs），mock key 必须用枚举名而非 URL 路径。
 vi.mock('@/api', () => ({
-  reportApi: { orderLogs: mocks.orderLogs },
+  reportApi: { orderLogs: mocks.orderLogs, exportReport: mocks.exportReport },
   orderApi: {},
   stockApi: {},
   stockReturnApi: {},
@@ -286,8 +282,8 @@ describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一�
   beforeEach(() => {
     mocks.orderLogs.mockReset()
     mocks.orderLogs.mockResolvedValue({ logs: [], pagination: { pages: 3, total: 40 } })
-    mocks.download.mockReset()
-    mocks.download.mockResolvedValue(undefined)
+    mocks.exportReport.mockReset()
+    mocks.exportReport.mockResolvedValue(undefined)
   })
 
   it('M:223: 第 2 页 + 条件未变时点「查询」：必须真的再发一次请求（不许静默吃缓存）', async () => {
@@ -326,12 +322,11 @@ describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一�
     await wrapper.find('.f-product').setValue('杯')
     await wrapper.find('.f-export').trigger('click')
 
-    expect(mocks.download).toHaveBeenCalledTimes(1)
+    expect(mocks.exportReport).toHaveBeenCalledTimes(1)
     // 「杯」——导出口径必须与输入框当前所见一致
-    expect(mocks.download).toHaveBeenCalledWith(
-      '/reports/export',
-      expect.any(String),
+    expect(mocks.exportReport).toHaveBeenCalledWith(
       expect.objectContaining({ report_type: 'order', product: '杯' }),
+      expect.any(String),
     )
 
     // 导出提交草稿触发一次查询；挂起的防抖到期发现快照已一致 → no-op，不重复请求
