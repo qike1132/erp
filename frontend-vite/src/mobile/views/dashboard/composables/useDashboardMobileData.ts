@@ -81,7 +81,12 @@ export function useDashboardMobileData() {
       error.value = e instanceof Error ? e.message : '网络请求失败'
       console.warn('[DashboardMobile] load error:', e)
     } finally {
-      if (seq === loadSeq) loading.value = false
+      if (seq === loadSeq) {
+        loading.value = false
+        // 最新请求统一收尾：refresh() 已把卡片重置为不可见，而被抢占的旧请求不会再走
+        // 上层的 triggerReveal；不补这一下会出现「数据已到、卡片永久 opacity:0」。
+        if (!visibleCards.value.some(Boolean)) triggerReveal()
+      }
     }
   }
 

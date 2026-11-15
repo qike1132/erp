@@ -342,6 +342,31 @@ describe('useOutsourceProcess 一键发货/收货数量草稿三分支（P1-21 �
   })
 })
 
+describe('useOutsourceProcess 备货行守卫（Order.id 与 StockIn.id 会撞号）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    grantedPermissions = new Set(['outsource_manage', 'outsource_ship', 'outsource_receive'])
+    currentUsername = 'admin'
+  })
+
+  it('备货行不按订单 id 查工序/流水，且不可发货/收货', async () => {
+    const stockinRow = { ...detail, id: 999, record_type: 'stockin' } as unknown as OutsourceOrderRow
+    const detailRef = ref<OutsourceOrderRow>(stockinRow)
+    const hook = useOutsourceProcess(detailRef, () => {})
+
+    await hook.loadProcesses(999)
+    await hook.loadFlows(999)
+
+    // 一旦发请求，撞号时会拉到「另一张订单」的工序并允许一键发货
+    expect(outsourceApi.orderProcesses).not.toHaveBeenCalled()
+    expect(outsourceApi.orderFlows).not.toHaveBeenCalled()
+    expect(hook.processes.value).toEqual([])
+    expect(hook.flows.value).toEqual([])
+    expect(hook.canShip.value).toBe(false)
+    expect(hook.canReceive.value).toBe(false)
+  })
+})
+
 describe('useOutsourceProcess 快速换单的请求序号（A-M35）', () => {
   beforeEach(() => {
     vi.clearAllMocks()

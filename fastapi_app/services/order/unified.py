@@ -384,7 +384,7 @@ async def get_unified_records(
     Args:
         db: 异步数据库会话（只读副本）。
         page: 页码，从 1 开始。
-        per_page: 每页数量（上限 500）。
+        per_page: 每页数量（上限 200，与端点契约一致）。
         record_type: 记录类型（all/order/stockin）。
         product_kw: 产品关键字（订单侧匹配 SKU 名称/条码，备货侧匹配产品名称/条码）。
         order_no_kw: 单号关键字（订单侧订单号，备货侧备货号）。

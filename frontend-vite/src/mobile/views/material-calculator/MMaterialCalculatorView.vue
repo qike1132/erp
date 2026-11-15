@@ -205,8 +205,10 @@ watch(searchQuery, (q) => {
   // 之处——抽屉永不打开，移动端无法添加产品。有关键词即打开。
   searchSheetVisible.value = !!q
   if (searchTimer) clearTimeout(searchTimer)
-  if (!q) { searchResults.value = []; return }
+  // 序号必须在任何分支之前自增：清空输入也要作废在途请求，
+  // 否则旧响应会回填到已清空的抽屉、失败时还会误弹 toast
   const seq = ++searchSeq
+  if (!q) { searchResults.value = []; return }
   searchTimer = setTimeout(async () => {
     searchLoading.value = true
     try {

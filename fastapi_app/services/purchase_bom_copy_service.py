@@ -59,6 +59,17 @@ async def batch_delete_purchase_orders(db: AsyncSession, order_ids: list, userna
         blocked = sorted({str(row.purchase_order_no or row.purchase_order_id) for row in blocked_rows})
         raise ConflictError(f'以下采购单存在来料登记，无法删除: {", ".join(blocked)}')
 
+    # 批删与单删同口径：删完把「已无采购单覆盖」的来源订单状态重算回真实值，
+    # 否则来源订单会永久停在「已备货」（历史缺陷在批量入口同样存在）。
+    from fastapi_app.services.purchase_order_crud import (
+        _po_source_order_ids,
+        _reset_uncovered_source_orders,
+    )
+
+    batch_source_order_ids: set[int] = set()
+    for order in orders_to_delete:
+        batch_source_order_ids |= await _po_source_order_ids(db, order)
+
     deleted_info = []
     deleted_order_nos: list[str] = []
     try:
@@ -87,6 +98,8 @@ async def batch_delete_purchase_orders(db: AsyncSession, order_ids: list, userna
         await db.flush()
     except IntegrityError as e:
         raise ConflictError('部分采购单被来料登记等记录引用，无法删除，请刷新后重试') from e
+
+    await _reset_uncovered_source_orders(db, batch_source_order_ids)
 
     logger.warning(
         f'批量删除采购订单 | 操作人: {username} | '

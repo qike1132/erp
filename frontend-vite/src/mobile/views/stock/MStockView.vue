@@ -116,6 +116,8 @@ function getQtyClass(item: InventoryItem): string {
 async function loadStock() {
   const seq = ++loadSeq
   loading.value = true
+  // 每次请求开始先清错误态：否则一次失败后，后续成功且结果为空时仍显示失败文案
+  loadError.value = ''
   try {
     // F-FE-MOBILE-07：服务端筛选；AUD-22：库存状态同样下推服务端 + 服务端分页
     const res = await stockApi.inventory({

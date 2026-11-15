@@ -14,17 +14,14 @@ export function escapeHtml(value: unknown): string {
 }
 
 /**
- * Excel 单元格取值：HTML 转义 + 打断公式/DDE 前缀。
+ * HTML-.xls 的「按文本」单元格属性。
  *
- * 导出的 .xls 本质是 HTML 表格，Excel 打开时会把手写 `= + - @` 开头的文本当公式
- * 解析（供应商 Excel 导入的物料名/规格天然带这些字符）。前缀单引号可强制按文本
- * 处理，与后端 `report_exporter._sanitize_excel_value` 同口径。
+ * 这种导出本质是 HTML 表格：给单元格加 `mso-number-format:'\@'`，Excel 打开时
+ * 会把 `= + - @` 开头的文本当普通文本（前缀单引号只在 Excel 内手工输入时才是
+ * 文本标记，写在 HTML 里反而会显示成多余字符）。与
+ * `views/outsource/composables/useOutsourceUnshipped.ts` 的既有写法一致。
  */
-export function excelCell(value: unknown): string {
-  const text = String(value ?? '')
-  const guarded = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
-  return escapeHtml(guarded)
-}
+export const EXCEL_TEXT_ATTR = ` style="mso-number-format:'\\@'"`
 
 const PRINT_STYLE = `
   body { font-family: SimSun, 宋体; padding: 20px; }

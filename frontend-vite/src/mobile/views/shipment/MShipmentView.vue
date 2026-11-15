@@ -27,8 +27,12 @@
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
 
       <!-- 空态 -->
-      <MEmpty v-else-if="loadError" :title="loadError" subtitle="请检查网络后重试">
-        <template #action>
+      <MEmpty
+        v-else-if="loadError"
+        :title="loadError"
+        :subtitle="loadErrorRetryable ? '请检查网络后重试' : '请联系管理员开通生产计划查看权限'"
+      >
+        <template v-if="loadErrorRetryable" #action>
           <button
             type="button"
             style="margin-top: 12px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--m-border, #dbe3ef); background: #fff; font: inherit;"
@@ -110,6 +114,8 @@ const selectedDate = ref(todayStr())
 const plansByDate = ref<Record<string, Plan[]>>({})
 // F-FE-MOBILE-10：加载错误态（403/网络失败与「暂无数据」区分）
 const loadError = ref('')
+/** 当前错误是否值得重试：403 重试只会再吃一次 403 */
+const loadErrorRetryable = ref(true)
 
 const loading = ref(false)
 const dateScrollRef = ref<HTMLElement>()
@@ -222,9 +228,10 @@ async function loadData() {
     // F-FE-MOBILE-10：403 等错误原先吞成空 plans → 页面显示「暂无计划」，
     // 与「真没数据」不可区分。置错误态让空态文案如实（403 详情拦截器已 toast）。
     // P2-7：本页无下拉刷新，文案不能说「下拉重试」。
-    loadError.value = (e as { response?: { status?: number } })?.response?.status === 403
-      ? '无查看权限'
-      : '加载失败，请稍后重试'
+    // 权限失败与网络失败分开：403 时给「重试」只会反复 403 并触发全局提示
+    const status = (e as { response?: { status?: number } })?.response?.status
+    loadErrorRetryable.value = status !== 403
+    loadError.value = status === 403 ? '无查看权限' : '加载失败，请稍后重试'
   } finally {
     if (seq === loadSeq) loading.value = false
   }

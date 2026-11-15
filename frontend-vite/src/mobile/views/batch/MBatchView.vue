@@ -94,6 +94,8 @@ async function handleSearch() {
   const seq = ++loadSeq
   const requestedPage = page.value
   loading.value = true
+  // 请求开始即清错误态，避免成功后仍显示上一次的失败文案
+  loadError.value = ''
   try {
     // 2026-10-17 审计 AUD-22：服务端分页（此前固定 page=1，第 51 条起不可达）
     const res = await batchApi.list({

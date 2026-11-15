@@ -84,6 +84,11 @@
         <UiButton variant="primary" :disabled="submitting" @click="submit">确认发货</UiButton>
       </div>
 
+      <!-- 加载失败：底栏不能再显示「0 单 / 0 件」，否则与错误提示自相矛盾 -->
+      <div v-else-if="loadError" class="osw-bar">
+        <UiButton variant="outline" @click="onOpenUpdate(false)">关闭</UiButton>
+      </div>
+
       <!-- 汇总态：实时合计 + 主操作 -->
       <div v-else class="osw-bar">
         <div class="osw-bar-info" role="status">

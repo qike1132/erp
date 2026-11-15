@@ -16,7 +16,7 @@ let isShowing403 = false
 let _csrfCache: string | null = null
 
 // 401 刷新令牌单飞：并发多个 401 共享同一个 refresh 请求，避免重复刷新
-let _refreshPromise: Promise<boolean> | null = null
+let _refreshPromise: Promise<boolean | 'rate_limited'> | null = null
 
 /** 清空 CSRF 缓存（注销时调用） */
 export function clearCsrfCache(): void {
@@ -51,7 +51,7 @@ type RetryableAxiosConfig = InternalAxiosRequestConfig & {
  * Web 端：后端用 refresh_token cookie 校验并自动回写新 access_token cookie。
  * 成功返回 true，失败返回 false（由调用方决定是否登出）。
  */
-async function refreshAccessToken(): Promise<boolean> {
+async function refreshAccessToken(): Promise<boolean | 'rate_limited'> {
   if (!_refreshPromise) {
     _refreshPromise = (async () => {
       try {
@@ -59,8 +59,9 @@ async function refreshAccessToken(): Promise<boolean> {
           _skipAuthRefresh: true,
         } as RetryableAxiosConfig)
         return true
-      } catch {
-        return false
+      } catch (e) {
+        // 429 不是「会话失效」：刷新端点有 IP 级限流，误伤时不能把在线用户踢下线
+        return axios.isAxiosError(e) && e.response?.status === 429 ? 'rate_limited' : false
       } finally {
         _refreshPromise = null
       }
@@ -100,7 +101,8 @@ service.interceptors.response.use(
       // 首次 401：用 refresh_token 刷新 access_token 后重放原请求（登录接口除外）
       if (config && !config._retried && !config._skipAuthRefresh && !isLoginRequest) {
         config._retried = true
-        if (await refreshAccessToken()) {
+        const refreshed = await refreshAccessToken()
+        if (refreshed === true) {
           try {
             // 原 signal 可能已被路由切换 abort；重放不应继承，否则刷新成功也会立刻取消
             config.signal = new AbortController().signal
@@ -108,6 +110,10 @@ service.interceptors.response.use(
           } catch {
             // 重放仍失败：继续走登出逻辑
           }
+        }
+        if (refreshed === 'rate_limited') {
+          // 刷新被限流 ≠ 会话失效：保持登录态，把错误交给调用方，避免强制踢下线
+          return Promise.reject(error)
         }
       }
       if (!isRedirecting401) {
@@ -260,7 +266,9 @@ export function post<T>(
       headers: opts?.headers,
       // 长任务（Excel 校验/建单）必须由调用方放宽：默认 15s 会把「后端仍在处理」
       // 判成失败，调用方再清暂存/重试就会与真实结果错位。
-      ...(opts?.timeout ? { timeout: opts.timeout } : {}),
+      // 用 !== undefined 而不是真值判断：axios 里 timeout:0 表示「不限时」，
+      // 调用方显式传 0 时不能被静默改回 15s 默认值。
+      ...(opts?.timeout !== undefined ? { timeout: opts.timeout } : {}),
     }) as Promise<T>,
     opts?.retryable === true,
   )

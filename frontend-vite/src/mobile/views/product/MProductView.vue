@@ -35,7 +35,15 @@
         </MCard>
       </div>
 
-      <MEmpty v-else-if="loadError" :title="loadError" />
+      <MEmpty v-else-if="loadError" :title="loadError">
+        <template #action>
+          <button
+            type="button"
+            style="margin-top: 12px; padding: 8px 18px; border-radius: 8px; border: 1px solid var(--m-border, #dbe3ef); background: #fff; font: inherit;"
+            @click="loadProducts()"
+          >重试</button>
+        </template>
+      </MEmpty>
       <MEmpty v-else :title="searchQuery ? '未找到匹配产品' : '暂无产品数据'" />
 
       <UiPagination
@@ -85,6 +93,8 @@ function handleSearch(val: string) {
 async function loadProducts() {
   const seq = ++loadSeq
   loading.value = true
+  // 请求开始即清错误态，避免成功后仍显示上一次的失败文案
+  loadError.value = ''
   try {
     // F-FE-MOBILE-07：服务端搜索；AUD-22：服务端分页（此前固定 page=1，
     // 第 201 条起永久不可达）

@@ -39,9 +39,12 @@ async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(
         if format_type in ['factory', 'supplier']:
             source_order_ids = list({o.source_order_id for o in orders if o.source_order_id})
             if source_order_ids:
-                # 只并**未完成**的同源采购单：已完成的是历史单，并进来会把数量/金额翻倍
+                # 只并**未完成**的同源采购单：已完成的是历史单，并进来会把数量/金额翻倍。
+                # 「未完成」= pending + confirmed（confirmed 是历史遗留但仍在用的状态，
+                # complete_purchase_order 也接受它，漏掉会让兄弟单被静默丢弃 → 少算）。
                 related = await svc.get_purchase_orders_by_source_ids(
-                    db, source_order_ids, statuses=[PurchaseOrderStatus.PENDING],
+                    db, source_order_ids,
+                    statuses=[PurchaseOrderStatus.PENDING, PurchaseOrderStatus.CONFIRMED],
                 )
                 all_order_ids = list(set(ids) | {o.id for o in related})
             else:

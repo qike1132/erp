@@ -65,6 +65,9 @@ async def _invalidate_orders_cache() -> None:
     try:
         await invalidate_cache('orders:p*')
         await invalidate_cache('orders:beile:*')
+        # 删单会重算来源客户订单状态：客户订单列表（orders:list*，TTL 60s）也要失效，
+        # 否则界面最长一分钟仍显示「已备货」，与本次修复的目标自相矛盾。
+        await invalidate_cache('orders:list*')
     except (OSError, ValueError):
         logger.warning('缓存失效失败(order_routes)', exc_info=True)
 

@@ -275,7 +275,8 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
-        where_clauses.append("p.factory = :factory")
+        # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
+        where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
@@ -404,7 +405,8 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
-        where_clauses.append("p.factory = :factory")
+        # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
+        where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
@@ -468,7 +470,8 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
-        where_clauses.append("p.factory = :factory")
+        # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
+        where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')
@@ -535,7 +538,8 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
-        where_clauses.append("p.factory = :factory")
+        # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
+        where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
     if start_date:
         params['start_date'] = parse_date_strict(start_date, '开始')

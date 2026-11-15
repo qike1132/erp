@@ -10,7 +10,7 @@
           :status-filter="statusFilter"
           :exporting="exporting"
           :unshipped-loading="unshippedLoading"
-          :can-ship="canShip"
+          :can-ship="canShip && !isBeile"
           @set-status="setStatus"
           @export="handleExport"
           @print="handlePrint"
@@ -31,7 +31,7 @@
             </div>
             <!-- 失败态必须与空态区分：否则 5xx 被显示成「暂无待收货发货单」，
                  收货人以为无货可收，单据实际积压 -->
-            <div v-else-if="loadError" class="osv-empty">
+            <div v-else-if="loadError && shipments.length === 0" class="osv-empty">
               <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
               <span>{{ loadError }}</span>
               <button type="button" class="osv-action-btn" @click="load()">重试</button>
@@ -69,7 +69,7 @@
                             <FontAwesomeIcon icon="eye" aria-hidden="true" /> 明细
                           </button>
                           <button
-                            v-if="canReceive && s.status === 'shipped'"
+                            v-if="isBeile && canReceive && s.status === 'shipped'"
                             type="button"
                             class="osv-action-btn osv-action-btn--primary"
                             :disabled="receivingId === s.id"
@@ -138,9 +138,15 @@ const PAGE_SIZE_OPTIONS = [20, 50, 100, 200]
 const authStore = useAuthStore()
 const canShip = computed(() => authStore.hasPermission('outsource_ship'))
 const canReceive = computed(() => authStore.hasPermission('outsource_receive'))
-// 说明：不再按用户名 '贝乐' 做二次门控。「贝乐只收货不发货」由权限点保证
-// （add_outsource_ship_receive_perms.py 只给它 outsource_receive）；
-// 硬编码用户名会让新增收货员看不到「确认收货」、超管小号也无法按权限操作。
+/**
+ * 贝乐账号：只收货不发货。
+ *
+ * 这条规则无法用现有权限点表达：贝乐持有 outsource_manage/outsource_view（预设页需要），
+ * 若无条件按 outsource_ship 渲染，被授予发货权的贝乐账号也能发货。预设维护有独立
+ * 权限码后再改为纯权限点门控。与 scripts/add_outsource_ship_receive_perms.py 的
+ * BEILE_USERNAME 保持一致。
+ */
+const isBeile = computed(() => authStore.user?.username === '贝乐')
 
 // ===== 列表状态 =====
 const statusFilter = ref<'shipped' | 'received'>('shipped')

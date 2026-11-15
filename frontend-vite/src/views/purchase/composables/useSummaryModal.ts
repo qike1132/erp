@@ -1,5 +1,6 @@
 import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
+import { getErrorStatus } from '@/types/errors'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, allocateOrderDisplayQuantities, parseQtyInput, computeDiffSnapshot } from './perSkuRows'
@@ -971,6 +972,14 @@ export function useSummaryModal() {
         fabricPendingRates.delete(key)
         if (lastSentEpoch !== lossRateEpoch) return
         lossRateSaveState.value = 'error'
+        if (getErrorStatus(err) === 409) {
+          // 行级率现在带 items_version：弹窗期间任一采购单的 BOM 被同步就会 409。
+          // 不刷新快照的话，之后每次改行级率都会继续 409，只能关掉重开。
+          await openSummary(orderIds.value, orderTime.value)
+          const conflictError = new Error('BOM 已更新，采购明细已刷新，请重新编辑损耗率')
+          conflictError.cause = err
+          throw conflictError
+        }
         throw err
       } finally {
         fabricDrainPromises.delete(key)

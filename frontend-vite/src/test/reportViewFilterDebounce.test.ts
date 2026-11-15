@@ -15,14 +15,19 @@
  * 注意：用真实定时器而非 fake timers——@tanstack/query-core 的调度在
  * fake timers 下会被冻结，挂载请求根本发不出，会制造「未请求」假绿。
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
 const mocks = vi.hoisted(() => ({
   orderLogs: vi.fn(),
+  download: vi.fn(),
 }))
+
+// 导出已从 window.open 改为 axios 下载（401/403 才能走统一错误通道），
+// 这里 mock 下载函数以断言「导出与查询同口径」。
+vi.mock('@/api/request', () => ({ download: mocks.download }))
 
 // ReportView 经 useReportConfig 的 ENDPOINT_MAP 以「orderLogs」等枚举名取 reportApi 方法
 // （reportApi.orderLogs → GET /reports/order-logs），mock key 必须用枚举名而非 URL 路径。
@@ -278,16 +283,11 @@ describe('ReportView — OCR-3 修复（防抖回跳 M5 / 查询空操作 M6）'
   })
 })
 describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一致性 Low:247）', () => {
-  let openSpy: ReturnType<typeof vi.spyOn>
-
   beforeEach(() => {
     mocks.orderLogs.mockReset()
     mocks.orderLogs.mockResolvedValue({ logs: [], pagination: { pages: 3, total: 40 } })
-    openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-  })
-
-  afterEach(() => {
-    openSpy.mockRestore()
+    mocks.download.mockReset()
+    mocks.download.mockResolvedValue(undefined)
   })
 
   it('M:223: 第 2 页 + 条件未变时点「查询」：必须真的再发一次请求（不许静默吃缓存）', async () => {
@@ -326,10 +326,13 @@ describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一�
     await wrapper.find('.f-product').setValue('杯')
     await wrapper.find('.f-export').trigger('click')
 
-    expect(openSpy).toHaveBeenCalledTimes(1)
-    const url = openSpy.mock.calls[0][0] as string
-    expect(url).toContain('product=%E6%9D%AF') // 「杯」——与输入框所见一致
-    expect(url).toContain('report_type=order')
+    expect(mocks.download).toHaveBeenCalledTimes(1)
+    // 「杯」——导出口径必须与输入框当前所见一致
+    expect(mocks.download).toHaveBeenCalledWith(
+      '/reports/export',
+      expect.any(String),
+      expect.objectContaining({ report_type: 'order', product: '杯' }),
+    )
 
     // 导出提交草稿触发一次查询；挂起的防抖到期发现快照已一致 → no-op，不重复请求
     await sleep(400)

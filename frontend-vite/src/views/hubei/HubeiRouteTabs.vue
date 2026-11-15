@@ -7,7 +7,7 @@
       <UiTabTrigger v-if="canOutsource" value="shipments" :active="activeTab === 'shipments'">
         <FontAwesomeIcon icon="truck-fast" aria-hidden="true" /> 发货单
       </UiTabTrigger>
-      <UiTabTrigger v-if="canOutsource" value="presets" :active="activeTab === 'presets'">
+      <UiTabTrigger v-if="canOutsource && !isBeile" value="presets" :active="activeTab === 'presets'">
         <FontAwesomeIcon icon="cogs" aria-hidden="true" /> 工序预设
       </UiTabTrigger>
     </UiTabs>
@@ -40,8 +40,15 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 const canOutsource = computed(() => authStore.hasAnyPermission(['outsource_manage', 'outsource_view']))
-// 不再按用户名隐藏 Tab：「贝乐只收货」由 outsource_receive 权限点保证，
-// 用户名硬编码会让新增收货员/超管小号按权限也进不去工序预设。
+
+/**
+ * 贝乐账号：只收货、不维护工序预设。
+ *
+ * 不能只靠权限点：贝乐本来就持有 outsource_manage（scripts/add_outsource_nav.py 按
+ * beile_order_view 授予），而预设页的读接口要 outsource_view、写接口要 outsource_manage，
+ * 放开后会真的能增删工序预设。等预设维护有独立权限码后再移除这个用户名门控。
+ */
+const isBeile = computed(() => authStore.user?.username === '贝乐')
 
 const TAB_PATHS: Record<string, string> = {
   orders: '/outsource',

@@ -1,6 +1,11 @@
 <template>
   <div>
+    <!-- 只读用户整块隐藏：只藏按钮会让拖拽区/文件选择仍可点，选了却无法导入也无法删除 -->
+    <div v-if="canManage === false" class="csd-upload-area csd-upload-readonly">
+      <span>没有导入权限（需要「管理出货计划」），请联系管理员</span>
+    </div>
     <div
+      v-else
       class="csd-upload-area"
       :class="{ 'csd-upload-hover': dragOver }"
       @click="fileInp?.click()"
@@ -13,7 +18,7 @@
         <span v-if="file" class="csd-file-selected"><FontAwesomeIcon icon="check-circle" aria-hidden="true" />{{ file.name }}</span>
         <span v-else>拖拽文件到此处或点击选择 · 仅支持 .xlsx</span>
       </div>
-      <div v-if="canManage !== false" class="csd-upload-buttons">
+      <div v-if="canManage" class="csd-upload-buttons">
         <button class="csd-inline-btn" aria-label="模板" @click.stop="dlTpl">模板</button>
         <button class="csd-inline-btn csd-inline-btn-primary" :disabled="!file || uploading" aria-label="导入" @click.stop="doUpload">
           <FontAwesomeIcon v-if="!uploading" icon="upload" aria-hidden="true" />

@@ -42,9 +42,10 @@ async def list_versions(db: AsyncSession, project_id: int) -> dict:
             CustomerSamplingFabricVersion.reason,
         )
         .where(CustomerSamplingFabricVersion.project_id == project_id)
-        .order_by(CustomerSamplingFabricVersion.version_no)
     )
-    rows = result.all()
+    # 版本号是 'T1'..'T10' 字符串：SQL 字典序会把 T10 排到 T2 前，前端取末位当
+    # 「最新版本」就会选错。统一用本模块的数值排序（与项目详情同口径）。
+    rows = sorted(result.all(), key=lambda row: _version_sort_key(row.version_no))
     return {
         'success': True,
         'items': [

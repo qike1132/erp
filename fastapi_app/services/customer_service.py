@@ -195,9 +195,13 @@ async def delete_customer(db: AsyncSession, customer_id: int) -> None:
             # 退货流水按客户名过滤（report_service / stock_inventory_service 都读这张表）；
             # 漏查会让删除成功，但退货流水仍按该客户名可查 → 「看得见、筛不了」。
             select(func.count()).where(StockReturn.customer == customer.name).scalar_subquery().label('stock_returns'),
-            # 日生产记录也带客户名，库存 CTE 会按它补 (产品,客户) 行。
+            # 日生产记录既有 customer_id 外键又有冗余客户名：按 ID 优先、名称兜底
+            # （客户改名后历史行的旧名仍会被命中，外键也不会被静默 SET NULL）。
             select(func.count()).where(
-                DailyProductionRecord.customer_name == customer.name
+                or_(
+                    DailyProductionRecord.customer_id == customer_id,
+                    DailyProductionRecord.customer_name == customer.name,
+                )
             ).scalar_subquery().label('daily_production'),
             select(func.count()).where(PackagingRecord.customer == customer.name).scalar_subquery().label('packaging_records'),
             select(func.count()).where(ProductionPlan.customer_name == customer.name).scalar_subquery().label('production_plans'),

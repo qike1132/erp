@@ -4,7 +4,7 @@ import { purchaseApi, type CompletedOrderExportRow } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { getErrorMessage } from '@/types/errors'
 import type { PurchaseOrder } from '@/types'
-import { escapeHtml, excelCell } from '@/utils/print'
+import { escapeHtml, EXCEL_TEXT_ATTR } from '@/utils/print'
 import { downloadXls } from '@/utils/xls'
 
 /** Vue Query 缓存 key */
@@ -60,12 +60,18 @@ function toCellText(value: unknown): string {
   return String(value)
 }
 
+/** 文本列：加 Excel「按文本」属性，防止 =+-@ 开头的物料名被当公式 */
+const TEXT_COLUMNS = new Set(['customer_name', 'supplier_name', 'material_name', 'material_code', 'specification', 'unit'])
+
 /** 把导出明细拼成 downloadXls 所需的 <table> HTML（单元格逐一转义） */
 function buildExportTable(rows: CompletedOrderExportRow[]): string {
   const head = EXPORT_COLUMNS.map((col) => '<th>' + escapeHtml(col.header) + '</th>').join('')
   const body = rows
     .map((row) => {
-      const cells = EXPORT_COLUMNS.map((col) => '<td>' + excelCell(toCellText(row[col.key])) + '</td>').join('')
+      const cells = EXPORT_COLUMNS.map((col) => {
+        const attr = TEXT_COLUMNS.has(String(col.key)) ? EXCEL_TEXT_ATTR : ''
+        return `<td${attr}>${escapeHtml(toCellText(row[col.key]))}</td>`
+      }).join('')
       return '<tr>' + cells + '</tr>'
     })
     .join('')

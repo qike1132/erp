@@ -116,6 +116,7 @@ import { MOBILE_LIST_PAGE_SIZE } from '@/mobile/constants'
 import type { CaseSearchItem, CaseItem, CaseMovementPayload, CaseProduct } from '@/api/case'
 import { showToast } from '@/composables/useToast'
 import { getErrorStatus } from '@/types/errors'
+import { isCanceledError } from '@/api/request'
 import { toISODate } from '@/utils/format'
 import { useCaseSettings, type PartsFilter } from '@/views/case/composables/useCaseSettings'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
@@ -157,9 +158,13 @@ async function onSearch() {
     results.value = res
   } catch (e) {
     if (seq !== searchSeq) return
+    // 换页/切 tab 会 abort 在途 GET，这不是失败，不能在新页面弹错
+    if (isCanceledError(e)) return
     results.value = []
+    // 403 已由 axios 拦截器统一提示「权限不足」，展示层不重复弹
+    if (getErrorStatus(e) === 403) return
     // 失败与「无匹配」必须区分：静默成空列表会让操作工以为皮套没建档、重复建档
-    showToast(getErrorStatus(e) === 403 ? '没有皮套查看权限' : '搜索失败，请重试', 'error')
+    showToast('搜索失败，请重试', 'error')
   }
 }
 
@@ -193,11 +198,8 @@ async function submit() {
     // 连续出库会按旧库存操作，直到刷新页面才发现超发。
     void loadInventory()
   } catch (e) {
-    // 403 时全局拦截器已提示「权限不足」，这里给可操作文案，不再泛化成「提交失败」
-    showToast(
-      getErrorStatus(e) === 403 ? '没有皮套操作权限，请联系管理员授权' : '提交失败，请重试',
-      'error',
-    )
+    // 403 已由全局拦截器提示，这里只兜住其余失败，避免同一次失败弹两条
+    if (getErrorStatus(e) !== 403) showToast('提交失败，请重试', 'error')
   } finally {
     submitting.value = false
   }

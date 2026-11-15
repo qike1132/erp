@@ -9,7 +9,7 @@
     </div>
     <button class="sp-action-btn" aria-label="导出" @click="emit('export')">导出</button>
     <button
-      v-if="canManage !== false"
+      v-if="canManage"
       class="sp-action-btn sp-action-btn-primary"
       aria-label="新建"
       @click="emit('create')"

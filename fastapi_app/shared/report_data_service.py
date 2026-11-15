@@ -111,13 +111,16 @@ def _apply_product_filter(query, product):
 
 
 def _apply_factory_filter(query, factory):
-    """工厂隔离：产品维度的 factory（与 order/unified.py 的 Product.factory 过滤同口径）。
+    """工厂隔离：产品维度的 factory。
 
-    非超管且绑定工厂的用户只看本厂产品的流水；NULL 工厂产品与 unified 的 == 语义
-    一致，不出现在任何厂绑定用户的视图里。
+    与库存/报表屏幕同口径（`stock_inventory_service._factory_match`）：本厂产品 +
+    未分配工厂（NULL/''）的历史产品。若这里仍用严格 ==，厂绑定用户在 /stock 看得到的
+    历史记录会在导出的 Excel 里整批消失，屏幕与导出对不上账。
     """
     if factory:
-        query = query.where(Product.factory == factory)
+        query = query.where(
+            or_(Product.factory == factory, Product.factory.is_(None), Product.factory == '')
+        )
     return query
 
 
@@ -152,7 +155,11 @@ def _apply_order_filters(query, customer, product, status, start_date, end_date,
             )
         )
     query = _apply_factory_filter(query, factory)
-    if status and status in VALID_ORDER_STATUSES:
+    if status:
+        # 与屏幕端（report_service.get_order_logs）同口径：非法状态必须报错，
+        # 静默忽略会让导出返回全量状态（端点已把 ValueError 映射成 400）。
+        if status not in VALID_ORDER_STATUSES:
+            raise ValueError(f'状态参数无效: {status}')
         query = query.where(Order.status == status)
     return _apply_date_filters(query, Order.order_date, start_date, end_date)
 

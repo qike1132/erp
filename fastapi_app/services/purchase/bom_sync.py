@@ -210,19 +210,10 @@ def _diff_counts(rows, target: list[dict]) -> tuple[int, int, int, list[int]]:
     added = sum((target_keys - existing_keys).values())
     removed = sum((existing_keys - target_keys).values())
     updated = sum((existing_keys & target_keys).values())
-    # 只收**真正会被删除**的行 id：原实现把全部有 id 的行都算进去（含更新行），
-    # 接这个字段做对账/清理的人会拿到一组含保留行的 id。
-    per_key_removed = {
-        key: max(0, count - target_keys.get(key, 0)) for key, count in existing_keys.items()
-    }
-    removed_rows: list[int] = []
-    for row in rows:
-        if row.id is None:
-            continue
-        key = _existing_key(row)
-        if per_key_removed.get(key, 0) > 0:
-            per_key_removed[key] -= 1
-            removed_rows.append(row.id)
+    # 只收**真正会被删除**的行 id，并复用审计快照同一份口径：原实现把全部有 id 的行
+    # 都算进去（含更新行），且与 `_removed_items` 的「保留前 N 行」顺序不一致，
+    # 导致 dry-run 预览与审计里的 removed_rows 是两个集合。
+    removed_rows = [r.id for r in _removed_items(rows, target) if r.id is not None]
     return added, updated, removed, removed_rows
 
 
@@ -408,6 +399,14 @@ async def _resolve_sku_pids(
             logger.warning(
                 'bom_sync unresolved sku po=%s name=%s barcode=%s',
                 po_id, name, line.get('product_barcode'),
+            )
+            return None
+        if name in name_to_pid and name_to_pid[name] != pid:
+            # 同名 SKU 各自解析到不同产品：产品名无法唯一映射，整单判 unresolved，
+            # 否则后面的赋值会覆盖前一个 pid，另一个产品的物料静默缺席。
+            logger.warning(
+                'bom_sync 同名 SKU 条码解析冲突 po=%s name=%s pids=%s/%s',
+                po_id, name, name_to_pid[name], pid,
             )
             return None
         name_to_pid[name] = pid

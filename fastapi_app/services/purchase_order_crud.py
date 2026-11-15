@@ -36,6 +36,7 @@ from fastapi_app.shared_models import (
     PurchaseOrderItem,
     PurchaseOrderSku,
     PurchaseOrderStatus,
+    StockIn,
 )
 
 logger = logging.getLogger(__name__)
@@ -429,12 +430,7 @@ async def _po_source_order_ids(db: AsyncSession, order: PurchaseOrder) -> set[in
     只取 ``source_record_type='order'``：``order.id`` 与 ``stock_in.id`` 会撞号，
     裸 id 匹配会把备货来源误当成客户订单。
     """
-    ids: set[int] = set()
-    # 取到局部变量再判空：getattr 不会收窄 ORM 属性类型，直接 int(None) 过不了 mypy
-    single_source = order.source_order_id
-    if single_source:
-        ids.add(int(single_source))
-    ids.update(parse_source_order_ids(order.source_order_ids))
+    snapshot_ids: set[int] = set()
     try:
         rows = await db.execute(
             select(PurchaseOrderSku.source_order_id).where(
@@ -442,11 +438,31 @@ async def _po_source_order_ids(db: AsyncSession, order: PurchaseOrder) -> set[in
                 PurchaseOrderSku.source_record_type == 'order',
             )
         )
-        ids.update(int(x) for x in rows.scalars().all() if x)
+        snapshot_ids = {int(x) for x in rows.scalars().all() if x}
     except SQLAlchemyError:
         # 快照表在旧库可能不存在（迁移 047 之前）：退回主表字段即可
         logger.warning('读取采购单 %s 的 SKU 来源失败，退回主表字段', order.id, exc_info=True)
-    return ids
+
+    # 快照带 source_record_type，优先信任；主表字段没有类型信息（order.id 与 stock_in.id 撞号）
+    if snapshot_ids:
+        return snapshot_ids
+
+    candidates: set[int] = set(parse_source_order_ids(order.source_order_ids))
+    single_source = order.source_order_id
+    if single_source:
+        candidates.add(int(single_source))
+    return await _drop_ambiguous_ids(db, candidates)
+
+
+async def _drop_ambiguous_ids(db: AsyncSession, ids: set[int]) -> set[int]:
+    """剔除「同时存在于 stock_in」的 id：该列无法区分客户订单与备货记录，撞号时不采信。"""
+    if not ids:
+        return set()
+    rows = await db.execute(select(StockIn.id).where(StockIn.id.in_(ids)))
+    ambiguous = {int(x) for x in rows.scalars().all()}
+    if ambiguous:
+        logger.warning('采购单来源 id 与备货记录撞号，按歧义丢弃: %s', sorted(ambiguous))
+    return set(ids) - ambiguous
 
 
 async def _orders_still_covered_by_po(db: AsyncSession, order_ids: set[int]) -> set[int]:
@@ -472,10 +488,13 @@ async def _orders_still_covered_by_po(db: AsyncSession, order_ids: set[int]) -> 
             )
         )
     )
+    from_main: set[int] = set()
     for single, many in rows.all():
         if single:
-            covered.add(int(single))
-        covered.update(parse_source_order_ids(many))
+            from_main.add(int(single))
+        from_main.update(parse_source_order_ids(many))
+    # 主表字段无类型信息：与 stock_in 撞号的 id 不采信，避免把无关订单当成「仍被覆盖」
+    covered |= await _drop_ambiguous_ids(db, from_main & set(order_ids))
     return covered & set(order_ids)
 
 
@@ -494,8 +513,13 @@ async def _reset_uncovered_source_orders(db: AsyncSession, order_ids: set[int]) 
         return 0
     from fastapi_app.services.order_utils import compute_order_statuses_batch
 
+    # 锁住相关订单行再判「是否仍被覆盖」→ 回退，避免两个并发删除都以为对方还覆盖着，
+    # 结果谁都不回退（订单永久卡在「已备货」且已无单可删）。
     orders = list((await db.execute(
-        select(Order).where(Order.id.in_(to_reset), Order.is_deleted.isnot(True))
+        select(Order)
+        .where(Order.id.in_(to_reset), Order.is_deleted.isnot(True))
+        .order_by(Order.id)
+        .with_for_update()
     )).scalars().all())
     if not orders:
         return 0

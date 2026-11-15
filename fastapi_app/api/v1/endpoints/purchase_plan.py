@@ -557,15 +557,20 @@ async def download_template(_user: User=Depends(require_permission('production_p
 
         from openpyxl import Workbook
 
+        from fastapi_app.services.purchase_plan_staging import PLAN_TEMPLATE_HEADERS
+
         wb = Workbook()
         ws = wb.active
         ws.title = '出货计划'
-        # 列序必须与 purchase_plan_staging._parse_excel_row 逐列对齐：
-        # row[0] 客户名称 / row[1] 产品名称 / row[2] 数量 / row[3] 计划日期 / row[4] 备注
-        ws.append(['客户名称', '产品名称', '数量', '计划日期', '备注'])
-        ws.append(['示例客户（导入前请删除本行）', '示例产品', 100, '2026-01-15', '示例备注'])
+        # 列序来自解析器同源常量，只写表头——**不能放示例数据行**：
+        # upload_excel 用首个数据行的月份锁定 detected_month，固定日期的示例行会让
+        # 用户当月的所有行被判「不允许跨月」而整批丢弃。
+        ws.append(list(PLAN_TEMPLATE_HEADERS))
         for col, width in zip('ABCDE', (28, 28, 10, 14, 24), strict=False):
             ws.column_dimensions[col].width = width
+        demo = wb.create_sheet('填写示例')
+        demo.append(list(PLAN_TEMPLATE_HEADERS))
+        demo.append(['示例客户', '示例产品', 100, '2026-01-15', '示例备注（仅示例表，不参与导入）'])
         buf = BytesIO()
         wb.save(buf)
         return buf.getvalue()

@@ -572,23 +572,18 @@ async def complete_batch(
     completed = []
     failed_orders = []
 
-    from fastapi_app.services.order_utils import compute_order_statuses_batch
-
-    # 一次聚合算完所有待完成订单状态：旧实现逐单 2 条 SQL，N 单持锁 2N 次往返（A-M13）。
-    shipped_orders = [o for o in orders if o.status == ORDER_STATUS_SHIPPED]
-    # 先写批次完成时间，再重算状态：compute_status_from_stockouts 的「批次已完成」
-    # 分支依赖 order.batch_completed_at，先算后置会让状态被写回「已出货」，
-    # 订单永远进不了历史批次（/order-batch/history 恒为空）。
-    for o in shipped_orders:
-        o.batch_completed_at = now
-        o.batch_completed_by_id = user.id
-    status_map = await compute_order_statuses_batch(db, shipped_orders)
+    # 批次完成仅适用于已出货的订单；状态直接落「批次已完成」。
+    # 旧实现「先算状态、后写 batch_completed_at」让派生函数的「批次已完成」分支永不触发，
+    # 订单被写回「已出货」，永远进不了历史批次（/order-batch/history 恒为空）。
     for o in orders:
-        # 批次完成仅适用于已出货的订单
         if o.status != ORDER_STATUS_SHIPPED:
             failed_orders.append({'id': o.id, 'order_no': o.order_no, 'status': o.status})
             continue
-        o.status = status_map.get(o.id, ORDER_STATUS_BATCH_COMPLETED)
+        # 兼容旧缺陷数据：已有完成时间的单保留首次归档时间与操作人
+        if o.batch_completed_at is None:
+            o.batch_completed_at = now
+            o.batch_completed_by_id = user.id
+        o.status = ORDER_STATUS_BATCH_COMPLETED
         completed.append(o)
 
     # 备货无出货状态：批次完成时无条件标记（查询已限定未完成）

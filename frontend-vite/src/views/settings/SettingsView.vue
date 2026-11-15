@@ -7,13 +7,14 @@
       </template>
       <UiDescriptions
         :rows="[
+          { label: '系统版本', key: 'version', value: APP_VERSION },
           { label: '前端框架', key: 'framework', value: 'Vue 3 + Vite' },
           { label: 'UI 组件库', key: 'ui', value: 'Reka UI + Tailwind CSS 4' },
           { label: '后端框架', key: 'backend', value: 'FastAPI' },
         ]"
       />
       <p class="settings-empty">
-        本页暂无可配置项。备份路径与计划在「数据备份」页维护；系统版本请以页面构建信息为准。
+        本页暂无可配置项。备份路径与计划在「数据备份」页维护。
       </p>
     </UiCard>
   </div>
@@ -22,6 +23,7 @@
 <script setup lang="ts">
 import UiCard from '@/components/ui/UiCard.vue'
 import UiDescriptions from '@/components/ui/UiDescriptions.vue'
+import { APP_VERSION } from '@/constants/brand'
 </script>
 
 <style scoped>

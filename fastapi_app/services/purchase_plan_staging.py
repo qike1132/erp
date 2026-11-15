@@ -28,6 +28,10 @@ from fastapi_app.services.purchase_plan_order_quota import (
     check_order_remaining,
     format_without_order_error,
 )
+
+# 导入模板列序的唯一真相源：模板下载端点与 _parse_excel_row 都引用这里，
+# 避免「模板改了、解析器没改」或反之导致静默解析出空数据。
+PLAN_TEMPLATE_HEADERS: tuple[str, ...] = ('客户名称', '产品名称', '数量', '计划日期', '备注')
 from fastapi_app.shared_models import (
     Product,
     PurchasePlan,
