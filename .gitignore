@@ -83,6 +83,8 @@ Thumbs.db
 
 # Windows system files
 nul
+# PowerShell 里 `$null` 若写成 `> $null` 会生成同名文件（不是丢弃输出）
+$null
 *.lnk
 
 # Database files (except if needed for version control)
