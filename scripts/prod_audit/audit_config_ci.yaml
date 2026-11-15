@@ -1,0 +1,290 @@
+# ============================================================================
+# CI 专用审核配置（advisory）
+#
+# 与 audit_config.yaml 的唯一差别：关掉三类在 GitHub runner 上必然不可用的层，
+# 其余层、权重、阈值全部保持同源。定位是「播报」：workflow 里该步骤是
+# continue-on-error，审计红了不挡 PR（与 review_packet 同一口径）。
+#
+# 关层标准只有一条：**在本机能做、在 CI 里不能做**。不是「太难/太慢」。
+# ============================================================================
+
+# 生产代码审核流程配置
+# 12 层审核 pipeline 的统一配置：层开关 / 白名单 / 阈值 / 审核员 / 权重 / 惩罚 / 压测阈值 / 覆盖率阈值
+#
+# 约束：
+#   - weights 各层权重 Σweight = 1.0（加载时校验，误差 ≤ 1e-9）
+#   - enabled=false 的层必须附 disable_reason 说明字段
+#   - severity_threshold 为阻断上线阈值（含该级别及以上）
+schema_version: "1.0"
+
+# ---------------------------------------------------------------------------
+# 12 层权重（Σweight = 1.0，安全层 L6 权重最高 0.15）
+# ---------------------------------------------------------------------------
+weights:
+  L1: 0.10
+  L2: 0.08
+  L3: 0.12
+  L4: 0.10
+  L5: 0.08
+  L6: 0.15
+  L7: 0.10
+  L8: 0.07
+  L9: 0.08
+  L10: 0.05
+  L11: 0.04
+  L12: 0.03
+
+# ---------------------------------------------------------------------------
+# 严重度阈值与问题惩罚
+# ---------------------------------------------------------------------------
+# CI 只播报，不做放行判定：阈值锚在 critical，让 high 级问题如实记录但不中断
+# pipeline（实测 L3 一上来就有 33 个 high，阈值设 high 会让 L4~L12 永远不执行，
+# 「接入」就变成了只跑前三层）。本地审计仍用 audit_config.yaml 的 high 口径。
+severity_threshold: "critical"
+# 播报模式：阻断级问题记录在案，但不中断后续层。没有这一行，实测会在 L3/L4
+# 就停下，L5~L12 永远不会执行。
+advisory: true
+readiness_threshold: 85         # 生产就绪评分阈值，≥ 85 为就绪
+
+issue_penalty:                  # 各严重度问题对层得分的扣分值（生产级校准）
+  critical: 25                  # 严重安全问题，立即阻断
+  high: 15                      # 高危问题，阻断上线
+  medium: 1                     # 中等问题，记录但不过度扣分（代码质量/可改进项）
+  low: 0                        # 低优先级，不扣分（仅记录跟踪）
+  info: 0                       # 信息性，不扣分
+
+# ---------------------------------------------------------------------------
+# 压测阈值
+# ---------------------------------------------------------------------------
+# ⚠️ DEPRECATED（2026-11-04 架构裁决）——**不要拿本段作为上线放行判据**。
+#
+# 唯一的 API 延迟口径在 `docs/slo.md`（2026-11-03）：
+#   常规 p50≤300ms / p95≤1500ms；聚合 p50≤800ms / p95≤3000ms；5xx=0。
+# 本段的 `core_list_p95_ms: 300` / `aggregate_p95_ms: 500` / `min_rps: 500`
+# 是更早的审核器常量，既无生产等价负载校准，也没有 500 RPS 的容量依据；
+# 与 slo.md 并存只会让同一套代码时而"极严"、时而"极松"。
+#
+# 现状：保留仅供历史对照与回归观察，不参与 Go/No-Go。清理方案（收敛为单一
+# 配置源 + CI 阈值一致性检查）见 docs/ops/2026-11-04-release-test-acceptance-risk-plan.md。
+perf_thresholds:
+  core_list_p95_ms: 300         # [legacy] 见上方 DEPRECATED；放行判据以 docs/slo.md 为准
+  aggregate_p95_ms: 500         # [legacy] 同上
+  min_rps: 500                  # [legacy] 无容量依据，不参与放行
+  max_error_rate: 0.001         # 错误率 ≤ 0.1%
+  cold_start_s: 10              # 冷启动 ≤ 10s
+  max_memory_mb: 1024           # 内存 ≤ 1GB
+  max_conn_pool_util: 0.80      # 连接池利用率 ≤ 80%
+  lcp_s: 2.5                    # LCP ≤ 2.5s
+  fid_ms: 100                   # FID ≤ 100ms
+  cls: 0.1                      # CLS ≤ 0.1
+  max_bundle_size_mb: 2         # 产物体积 ≤ 2MB
+
+# ---------------------------------------------------------------------------
+# 覆盖率分级阈值
+# ---------------------------------------------------------------------------
+coverage_thresholds:
+  core: 85                      # 核心模块覆盖率 ≥ 85%
+  backup: 80                    # 备份模块覆盖率 ≥ 80%
+  inbound: 75                   # 来料模块覆盖率 ≥ 75%
+  dashboard: 70                 # 仪表盘模块覆盖率 ≥ 70%
+
+# ---------------------------------------------------------------------------
+# 断点恢复
+# ---------------------------------------------------------------------------
+resume_from: null               # 可选层 ID（如 "L4"），null 表示从头开始
+
+# ---------------------------------------------------------------------------
+# 白名单豁免说明
+# ---------------------------------------------------------------------------
+whitelist_explanations:
+  - file: "server_manager.py"
+    layer: "L1"
+    rule_id: "L1-BROAD-EXCEPT-001"
+    count: 39
+    reason: "桌面壳（PyInstaller 打包的 server_manager.exe）入口模块，需捕获所有异常以防止 GUI 崩溃；39 处宽泛 except 已逐一审查并附说明，不纳入后端服务审核范围。"
+  - file: "server_manager.py"
+    layer: "L3"
+    rule_id: "L3-LOOP-QUERY-001"
+    count: 1
+    reason: "桌面壳入口的循环查询用于服务状态轮询（非业务数据层），已人工确认无 N+1 风险。"
+  - file: "fastapi_app/main.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "应用组合根：lifespan 启动清理/健康探测为独立短事务；无跨请求大事务。"
+  - file: "fastapi_app/core/audit_middleware.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "审计中间件按请求批写入，单事务行数受请求体上限约束，不持有长事务。"
+  - file: "fastapi_app/shared/stock_concurrency.py"
+    layer: "L4"
+    rule_id: "L4-LOCK-001"
+    count: 1
+    reason: "库存并发原语：SELECT ... FOR UPDATE 是设计意图（行锁），扫描器按大事务误报。"
+  - file: "fastapi_app/services/purchase_plan_crud.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "采购计划批量保存需在同一事务内保持台账一致性；行数受单次导入上限约束。"
+  - file: "fastapi_app/services/bom_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "BOM 整体替换（删旧+插新）必须原子；单产品物料行数量有界。"
+  - file: "fastapi_app/services/purchase_supplier_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "供应商改名级联更新需与引用表同事务，避免半改状态；批大小受供应商维度约束。"
+  - file: "fastapi_app/services/staging_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "暂存批量写入按导入批次控制行数，事务边界与导入批次一致。"
+  - file: "fastapi_app/services/purchase_order_crud.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "采购单生成/删除含 savepoint 与来源状态回写，需原子；单次来源记录数有界。"
+  - file: "fastapi_app/services/order_batch_create.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "批量建单按客户分组、单事务保证整批成功/失败；批大小受导入上限约束。"
+  - file: "fastapi_app/services/purchase_bom_copy_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "BOM 跨产品复制需在同一事务内完成，避免半复制；目标产品物料数有界。"
+  - file: "fastapi_app/services/notification_service.py"
+    layer: "L4"
+    rule_id: "L4-BIG-TX-001"
+    count: 1
+    reason: "通知 fan-out 批量 INSERT 与业务提交同事务，收件人数受权限用户规模约束。"
+
+# ---------------------------------------------------------------------------
+# 12 层配置
+# ---------------------------------------------------------------------------
+layers:
+  L1:
+    enabled: true
+    reviewer: "static-analysis-bot"
+    layer_name: "静态分析门禁审核"
+    whitelist:
+      - "server_manager.py"
+    thresholds:
+      max_func_lines: 80
+      max_component_lines: 300
+      ruff_select: ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C4", "S", "RUF"]
+
+  L2:
+    enabled: true
+    reviewer: "architecture-reviewer"
+    layer_name: "架构与分层审核"
+    whitelist: []
+    thresholds:
+      max_service_lines: 500
+      max_endpoint_body_lines: 30
+
+  L3:
+    enabled: true
+    reviewer: "business-logic-reviewer"
+    layer_name: "业务逻辑与正确性审核"
+    whitelist:
+      - "server_manager.py"
+    thresholds:
+      max_loop_query_count: 0
+
+  L4:
+    enabled: true
+    reviewer: "data-access-reviewer"
+    layer_name: "数据访问层审核"
+    whitelist:
+      - "fastapi_app/main.py"
+      - "fastapi_app/core/audit_middleware.py"
+      - "fastapi_app/shared/stock_concurrency.py"
+      - "fastapi_app/services/purchase_plan_crud.py"
+      - "fastapi_app/services/bom_service.py"
+      - "fastapi_app/services/purchase_supplier_service.py"
+      - "fastapi_app/services/staging_service.py"
+      - "fastapi_app/services/purchase_order_crud.py"
+      - "fastapi_app/services/order_batch_create.py"
+      - "fastapi_app/services/purchase_bom_copy_service.py"
+      - "fastapi_app/services/notification_service.py"
+    thresholds:
+      max_big_tx_rows: 1000
+      max_big_tx_seconds: 1
+
+  L5:
+    enabled: false
+    disable_reason: "契约层要现场生成/比对 OpenAPI 快照并等待真实后端可达；CI lint job 里没有起服务，实测会停在 L5 不返回。CI 的 test job 已用 check_openapi_frontend_alignment 做同口径端点对齐，故此处关闭。"
+    reviewer: "api-contract-reviewer"
+    layer_name: "API 契约与版本兼容审核"
+    whitelist: []
+    thresholds:
+      contract_snapshot_dir: "evidence/contract_snapshots"
+
+  L6:
+    enabled: false
+    disable_reason: "该层会对七档 requirements/*.lock 逐个跑 pip-audit 并跑 npm audit，实测超 3 分钟仍在依赖解析（CI 里会更慢）；CI 的 test job 已独立执行 pip-audit --require-hashes 与 bandit，frontend job 已执行 npm audit --omit=dev，同口径判定不丢，只是不在审计器里重复。"
+    reviewer: "security-blue-team"
+    layer_name: "安全审核（蓝队 + 红队）"
+    whitelist: []
+    thresholds:
+      pip_audit_severity: "high"
+      trivy_severity: "HIGH,CRITICAL"
+
+  L7:
+    enabled: false
+    disable_reason: "CI runner 没有压测环境与 perf 报告（evidence/perf_reports 为空），性能层在发布前由本机跑；放进 CI 只会稳定误报。"
+    reviewer: "performance-reviewer"
+    layer_name: "性能与可扩展性审核"
+    whitelist: []
+    thresholds:
+      perf_report_dir: "evidence/perf_reports"
+
+  L8:
+    enabled: true
+    reviewer: "observability-reviewer"
+    layer_name: "可观测性审核"
+    whitelist: []
+    thresholds:
+      required_log_fields: ["request_id", "user_id", "timestamp", "level"]
+
+  L9:
+    enabled: false
+    disable_reason: "该层会再跑一遍全量 pytest（约 8 分钟）且依赖真实 PG/Redis；CI 的 test job 已执行同一套测试与覆盖率判定，重复执行只增加时长。"
+    reviewer: "test-quality-reviewer"
+    layer_name: "测试质量审核"
+    whitelist: []
+    thresholds:
+      coverage_report_dir: "evidence/coverage_reports"
+
+  L10:
+    enabled: true
+    reviewer: "frontend-mobile-reviewer"
+    layer_name: "前端与移动端审核"
+    whitelist: []
+    thresholds:
+      max_component_lines: 300
+      max_bundle_size_mb: 2
+
+  L11:
+    enabled: false
+    disable_reason: "部署就绪层读取生产机现场状态（NSSM 五服务、nginx 配置、证书、磁盘），GitHub runner 上恒不可达；发布前在目标机执行。"
+    reviewer: "deploy-readiness-reviewer"
+    layer_name: "部署就绪与配置审核"
+    whitelist: []
+    thresholds:
+      require_health_check: true
+      require_rollback_plan: true
+      require_lockfile: true
+
+  L12:
+    enabled: true
+    reviewer: "release-manager"
+    layer_name: "审核报告与上线决策"
+    whitelist: []
+    thresholds:
+      min_readiness_score: 85

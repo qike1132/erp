@@ -121,6 +121,10 @@ class AuditConfig(BaseModel):
     perf_thresholds: PerfThresholds = Field(description="压测阈值")
     coverage_thresholds: CoverageThresholds = Field(description="覆盖率阈值")
     resume_from: str | None = Field(default=None, description="断点恢复层 ID")
+    # 播报模式：命中阻断阈值时**记录但不中断** pipeline。CI 用（continue-on-error
+    # + 只播报），否则第一个 high/critical 层之后的所有层永远不会执行，
+    # 「接入审计」会退化成只跑前两三层。放行判定仍由 quality_gate + pytest 承担。
+    advisory: bool = Field(default=False, description="命中阻断阈值时是否继续执行后续层")
     whitelist_explanations: list[WhitelistExplanation] = Field(
         default_factory=list, description="白名单豁免说明"
     )

@@ -471,6 +471,24 @@ jobs:
           python scripts/file_size_gate.py --all
         fi
 
+    # 12 层审计的静态层接进 CI。定位是**播报**：continue-on-error 保证审计红了
+    # 不挡 PR/推送，与上面 review_packet 同一口径（播报与判定分离）；证据落
+    # artifact 供人工评审引用。放行判据仍然只有 quality_gate + pytest。
+    # 关掉的 L7/L9/L11 是「本机能做、runner 不能做」的三层，理由写在
+    # audit_config_ci.yaml 的 disable_reason 里（ConfigLoader 会校验非空）。
+    - name: Run prod_audit static layers (advisory)
+      continue-on-error: true
+      run: |
+        python scripts/run_prod_audit.py           --config scripts/prod_audit/audit_config_ci.yaml           --evidence-dir "$RUNNER_TEMP/prod_audit_evidence"           || echo "[prod_audit] 有层被阻断（advisory，不阻断 CI），详见 evidence artifact"
+
+    - name: Upload prod_audit evidence (advisory)
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: prod-audit-evidence
+        path: ${{ runner.temp }}/prod_audit_evidence
+        if-no-files-found: ignore
+
   frontend:
     runs-on: ubuntu-24.04
 

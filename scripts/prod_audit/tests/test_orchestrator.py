@@ -19,6 +19,7 @@ from scripts.prod_audit.base.layer_base import (
     AuditState,
     LayerResult,
     LayerStatus,
+    ReleaseDecision,
     Severity,
 )
 from scripts.prod_audit.config_loader import AuditConfig, RulesRegistry
@@ -289,6 +290,42 @@ class TestGateBlocking:
         for layer_id in LAYER_ORDER:
             assert executors[layer_id].run_call_count == 1
         assert isinstance(result, AuditRunResult)
+
+
+# ---------------------------------------------------------------------------
+# advisory 播报模式：阻断级问题只记录、不中断
+# ---------------------------------------------------------------------------
+
+
+class TestAdvisoryMode:
+    """CI 用：跑完 12 层并留下证据，但决策仍是 REJECTED。"""
+
+    async def test_advisory_continues_after_blocking_layer(
+        self,
+        audit_config: AuditConfig,
+        rules_registry: RulesRegistry,
+        archiver: EvidenceArchiver,
+        mock_executors_factory,
+    ) -> None:
+        # 没有这个开关，L3 一有 high/critical 就抛异常，L4~L12 永远不执行，
+        # CI 里的「接入审计」实际只跑了前两三层。
+        config = audit_config.model_copy(update={"advisory": True})
+        builder = IssueBuilder()
+        critical = make_issue(
+            layer_id="L3",
+            severity=Severity.CRITICAL,
+            description="advisory 测试问题",
+            builder=builder,
+        )
+        executors = mock_executors_factory(issues_per_layer={"L3": [critical]})
+        orchestrator = AuditOrchestrator(config, rules_registry, archiver)
+        _inject_executors(orchestrator, executors)
+
+        result = await orchestrator.run()
+
+        assert [executors[lid].run_call_count for lid in LAYER_ORDER] == [1] * 12
+        # 播报 ≠ 放行：决策必须仍然是 REJECTED，否则 advisory 就成了洗绿开关。
+        assert result.signoff.release_decision is ReleaseDecision.REJECTED
 
 
 # ---------------------------------------------------------------------------

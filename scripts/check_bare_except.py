@@ -87,10 +87,15 @@ class BroadExceptVisitor(ast.NodeVisitor):
         self.file_path = file_path
         self.lines = source.splitlines()
         self.violations: list[Violation] = []
+        # 原始命中数（含已标注理由的）。必须单独累计：已文档化的 except 在
+        # violations 里根本不存在，只看它会让「全部带理由」与「没有宽泛 except」
+        # 在输出上完全一样。
+        self.raw_total = 0
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         kind = _except_kind(node)
         if kind is not None:
+            self.raw_total += 1
             line_text = self.lines[node.lineno - 1] if node.lineno - 1 < len(self.lines) else ""
             if not _is_documented(line_text):
                 self.violations.append(
@@ -103,7 +108,7 @@ class BroadExceptVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def scan_file(path: Path) -> tuple[list[Violation], str | None]:
+def scan_file(path: Path) -> tuple[list[Violation], int, str | None]:
     """返回 (违规列表, 解析错误)。
 
     解析失败必须显式上报——静默返回空会让"有语法错误的文件"被报告为
@@ -113,10 +118,10 @@ def scan_file(path: Path) -> tuple[list[Violation], str | None]:
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
     except (SyntaxError, OSError) as exc:
-        return [], str(exc)
+        return [], 0, str(exc)
     visitor = BroadExceptVisitor(path, source)
     visitor.visit(tree)
-    return visitor.violations, None
+    return visitor.violations, visitor.raw_total, None
 
 
 def load_whitelist(yaml_path: Path | None) -> set[str]:
@@ -190,12 +195,14 @@ def main() -> int:
 
     all_violations: list[Violation] = []
     parse_errors: list[tuple[str, str]] = []
+    raw_total = 0
     for f in files:
-        violations, err = scan_file(f)
+        violations, file_raw_total, err = scan_file(f)
         if err is not None:
             parse_errors.append((str(f.relative_to(PROJECT_ROOT)), err))
             continue
         all_violations.extend(violations)
+        raw_total += file_raw_total
 
     if parse_errors:
         print(
@@ -213,12 +220,23 @@ def main() -> int:
             ],
             "parse_errors": len(parse_errors),
             "total": len(real),
+            # 只报 total 时，报告里的「0 处」会被读成「本仓没有宽泛 except」；
+            # 这三个字段让「扫描了多少、原始命中多少、豁免多少」可见。
+            "scanned": len(files),
+            "raw_total": raw_total,
+            "exempted": raw_total - len(real),
         }
         print(json.dumps(payload, ensure_ascii=False))
         return 0 if not real else 1
 
     if not real:
-        print("[PASS] 未发现裸/宽泛 except（白名单与 defensive 标注已豁免）")
+        if raw_total:
+            print(
+                f"[PASS] 未发现未申报的裸/宽泛 except（扫描 {len(files)} 个文件；"
+                f"其中 {raw_total} 处已按规范标注理由或白名单豁免）"
+            )
+        else:
+            print(f"[PASS] 未发现裸/宽泛 except（扫描 {len(files)} 个文件）")
         return 0
 
     by_file: dict[str, list[Violation]] = {}

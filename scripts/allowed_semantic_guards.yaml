@@ -1,0 +1,85 @@
+# scripts/allowed_semantic_guards.yaml
+#
+# `scripts/check_semantic_guards.py` 的豁免清单。
+#
+# 规则（脚本强制，不是约定）：
+#   - 每条**必须**有 `file` + `reason`；缺 reason 的条目视为无效豁免：
+#     脚本在 stderr 告警，且**该违规照常上报**。
+#     否则「往清单里塞一行空条目」就成了关闭门禁的开关。
+#   - `function` / `rule` 可选，用来把豁免收窄到单个函数 / 单条规则。
+#     （只写 file 等于豁免整个文件，会让该文件随后新增的缺口一起被放过。）
+#   - rule 取值：authz_missing / lock_order / idempotency_missing
+#
+# 下面每一条都是**实测**（`python scripts/check_semantic_guards.py --json`）
+# 报出来、并逐一核对过调用链的，不是凭印象补的。
+schema_version: "1"
+
+exemptions:
+  # ---------------------------------------------------------------------------
+  # 认证入口：登录前不可能持有权限，router.py 里 auth 路由也不注入全局认证依赖
+  # ---------------------------------------------------------------------------
+  - file: fastapi_app/api/v1/endpoints/auth.py
+    function: api_login
+    rule: authz_missing
+    reason: >-
+      登录入口本身是权限体系的起点：调用者此刻还没有任何凭据，无法用
+      require_permission 判定。防滥用靠三层限流（突发 30/60s、持续 100/300s、
+      按用户名+IP 绑键）+ 口令校验，见模块内 LOGIN_* 常量与 limiter 声明。
+
+  - file: fastapi_app/api/v1/endpoints/auth.py
+    function: api_logout
+    rule: authz_missing
+    reason: >-
+      登出必须允许「token 已过期/已失效」的调用（否则过期会话无法清理 cookie），
+      故按设计不做 RBAC；其唯一副作用是把当前 token 的 jti 拉黑，越权者无从利用。
+
+  - file: fastapi_app/api/v1/endpoints/auth.py
+    function: api_refresh_token
+    rule: authz_missing
+    reason: >-
+      refresh 的凭据是 refresh token 本身（签名 + 有效期 + 黑名单校验），
+      等价于凭据即身份；再叠 RBAC 会在会话保活路径上引入无意义的权限抖动。
+
+  # ---------------------------------------------------------------------------
+  # 已登录用户的自助写接口：只需「是本人」，没有可授予的细粒度权限码
+  # ---------------------------------------------------------------------------
+  - file: fastapi_app/api/v1/endpoints/auth.py
+    function: upload_file
+    rule: authz_missing
+    reason: >-
+      通用图片上传（产品新增/编辑的图片入口），已由 get_current_user_id_write_strict
+      强制登录态。写权限的判定发生在业务端点（新建/编辑产品需 product_manage），
+      上传本身只是把文件落到对象存储、不产生业务数据，故不单独设权限码。
+
+  - file: fastapi_app/api/v1/endpoints/auth.py
+    function: log_frontend_error
+    rule: authz_missing
+    reason: >-
+      前端错误上报：任何登录用户（含最低权限角色）在前端崩溃时都应能写日志，
+      否则刚好在出错时丢掉证据。防护是限流 + 字段长度上界 + 仅写日志表。
+
+  - file: fastapi_app/api/v1/endpoints/notification.py
+    function: mark_as_read
+    rule: authz_missing
+    reason: >-
+      按 user_id 自限：读取后立即校验 notification.user_id == 当前用户，
+      不匹配返回 404（连存在性都不泄露）。只能改自己的通知，无越权面。
+
+  - file: fastapi_app/api/v1/endpoints/notification.py
+    function: mark_all_as_read
+    rule: authz_missing
+    reason: >-
+      同 mark_as_read：UPDATE 语句的 where 条件固定带 user_id = 当前用户
+      （mark_all_notifications_read 内部实现），作用域天然自限。
+
+  # ---------------------------------------------------------------------------
+  # 设计上必须匿名的上报入口
+  # ---------------------------------------------------------------------------
+  - file: fastapi_app/api/v1/endpoints/monitoring.py
+    function: receive_vitals
+    rule: authz_missing
+    reason: >-
+      Web Vitals 由 navigator.sendBeacon 上报，浏览器 API 无法携带 Authorization
+      header，故按设计匿名（router.py 也未给 monitoring 注入全局认证）。
+      写入侧自带三层防护：单请求批次上限、保留期清理、落库失败熔断，
+      且只写 web_vital 指标表，不触及业务数据。

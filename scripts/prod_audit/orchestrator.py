@@ -446,7 +446,23 @@ class AuditOrchestrator:
         result: LayerResult,
         blocking_threshold: Severity,
     ) -> None:
-        """层门禁检查：存在阻断问题时抛出 AuditLayerBlockedError。"""
+        """层门禁检查：存在阻断问题时抛出 AuditLayerBlockedError。
+
+        ``config.advisory=True`` 时只记录、不抛出：CI 里要的是「跑完 12 层并
+        留下完整证据」，不是「在第一个 high 层停下」。评分与上线决策仍会把
+        blocking 计算进去，所以播报模式不会把 No-Go 洗成 Go。
+        """
+        if self.config.advisory and not executor.check_gate(result.issues, blocking_threshold):
+            blocking = sum(
+                1 for i in result.issues
+                if i.severity in (Severity.CRITICAL, Severity.HIGH)
+            )
+            print(
+                f"[advisory] {layer_id} 有 {blocking} 个阻断级问题，"
+                "按配置继续执行后续层（不中断 pipeline）",
+                file=sys.stderr,
+            )
+            return
         if executor.check_gate(result.issues, blocking_threshold):
             return
         blocking_issues = [

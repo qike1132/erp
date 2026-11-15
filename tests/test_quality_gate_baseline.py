@@ -287,3 +287,19 @@ def test_hook_triggers_on_baseline_file():
     assert 'GATE_BASELINE_REF=HEAD' in text, 'hook 未以 HEAD 为参考基线'
     assert '--baseline-check' in text, 'hook 未调用基线检查'
 
+
+
+# ---------------------------------------------------------------------------
+# pip-audit：没有漏洞库数据时必须写 SKIPPED，不能让人把「0 条」读成「0 漏洞」
+# ---------------------------------------------------------------------------
+
+def test_pip_audit_gate_marks_skipped_when_no_vuln_data(monkeypatch):
+    # load_vuln_ids 返回 (vuln_ids, source, hard_error)；vuln_ids=None 表示没跑扫描。
+    # 旧行为只写一条 [WARN]，报告主行的「0 条」仍会被读成「零漏洞」——
+    # 2026-10-10 上线前评审就把它当成真实结果引用过一次。
+    monkeypatch.setattr(q, "load_vuln_ids", lambda _path: (None, "未执行（测试）", None))
+
+    outcome = q.run_pip_audit_gate({"pip_audit_max_days": 180}, None)
+
+    assert outcome.count == 0, "豁免策略本身合规，计数仍为 0"
+    assert any("SKIPPED" in note for note in outcome.notes),         f"未标注 SKIPPED，notes={outcome.notes!r}"

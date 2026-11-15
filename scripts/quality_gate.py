@@ -263,6 +263,20 @@ GATES: tuple[Gate, ...] = (
         fix_hint="修掉新增的安全发现（SQL 拼接 / 子进程 / 弱哈希 / 随机数等）；"
         "确属误报请在该行加 nosec 抑制注解（规则号 + 理由），受 nosec 预算门禁约束",
     ),
+    # 语义门禁：形态门禁查不出「接口漏授权」「加锁顺序反了」「建单不幂等」这三类
+    # 必须读懂代码意图才能发现的问题（2026-11-15 专项评审实测：下单零幂等、
+    # stock_in_service 先锁 StockIn 后锁 Product）。存量按基线棘轮记账，新增即红。
+    Gate(
+        key="semantic_guards",
+        title="语义门禁（写接口授权 / 加锁顺序 / 建单幂等）",
+        mode=MODE_JSON,
+        script="scripts/check_semantic_guards.py",
+        extra_args=("--json",),
+        fix_hint="写接口补 require_* 依赖；加锁统一 Product→StockIn；"
+        "建单/导入接口接收 Idempotency-Key。确属设计如此请在 "
+        "scripts/allowed_semantic_guards.yaml 登记 file + reason",
+        accepts_paths=True,
+    ),
 )
 
 
@@ -334,6 +348,53 @@ def _json_count(gate: Gate, text: str) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
     return value
+
+
+def _json_notes(gate: Gate, text: str) -> tuple[str, ...]:
+    """从子脚本的 --json 载荷里提取「计数之外」的明细。
+
+    为什么需要：部分门禁的 count 是**扣除豁免后**的口径，单独看会误导。
+    典型：bare_except 的 0 处表示「没有未申报的宽泛 except」，而仓库里实测
+    295 处宽泛 except 全都带了理由；只报 0 会让读者以为本仓没有宽泛异常。
+    这里把扫描面、原始命中、豁免量一并带进 notes。
+    """
+    payload = _first_json_object(text)
+    if payload is None:
+        return ()
+
+    def as_int(name: str) -> int | None:
+        """计数既可能是 int，也可能是明细数组（分桶式输出取长度）。"""
+        value = payload.get(name)
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, list):
+            return len(value)
+        return None
+
+    if gate.key == "bare_except":
+        scanned, raw, exempted = as_int("scanned"), as_int("raw_total"), as_int("exempted")
+        if scanned is None or raw is None or exempted is None:
+            return ()
+        return (
+            f"扫描 {scanned} 个文件：裸/宽泛 except 共 {raw} 处，"
+            f"{exempted} 处已按规范标注理由，{raw - exempted} 处未申报",
+        )
+
+    if gate.key == "semantic_guards":
+        labels = (
+            ("authz_missing", "写接口缺少授权"),
+            ("lock_order", "加锁顺序违反 Product→StockIn"),
+            ("idempotency_missing", "建单/导入缺少幂等键"),
+        )
+        parts = [f"{label} {as_int(key)} 处" for key, label in labels if as_int(key) is not None]
+        scanned = as_int("scanned")
+        if scanned is not None:
+            parts.append(f"扫描 {scanned} 个文件")
+        return ("；".join(parts),) if parts else ()
+
+    return ()
 
 
 def _ruff_count(text: str) -> int | None:
@@ -530,7 +591,8 @@ def run_pip_audit_gate(thresholds: dict[str, int], audit_report: str | None) -> 
         notes.append("≤30 天内到期：" + "、".join(expiring))
     if vuln_ids is None:
         notes.append(
-            "[WARN] 无漏洞库数据，僵尸条目检测已跳过"
+            "[SKIPPED] 漏洞扫描未执行（未提供 --audit-report 且现场 pip-audit 不可用）："
+            "本次仅校验豁免策略，不能据「0 条」推断「0 漏洞」"
             "（CI 请传 --audit-report 或在 lint job 安装 pip-audit）"
         )
     output = "\n".join(problems) if problems else "[PASS] pip-audit 豁免策略合规"
@@ -702,7 +764,7 @@ def run_gate(
     if proc.returncode not in (0, 1):
         return GateOutcome(proc.returncode, count, output,
                            f"子脚本以退出码 {proc.returncode} 结束（环境/解析异常）")
-    return GateOutcome(proc.returncode, count, output)
+    return GateOutcome(proc.returncode, count, output, notes=_json_notes(gate, proc.stdout or ""))
 
 
 def evaluate(gate: Gate, outcome: GateOutcome, base: int | None) -> Judgement:
@@ -1027,6 +1089,30 @@ SELFTEST_FIXTURES: dict[str, tuple[tuple[str, bytes], tuple[str, bytes]]] = {
     "loop_shadow": (
         ("probe.py", b"for x in []:\n    for x in []:\n        pass\n"),
         ("probe.py", b"for x in []:\n    for y in []:\n        pass\n"),
+    ),
+    # 探针必须**同时**缺授权与缺幂等：只缺一项时若检查器退化成只看另一项，
+    # 自检仍然会绿，等于没验证到。
+    "semantic_guards": (
+        (
+            "probe_endpoints.py",
+            b"from fastapi import APIRouter\n\n"
+            b"router = APIRouter(prefix=\'/orders\')\n\n\n"
+            b"@router.post(\'/create\')\n"
+            b"async def create_order(payload: dict):\n"
+            b"    return payload\n",
+        ),
+        (
+            "probe_endpoints.py",
+            b"from fastapi import APIRouter, Depends, Header\n\n"
+            b"router = APIRouter(prefix=\'/orders\')\n\n\n"
+            b"@router.post(\'/create\')\n"
+            b"async def create_order(\n"
+            b"    payload: dict,\n"
+            b"    idempotency_key: str = Header(alias=\'Idempotency-Key\'),\n"
+            b"    _user=Depends(require_permission(\'order_create\')),\n"
+            b"):\n"
+            b"    return payload\n",
+        ),
     ),
 }
 SELFTEST_RUFF_PROBE = (("probe.py", b"import os\n"), ("probe.py", b"import sys\n\nprint(sys.path)\n"))
