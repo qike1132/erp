@@ -22,6 +22,7 @@ from fastapi_app.core.deps import (
     get_current_user_id,
     get_current_user_id_write_strict,
 )
+from fastapi_app.core.exceptions import AppError
 from fastapi_app.core.limiter import limiter, memory_limiter, rate_limit_key
 from fastapi_app.core.response import success_response
 from fastapi_app.core.validators import require_upload_magic
@@ -35,6 +36,8 @@ LOGIN_BURST_LIMIT = 30         # 1 分钟内最大尝试次数
 LOGIN_BURST_WINDOW = 60        # 突发窗口（秒）
 LOGIN_ATTEMPT_LIMIT = 100      # 5 分钟内最大尝试次数
 LOGIN_ATTEMPT_WINDOW = 300     # 持续窗口（秒）
+LOGIN_USER_FAIL_LIMIT = 10     # 账户级连续失败上限（换 IP 也拦得住）
+LOGIN_USER_FAIL_WINDOW = 900   # 账户级失败计数窗口（秒，15 分钟）
 
 
 # ==================== Schemas ====================
@@ -217,6 +220,79 @@ async def _check_login_rate_limit(key: str) -> None:
         logger.warning("[Login] Redis 限流不可用，已降级为进程内存限流: IP=%s", key)
 
 
+# ==================== 账户级失败锁定 ====================
+# IP 维度限流（_check_login_rate_limit）挡不住「换 IP 喷洒同一账号」，这里补 username 维度。
+
+def _user_fail_key(username: str) -> str:
+    """账户级失败计数的 Redis 键（大小写/首尾空格归一，避免同一账号散成多份计数）。"""
+    return f"login_user_fail:{username.strip().lower()}"
+
+
+async def _check_user_lock(username: str) -> None:
+    """账户级失败锁定：连续失败达上限后抛 429。
+
+    与 IP 维度限流**互补**：IP 限流挡不住「换 IP 对同一账号无限喷洒」。Redis 不可用时
+    **fail-open**（记 warning 后放行）——缓存故障不能把全站登录锁死，此时仍由
+    `_check_login_rate_limit` 的 IP 维度（含进程内存兜底）把关。日志只记计数，
+    **不打印用户名**。
+    """
+    try:
+        from fastapi_app.core.redis_wrapper import get_client
+
+        _redis = get_client()
+        if not _redis:
+            logger.warning("[Login] Redis 不可用，账户级失败锁已跳过（fail-open），仅剩 IP 限流")
+            return
+        _fails = int(await _redis.get(_user_fail_key(username)) or 0)
+    except Exception as e:  # defensive: 缓存故障不得锁死登录入口（fail-open）
+        logger.warning("[Login] 账户级失败锁检查失败，已放行（fail-open）: %s", e)
+        return
+
+    if _fails >= LOGIN_USER_FAIL_LIMIT:
+        logger.warning("[Login] 账号已临时锁定: 窗口内连续失败%d次", _fails)
+        raise HTTPException(
+            status_code=429,
+            detail="账号已临时锁定，请15分钟后重试",
+            headers={"Retry-After": str(LOGIN_USER_FAIL_WINDOW)},
+        )
+
+
+async def _record_login_failure(username: str) -> int | None:
+    """记一次账户级登录失败，返回窗口内累计失败次数（Redis 不可用返回 None）。
+
+    incr 与 expire 必须同一 pipeline：照 `_check_login_rate_limit` 的既有写法，
+    避免「incr 成功、expire 失败」留下**永不过期**的计数键（该账号会被永久 429）。
+    """
+    try:
+        from fastapi_app.core.redis_wrapper import get_client
+
+        _redis = get_client()
+        if not _redis:
+            return None
+        _key = _user_fail_key(username)
+        _pipe = _redis.pipeline()
+        _pipe.incr(_key)
+        _pipe.expire(_key, LOGIN_USER_FAIL_WINDOW)
+        _fails, _ = await _pipe.execute()
+        return int(_fails)
+    except Exception as e:  # defensive: 计数失败不得改变登录响应（本次失败照样 401）
+        logger.warning("[Login] 账户级失败计数写入失败（不影响本次响应）: %s", e)
+        return None
+
+
+async def _reset_login_failures(username: str) -> None:
+    """登录成功后清零账户级失败计数（Redis 不可用时静默返回）。"""
+    try:
+        from fastapi_app.core.redis_wrapper import get_client
+
+        _redis = get_client()
+        if not _redis:
+            return
+        await _redis.delete(_user_fail_key(username))
+    except Exception as e:  # defensive: 清零失败只影响下次登录的宽容度，不得阻断成功登录
+        logger.warning("[Login] 账户级失败计数清零失败（不影响本次登录）: %s", e)
+
+
 def _set_login_cookies(  # log-context: internal helper 无请求上下文
     response: Response, request: Request,
     access_token: str, refresh_token: str,
@@ -267,7 +343,25 @@ async def api_login(
         logger.info(f"[Login] 登录失败: 密码过长, IP={key}")
         raise HTTPException(status_code=400, detail="密码长度不能超过128位")
 
-    result = await authenticate_login(db, username, password, data.remember, key)
+    # 账户级失败锁：必须在校验凭据**之前**（否则喷洒方每个请求仍会走到哈希校验）。
+    await _check_user_lock(username)
+
+    try:
+        result = await authenticate_login(db, username, password, data.remember, key)
+    except (HTTPException, AppError) as exc:
+        # 只对 401（凭据错误）计数：400 之类的参数错误不计数，免得被刷爆正常账号的额度。
+        # 注意本仓 `authenticate_login` 抛的是 `UnauthorizedError`（AppError 子类，由
+        # main.py 的 AppError 处理器转 401），**不是** HTTPException，只捕 HTTPException
+        # 会让这条计数永远不生效。
+        if getattr(exc, 'status_code', None) == 401:
+            _fails = await _record_login_failure(username)
+            # 只记 IP 与计数：不打印用户名/口令。
+            logger.warning(
+                "[Login] 登录失败: IP=%s, 账号失败计数=%s/%d",
+                key, _fails, LOGIN_USER_FAIL_LIMIT,
+            )
+        raise
+
     user = result['user']
 
     _set_login_cookies(
@@ -277,6 +371,8 @@ async def api_login(
     )
 
     logger.info("[Login] 登录成功: IP=%s, user_id=%s", key, user.id)
+    # 成功即清零账户级失败计数：否则「偶发打错几次」会累积到把号锁住。
+    await _reset_login_failures(username)
 
     return LoginResponse(
         success=True,

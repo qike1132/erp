@@ -32,6 +32,20 @@ _INVALIDATE_TARGET = 'fastapi_app.core.cache.invalidate_cache'
 _PUBLISH_TARGET = 'fastapi_app.services.notification_service.publish_event'
 
 
+@pytest.fixture(autouse=True)
+def _no_source_advisory_lock():
+    """把 `PURCHASE_GENERATE_SOURCE` advisory 锁打桩掉。
+
+    撤销路径现在会先取来源锁（与自动生成侧互斥），而本文件用 `AsyncMock` 会话 +
+    **按调用顺序编排**的 `db.execute` 序列：多一次 `pg_advisory_xact_lock` 查询会把整段
+    编排错位（SQLite/PG 都还没轮到就已消费掉一条假结果）。这些用例的主题是撤销/生成的
+    **编排顺序**，与锁本身无关，故在测试侧打桩（同 tests/test_order_create_idempotency.py）。
+    """
+    with patch('fastapi_app.services.purchase_order_idempotency.acquire_source_locks',
+               new=AsyncMock()):
+        yield
+
+
 def _patch_session():
     """让 _run_auto_generate 拿到一个**独立**的假会话工厂。
 

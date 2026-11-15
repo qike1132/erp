@@ -46,6 +46,21 @@ STOCKIN_ID = 87300
 _REVOKE_MOD = 'fastapi_app.services.purchase_order_revoke'
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _no_source_advisory_lock():
+    """把 `PURCHASE_GENERATE_SOURCE` advisory 锁打桩掉。
+
+    撤销路径现在会取来源锁（与自动生成侧互斥），但 SQLite 没有
+    `pg_advisory_xact_lock`，报的是 `OperationalError`（`acquire_advisory_lock_async`
+    只吞 `ProgrammingError`，这是刻意的：真实 PG 错误不得被降级成「无锁」）。
+    本文件的主题是「快照反查产品归属」，与锁无关，故在测试侧打桩——
+    与 tests/test_order_create_idempotency.py 处理同一问题的口径一致。
+    """
+    with patch('fastapi_app.services.purchase_order_idempotency.acquire_source_locks',
+               new=AsyncMock()):
+        yield
+
+
 @pytest_asyncio.fixture
 async def db():
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')

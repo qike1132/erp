@@ -163,11 +163,24 @@ async def revoke_pending_purchase_orders_for_product(db: AsyncSession, product_i
     if await _fetch_bom_product_ids(db, [product_id]):
         return {'revoked': 0, 'orders_reset': 0}
 
+    # 与自动生成侧互斥：撤销删的是「按旧 BOM 生成的 pending 单」，若此刻并发的保存
+    # BOM 触发自动生成、且生成侧已越过来源锁，就会出现「删空 BOM 已确认 → 生成侧仍
+    # 按旧 BOM 落单」的交错，留下引用空 BOM 的孤儿 pending 单。锁必须在任何查询/行锁
+    # /删除之前取（与生成侧同为「先锁后读」，两侧锁序一致才无 AB-BA）。
+    source_ids = await _product_source_ids(db, product_id)
+    if source_ids:
+        # **两种来源类型都锁**：`_product_source_ids` 返回的是**裸 id**，而本仓
+        # `order.id` 与 `stockin.id` 会撞号（见 shared_models/purchase_order.py），
+        # 无法在此判别类型。多锁一类只会降低一点并发度、不会误伤；漏锁才会留孤儿单。
+        from fastapi_app.services.purchase_order_idempotency import acquire_source_locks
+
+        await acquire_source_locks(
+            db, [f'{t}:{i}' for i in source_ids for t in ('order', 'stockin')],
+        )
+
     # 先在 SQL 侧把范围缩到「可能含该产品」的候选单：旧实现把**全部** pending 单
     # 当实体载入内存再逐单反推产品归属，pending 越多越慢（审计 Z02-R4）。
-    candidate_ids = await _candidate_pending_po_ids(
-        db, await _product_source_ids(db, product_id),
-    )
+    candidate_ids = await _candidate_pending_po_ids(db, source_ids)
     if not candidate_ids:
         return {'revoked': 0, 'orders_reset': 0}
 
@@ -208,8 +221,22 @@ async def _revoke_by_source(db: AsyncSession, record_type: str, source_id: int) 
 
     用 ``source_record_type`` 判别而非裸 id：本仓 ``order.id`` 与 ``stockin.id`` 会撞号
     （见 shared_models/purchase_order.py），裸 id 匹配会误删他类来源的单。
+
+    **必须在调用方事务内执行**：这里取的 ``PURCHASE_GENERATE_SOURCE`` advisory lock 是
+    事务级锁，**锁随调用方事务提交/回滚释放**（``acquire_advisory_lock_async`` 走
+    ``pg_advisory_xact_lock``）。若调用方没有包在事务里，语句自动提交后锁立刻释放，
+    等于没取；需要短事务的调用方请自己 ``db_transaction(db)`` 包住（见
+    ``_run_stockin_deleted``）。锁必须在任何行锁/删除**之前**取，否则「查完 po_ids
+    → 生成侧插单」的窗口仍然存在。
     """
+    from fastapi_app.services.purchase_order_idempotency import acquire_source_locks
     from fastapi_app.shared_models.purchase_order import PurchaseOrder, PurchaseOrderSku, PurchaseOrderStatus
+
+    # 顺序：先取来源 advisory 锁，再查询 / 行锁 / 删除。生成侧
+    # （purchase_order_generate → acquire_source_locks）同为「先锁后读」，
+    # 两侧锁序一致才不会 AB-BA；锁晚了则「删空 BOM 撤销」与「并发保存 BOM 触发
+    # 自动生成」可能交错，留下引用空 BOM 的孤儿 pending 单。
+    await acquire_source_locks(db, [f'{record_type}:{source_id}'])
 
     po_ids = {
         po_id for (po_id,) in (await db.execute(
