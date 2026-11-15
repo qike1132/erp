@@ -65,14 +65,10 @@ def _make_db(events: list, product_id: int, stockin_row):
         sql = _sql(stmt)
         events.append(('execute', sql))
         result = MagicMock()
-        if 'stock_in.product_id' in sql and 'FOR UPDATE' not in sql.upper():
-            # 第 1 步：无锁读 product_id
-            result.scalar_one_or_none = MagicMock(return_value=product_id)
-        else:
-            # 第 3 步：锁 StockIn 并读整行
-            result.scalar_one_or_none = MagicMock(return_value=stockin_row)
+        # 快照读与加锁读都返回同一行：本测试只关心「谁先谁后」，
+        # 行内容由 stockin_row 决定（None 表示记录不存在）。
+        result.scalar_one_or_none = MagicMock(return_value=stockin_row)
         return result
-
     db.execute = AsyncMock(side_effect=_execute)
     db.flush = AsyncMock()
     return db
@@ -127,20 +123,26 @@ async def test_product_locked_before_stockin_row_lock():
 
 
 @pytest.mark.asyncio
-async def test_no_extra_unlocked_read_before_row_lock():
-    """不额外打「无锁读 product_id」的查询：product_id 直接取传入实体。
+async def test_unlocked_snapshot_read_happens_before_any_lock():
+    """第 1 步必须是无锁快照读（不带 FOR UPDATE）：用来判存在、并决定要不要锁 Product。
 
-    多打一条 SELECT 既多一次往返，也会打乱按调用顺序编排返回值的既有测试；
-    product_id 是 NOT NULL 且不可变的列，用调用方已加载的实体属性即可。
+    这条也顺带保证「数量没变时不必锁 Product」——锁了反而与既有语义不一致。
     """
     events: list = []
     await _run_core(events, quantity=9)
 
-    execute_events = [e for e in events if e[0] == 'execute']
-    assert execute_events, '没有任何 SQL'
-    assert 'FOR UPDATE' in execute_events[0][1].upper(), (
-        f'第一条 SQL 应当是锁 StockIn 行，实际={execute_events[0][1]}'
-    )
+    assert events[0][0] == 'execute'
+    first_sql = events[0][1]
+    assert 'FOR UPDATE' not in first_sql.upper(), f'第一条 SQL 不应加锁，实际={first_sql}'
+
+
+@pytest.mark.asyncio
+async def test_same_quantity_does_not_lock_product():
+    """只改文本（数量不变）时不应锁 Product：省一次行锁，且不改变既有语义。"""
+    events: list = []
+    _, _, _product, apply_delta = await _run_core(events, quantity=5)
+    assert not _index_of('product_lock', events), '数量未变却锁了 Product'
+    apply_delta.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -627,20 +627,19 @@ async def api_refresh_token(
     _set_auth_cookies(request, response, access_token, new_refresh_token)
 
     logger.info("[Refresh] 令牌刷新成功（refresh 已轮换）: user_id=%s", user_id)
-    # 与登录同口径：浏览器只要 cookie（新 token 已写进 httpOnly cookie），body 里回传
-    # access_token 会让 httpOnly 设计失效；只有 Capacitor 需要 Bearer。
-    body_access_token = access_token if _is_capacitor_request(request) else None
     if data and data.refresh_token:
         # 请求体传 refresh token 的客户端（移动端/API）读不到 httpOnly cookie，
-        # 必须把轮换后的**新 refresh token** 回传 —— 否则它仍持旧 token，grace 窗口过后
-        # 必然 401。access_token 仍按客户端类型决定是否回传。
+        # 必须把轮换后的**新 refresh token** 与 access_token 一并回传 —— 否则它仍持
+        # 旧 token，grace 窗口过后必然 401。浏览器走 cookie 流（不传 body），
+        # 下面那条分支不回传 access_token，避免 httpOnly 设计被 body 泄露绕过。
         return success_response(
-            access_token=body_access_token, refresh_token=new_refresh_token,
+            access_token=access_token, refresh_token=new_refresh_token,
             # token_type 是 OAuth2 令牌类型标识（RFC 6749），非口令 —— S106 误报
             token_type="bearer",  # noqa: S106
         )
+    # 浏览器 cookie 流：新 token 已在 httpOnly cookie 里，body 不再重复回传。
     # token_type 是 OAuth2 令牌类型标识（RFC 6749），非口令 —— S106 误报
-    return success_response(access_token=body_access_token, token_type="bearer")  # noqa: S106
+    return success_response(access_token=None, token_type="bearer")  # noqa: S106
 
 
 # ==================== 文件上传 ====================

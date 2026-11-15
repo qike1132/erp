@@ -59,15 +59,26 @@ async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int,
     「该锁谁」），锁完 Product 再锁 StockIn 并重新读取行；old_quantity 必须取自
     **加锁后**的行（传入实体的 quantity 可能已被并发改过）。
     """
-    # 直接从传入的实体取 product_id：该列 NOT NULL 且不可变，调用方（update_stockin）
-    # 已从库里加载过它。刻意不再多打一条 SELECT —— 既省一次往返，也避免把
-    # 「按顺序编排 execute 返回值」的既有测试打乱。
-    product_id = stockin.product_id
-    if product_id is None:
+    # 第 1 步：无锁读当前行（判存在 + 决定要不要锁 Product）。
+    # 数量没变时不必碰 Product —— 既省一次行锁，也不改变既有「只改文本」的语义。
+    snapshot = (await db.execute(
+        select(StockIn).where(StockIn.id == stockin.id)
+    )).scalar_one_or_none()
+    if snapshot is None:
         raise ValueError('入库记录不存在')
-    product = await stock_service.get_product_for_update(db, product_id)
+    product_id = snapshot.product_id
+    product = None
+    if quantity != snapshot.quantity:
+        # 第 2 步：先锁 Product（锁序 Product → StockIn）
+        product = await stock_service.get_product_for_update(db, product_id)
 
-    result = await db.execute(select(StockIn).where(StockIn.id == stockin.id).with_for_update())
+    # 第 3 步：再锁 StockIn 行。populate_existing=True 强制用**加锁后的行**覆盖
+    # 身份映射里的旧对象，否则 old_quantity 会读到第 1 步的快照（并发下已过期）。
+    result = await db.execute(
+        select(StockIn).where(StockIn.id == stockin.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     stockin_row = result.scalar_one_or_none()
     if not stockin_row:
         raise ValueError('入库记录不存在')
@@ -78,6 +89,11 @@ async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int,
     stockin.stockin_date = stockin_date
     stockin.note = note
     if quantity != old_quantity:
+        if product is None:
+            # 并发把数量改成了别的值：此时再锁 Product 会构成 StockIn→Product 反序，
+            # 直接让调用方重试（重试会走「数量已变」分支、按正确顺序加锁）。
+            from fastapi_app.core.exceptions import ConflictError
+            raise ConflictError('该入库单数量刚被并发修改，请刷新后重试')
         updated = await apply_stock_delta_locked(db, product, quantity - old_quantity)
         before, after = inventory_balance_bounds(updated.current_stock, quantity - old_quantity)
         stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库修改', change_quantity=quantity - old_quantity, related_id=str(stockin.id), note=f'入库修改ID：{stockin.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)

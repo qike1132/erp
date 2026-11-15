@@ -320,7 +320,11 @@ async def get_async_db(request: Request = None):  # type: ignore[assignment]
         # 会话不应再有待落库变更。仍有 new/dirty/deleted = 有端点漏了改造，它的提交
         # 就发生在本依赖收尾阶段（响应已发出之后），失败客户端不会知道。
         # **不回滚**：回滚等于把漏网端点的数据静默丢弃，比晚提交更糟；记 ERROR 照常提交。
-        pending_new, pending_dirty, pending_deleted = len(session.new), len(session.dirty), len(session.deleted)
+        # getattr 兜底：测试里的假会话（_Session stub）没有 new/dirty/deleted，
+        # 真会话一定有三个集合；这里只做「有没有残留变更」的判断。
+        pending_new = len(getattr(session, "new", ()) or ())
+        pending_dirty = len(getattr(session, "dirty", ()) or ())
+        pending_deleted = len(getattr(session, "deleted", ()) or ())
         if pending_new or pending_dirty or pending_deleted:
             logger.error(
                 "端点未在请求内提交：依赖收尾阶段仍检测到待落库变更 "
