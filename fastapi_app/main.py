@@ -36,6 +36,7 @@ from fastapi_app.core.health import register_health_routes
 from fastapi_app.core.limiter import default_limits, limiter
 from fastapi_app.core.logger import logger, setup_logging
 from fastapi_app.core.middleware import setup_middleware
+from fastapi_app.core.signed_static_files import SignedUploadsStaticFiles
 
 
 class MsgspecResponse(JSONResponse):
@@ -515,7 +516,10 @@ if not _static_dir.is_dir():
 
 _uploads_dir = _static_dir / "uploads"
 _uploads_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/static/uploads", StaticFiles(directory=str(_uploads_dir)), name="static-uploads")
+# uploads 是用户上传件，nginx 侧已有 secure_link 校验；应用层同样校验签名
+# （纵深防御，绕过 nginx 直连本端口时不再裸奔）。files/releases 是非敏感静态产物，
+# 保持无签名。见 fastapi_app/core/signed_static_files.py。
+app.mount("/static/uploads", SignedUploadsStaticFiles(directory=str(_uploads_dir)), name="static-uploads")
 
 _files_dir = _static_dir / "files"
 _files_dir.mkdir(parents=True, exist_ok=True)

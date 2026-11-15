@@ -299,7 +299,10 @@ async def staging_validate(
         StagingValidateResponse: 包含验证结果的响应。
     """
     session_id, _ = get_user_identity(_user)
-    result = await production_plan_service.validate_staging(db, session_id)
+    # validate_staging 会回写 StagingPurchasePlan 的 is_validated/validation_error/product_name，
+    # 是真写库操作：必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）。
+    async with db_transaction(db):
+        result = await production_plan_service.validate_staging(db, session_id)
     return StagingValidateResponse(**success_response(**{**result}))
 
 

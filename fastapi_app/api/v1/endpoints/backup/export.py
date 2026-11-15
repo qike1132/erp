@@ -31,6 +31,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
 from fastapi_app.core.audit_middleware import _buffer_audit_entry
 from fastapi_app.core.backup_progress import _sanitize_error
 from fastapi_app.core.database import get_async_db
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.backup import (
     BackupChunkInfo,
@@ -313,16 +314,18 @@ async def save_backup_to_server(
     # 写入 BackupRecord
     # S4：状态由产物自述推导（缺表/覆盖度不足 → partial），不再默认成功
     export_status, export_detail = backup_service.evaluate_backup_completeness(manifest)
-    await backup_service.write_backup_record(
-        db, record_type='full', trigger_type='manual',
-        filename=filename, size=len(file_bytes),
-        table_count=manifest.get('table_count', 0),
-        total_rows=manifest.get('total_rows', 0),
-        operator=user.username if hasattr(user, 'username') else str(user.id),
-        remark=backup_service.compose_remark(remark, export_detail),
-        status=export_status,
-        encrypted=manifest.get('encrypted', False),
-    )
+    # 写库必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）
+    async with db_transaction(db):
+        await backup_service.write_backup_record(
+            db, record_type='full', trigger_type='manual',
+            filename=filename, size=len(file_bytes),
+            table_count=manifest.get('table_count', 0),
+            total_rows=manifest.get('total_rows', 0),
+            operator=user.username if hasattr(user, 'username') else str(user.id),
+            remark=backup_service.compose_remark(remark, export_detail),
+            status=export_status,
+            encrypted=manifest.get('encrypted', False),
+        )
 
     return success_response(**{ 'format': 'zip', 'filename': filename,
         'size': len(file_bytes),

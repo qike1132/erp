@@ -167,22 +167,22 @@ async def test_record_failure_is_silent_when_redis_unavailable() -> None:
 # ============================================================================
 # api_login 接线：401 计数 / 400 不计数 / 成功清零
 # ============================================================================
-def _login_request(ip: str = '10.0.0.9') -> Request:
+def _login_request(ip: str = '10.0.0.9', headers: dict | None = None) -> Request:
     request = MagicMock(spec=Request)
     request.client = SimpleNamespace(host=ip)
     request.url.scheme = 'http'
-    request.headers = {}
+    request.headers = headers or {}
     return request
 
 
-async def _call_api_login(authenticate: AsyncMock) -> auth.LoginResponse:
+async def _call_api_login(authenticate: AsyncMock, headers: dict | None = None) -> auth.LoginResponse:
     """直接调用未限流的内层函数（slowapi 用 functools.wraps 包装，`__wrapped__` 可取）。"""
     data = auth.LoginRequest(username='  Dave ', password='whatever', remember=False)
     with patch.object(auth, '_check_login_rate_limit', new=AsyncMock()), \
          patch.object(auth, '_set_login_cookies'), \
          patch('fastapi_app.services.auth_service.authenticate_login', new=authenticate):
         return await auth.api_login.__wrapped__(
-            request=_login_request(),
+            request=_login_request(headers=headers),
             response=MagicMock(spec=Response),
             data=data,
             db=AsyncMock(),
@@ -227,9 +227,27 @@ async def test_api_login_resets_failures_on_success(redis_patched: _FakeRedis) -
 
     assert result.success is True
     assert auth._user_fail_key('Dave') not in redis_patched.store
-    # 成功响应体与既有契约一致（未因本次改动变形）
-    assert result.access_token == 'access-token'
+    # 成功响应体形状不变；但**浏览器**请求不再回传 access_token（只走 httpOnly
+    # cookie，见 auth._is_capacitor_request）。原断言 `== 'access-token'` 钉的正是
+    # 本次要取消的行为，故改为 None；Capacitor 分支见下一个用例。
+    assert result.access_token is None
+    assert result.token_type == 'bearer'
     assert result.user.user_id == 7
+
+
+async def test_api_login_returns_access_token_for_capacitor(redis_patched: _FakeRedis) -> None:
+    """Capacitor 客户端（Origin: http://localhost）仍从响应体取 Bearer token。"""
+    authenticate = AsyncMock(return_value={
+        'user': SimpleNamespace(id=7, username='Dave', is_super=False, factory=None, permissions=[]),
+        'access_token': 'access-token',
+        'refresh_token': 'refresh-token',
+        'token_max_age': 3600,
+        'refresh_max_age': 86400,
+    })
+
+    result = await _call_api_login(authenticate, headers={'origin': 'http://localhost'})
+
+    assert result.access_token == 'access-token'
 
 
 async def test_api_login_blocked_before_authenticate_when_locked(redis_patched: _FakeRedis) -> None:

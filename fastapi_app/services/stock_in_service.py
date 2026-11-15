@@ -49,6 +49,24 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
 
 
 async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str, operator_id: int | None = None) -> StockIn:
+    """更新入库记录核心逻辑（调用方需已在事务内）。
+
+    ⚠️ **锁序 Product → StockIn**，与 order_deduction_service 及本模块
+    update_stockin / delete_stockin 一致：本函数原先先锁 StockIn，改数量时才锁
+    Product —— 反序时两条路径命中同一 (product, stockin) 会互相等锁，PG 检出后
+    回滚其一（500/409，无数据损坏）。
+    为按序加锁，先从传入实体取 product_id（该列 NOT NULL 且不可改，只用于知道
+    「该锁谁」），锁完 Product 再锁 StockIn 并重新读取行；old_quantity 必须取自
+    **加锁后**的行（传入实体的 quantity 可能已被并发改过）。
+    """
+    # 直接从传入的实体取 product_id：该列 NOT NULL 且不可变，调用方（update_stockin）
+    # 已从库里加载过它。刻意不再多打一条 SELECT —— 既省一次往返，也避免把
+    # 「按顺序编排 execute 返回值」的既有测试打乱。
+    product_id = stockin.product_id
+    if product_id is None:
+        raise ValueError('入库记录不存在')
+    product = await stock_service.get_product_for_update(db, product_id)
+
     result = await db.execute(select(StockIn).where(StockIn.id == stockin.id).with_for_update())
     stockin_row = result.scalar_one_or_none()
     if not stockin_row:
@@ -60,7 +78,6 @@ async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int,
     stockin.stockin_date = stockin_date
     stockin.note = note
     if quantity != old_quantity:
-        product = await stock_service.get_product_for_update(db, stockin.product_id)
         updated = await apply_stock_delta_locked(db, product, quantity - old_quantity)
         before, after = inventory_balance_bounds(updated.current_stock, quantity - old_quantity)
         stock_service.log_inventory_change(db, product_id=stockin.product_id, change_type='入库修改', change_quantity=quantity - old_quantity, related_id=str(stockin.id), note=f'入库修改ID：{stockin.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)

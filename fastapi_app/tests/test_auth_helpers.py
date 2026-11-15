@@ -163,3 +163,80 @@ class TestSetLoginCookies:
         refresh_call = response.set_cookie.call_args_list[1]
         assert refresh_call.kwargs['value'] == 'refresh_val'
         assert refresh_call.kwargs['max_age'] == 86400
+
+
+# ============================================================================
+# _is_capacitor_request / 登录响应体是否回传 access_token
+# ============================================================================
+def _make_user():
+    user = MagicMock()
+    user.id = 7
+    user.username = "tester"
+    user.is_super = False
+    user.factory = None
+    user.permissions = []
+    return user
+
+
+def _login_result():
+    return {
+        'user': _make_user(),
+        'access_token': 'AT-VALUE',
+        'refresh_token': 'RT-VALUE',
+        'token_max_age': 3600,
+        'refresh_max_age': 86400,
+    }
+
+
+async def _call_api_login(headers):
+    """直接调用 api_login 本体（绕过 slowapi 装饰器），返回 (响应模型, Response)。"""
+    request = _make_request(scheme="https", headers=headers)
+    response = Response()
+    with (
+        patch.object(auth, '_check_login_rate_limit', AsyncMock()),
+        patch.object(auth, '_check_user_lock', AsyncMock()),
+        patch.object(auth, '_reset_login_failures', AsyncMock()),
+        patch('fastapi_app.services.auth_service.authenticate_login',
+              AsyncMock(return_value=_login_result())),
+    ):
+        payload = await auth.api_login.__wrapped__(
+            request, response, auth.LoginRequest(username="tester", password="pw"), None,
+        )
+    return payload, response
+
+
+class TestIsCapacitorRequest:
+    def test_client_type_header(self):
+        assert auth._is_capacitor_request(_make_request(headers={"x-client-type": "capacitor"})) is True
+
+    def test_localhost_origin(self):
+        assert auth._is_capacitor_request(_make_request(headers={"origin": "http://localhost"})) is True
+        assert auth._is_capacitor_request(_make_request(headers={"origin": "http://localhost:8100"})) is True
+
+    def test_browser_is_not_capacitor(self):
+        assert auth._is_capacitor_request(_make_request(headers={})) is False
+        assert auth._is_capacitor_request(
+            _make_request(headers={"origin": "https://erp.example.com"})
+        ) is False
+
+
+class TestLoginBodyTokenExposure:
+    """登录响应体只在 Capacitor 下带 access_token（浏览器走 httpOnly cookie）。"""
+
+    @pytest.mark.asyncio
+    async def test_browser_login_body_has_no_access_token(self):
+        payload, response = await _call_api_login({"origin": "https://erp.example.com"})
+        assert payload.access_token is None
+        assert payload.model_dump()['access_token'] is None
+        # cookie 仍然照设：浏览器认证完全依赖它
+        assert response.headers.getlist('set-cookie')
+
+    @pytest.mark.asyncio
+    async def test_capacitor_login_body_has_access_token(self):
+        payload, _ = await _call_api_login({"x-client-type": "capacitor"})
+        assert payload.access_token == 'AT-VALUE'
+
+    @pytest.mark.asyncio
+    async def test_capacitor_localhost_origin_login_body_has_access_token(self):
+        payload, _ = await _call_api_login({"origin": "http://localhost"})
+        assert payload.access_token == 'AT-VALUE'

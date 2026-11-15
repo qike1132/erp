@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
 from fastapi_app.core.database import get_async_db, get_async_read_db
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.backup import (
     BackupDeleteResponse,
     BackupListResponse,
@@ -120,9 +121,15 @@ async def delete_server_backup(
         from sqlalchemy import delete as _sa_delete
 
         from fastapi_app.shared_models.backup_record import BackupRecord
-        await db.execute(_sa_delete(BackupRecord).where(BackupRecord.filename == safe_name))
-    except SQLAlchemyError as e:
-        logger.error(f'清理备份记录 {safe_name} 失败: {e}')
+        # 写库必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）
+        async with db_transaction(db):
+            await db.execute(_sa_delete(BackupRecord).where(BackupRecord.filename == safe_name))
+    except HTTPException as e:
+        # 记录清理失败不影响「文件删除」的成功语义（改造前只记日志后照样返回成功）；
+        # db_transaction 已把 SQLAlchemyError 收敛成 500，这里降级为日志。
+        if e.status_code < 500:
+            raise
+        logger.error(f'清理备份记录 {safe_name} 失败: {e.detail}')
     return {'success': True, 'deleted': deleted}
 
 
@@ -222,10 +229,12 @@ async def create_backup_schedule(
 ):
     """新增定时任务（backup_manage）"""
     try:
-        row = await schedule_service.create_schedule(
-            db, name=payload.name, task_type=payload.task_type,
-            cron_expr=payload.cron_expr, enabled=payload.enabled,
-        )
+        # 写库必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）
+        async with db_transaction(db):
+            row = await schedule_service.create_schedule(
+                db, name=payload.name, task_type=payload.task_type,
+                cron_expr=payload.cron_expr, enabled=payload.enabled,
+            )
     except schedule_service.BackupSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {
@@ -249,10 +258,12 @@ async def update_backup_schedule(
 ):
     """更新定时任务（backup_manage）"""
     try:
-        row = await schedule_service.update_schedule(
-            db, schedule_id, name=payload.name, task_type=payload.task_type,
-            cron_expr=payload.cron_expr, enabled=payload.enabled,
-        )
+        # 写库必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）
+        async with db_transaction(db):
+            row = await schedule_service.update_schedule(
+                db, schedule_id, name=payload.name, task_type=payload.task_type,
+                cron_expr=payload.cron_expr, enabled=payload.enabled,
+            )
     except schedule_service.BackupSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {
@@ -279,11 +290,14 @@ async def delete_backup_schedule(
     schedule_service.GUARDED_TASK_TYPES —— 误删会静默失去备份可用性保障。
     """
     try:
-        deleted = await schedule_service.delete_schedule(db, schedule_id)
+        # 写库必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）；
+        # 404 在事务内抛出 → 回滚，不会留下「报错但已删」的中间态。
+        async with db_transaction(db):
+            deleted = await schedule_service.delete_schedule(db, schedule_id)
+            if not deleted:
+                raise HTTPException(status_code=404, detail=f'调度任务 {schedule_id} 不存在')
     except schedule_service.BackupSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f'调度任务 {schedule_id} 不存在')
     return {'success': True, 'task_name': str(schedule_id), 'message': '调度任务已删除'}
 
 

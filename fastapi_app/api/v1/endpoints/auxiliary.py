@@ -328,7 +328,8 @@ async def delete_stockout_api(
     if _product_id is None:
         raise HTTPException(status_code=404, detail='出库记录不存在')
     await assert_product_factory_scoped(db, _product_id, user, what='出库记录')
-    async with db_transaction(db, commit=False):
+    # 提交必须在响应之前：依赖收尾晚于响应发送，commit=False 会让失败静默（2026-11-15 修复）
+    async with db_transaction(db):
         await svc_delete(db, id)
     return success_response(message='出库删除成功')
 
@@ -349,7 +350,8 @@ async def delete_stockin_api(
     if _product_id is None:
         raise HTTPException(status_code=404, detail='入库记录不存在')
     await assert_product_factory_scoped(db, _product_id, user, what='入库记录')
-    async with db_transaction(db, commit=False):
+    # 同上：删除必须在本请求内提交，不留给依赖收尾
+    async with db_transaction(db):
         await svc_delete(db, id)
     return success_response(message='入库删除成功')
 
@@ -378,7 +380,10 @@ async def delete_supplier_api(
 ):
     """删除供应商（API方式）"""
     from fastapi_app.services.auxiliary_service import delete_supplier
-    await delete_supplier(db, id)
+    # 写库必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）；
+    # 与同文件 delete_customer_api 同款，AppError 由 db_transaction 转成对应状态码。
+    async with db_transaction(db):
+        await delete_supplier(db, id)
     return success_response(message='供应商删除成功')
 
 

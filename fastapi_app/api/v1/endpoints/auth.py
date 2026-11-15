@@ -59,7 +59,9 @@ class LoginResponse(BaseModel):
     success: bool
     message: str = ""
     error: str = ""
-    access_token: str = ""
+    # 仅 Capacitor（WebView）客户端回传：浏览器走 httpOnly cookie，body 里给 null，
+    # 避免 token 暴露在可被 JS 读取的响应体/浏览器历史/日志里。
+    access_token: str | None = None
     token_type: str = ""
     user: UserInfoResponse | None = None
 
@@ -293,6 +295,22 @@ async def _reset_login_failures(username: str) -> None:
         logger.warning("[Login] 账户级失败计数清零失败（不影响本次登录）: %s", e)
 
 
+def _is_capacitor_request(request: Request) -> bool:
+    """是否 Capacitor（移动端 WebView）客户端。
+
+    判据（与改造前 _set_login_cookies 内联判断逐字一致）：
+    - 显式头 `X-Client-Type: capacitor`；
+    - 或 `Origin` 以 `http://localhost` 开头（Capacitor Android 的 WebView 源）。
+
+    用途有两处：cookie 的 SameSite/Secure 自适应，以及**是否在响应体里回传
+    access_token**（浏览器只走 httpOnly cookie，见 api_login / api_refresh_token）。
+    """
+    return (
+        request.headers.get("x-client-type") == "capacitor"
+        or request.headers.get("origin", "").startswith("http://localhost")
+    )
+
+
 def _set_login_cookies(  # log-context: internal helper 无请求上下文
     response: Response, request: Request,
     access_token: str, refresh_token: str,
@@ -300,7 +318,7 @@ def _set_login_cookies(  # log-context: internal helper 无请求上下文
 ) -> None:
     """设置 httpOnly cookie（浏览器 Web 端自动携带），根据 HTTPS/Capacitor 自适应 SameSite/Secure"""
     _is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-    _is_capacitor = request.headers.get("x-client-type") == "capacitor" or request.headers.get("origin", "").startswith("http://localhost")
+    _is_capacitor = _is_capacitor_request(request)
     _samesite: Literal['lax', 'strict', 'none']
     if _is_capacitor and not _is_https:
         _samesite, _secure = "lax", False
@@ -322,8 +340,10 @@ async def api_login(
 ):
     """AJAX登录API（JWT + Cookie双模式）
 
-    返回JWT Token（移动端通过 Authorization: Bearer <token> 使用），
-    同时设置 httpOnly cookie（浏览器自动携带）。
+    浏览器：只设 httpOnly cookie（自动携带），响应体 access_token 为 null ——
+    token 不进可被 JS 读取的 body，避免 XSS/日志/浏览器历史泄露。
+    Capacitor（移动端 WebView，见 _is_capacitor_request）：额外在响应体返回
+    access_token，供其通过 Authorization: Bearer <token> 使用。
     """
     from slowapi.util import get_remote_address
 
@@ -377,7 +397,9 @@ async def api_login(
     return LoginResponse(
         success=True,
         message="登录成功",
-        access_token=result['access_token'],
+        # 浏览器只靠 httpOnly cookie；body 回传 token 会绕开该设计（前端 useLogin.ts
+        # 也只在 isCapacitor 时读它）。仅 Capacitor 需要 Bearer。
+        access_token=result['access_token'] if _is_capacitor_request(request) else None,
         token_type="bearer",  # nosec  # noqa: S106  # OAuth2 token type, not a password
         user=UserInfoResponse(
             user_id=user.id,
@@ -605,16 +627,20 @@ async def api_refresh_token(
     _set_auth_cookies(request, response, access_token, new_refresh_token)
 
     logger.info("[Refresh] 令牌刷新成功（refresh 已轮换）: user_id=%s", user_id)
+    # 与登录同口径：浏览器只要 cookie（新 token 已写进 httpOnly cookie），body 里回传
+    # access_token 会让 httpOnly 设计失效；只有 Capacitor 需要 Bearer。
+    body_access_token = access_token if _is_capacitor_request(request) else None
     if data and data.refresh_token:
         # 请求体传 refresh token 的客户端（移动端/API）读不到 httpOnly cookie，
-        # 必须把轮换后的新 token 回传 —— 否则它仍持旧 token，grace 窗口过后必然 401。
+        # 必须把轮换后的**新 refresh token** 回传 —— 否则它仍持旧 token，grace 窗口过后
+        # 必然 401。access_token 仍按客户端类型决定是否回传。
         return success_response(
-            access_token=access_token, refresh_token=new_refresh_token,
+            access_token=body_access_token, refresh_token=new_refresh_token,
             # token_type 是 OAuth2 令牌类型标识（RFC 6749），非口令 —— S106 误报
             token_type="bearer",  # noqa: S106
         )
     # token_type 是 OAuth2 令牌类型标识（RFC 6749），非口令 —— S106 误报
-    return success_response(access_token=access_token, token_type="bearer")  # noqa: S106
+    return success_response(access_token=body_access_token, token_type="bearer")  # noqa: S106
 
 
 # ==================== 文件上传 ====================

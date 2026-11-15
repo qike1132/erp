@@ -13077,7 +13077,7 @@
           "认证与上传"
         ],
         "summary": "Api Login",
-        "description": "AJAX登录API（JWT + Cookie双模式）\n\n返回JWT Token（移动端通过 Authorization: Bearer <token> 使用），\n同时设置 httpOnly cookie（浏览器自动携带）。",
+        "description": "AJAX登录API（JWT + Cookie双模式）\n\n浏览器：只设 httpOnly cookie（自动携带），响应体 access_token 为 null ——\ntoken 不进可被 JS 读取的 body，避免 XSS/日志/浏览器历史泄露。\nCapacitor（移动端 WebView，见 _is_capacitor_request）：额外在响应体返回\naccess_token，供其通过 Authorization: Bearer <token> 使用。",
         "operationId": "api_login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -27479,9 +27479,15 @@
             "default": ""
           },
           "access_token": {
-            "type": "string",
-            "title": "Access Token",
-            "default": ""
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Token"
           },
           "token_type": {
             "type": "string",

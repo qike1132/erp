@@ -134,6 +134,29 @@ def sign_upload_url(key: str, ttl_seconds: int = 3600) -> str:
     return f"{url}?st={expired}&s={sig}"
 
 
+def signature_matches(key: str, expired: int, sig: str, secret: str | None = None) -> bool:
+    """**只比对摘要本身**，不看有效期（nginx secure_link 的「哈希对不对」那一步）。
+
+    与 verify_signature 的分工：verify_signature 把「已过期」也算作不通过，适合
+    「有效 / 无效」二元判断；需要区分 *403 签名不对* 与 *410 签名对但过期*
+    （应用层 `SignedUploadsStaticFiles` 与 nginx 的 $secure_link 语义对齐）时，
+    必须这样才能把两种失败分开。
+
+    注意本函数与 verify_signature **共用同一处公式实现**（单一事实来源），
+    改动 nginx secure_link_md5 口径只需改这里。
+
+    ⚠️ 同 verify_signature：签名功能未启用（密钥为空）时返回 True —— 那是
+    「未启用 ⇒ 不校验」，不是「校验通过」；不得单独作为鉴权判据。
+    """
+    secret = secret or signing_secret()
+    if not secret:
+        return True
+    uri = quote(f"/static/uploads/{key}", safe="/")
+    raw = f"{expired}{uri} {secret}".encode()
+    expect = base64.urlsafe_b64encode(hashlib.md5(raw).digest()).rstrip(b"=").decode("ascii")  # nosec B324 - 同上
+    return sig == expect
+
+
 def verify_signature(key: str, expired: int, sig: str, secret: str | None = None) -> bool:
     """纯函数校验（供后端测试与对账使用；生产校验在 nginx secure_link 完成）。
 
@@ -147,7 +170,4 @@ def verify_signature(key: str, expired: int, sig: str, secret: str | None = None
         return True
     if expired < int(time.time()):
         return False
-    uri = quote(f"/static/uploads/{key}", safe="/")
-    raw = f"{expired}{uri} {secret}".encode()
-    expect = base64.urlsafe_b64encode(hashlib.md5(raw).digest()).rstrip(b"=").decode("ascii")  # nosec B324 - 同上
-    return sig == expect
+    return signature_matches(key, expired, sig, secret)

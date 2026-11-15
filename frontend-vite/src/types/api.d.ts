@@ -1333,7 +1333,7 @@ export interface LoginResponse {
   success: boolean
   message?: string
   error?: string
-  access_token?: string
+  access_token?: string | null
   token_type?: string
   user?: UserInfoResponse | null
 }

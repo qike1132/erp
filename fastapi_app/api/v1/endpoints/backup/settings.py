@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
 from fastapi_app.core.database import get_async_db
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.backup import (
     BackupPathValidateRequest,
     BackupPathValidateResponse,
@@ -61,14 +62,16 @@ async def update_backup_settings(
     """
     operator = getattr(user, 'username', None) or str(getattr(user, 'id', ''))
     try:
-        result = await backup_service.save_settings(
-            db,
-            backup_dir=payload.backup_dir,
-            retention_days=payload.retention_days,
-            max_count=payload.max_count,
-            encryption_mode=payload.encryption_mode,
-            operator=operator,
-        )
+        # 写库必须在本端点内提交（依赖收尾 commit 晚于响应发送，见 get_async_db docstring）
+        async with db_transaction(db):
+            result = await backup_service.save_settings(
+                db,
+                backup_dir=payload.backup_dir,
+                retention_days=payload.retention_days,
+                max_count=payload.max_count,
+                encryption_mode=payload.encryption_mode,
+                operator=operator,
+            )
     except BackupSettingsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     result['success'] = True

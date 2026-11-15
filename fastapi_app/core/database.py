@@ -290,9 +290,15 @@ def _commit_failure_counter():
 async def get_async_db(request: Request = None):  # type: ignore[assignment]
     """异步数据库会话依赖（Unit of Work 模式）
 
-    - 请求成功时自动 commit
+    - 请求成功时自动 commit（**最后兜底**，见下）
     - 请求异常时自动 rollback
     - 服务层应使用 flush() 而非 commit()，由本依赖统一控制事务边界
+
+    ⚠️ **依赖收尾晚于响应发送**：FastAPI（0.137 实测）的 `request_response` 先
+    `await response(...)` 把响应写出去，再关闭依赖栈 —— 于是本函数里的 commit 在
+    客户端已拿到 200 之后才执行，提交失败时客户端无从得知。因此**写端点必须在
+    处理器内用 `async with db_transaction(db):` 自行提交**，不要依赖本依赖的收尾
+    commit；这里的 commit 只是兜底（下方对残留变更打 ERROR 告警）。
 
     注意：备份恢复操作（psql 路径）会 DROP+CREATE 数据库，导致当前 session
     的连接失效。此依赖对 commit/rollback 错误进行宽容处理，避免恢复成功后
@@ -310,6 +316,23 @@ async def get_async_db(request: Request = None):  # type: ignore[assignment]
             except (RuntimeError, OSError, ValueError, SQLAlchemyError):
                 logger.warning("Session rollback failed (may be broken after psql restore)", exc_info=True)
             raise
+        # 最后兜底，正常路径不应触发：写端点自己用 db_transaction 提交，收尾到这里时
+        # 会话不应再有待落库变更。仍有 new/dirty/deleted = 有端点漏了改造，它的提交
+        # 就发生在本依赖收尾阶段（响应已发出之后），失败客户端不会知道。
+        # **不回滚**：回滚等于把漏网端点的数据静默丢弃，比晚提交更糟；记 ERROR 照常提交。
+        pending_new, pending_dirty, pending_deleted = len(session.new), len(session.dirty), len(session.deleted)
+        if pending_new or pending_dirty or pending_deleted:
+            logger.error(
+                "端点未在请求内提交：依赖收尾阶段仍检测到待落库变更 "
+                "new=%d dirty=%d deleted=%d（最后兜底，正常路径不应触发）"
+                "—— 写端点须在处理器内 async with db_transaction(db) 提交 "
+                "path=%s request_id=%s",
+                pending_new,
+                pending_dirty,
+                pending_deleted,
+                getattr(getattr(request, "url", None), "path", None),
+                getattr(getattr(request, "state", None), "request_id", None),
+            )
         # FastAPI 0.106+ 语义：依赖收尾在响应发送之后执行，commit 失败时客户端已收到
         # 成功响应。此处显式 ERROR 告警 + 指标计数（监控可对关键字段告警），防止静默数据丢失。
         try:
