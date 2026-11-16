@@ -460,3 +460,9 @@ _firefox_profile_*/
 # uv 锁门禁的仓内缓存/临时目录（scripts/check_requirements_lock.py）
 .uv-cache/
 .lockcheck-tmp*/
+
+# === 2026-11-16 上线前审计 B-5：又漏了一个 AI 工具痕迹目录 ===
+# .alma-snapshots/（config.json + index.json）在工作区出现，但当时没有任何规则覆盖它，
+# `git ls-files -o --exclude-standard` 会把它列为「可被 git add 扫入」的未跟踪文件。
+# 按 AGENTS.md §7「AI 工具痕迹不入库」补忽略，并同步进根文件的清单（两处要一起改）。
+/.alma-snapshots/

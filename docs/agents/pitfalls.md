@@ -253,6 +253,52 @@ erp-redis-broker` 的唯一依赖方就是它）。SCM 拒停合法，代码却�
 那次是**文件损坏**，这次是**文件消失**。修法因此不同：损坏可试着重装单个包，成批消失必须
 先摸清范围再动手，否则会反复"修好一个又崩一个"。
 
+## 17. 本机跑 `mypy` 必须先设 `PYTHONUTF8=1`，否则读 `mypy.ini` 直接崩
+
+`mypy.ini`（25KB）是 UTF-8，而 Windows 上 Python 的 `configparser` 按**系统 locale** 打开它。
+非 UTF-8 locale 下 `python -m mypy --config-file mypy.ini --no-native-parser` 报：
+
+```
+UnicodeDecodeError: 'gbk' codec can't decode byte 0x88 in position 450: illegal multibyte sequence
+```
+
+这是**环境问题，不是类型错误** —— 但它出现在 mypy 的 traceback 里，很容易被当成「本次改动
+引入的问题」去查代码。正路：
+
+```powershell
+$env:PYTHONUTF8='1'
+python -m mypy --config-file mypy.ini --no-native-parser   # 2026-11-16 实测 381 files 通过
+```
+
+`--no-native-parser` 是 G-01 的既有要求（本机 ast_serialize 是需手工构建的 Rust 扩展）；
+`PYTHONUTF8=1` 是另一条独立前提，两者都要。
+
+## 18. Agent 环境跑提权 pytest：必须同一次调用内 `-Wait`，否则进程被收掉
+
+`logs/run_full_tests.sh` 是 bash 版正路，在只有 PowerShell 的 Agent 会话里不可用（git-bash 无 python）。
+照抄它用 `Start-Process -Verb RunAs` 发起提权 pytest 会**静默失败**：
+
+- 症状：日志只留脚本头部 317 字节，没有 pytest 输出、没有 `EXITCODE=`，进程秒退。
+- 看起来像 UAC 被拒或 pytest 崩了，其实 UAC 是放行的（本机 `EnableLUA=1` +
+  `ConsentPromptBehaviorAdmin=0` = 不提示直接提升，probe 能写文件证实）。
+- **真因**：提权子进程挂在 Agent 主机的 job object 下，**父调用一返回就被一起收掉**。
+  分成「发起」和「轮询」两次调用，等于每次都杀掉自己的测试。
+
+正路（一次调用内等到结束，实测 5940 passed / 58 skipped / 10m22s）：
+
+```powershell
+$cmd = "& '$repo\logs\_run_pytest_elevated.ps1' -ArgsFile '$argsFile' -OutFile '$log'"
+Start-Process -FilePath 'C:\Program Files\PowerShell\7\pwsh.exe' `
+  -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`"" `
+  -Verb RunAs -PassThru -Wait          # ← -Wait 不能省；超时给足 90 分钟
+```
+
+两个引号坑一起记：
+- `-ArgumentList '-File','D:\...ps1'` 这种数组/字符串混传会让 `-File` 的路径引号被吞 → 脚本根本找不到；
+  用 `-Command "& 'script' -ArgsFile '...' -OutFile '...'"`（内层全用单引号）最稳。
+- 参数/日志文件名要按次唯一（`_pytest_args.<yyyyMMddHHmmss>.txt`），否则并发会话会把「全量」
+  跑成对方的子集（2026-10-12 踩过，见 `run_full_tests.sh` 注释）。
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。

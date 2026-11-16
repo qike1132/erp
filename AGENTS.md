@@ -63,7 +63,7 @@ npm run check:types               # 类型对齐
 
 以上 = CI（`.github/workflows/ci-cd.yml`）三个 job（test/lint/frontend）门禁的**本地等价物**，少跑一项 CI 就可能变红。CI 红了先看哪个 job 的**第一个 failure step**。
 
-- **pytest 必须提权跑**：根 `.env` 的 ACL 只授予 Administrators/SYSTEM，非提权跑会因 conftest 读不到 `.env` 整批假红（连的是真实测试库 `erp_system_test`，非派生库）。正路：提权跑 `logs/_run_pytest_elevated.ps1`（2026-10-12 实测全量 4353 passed / 271 skipped）；非提权只读场景用「stub .env 为空流」脚本绕。**全量 pytest 必须独占单实例**——两进程共用 `erp_system_test` 会互撞假红（`DROP SCHEMA` + 硬编码 `SO-PERF-*`，见 `docs/agents/pitfalls.md` §7）。机器护栏已落地（F2-7，与 Z09-R5 同一修法）：`tests/conftest.py::_exclusive_test_db_lock` 用 PG 咨询锁按库互斥，第二个实例直接 `exit 2` 并报出占用者 PID。
+- **pytest 必须提权跑**：根 `.env` 的 ACL 只授予 Administrators/SYSTEM，非提权跑会因 conftest 读不到 `.env` 整批假红（连的是真实测试库 `erp_system_test`，非派生库）。正路：提权跑 `logs/_run_pytest_elevated.ps1`（2026-11-16 实测全量 5940 passed / 58 skipped，10m22s；同日实测：全量跑完后 `logs/domain_events_deadletter.jsonl` 与 `audit_overflow.log` 零增长，证明测试期证据隔离生效）；非提权只读场景用「stub .env 为空流」脚本绕。**全量 pytest 必须独占单实例**——两进程共用 `erp_system_test` 会互撞假红（`DROP SCHEMA` + 硬编码 `SO-PERF-*`，见 `docs/agents/pitfalls.md` §7）。机器护栏已落地（F2-7，与 Z09-R5 同一修法）：`tests/conftest.py::_exclusive_test_db_lock` 用 PG 咨询锁按库互斥，第二个实例直接 `exit 2` 并报出占用者 PID。
 - **vitest 要把 TEMP 指进仓内**（如 `frontend-vite/.vitest-tmp`），否则 EPERM mkdir 导致全部 0 test 失败；前端构建用 `npm run build:atomic`，esbuild 需 `ESBUILD_BINARY_PATH` 指外部副本，绕开 `%TEMP%` 删除限制。
 - **pip-audit 口径（2026-10-11 起判定；2026-10-21 更正豁免所在文件，审计 F1-8）**：CI 已恢复判定——步骤输出 JSON 后由 `scripts/quality_gate.py --only pip_audit` 判定（豁免项见 **`pyproject.toml`** 的 `[[tool.code-quality.pip-audit-ignores]]`，门禁只读 `quality_gate.py:74` 定义的 `PYPROJECT`；写进 `ruff.toml` 不会被任何代码读到 = 静默失效的豁免）。**不要**为过门禁批量登记豁免；依赖升级后再收紧。
 - CI 的 lint job 另跑四项：`scan_secrets.py --verbose`（全树密钥）、`check_orphan_modules.py`（孤儿模块）、`file_size_gate.py`（PR 基线对比）、`check_requirements_lock.py`（`requirements/<tier>.lock` 与 `.txt` 同步，需 `uv`）。改动涉及模块接线/删文件/新增大文件/改 `requirements/*.txt` 时先本地跑。
@@ -131,7 +131,7 @@ npm run check:types               # 类型对齐
 ## 7. AI 工具痕迹治理
 
 根目录曾被 15+ 个 AI 工具痕迹污染，以下已在 `.gitignore` 忽略，**不要提交**：
-`.agent/ .claude/ .cursor/ .graphflow/ .graphflow-cache/ graphflow-out/ .trae/ .qoder/ .workbuddy/ .reasonix/ .superpowers/ .codebuddy/ .freebuff/ .lean-ctx/ .resultverify/ .codeartsdoer/ .zcode/ .zcodeignore dsh-web-dump-config.txt`
+`.agent/ .claude/ .cursor/ .graphflow/ .graphflow-cache/ graphflow-out/ .trae/ .qoder/ .workbuddy/ .reasonix/ .superpowers/ .codebuddy/ .freebuff/ .lean-ctx/ .resultverify/ .codeartsdoer/ .zcode/ .zcodeignore .alma-snapshots/ dsh-web-dump-config.txt`
 
 `.zcodeignore` 是 `.gitignore` 的派生文件（自述），入库会制造第二真相源，同样忽略（2026-10-05）。
 
