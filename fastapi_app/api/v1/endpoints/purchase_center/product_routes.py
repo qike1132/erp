@@ -285,11 +285,17 @@ async def api_copy_bom_to_product(
     try:
         async with db_transaction(db):
             result = await svc.copy_bom_to_product(db, target_product_id, data.model_dump())
+            # 2026-11-16 上线前审计 A-8：复制 BOM 与「保存 BOM」写的是同一批表，
+            # 但这里原先只写表、不注册副作用 —— 目标产品的待生成行与已有 pending 单
+            # 都停在复制前的状态，而前端复制完只 reload，用户看不到任何提示。
+            schedule_bom_saved_side_effects(db, target_product_id)
     except HTTPException as e:
         if e.status_code == 400 and '目标产品已有BOM' in e.detail:
             raise HTTPException(status_code=409, detail=e.detail, headers={'has_existing_bom': 'true'}) from e
         raise
     await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.PRODUCT)
+    # 与保存路径同口径：复制同样改变了 unprocessed 行的逐 SKU has_bom（30s Redis 缓存）
+    await cache_mgr.invalidate(InvalidationStrategy.PATTERN, 'orders:unprocessed:*')
     return success_response(**{**result})
 
 
