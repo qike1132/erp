@@ -40,22 +40,22 @@ defineProps<{ result: ShipResult }>()
 .osw-result { border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 .osw-result--ok { background: var(--color-success-50, #f0fdf4); border: 1px solid var(--color-success-200, #bbf7d0); }
 .osw-result--fail { background: var(--color-danger-50, #fef2f2); border: 1px solid #fecaca; }
-.osw-result-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.osw-result-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body-sm); }
 .osw-result--ok .osw-result-head { color: var(--color-success-700, #15803d); }
 .osw-result--fail .osw-result-head { color: #b91c1c; }
 .osw-result-row {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   background: #fff; border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: 10px; padding: 9px 12px; font-size: 12px;
+  border-radius: 10px; padding: 9px 12px; font-size: var(--fs-caption);
 }
 .osw-mono { font-family: var(--font-mono); font-weight: 700; }
 .osw-badge {
-  margin-left: auto; font-size: 12px; font-weight: 700; color: var(--color-warning-600, #d97706);
+  margin-left: auto; font-size: var(--fs-caption); font-weight: 700; color: var(--color-warning-600, #d97706);
   background: var(--color-warning-50, #fffbeb); border: 1px solid var(--color-warning-200, #fde68a);
   border-radius: 7px; padding: 2px 9px;
 }
 .osw-result-detail {
   background: #fff; border: 1px solid #fecaca; border-radius: 10px;
-  padding: 10px 12px; font-size: 12px; color: #b91c1c;
+  padding: 10px 12px; font-size: var(--fs-caption); color: #b91c1c;
 }
 </style>

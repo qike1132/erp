@@ -92,7 +92,7 @@ const emit = defineEmits<{
   display: inline-flex;
   align-items: center;
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text-secondary, #6b7280);
   background: #fff;
@@ -120,7 +120,7 @@ const emit = defineEmits<{
   align-items: center;
   gap: 5px;
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 8px;

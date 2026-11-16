@@ -323,7 +323,7 @@ function onOpenUpdate(v: boolean) {
 }
 .osw-empty--fill { flex: 1; justify-content: center; }
 
-.osw-title-sub { font-size: 12px; font-weight: 400; color: var(--color-text-muted, #94a3b8); }
+.osw-title-sub { font-size: var(--fs-caption); font-weight: 400; color: var(--color-text-muted, #94a3b8); }
 
 /* ===== 移动端 Tab（桌面隐藏） ===== */
 .osw-tabs { display: none; }
@@ -338,22 +338,22 @@ function onOpenUpdate(v: boolean) {
 .osw-bar { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
 .osw-bar-info {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  font-size: 12px; color: var(--color-text-secondary, #475569);
+  font-size: var(--fs-caption); color: var(--color-text-secondary, #475569);
 }
 .osw-bar-info b {
-  font-family: var(--font-mono); font-size: 14px; font-weight: 800;
+  font-family: var(--font-mono); font-size: var(--fs-body-sm); font-weight: 800;
   color: var(--color-primary-600, #2563eb); font-variant-numeric: tabular-nums;
 }
 .osw-bar-info b.is-zero { color: var(--color-text-muted, #94a3b8); }
 .osw-sep { color: #cbd5e1; }
 .osw-bar-err {
-  display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-caption); font-weight: 700;
   color: var(--color-danger-600, #dc2626); background: var(--color-danger-50, #fef2f2);
   border: 1px solid #fecaca; border-radius: 7px; padding: 2px 9px;
 }
 .osw-bar--confirm { animation: osw-bar-in 0.22s ease; }
 .osw-bar--confirm .osw-bar-info b { color: var(--color-warning-600, #d97706); }
-.osw-bar-warn { color: var(--color-warning-600, #d97706); font-size: 16px; flex-shrink: 0; }
+.osw-bar-warn { color: var(--color-warning-600, #d97706); font-size: var(--fs-body); flex-shrink: 0; }
 @keyframes osw-bar-in {
   from { opacity: 0.3; transform: translateY(3px); }
   to { opacity: 1; transform: none; }
@@ -364,13 +364,13 @@ function onOpenUpdate(v: boolean) {
   position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 10px;
   background: rgba(255, 255, 255, 0.82); backdrop-filter: blur(2px); border-radius: 12px;
-  font-size: 14px; font-weight: 700; color: var(--color-primary-600, #2563eb);
+  font-size: var(--fs-body-sm); font-weight: 700; color: var(--color-primary-600, #2563eb);
 }
 
 /* ===== 结果态样式已随 OutsourceShipResultView 子组件迁移 ===== */
 
 .osw-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 20px; color: var(--color-text-muted, #64748b); }
-.osw-empty span { font-size: 14px; }
+.osw-empty span { font-size: var(--fs-body-sm); }
 
 /* ===== 响应式：移动端双 Tab ===== */
 @media (max-width: 768px) {
@@ -379,12 +379,12 @@ function onOpenUpdate(v: boolean) {
     background: var(--color-surface, #f8fafc); border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 11px;
   }
   .osw-tab {
-    flex: 1; text-align: center; font: inherit; font-size: 12px; font-weight: 700;
+    flex: 1; text-align: center; font: inherit; font-size: var(--fs-caption); font-weight: 700;
     color: var(--color-text-muted, #64748b); background: transparent; border: none;
     padding: 7px 0; border-radius: 8px; cursor: pointer;
   }
   .osw-tab.is-on { background: #fff; color: var(--color-primary-600, #2563eb); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.1); }
-  .osw-tab-cnt { font-family: var(--font-mono); font-size: 12px; margin-left: 3px; }
+  .osw-tab-cnt { font-family: var(--font-mono); font-size: var(--fs-caption); margin-left: 3px; }
 
   /* 显隐切换命中子组件根元素（根元素带父作用域属性）；左右栏内部规则已随子组件迁移 */
   .osw-panes[data-tab='pick'] .osw-right { display: none; }

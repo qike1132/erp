@@ -300,32 +300,32 @@ loadUnshippedQty()
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-.osv-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
+.osv-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--fs-body-sm); }
 .osv-table thead { background: var(--color-surface, #f8fafc); position: sticky; top: 0; z-index: 1; }
 .osv-table thead th {
-  padding: 10px 14px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 10px 14px; font-size: var(--fs-caption); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
   border-right: 1px solid #d8dce2; border-bottom: 2px solid #b8bec6; color: var(--color-text-secondary);
   text-align: center; white-space: nowrap;
 }
 .osv-table thead th:last-child { border-right: none; }
 .osv-th-center { text-align: center !important; }
 .osv-table tbody td {
-  padding: 10px 14px; font-size: 14px; border-right: 1px solid #d8dce2; border-bottom: 1px solid #d8dce2;
+  padding: 10px 14px; font-size: var(--fs-body-sm); border-right: 1px solid #d8dce2; border-bottom: 1px solid #d8dce2;
   text-align: center; vertical-align: middle; color: var(--color-text);
 }
 .osv-table tbody td:last-child { border-right: none; }
 .osv-table tbody tr:hover { background: var(--color-primary-50); }
 .osv-td-center { text-align: center !important; }
 .osv-td-nowrap { white-space: nowrap; }
-.osv-td-mono { font-family: var(--font-mono); font-size: 12px; }
+.osv-td-mono { font-family: var(--font-mono); font-size: var(--fs-caption); }
 
-.osv-status-badge { display: inline-block; padding: 2px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.osv-status-badge { display: inline-block; padding: 2px 9px; border-radius: 7px; font-size: var(--fs-caption); font-weight: 600; white-space: nowrap; }
 .osv-status-shipped { background: var(--color-warning-50); color: var(--color-warning-600); }
 .osv-status-received { background: var(--color-success-50); color: var(--color-success-700); }
 
 .osv-actions { display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
 .osv-action-btn {
-  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: var(--fs-caption); font-weight: 600;
   border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 7px; background: #fff;
   color: var(--color-text-secondary, #475569); cursor: pointer; font-family: inherit; transition: all 0.15s ease;
 }
@@ -335,7 +335,7 @@ loadUnshippedQty()
 .osv-action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .osv-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 20px; color: var(--color-text-muted); }
-.osv-empty span { font-size: 14px; }
+.osv-empty span { font-size: var(--fs-body-sm); }
 
 .osv-fetching-bar { height: 2px; background: var(--color-primary-100, #e0f2fe); overflow: hidden; border-radius: 1px; }
 .osv-fetching-progress {

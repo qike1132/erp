@@ -273,7 +273,7 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
 .bo-grid {
   display: grid;
   width: 100%;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .bo-grid-header {
   flex-shrink: 0;
@@ -287,7 +287,7 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   display: flex;
   align-items: center;
   background: var(--color-surface, #f8fafc);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -336,7 +336,7 @@ watch([page, appliedProduct, appliedCustomer, confirmStatus], () => {
   opacity: 0.5;
 }
 .bo-empty span {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .bo-empty-inline {
   padding: 24px 20px;

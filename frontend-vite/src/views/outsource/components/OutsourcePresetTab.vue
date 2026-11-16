@@ -126,7 +126,9 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
-const canManage = computed(() => authStore.hasPermission('outsource_manage'))
+// 工序预设的增删改改用细粒度权限码（2026-11-16 审计 A-22）：outsource_manage 历史上
+// 被 script 授给了贝乐（只需收货的角色），用它门控 UI 等于把预设增删也给了贝乐。
+const canManage = computed(() => authStore.hasPermission('outsource_preset_manage'))
 
 const {
   presets,
@@ -249,7 +251,7 @@ const confirmDialog = useConfirmDialog()
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .osp-table thead {
   background: var(--color-surface, #f8fafc);
@@ -259,7 +261,7 @@ const confirmDialog = useConfirmDialog()
 }
 .osp-table thead th {
   padding: 10px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -274,7 +276,7 @@ const confirmDialog = useConfirmDialog()
 .osp-th-center { text-align: center !important; }
 .osp-table tbody td {
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   border-right: 1px solid #d8dce2;
   border-bottom: 1px solid #d8dce2;
   text-align: center;
@@ -287,9 +289,9 @@ const confirmDialog = useConfirmDialog()
 .osp-td-left { text-align: left !important; }
 .osp-td-center { text-align: center !important; }
 .osp-td-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
-.osp-td-mono { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-secondary); }
+.osp-td-mono { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--color-text-secondary); }
 .osp-factory-chip {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-primary-600);
   background: var(--color-primary-50);
@@ -297,7 +299,7 @@ const confirmDialog = useConfirmDialog()
   border-radius: 6px;
   padding: 1px 8px;
 }
-.osp-count-num { color: var(--color-primary-600); font-size: 16px; }
+.osp-count-num { color: var(--color-primary-600); font-size: var(--fs-body); }
 
 .osp-proc-cell { vertical-align: top; }
 .osp-proc-inner {
@@ -321,7 +323,7 @@ const confirmDialog = useConfirmDialog()
   gap: 6px;
   padding: 5px 11px;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
@@ -334,14 +336,14 @@ const confirmDialog = useConfirmDialog()
   border: none;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   cursor: pointer;
   padding: 2px;
   border-radius: 4px;
   line-height: 1;
 }
 .osp-chip-del:hover { color: var(--color-danger-500); background: rgba(239, 68, 68, 0.1); }
-.osp-no-proc { font-size: 12px; color: var(--color-text-muted); }
+.osp-no-proc { font-size: var(--fs-caption); color: var(--color-text-muted); }
 
 .osp-add-bar { flex-shrink: 0; }
 .osp-add-btn {
@@ -353,7 +355,7 @@ const confirmDialog = useConfirmDialog()
   border-radius: 9px;
   background: white;
   color: var(--color-primary-600);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
@@ -363,13 +365,13 @@ const confirmDialog = useConfirmDialog()
 .osp-add-btn:hover { background: var(--color-primary-50); border-color: var(--color-primary-400); transform: translateY(-1px); }
 .osp-add-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.osp-partial { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12px;
+.osp-partial { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: var(--fs-caption);
   border-bottom: 1px solid var(--color-warning-200, #fde68a);
   background: var(--color-warning-50, #fffbeb); color: var(--color-warning-800, #92400e); }
 .osp-partial span { flex: 1; min-width: 0; }
 .osp-partial .osp-retry-btn { margin-top: 0; padding: 3px 12px; }
 .osp-chip-more { border: 1px dashed var(--color-primary-300); border-radius: 7px;
-  background: transparent; color: var(--color-primary-700); font-size: 12px; padding: 4px 9px; cursor: pointer; }
+  background: transparent; color: var(--color-primary-700); font-size: var(--fs-caption); padding: 4px 9px; cursor: pointer; }
 .osp-empty {
   flex: 1;
   display: flex;
@@ -380,9 +382,9 @@ const confirmDialog = useConfirmDialog()
   padding: 40px 20px;
   color: var(--color-text-muted);
 }
-.osp-empty span { font-size: 14px; }
-.osp-empty-sub { font-size: 12px; opacity: 0.85; }
+.osp-empty span { font-size: var(--fs-body-sm); }
+.osp-empty-sub { font-size: var(--fs-caption); opacity: 0.85; }
 .osp-error svg { color: var(--color-danger-500); }
-.osp-retry-btn { margin-top: 6px; padding: 6px 18px; border: 1px solid var(--color-border, #cbd5e1); border-radius: 8px; background: white; color: var(--color-text); font-size: 14px; cursor: pointer; }
+.osp-retry-btn { margin-top: 6px; padding: 6px 18px; border: 1px solid var(--color-border, #cbd5e1); border-radius: 8px; background: white; color: var(--color-text); font-size: var(--fs-body-sm); cursor: pointer; }
 .osp-retry-btn:hover { border-color: var(--color-primary-400); color: var(--color-primary-600); }
 </style>

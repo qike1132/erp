@@ -225,7 +225,7 @@ function statusClass(label: string): string {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .oso-table thead {
   background: var(--color-surface, #f8fafc);
@@ -235,7 +235,7 @@ function statusClass(label: string): string {
 }
 .oso-table thead th {
   padding: 10px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -250,7 +250,7 @@ function statusClass(label: string): string {
 .oso-th-center { text-align: center !important; }
 .oso-table tbody td {
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   border-right: 1px solid #d8dce2;
   border-bottom: 1px solid #d8dce2;
   text-align: center;
@@ -265,7 +265,7 @@ function statusClass(label: string): string {
 .oso-table tbody tr:hover { background: var(--color-primary-50); }
 .oso-customer-cell { font-weight: 600; white-space: nowrap; }
 .oso-cell-main { font-weight: 600; }
-.oso-sku-line { padding: 2px 0; font-size: 14px; line-height: 1.4; }
+.oso-sku-line { padding: 2px 0; font-size: var(--fs-body-sm); line-height: 1.4; }
 .oso-sku-name {
   display: block;
   white-space: nowrap;
@@ -274,7 +274,7 @@ function statusClass(label: string): string {
 .oso-sku-note {
   display: inline-block;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   word-break: break-word;
   vertical-align: middle;
 }
@@ -291,7 +291,7 @@ function statusClass(label: string): string {
   align-items: center;
   justify-content: center;
   padding: 1px 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   border-radius: 4px;
   line-height: 1.5;
@@ -299,7 +299,7 @@ function statusClass(label: string): string {
 .oso-type-badge--order { background: var(--color-success-50, #e8f9ef); color: var(--color-success-600, #1e9e55); }
 .oso-type-badge--stockin { background: var(--color-primary-50, #eff6ff); color: var(--color-primary-600, #2563eb); }
 /* 订单号：等宽字体便于逐位比对（单号是给人念/抄的） */
-.oso-order-no { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.2px; }
+.oso-order-no { font-family: var(--font-mono); font-size: var(--fs-caption); letter-spacing: 0.2px; }
 .oso-proc-badge {
   display: inline-flex;
   align-items: center;
@@ -308,7 +308,7 @@ function statusClass(label: string): string {
   border-radius: 8px;
   background: var(--color-primary-50);
   color: var(--color-primary-600);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -324,7 +324,7 @@ function statusClass(label: string): string {
   padding: 40px 20px;
   color: var(--color-text-muted);
 }
-.oso-empty span { font-size: 14px; }
+.oso-empty span { font-size: var(--fs-body-sm); }
 .oso-empty-inline { padding: 24px 20px; }
 
 .oso-fetching-bar { height: 2px; background: var(--color-primary-100, #e0f2fe); overflow: hidden; border-radius: 1px; }
@@ -363,13 +363,13 @@ function statusClass(label: string): string {
 .oso-progress-fill--done { background: var(--color-success-500); }
 .oso-progress-fill--run { background: var(--color-warning-400); }
 .oso-progress-fill--wait { background: var(--color-warning-400); }
-.oso-cell-muted { color: var(--color-text-muted); font-size: 12px; }
+.oso-cell-muted { color: var(--color-text-muted); font-size: var(--fs-caption); }
 
 .oso-status-badge {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   white-space: nowrap;
 }

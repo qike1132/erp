@@ -1,14 +1,24 @@
 """
-添加湖北外发模块导航项到 Permission 表，并授予权限
+添加湖北外发模块导航项到 Permission 表
 
 权限设计（对齐 beile_order 单权限模式 + 管理/查看分离）：
-- outsource_manage：湖北外发（管理）— 工序预设 CRUD + 工序状态管理
+- outsource_manage：湖北外发（管理）— 页面入口 + 订单级写操作
 - outsource_view：湖北外发（查看）— 订单列表 / 看板 / 工序只读
 导航项 code=outsource_manage，permission_codes 同时包含两个权限，
 持有任一权限的用户均可看到导航入口。
 
+授权历史（缺陷 #5，2026-11-16 上线前审计）：**该脚本历史上把 outsource_manage
+授给了贝乐**——按「已持有 beile_order_view / order_manage / stockin_manage」批量授予，
+而贝乐恰好持有 beile_order_view，于是贝乐自动拿到 outsource_manage，连带拿到当时
+挂在它名下的「删工序预设」权限，属于**过宽授权**。工序预设的增删改现已拆出细粒度码
+outsource_preset_manage（fastapi_app/api/v1/endpoints/outsource.py），本脚本只保留
+导航项的创建与「显式配置」授权：不再按任何既有权限反推，必须用环境变量点名。
+
 运行方式（在项目根目录）:
+    # 只建导航项（不授权；超管 is_super 天然全通）
     python scripts/add_outsource_nav.py
+    # 显式指定要给 outsource_manage 的账号（逗号分隔用户名）
+    OUTSOURCE_GRANT_USERNAMES=zhangsan,lisi python scripts/add_outsource_nav.py
 """
 import os
 import sys
@@ -18,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from sqlalchemy import insert, select
 
 from fastapi_app.core.database import SyncSessionLocal
-from fastapi_app.shared_models import Permission, user_permission
+from fastapi_app.shared_models import Permission, User, user_permission
 
 PERM_MANAGE = 'outsource_manage'
 PERM_VIEW = 'outsource_view'
@@ -27,6 +37,42 @@ PERM_ICON = 'fa-shuttle-van'
 PERM_URL = '/outsource'
 PERM_SECTION = 'core'
 PERM_SECTION_NAME = '核心业务'
+
+# 显式授权名单（逗号分隔用户名）。默认空 = 不授予任何普通账号，
+# 避免再次出现「按其它权限反推」的过宽授权。
+GRANT_USERNAMES_ENV = 'OUTSOURCE_GRANT_USERNAMES'
+
+
+def _grant_explicit_users(session, nav_id: int) -> tuple[int, list[str]]:
+    """只为显式配置的用户名授予导航权限（幂等）。
+
+    Returns:
+        (实际新增的授权条数, 配置了但库里找不到的用户名列表)
+    """
+    names = [
+        n.strip() for n in (os.environ.get(GRANT_USERNAMES_ENV) or '').split(',')
+        if n.strip()
+    ]
+    granted = 0
+    missing: list[str] = []
+    for name in names:
+        user = session.query(User).filter_by(username=name).first()
+        if user is None:
+            missing.append(name)
+            continue
+        exists = session.execute(
+            select(user_permission).where(
+                user_permission.c.user_id == user.id,
+                user_permission.c.permission_id == nav_id,
+            )
+        ).first()
+        if exists:
+            continue
+        session.execute(
+            insert(user_permission).values(user_id=user.id, permission_id=nav_id)
+        )
+        granted += 1
+    return granted, missing
 
 
 def main():
@@ -79,34 +125,12 @@ def main():
         session.add(view)
         session.flush()
 
-        # 5. 为已拥有 beile_order_view / order_manage / stockin_manage 的用户授予管理权限
-        granted = 0
-        source_codes = ('beile_order_view', 'order_manage', 'stockin_manage')
-        source_perms = session.query(Permission).filter(Permission.code.in_(source_codes)).all()
-        user_ids: set[int] = set()
-        for sp in source_perms:
-            ids = session.execute(
-                select(user_permission.c.user_id).where(
-                    user_permission.c.permission_id == sp.id
-                )
-            ).scalars().all()
-            user_ids.update(ids)
-
-        # 超管用户（is_super）自动可见，无需显式授权；此处仅处理普通用户
-        for uid in user_ids:
-            exists = session.execute(
-                select(user_permission).where(
-                    user_permission.c.user_id == uid,
-                    user_permission.c.permission_id == nav.id,
-                )
-            ).first()
-            if not exists:
-                session.execute(
-                    insert(user_permission).values(
-                        user_id=uid, permission_id=nav.id
-                    )
-                )
-                granted += 1
+        # 5. 只给显式配置的用户名授权（超管 is_super 自动可见，无需授权）。
+        #    原逻辑按 beile_order_view / order_manage / stockin_manage 反推批量授予，
+        #    把管理权连带给贝乐（过宽授权），已删除。
+        granted, missing = _grant_explicit_users(session, nav.id)
+        for name in missing:
+            print(f"[WARN] 用户名不存在，跳过授权: {name}")
 
         session.commit()
 
@@ -118,12 +142,12 @@ def main():
 
             _aio.run(safe_delete('nav_sections', context="湖北外发导航缓存"))
             print("[OK] 已清除导航缓存")
-        except Exception:
+        except Exception:  # broad-except: 清缓存失败不影响已提交的权限数据，仅提示手工处理
             print("[WARN] 清除导航缓存失败，请手动重启或等待缓存过期")
 
         print(
             f"[OK] 湖北外发导航项已添加 (id={nav.id}, sort_order={next_sort}, "
-            f"已为 {granted} 名用户授予管理权限)"
+            f"已为 {granted} 名显式配置的用户授予管理权限)"
         )
     finally:
         session.close()

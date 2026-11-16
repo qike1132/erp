@@ -4,7 +4,8 @@
  * 业务规则（方案B，docs/outsource/外发模块TAB重构方案.md）：
  * - 三个 TAB 从左到右：外发进度、发货单、工序预设；裸路径 /outsource 落地「外发进度」
  * - 「发货单」对全部角色同名（贝乐在该页确认收货，页面主体即发货单台账）
- * - 「工序预设」对贝乐账号隐藏（贝乐只收货，不维护工序预设）
+ * - 「工序预设」按细粒度权限码 outsource_preset_manage 显示（2026-11-16 审计 A-22：
+ *   原先按用户名隐藏，但贝乐本来就持有 outsource_manage，放开即能增删预设）
  * - TAB → 路由映射契约：orders→/outsource、shipments→/outsource/shipments、presets→/outsource/presets
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -13,12 +14,15 @@ import HubeiRouteTabs from '@/views/hubei/HubeiRouteTabs.vue'
 
 /** 当前测试用户名与路由路径（useRoute 的 mock 按引用返回，可逐用例改写） */
 let currentUsername = 'admin'
+/** 当前用户被授予的权限码（工序预设 Tab 按 outsource_preset_manage 显示） */
+let currentPerms = new Set(['outsource_preset_manage'])
 let currentPath = '/outsource'
 const pushMock = vi.fn()
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     hasAnyPermission: () => true,
+    hasPermission: (code: string) => currentPerms.has(code),
     user: { get username() { return currentUsername } },
   }),
 }))
@@ -64,6 +68,7 @@ function activeFlags(wrapper: ReturnType<typeof mountTabs>): string[] {
 beforeEach(() => {
   vi.clearAllMocks()
   currentUsername = 'admin'
+  currentPerms = new Set(['outsource_preset_manage'])
   currentPath = '/outsource'
 })
 
@@ -73,8 +78,9 @@ describe('HubeiRouteTabs 外发 TAB 导航（方案B）', () => {
     expect(tabTexts(mountTabs())).toEqual(['外发进度', '发货单', '工序预设'])
   })
 
-  it('贝乐：隐藏「工序预设」，只剩 外发进度 → 发货单', () => {
+  it('未授 outsource_preset_manage（如贝乐）：隐藏「工序预设」，只剩 外发进度 → 发货单', () => {
     currentUsername = '贝乐'
+    currentPerms = new Set()
     const texts = tabTexts(mountTabs())
     expect(texts).toEqual(['外发进度', '发货单'])
     expect(texts.join('|')).not.toContain('工序预设')
@@ -82,6 +88,7 @@ describe('HubeiRouteTabs 外发 TAB 导航（方案B）', () => {
 
   it('「发货单」对贝乐同名（不再使用旧双名「收货」）', () => {
     currentUsername = '贝乐'
+    currentPerms = new Set()
     expect(tabTexts(mountTabs())).toContain('发货单')
     expect(tabTexts(mountTabs()).join('|')).not.toContain('收货')
   })

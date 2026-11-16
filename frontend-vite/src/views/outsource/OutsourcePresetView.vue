@@ -138,7 +138,7 @@ function onPickProduct(p: ProductSuggestion) {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
@@ -159,8 +159,8 @@ function onPickProduct(p: ProductSuggestion) {
   gap: 2px;
   align-items: flex-start;
 }
-.preset-ac-name { color: var(--color-text); font-weight: 500; font-size: 14px; }
-.preset-ac-barcode { color: var(--color-text-muted); font-size: 12px; font-family: var(--font-mono); }
+.preset-ac-name { color: var(--color-text); font-weight: 500; font-size: var(--fs-body-sm); }
+.preset-ac-barcode { color: var(--color-text-muted); font-size: var(--fs-caption); font-family: var(--font-mono); }
 /* 贝乐账号直达该路由时的说明（不挂载预设子组件） */
 .hu-blocked-tip { padding: 24px; color: var(--color-text-secondary, #64748b); }
 </style>

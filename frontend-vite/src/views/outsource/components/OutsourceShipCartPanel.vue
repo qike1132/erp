@@ -144,9 +144,9 @@ function productOrderCount(p: CartProduct): number {
 /* ---- 右栏 ---- */
 .osw-right { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--color-surface, #f8fafc); }
 .osw-r-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; flex-shrink: 0; }
-.osw-r-title { font-size: 14px; font-weight: 800; color: var(--color-text, #1e293b); }
+.osw-r-title { font-size: var(--fs-body-sm); font-weight: 800; color: var(--color-text, #1e293b); }
 .osw-chip {
-  font-size: 12px; font-weight: 700; font-family: var(--font-mono);
+  font-size: var(--fs-caption); font-weight: 700; font-family: var(--font-mono);
   background: var(--color-primary-50, #eff6ff); color: var(--color-primary-600, #2563eb);
   border: 1px solid var(--color-primary-200, #bfdbfe); border-radius: 999px; padding: 1px 9px;
 }
@@ -156,12 +156,12 @@ function productOrderCount(p: CartProduct): number {
 /* 两栏共用类：scoped 样式不跨组件，在两个子组件内各持一份 */
 .osw-link {
   border: none; background: transparent; color: var(--color-primary-600, #2563eb);
-  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  font: inherit; font-size: var(--fs-caption); font-weight: 700; cursor: pointer;
   padding: 4px 6px; border-radius: 6px; transition: background 0.15s ease;
 }
 .osw-link:hover:not(:disabled) { background: var(--color-primary-50, #eff6ff); }
 .osw-link:disabled { color: #b6c2d2; cursor: not-allowed; }
-.osw-link--sm { font-size: 12px; }
+.osw-link--sm { font-size: var(--fs-caption); }
 
 .osw-r-list { flex: 1; overflow-y: auto; padding: 0 16px 14px; scrollbar-gutter: stable; }
 
@@ -172,10 +172,10 @@ function productOrderCount(p: CartProduct): number {
 .osw-cart-empty-ico {
   width: 52px; height: 52px; border-radius: 16px; background: var(--color-primary-50, #eff6ff);
   color: var(--color-primary-300, #93c5fd); display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 12px; font-size: 20px;
+  margin: 0 auto 12px; font-size: var(--fs-heading-3);
 }
-.osw-cart-empty-t { font-size: 14px; font-weight: 700; color: var(--color-text-secondary, #475569); margin-bottom: 4px; }
-.osw-cart-empty-s { font-size: 12px; line-height: 1.7; }
+.osw-cart-empty-t { font-size: var(--fs-body-sm); font-weight: 700; color: var(--color-text-secondary, #475569); margin-bottom: 4px; }
+.osw-cart-empty-s { font-size: var(--fs-caption); line-height: 1.7; }
 
 .osw-cart-card {
   background: #fff; border: 1px solid var(--color-border-light, #e2e8f0); border-radius: 12px;
@@ -185,20 +185,20 @@ function productOrderCount(p: CartProduct): number {
   display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-bottom: 1px solid #eef2f7;
 }
 .osw-cart-title {
-  min-width: 0; font-size: 14px; font-weight: 800; color: var(--color-text, #1e293b);
+  min-width: 0; font-size: var(--fs-body-sm); font-weight: 800; color: var(--color-text, #1e293b);
   overflow-wrap: anywhere; line-height: 1.45;
 }
 /* 跨订单合并提示：该产品由多张订单汇总而来 */
 .osw-cart-orders {
-  flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--color-warning-600, #d97706);
+  flex-shrink: 0; font-size: var(--fs-caption); font-weight: 700; color: var(--color-warning-600, #d97706);
   background: var(--color-warning-50, #fffbeb); border: 1px solid var(--color-warning-200, #fde68a);
   border-radius: 5px; padding: 0 5px; line-height: 1.6; white-space: nowrap;
 }
-.osw-cart-sum { margin-left: auto; font-size: 12px; color: var(--color-text-muted, #64748b); white-space: nowrap; }
-.osw-cart-sum b { font-family: var(--font-mono); font-size: 14px; font-weight: 800; color: var(--color-primary-600, #2563eb); }
+.osw-cart-sum { margin-left: auto; font-size: var(--fs-caption); color: var(--color-text-muted, #64748b); white-space: nowrap; }
+.osw-cart-sum b { font-family: var(--font-mono); font-size: var(--fs-body-sm); font-weight: 800; color: var(--color-primary-600, #2563eb); }
 .osw-rm {
   flex-shrink: 0; width: 24px; height: 24px; border-radius: 7px; border: none; background: transparent;
-  color: var(--color-text-muted, #94a3b8); cursor: pointer; font-size: 12px;
+  color: var(--color-text-muted, #94a3b8); cursor: pointer; font-size: var(--fs-caption);
   display: flex; align-items: center; justify-content: center; transition: background 0.15s ease, color 0.15s ease;
 }
 .osw-rm:hover { background: var(--color-danger-50, #fef2f2); color: var(--color-danger-500, #dc2626); }
@@ -223,7 +223,7 @@ function productOrderCount(p: CartProduct): number {
 .osw-cell.is-off { opacity: 0.45; }
 .osw-cell-top { display: flex; align-items: center; gap: 6px; }
 .osw-proc {
-  flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--color-text, #1e293b);
+  flex: 1; min-width: 0; font-size: var(--fs-caption); font-weight: 600; color: var(--color-text, #1e293b);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* 工序格统计区：标签 + 数值，两个数值与数量框文字共用同一右对齐轴 */
@@ -231,7 +231,7 @@ function productOrderCount(p: CartProduct): number {
 .osw-total,
 .osw-remain {
   display: flex; align-items: baseline; gap: 6px;
-  font-size: 12px; line-height: 1.5;
+  font-size: var(--fs-caption); line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
 .osw-total i,
@@ -251,7 +251,7 @@ function productOrderCount(p: CartProduct): number {
 .osw-remain.is-zero b { color: var(--color-text-muted, #94a3b8); font-weight: 500; }
 .osw-qty {
   width: 100%; padding: 6px 9px; font-family: var(--font-mono);
-  font-size: 12px; font-weight: 700; text-align: right; color: var(--color-text, #1e293b);
+  font-size: var(--fs-caption); font-weight: 700; text-align: right; color: var(--color-text, #1e293b);
   border: 1px solid #cbd5e1; border-radius: 8px; outline: none;
   font-variant-numeric: tabular-nums; transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }

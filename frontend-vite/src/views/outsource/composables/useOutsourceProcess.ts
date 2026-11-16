@@ -13,6 +13,14 @@ export interface ProcessGroup {
   processes: OrderOutsourceProcess[]
 }
 
+/**
+ * 后端 beile-list 随行下发的「逐 order_item 真实数量」（{order_item_id: 数量}）。
+ *
+ * 该字段本该并入 OutsourceOrderRow（useOutsourceOrders.ts），此处就近声明以把改动
+ * 限制在本文件；旧后端不下发时按可选处理，走下方回退分支，不影响既有展示。
+ */
+type OrderQtyMapCarrier = { item_qty_map?: Record<string, number> | null }
+
 /** 订单外发工序弹窗的业务逻辑 */
 export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null>, emit: (event: 'refresh') => void) {
   const authStore = useAuthStore()
@@ -110,10 +118,39 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
 
   const processRows = computed(() => processes.value)
 
-  /** 某道工序的目标数量（所属 SKU/订单数量） */
+  /** 后端下发的逐 SKU 真实数量（覆盖产品筛选收窄前的全部 order_item；缺省为空对象） */
+  const itemQtyMap = computed<Record<string, number>>(() => {
+    const row = detailData.value as (OutsourceOrderRow & OrderQtyMapCarrier) | null
+    return row?.item_qty_map ?? {}
+  })
+
+  /** 整单全量数量：逐 SKU 求和（映射缺失时退回 items 求和，再退回行数量） */
+  const orderTotalQty = computed(() => {
+    const keys = Object.keys(itemQtyMap.value)
+    if (keys.length > 0) return keys.reduce((sum, k) => sum + (itemQtyMap.value[k] || 0), 0)
+    const items = detailData.value?.items || []
+    if (items.length > 0) return items.reduce((sum, s) => sum + (s.quantity || 0), 0)
+    return detailData.value?.quantity || 0
+  })
+
+  /**
+   * 某道工序的目标数量（所属 SKU 的真实数量）
+   *
+   * 拦哪种错：后端在产品筛选（product_kw）生效时会把 items 收窄为命中的 SKU，并把
+   * 整行 quantity 改成「首个命中 SKU 的量」。旧实现在组内找不到该 SKU 时回退整行
+   * quantity，于是**未命中 SKU 的工序拿到了别的 SKU 的数量**：偏大时一键发货整批
+   * 400，偏小时静默少发。现在只认 order_item 的真实数量，绝不回退整行 quantity。
+   */
   function skuQtyOf(p: OrderOutsourceProcess): number {
+    const perItem = p.order_item_id != null
+      ? itemQtyMap.value[String(p.order_item_id)]
+      : undefined
+    if (typeof perItem === 'number') return perItem
+    // 未绑定 SKU 的历史工序：目标量是整单合计，而不是首个 SKU 的量
+    if (p.order_item_id == null) return orderTotalQty.value
+    // 旧后端未下发 item_qty_map：退回组内数量；仍取不到就是 0（宁可拦下也不多发）
     const group = processGroups.value.find((g) => g.processes.some((x) => x.id === p.id))
-    return group?.skuQty || detailData.value?.quantity || 0
+    return group?.skuQty || 0
   }
 
   /** 某道工序剩余待发数量（目标 - 已发，下限 0） */

@@ -579,6 +579,15 @@ def _build_beile_order_record(
         for item in source_items
     ]
     first_item = source_items[0] if source_items else None
+    # 逐 order_item 的真实数量（全量工厂 SKU，不受 product_kw 收窄影响）。
+    #
+    # 为什么需要独立字段：搜索态下 items 被收窄为命中 SKU、record['quantity'] 变成
+    # 「首个命中 SKU 的量」，而未命中 SKU 的外发工序同样挂在整单上。前端若拿行
+    # quantity 给这些工序兜底，目标量就会取到别的 SKU 的量（偏大 → 批量发货整批
+    # 400；偏小 → 一键发货静默少发）。既有字段语义一个都不动，只补这一份映射。
+    item_qty_map = {
+        str(it.id): (it.quantity or 0) for it in factory_items if it.id is not None
+    }
     record = {
         'id': order.id,
         'order_no': order.order_no,
@@ -589,6 +598,8 @@ def _build_beile_order_record(
         'order_date': _fmt_beile_time(order.order_date),
         'record_type': 'order',
         'items': items_data,
+        # 工序目标量的唯一可信来源：{order_item_id: 数量}，覆盖收窄前的全部 SKU
+        'item_qty_map': item_qty_map,
         'factories': [factory],
         # 湖北订单确认状态：confirmed_at IS NULL 视为「未确认订单」
         'confirmed': order.confirmed_at is not None,

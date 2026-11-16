@@ -8,12 +8,23 @@
 
 权限：
 - outsource_view：查看订单/工序
-- outsource_manage：工序预设 CRUD
+- outsource_manage：湖北外发页面与订单级写操作（按预设生成工序、工序状态推进等）
+- outsource_preset_manage：工序预设的增删改（细粒度码，必须显式授权）
 - outsource_ship：外发工序发货（外协方账号）
 - outsource_receive：确认收货（贝乐账号）
 
 说明：发货/收货原先按「用户名 == 贝乐」硬编码区分，现改为权限点；
 配套授权脚本 scripts/add_outsource_ship_receive_perms.py 必须先于本代码上线执行。
+
+说明（缺陷 #5，授权过宽）：工序预设的增删改原先是只认 outsource_manage，而
+scripts/add_outsource_nav.py 历史上把 outsource_manage 批量授给了全部持有
+beile_order_view / order_manage / stockin_manage 的账号（含贝乐），等于「能看湖北
+订单」就「能删工序预设」。现拆出 outsource_preset_manage：它**不是** outsource_manage
+的子权限（见 scripts/seed_nav.py 的登记说明），否则 User.has_permission 的 children
+继承会把旧授权原样放行，拆码就白拆了。
+
+上线前置：先跑 `python scripts/seed_nav.py` 把该码种入 permission 表，再在 /user 里
+给真正需要维护预设的账号显式勾选（本批不写迁移）。
 """
 import logging
 
@@ -58,6 +69,10 @@ from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# 工序预设增删改的细粒度权限码（与登记处 scripts/seed_nav.py 同源维护）。
+# 单独提常量而不是散写字面量：这五个端点必须口径一致，漏改一个就留下旧通道。
+PERM_PRESET_MANAGE = "outsource_preset_manage"
 
 
 # ==================== 湖北外发订单列表 ====================
@@ -112,7 +127,7 @@ async def list_process_types(
 async def create_process_type(
     data: ProcessTypeCreate,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("outsource_manage")),
+    user: User = Depends(require_permission(PERM_PRESET_MANAGE)),
 ) -> ProcessTypeResponse:
     """创建 SKU 外发工序预设。"""
     async with db_transaction(db, error_map={
@@ -132,7 +147,7 @@ async def create_process_type(
 async def batch_create_process_types(
     data: ProcessTypeBatchCreate,
     db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("outsource_manage")),
+    user: User = Depends(require_permission(PERM_PRESET_MANAGE)),
 ) -> GenerateProcessResponse:
     """为一个 SKU 批量添加多个工序预设（自由输入工序名称，幂等去重）。"""
     async with db_transaction(db, error_map={
@@ -162,7 +177,7 @@ async def update_process_type(
     pt_id: int,
     data: ProcessTypeUpdate,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission("outsource_manage")),
+    _user: User = Depends(require_permission(PERM_PRESET_MANAGE)),
 ) -> ProcessTypeResponse:
     """更新 SKU 外发工序预设（部分更新）。"""
     async with db_transaction(db, error_map={
@@ -182,7 +197,7 @@ async def update_process_type(
 async def delete_process_type(
     pt_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission("outsource_manage")),
+    _user: User = Depends(require_permission(PERM_PRESET_MANAGE)),
 ) -> OrderActionResponse:
     """删除 SKU 外发工序预设。"""
     async with db_transaction(db):
@@ -351,7 +366,7 @@ async def receive_order_processes_batch(
 async def delete_order_process(
     process_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission("outsource_manage")),
+    _user: User = Depends(require_permission(PERM_PRESET_MANAGE)),
 ) -> OrderActionResponse:
     """删除订单外发工序。"""
     async with db_transaction(db):

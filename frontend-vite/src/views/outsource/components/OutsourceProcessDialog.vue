@@ -173,7 +173,7 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text);
 }
 
@@ -197,12 +197,12 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
 }
 .oso-detail-no {
   font-weight: 700;
-  font-size: 16px;
+  font-size: var(--fs-body);
   color: var(--color-text);
   white-space: nowrap;
 }
-.oso-detail-meta-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 14px; }
-.oso-detail-meta-label { color: var(--color-text-muted, #64748b); font-size: 12px; }
+.oso-detail-meta-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: var(--fs-body-sm); }
+.oso-detail-meta-label { color: var(--color-text-muted, #64748b); font-size: var(--fs-caption); }
 .oso-detail-meta-num { color: var(--color-primary-700, #2d5ab8); }
 .oso-detail-overview {
   display: flex;
@@ -215,14 +215,14 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
   white-space: nowrap;
 }
-.oso-detail-progress-text strong { font-size: 16px; color: var(--color-primary-600); }
+.oso-detail-progress-text strong { font-size: var(--fs-body); color: var(--color-primary-600); }
 
 .oso-detail-actions { display: flex; align-items: center; gap: 12px; }
-.oso-detail-hint { font-size: 12px; color: var(--color-text-muted); }
+.oso-detail-hint { font-size: var(--fs-caption); color: var(--color-text-muted); }
 
 .oso-tabs {
   display: inline-flex;
@@ -237,7 +237,7 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
   border-radius: 7px;
   background: transparent;
   color: var(--color-text-secondary, #475569);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -257,13 +257,13 @@ watch([detailOpen, detailDataRef], ([open, data]) => {
   padding: 40px 20px;
   color: var(--color-text-muted);
 }
-.oso-empty span { font-size: 14px; }
+.oso-empty span { font-size: var(--fs-body-sm); }
 
 .oso-status-badge {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   white-space: nowrap;
 }

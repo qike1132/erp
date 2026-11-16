@@ -489,3 +489,87 @@ describe('useOutsourceProcess 快速换单的请求序号（A-M35）', () => {
     expect(src).not.toMatch(/:key="item\.process_type"/)
   })
 })
+
+describe('useOutsourceProcess 工序目标量（产品筛选收窄 items，缺陷 #4）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    grantedPermissions = new Set(['outsource_manage', 'outsource_ship', 'outsource_receive'])
+    currentUsername = 'admin'
+  })
+
+  /**
+   * 后端响应形态：产品筛选只命中「变形金刚」，SQL 侧整单返回后把 items 收窄为命中
+   * SKU，行 quantity 被改成首个命中 SKU 的量（60）。`item_qty_map` 带出全部 SKU 的
+   * 真实数量（变形金刚 60 / 蛋黄派 40）。
+   */
+  const narrowedRow = {
+    id: 9,
+    record_type: 'order',
+    quantity: 60,
+    product_name: '变形金刚',
+    items: [
+      {
+        id: 901,
+        order_id: 9,
+        product_id: 1,
+        product_name: '变形金刚',
+        product_barcode: '690001',
+        quantity: 60,
+        deduct_stock: false,
+        deduct_quantity: 0,
+        note: null,
+      },
+    ],
+    item_qty_map: { '901': 60, '902': 40 },
+  } as unknown as OutsourceOrderRow
+
+  it('未命中 SKU 的工序目标量取自身 order_item 数量，而不是命中 SKU 的量', async () => {
+    vi.mocked(outsourceApi.orderProcesses).mockResolvedValue({
+      success: true,
+      total: 2,
+      data: [
+        makeProcess({ id: 1, order_id: 9, order_item_id: 901, product_id: 1, process_type: '电绣' }),
+        makeProcess({ id: 2, order_id: 9, order_item_id: 902, product_id: 2, process_type: '转印' }),
+      ],
+    } as never)
+
+    const hook = useOutsourceProcess(ref(narrowedRow), () => {})
+    await hook.loadProcesses(9)
+
+    // 修复前：组内找不到「蛋黄派」这个 SKU → 回退整行 quantity=60
+    // → 目标量偏大（批量发货整批 400）或偏小（静默少发），都与真实数量无关
+    expect(hook.processes.value.map((p) => hook.remainingShipQty(p))).toEqual([60, 40])
+    expect(hook.remainingList.value.map((row) => [row.process_type, row.target])).toEqual([
+      ['电绣', 60],
+      ['转印', 40],
+    ])
+  })
+
+  it('后端未下发 item_qty_map 时退回组内数量，不退回整行 quantity', async () => {
+    // 旧后端的响应：items 全量、没有映射。此时组内能找到该 SKU，按 SKU 数量走。
+    const fullRow = {
+      id: 9,
+      record_type: 'order',
+      quantity: 60,
+      product_name: '变形金刚',
+      items: [
+        { id: 901, order_id: 9, product_id: 1, product_name: '变形金刚', product_barcode: null, quantity: 60, deduct_stock: false, deduct_quantity: 0, note: null },
+        { id: 902, order_id: 9, product_id: 2, product_name: '蛋黄派', product_barcode: null, quantity: 40, deduct_stock: false, deduct_quantity: 0, note: null },
+      ],
+    } as unknown as OutsourceOrderRow
+
+    vi.mocked(outsourceApi.orderProcesses).mockResolvedValue({
+      success: true,
+      total: 2,
+      data: [
+        makeProcess({ id: 1, order_id: 9, order_item_id: 901, product_id: 1, process_type: '电绣' }),
+        makeProcess({ id: 2, order_id: 9, order_item_id: 902, product_id: 2, process_type: '转印' }),
+      ],
+    } as never)
+
+    const hook = useOutsourceProcess(ref(fullRow), () => {})
+    await hook.loadProcesses(9)
+
+    expect(hook.processes.value.map((p) => hook.remainingShipQty(p))).toEqual([60, 40])
+  })
+})

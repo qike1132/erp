@@ -54,6 +54,14 @@ NAV_SEED: list[dict] = [
     {'code': 'backup_manage', 'name': '数据备份', 'icon': 'fa-database', 'url': '/backup', 'section': 'system', 'section_name': '系统管理', 'sort_order': 14, 'is_nav': True},
     {'code': 'production_plan_manage', 'name': '管理出货计划', 'icon': None, 'url': None, 'section': None, 'section_name': None, 'sort_order': 0, 'is_nav': False},
     {'code': 'production_summary_manage', 'name': '管理生产报表', 'icon': None, 'url': None, 'section': None, 'section_name': None, 'sort_order': 0, 'is_nav': False},
+    # 缺陷 #5（2026-11-16 上线前审计）：工序预设增删改的细粒度码。
+    #
+    # 登记在此（= parent_id IS NULL 的顶层行）而不是 init_permissions.py 的子权限，
+    # 是**有意为之**：User.has_permission 对「父权限的 children」默认放行
+    # （fastapi_app/shared_models/user.py 的继承规则），若把它挂到 outsource_manage
+    # 之下，则历史上被过宽授予 outsource_manage 的贝乐会原样继承回来，拆码等于没拆。
+    # 顶层行 + 必须显式勾选，才真正收窄。无迁移（本批不写迁移），只登记。
+    {'code': 'outsource_preset_manage', 'name': '维护外发工序预设', 'icon': None, 'url': None, 'section': None, 'section_name': None, 'sort_order': 0, 'is_nav': False},
 ]
 
 _SEED_FIELDS = ('name', 'icon', 'url', 'section', 'section_name', 'sort_order', 'is_nav')

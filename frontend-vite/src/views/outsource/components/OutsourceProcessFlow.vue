@@ -110,14 +110,14 @@ defineProps<{
   background: #f8fafc;
   border-bottom: 1px solid #e8ecf1;
 }
-.oso-proc-sku { font-weight: 700; font-size: 14px; color: var(--color-text); }
-.oso-proc-qty { font-size: 12px; color: var(--color-text-muted); }
-.oso-proc-count { margin-left: auto; font-size: 12px; color: var(--color-text-muted); }
+.oso-proc-sku { font-weight: 700; font-size: var(--fs-body-sm); color: var(--color-text); }
+.oso-proc-qty { font-size: var(--fs-caption); color: var(--color-text-muted); }
+.oso-proc-count { margin-left: auto; font-size: var(--fs-caption); color: var(--color-text-muted); }
 
 .oso-proc-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .oso-proc-table th,
 .oso-proc-table td {
@@ -126,7 +126,7 @@ defineProps<{
   border-bottom: 1px solid #eef1f5;
 }
 .oso-proc-table th {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-muted);
   background: #fafbfc;
@@ -138,7 +138,7 @@ defineProps<{
 .oso-col-qty { width: 11%; }
 .oso-col-time { width: 15%; }
 .oso-col-status { width: 11%; }
-.oso-time-val { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
+.oso-time-val { font-size: var(--fs-caption); color: var(--color-text-secondary); white-space: nowrap; }
 .oso-remain { color: var(--color-warning-600); font-weight: 700; }
 
 .oso-proc-seq {
@@ -152,7 +152,7 @@ defineProps<{
   border-radius: 6px;
   background: #f1f5f9;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
 }
 .oso-proc-row--shipped .oso-proc-seq { background: var(--color-primary-50); color: var(--color-primary-600); }
@@ -163,7 +163,7 @@ defineProps<{
 }
 .oso-proc-cum {
   margin-left: 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 
@@ -171,7 +171,7 @@ defineProps<{
 .oso-qty-input {
   width: 88px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: white;
@@ -183,7 +183,7 @@ defineProps<{
   display: inline-block;
   padding: 2px 9px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   white-space: nowrap;
 }
