@@ -167,7 +167,10 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
     customer = customer.strip()[:100]
     product = product.strip()[:100]
 
-    where_clauses = ["(o.is_deleted = false OR o.is_deleted IS NULL)"]
+    # 软删谓词必须写成 IS NOT TRUE：partial 索引（shared_models/order.py:131 声明）
+    # 的谓词就是 `is_deleted IS NOT TRUE`，PG 不做谓词蕴含推断，写成
+    # `= false OR IS NULL` 语义等价却吃不到该索引（导出侧 .isnot(True) 已同款）。
+    where_clauses = ["o.is_deleted IS NOT TRUE"]
     # 明细级筛选（产品/工厂）：CTE 用全量 where 选订单，外层用它收窄到匹配的 SKU 行
     item_where_clauses: list[str] = []
     params: dict[str, object] = {}
@@ -303,7 +306,10 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
         LIMIT :limit OFFSET :offset""",  # nosec B608
         qty_sql_template="SELECT COALESCE(SUM(sr.quantity), 0) FROM stock_return sr JOIN product p ON sr.product_id = p.id WHERE 1=1 {where_sql}",
         row_mapper=lambda row: {
-            'record_id': row.record_id, 'record_no': row.return_no or '',
+            # 必须取别名 record_no：SQL 侧写的是 `sr.return_no AS record_no`，
+            # Row 上没有 return_no 列，取 row.return_no 会抛 AttributeError
+            # （_query_logs_generic 无兜底 → 只要库里有 active 退货就整页 500）。
+            'record_id': row.record_id, 'record_no': row.record_no or '',
             'return_date': row.return_date or '-', 'customer': row.customer or '',
             'product_name': row.product_name or '', 'product_barcode': row.product_barcode or '',
             'quantity': row.quantity or 0,
@@ -460,7 +466,9 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
     product = product.strip()[:100]
 
     where_clauses = ["so.quantity > 0", "so.stockin_id IS NULL",
-                     "(so.order_id IS NULL OR o2.is_deleted = false OR o2.is_deleted IS NULL)"]
+                     # IS NOT TRUE 而非 `= false OR IS NULL`：与 partial 索引谓词同形
+                     # （shared_models/order.py:131），否则 PG 不做谓词蕴含推断、吃不到索引
+                     "(so.order_id IS NULL OR o2.is_deleted IS NOT TRUE)"]
     params: dict[str, object] = {}
 
     if customer:
@@ -525,7 +533,9 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
     product = product.strip()[:100]
 
     where_clauses = ["so.stockin_id IS NOT NULL",
-                     "(o.is_deleted = false OR o.is_deleted IS NULL)",
+                     # IS NOT TRUE 而非 `= false OR IS NULL`：与 partial 索引谓词同形，
+                     # PG 不做谓词蕴含推断，旧写法语义等价但吃不到索引
+                     "o.is_deleted IS NOT TRUE",
                      # 与导出 _get_deduction_logs（第八轮审计口径）对齐：净量>0，
                      # 全退抵扣（quantity==returned_quantity）不以 0 数量计入 total_count
                      "(so.quantity - so.returned_quantity) > 0"]

@@ -297,3 +297,255 @@ class TestExportTypeParity:
 
         for attr in _EXPORT_METHODS.values():
             assert callable(getattr(ReportExporter, attr)), attr
+
+
+# ============================================================
+# 2026-11-16 上线前审计的 5 个缺陷：回归测试
+# ============================================================
+
+# 与 report_service.get_return_logs 的 SELECT 别名逐一对应（含 total_count）：
+# 真实 SQLAlchemy Row 才会像线上那样「没有哪一列就取不到哪个属性」。
+_RETURN_ROW_SQL = (
+    "SELECT 1 AS record_id, 'RT-2026-1001' AS record_no, "
+    "'2026-10-13 09:30' AS return_date, '退货客户甲' AS customer, "
+    "'退货产品甲' AS product_name, 'SKU-RT-1' AS product_barcode, "
+    "3 AS quantity, '破损' AS reason, '已换货' AS note, 1 AS total_count"
+)
+
+
+def _real_return_rows():
+    """用内存 sqlite 造真实 sqlalchemy.engine.Row（不连任何业务库）"""
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine('sqlite://')
+    try:
+        with engine.connect() as conn:
+            return conn.execute(text(_RETURN_ROW_SQL)).fetchall()
+    finally:
+        engine.dispose()
+
+
+def _configure_orm_mappers():
+    """构建订单查询前先配置 mapper。
+
+    ``_get_order_logs`` 引用 ``Order.order_stockouts``——该属性由 StockOut 的 backref
+    在 **mapper 配置时**注入，未经配置的 Order 类上没有它（单跑本文件会 AttributeError）。
+    """
+    from sqlalchemy.orm import configure_mappers
+
+    configure_mappers()
+
+
+class _FakeResult:
+    def __init__(self, rows=None, scalar_value=0):
+        self._rows = rows
+        self._scalar_value = scalar_value
+
+    def fetchall(self):
+        return self._rows
+
+    def scalar(self):
+        return self._scalar_value
+
+
+class _FakeSession:
+    """只实现 _query_logs_generic 用到的 execute（明细查询返回行、数量查询返回标量）"""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def execute(self, stmt, params=None):
+        if 'total_count' in str(stmt):
+            return _FakeResult(rows=self._rows)
+        return _FakeResult(scalar_value=3)
+
+
+class TestReturnLogsRecordNoMapping:
+    """缺陷 1（High）：退货流水只要库里有 active 退货就整页 500。
+
+    拦的错：SQL 别名写的是 `sr.return_no AS record_no`，row_mapper 却取
+    `row.return_no` —— SQLAlchemy Row 没有 return_no 列，访问即
+    `AttributeError: Could not locate column in row for column 'return_no'`，
+    而 _query_logs_generic 无兜底，整页 500（筛不筛选都一样）。
+    本用例**不 mock _query_logs_generic**：真实 Row 走完整查询/映射路径。
+    """
+
+    @pytest.mark.asyncio
+    async def test_return_logs_map_record_no_alias(self):
+        result = await get_return_logs(_FakeSession(_real_return_rows()))
+
+        assert len(result['logs']) == 1
+        log = result['logs'][0]
+        assert log['record_no'] == 'RT-2026-1001'
+        assert log['record_id'] == 1
+        assert log['return_date'] == '2026-10-13 09:30'
+        assert log['quantity'] == 3
+        assert log['note_display'] == '破损；已换货'
+        assert result['stats']['total_count'] == 1
+
+
+class TestExportDateFilterStrict:
+    """缺陷 2（High）：导出侧非法日期被静默忽略 → 拿到「全量」Excel 却以为已筛选。
+
+    拦的错：`_apply_date_filters` 里 `except ValueError: logger.warning` 后返回
+    未过滤 query，导出 200 + 全量数据（屏幕侧同样的脏值会 400）。筛错方向比报错
+    危险得多：用户以为报表已按区间过滤，对账时多出来的行无法察觉。
+    """
+
+    def test_invalid_start_date_raises(self):
+        from sqlalchemy import select
+
+        from fastapi_app.shared.report_data_service import _apply_date_filters
+        from fastapi_app.shared_models import Order
+
+        with pytest.raises(ValueError, match='开始格式错误'):
+            _apply_date_filters(select(Order), Order.order_date, '2026/10/01', '')
+
+    def test_invalid_end_date_raises(self):
+        from sqlalchemy import select
+
+        from fastapi_app.shared.report_data_service import _apply_date_filters
+        from fastapi_app.shared_models import Order
+
+        with pytest.raises(ValueError, match='结束格式错误'):
+            _apply_date_filters(select(Order), Order.order_date, '', '2026-13-01')
+
+    def test_export_path_surfaces_invalid_date(self):
+        """导出入口 get_all_logs_data 必须把 ValueError 抛出去（端点映射 400）"""
+        from fastapi_app.shared.report_data_service import get_all_logs_data
+
+        _configure_orm_mappers()
+        with pytest.raises(ValueError):
+            get_all_logs_data(MagicMock(), 'order', start_date='2026/10/01')
+        with pytest.raises(ValueError):
+            get_all_logs_data(MagicMock(), 'return', end_date='2026-13-01')
+
+
+class TestExportQueryFailureNotSilent:
+    """缺陷 5（Low）：导出查询异常被吞成「成功导出空表」。
+
+    拦的错：get_all_logs_data 的 `except (ValueError, TypeError, OSError): return [], {}`
+    把查询失败变成「0 行」，两个调用方（export_report_to_excel / report_tasks）只看
+    total_count==0 → 照常生成仅表头的 xlsx 并报成功。查询失败必须与零行分开。
+    """
+
+    def test_query_error_propagates_instead_of_empty_export(self):
+        from fastapi_app.shared.report_data_service import get_all_logs_data
+
+        session = MagicMock()
+        session.execute.side_effect = TypeError('驱动层失败')
+
+        with pytest.raises(TypeError):
+            get_all_logs_data(session, 'stockin')
+
+
+class TestOrderNoteParity:
+    """缺陷 3（Medium）：订单流水「备注」屏幕与导出两口径。
+
+    拦的错：导出只取 order.note 并在头部拼「订单X抵扣备货Y」，屏幕是
+    `item.note or order.note` —— 同一行两边备注不同，带 SKU 备注的行导出后
+    SKU 备注整列丢失；抵扣串还污染了备注列。
+    """
+
+    @staticmethod
+    def _screen_row(item_note: str, order_note: str):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            order_id=7, item_id=11, order_no='SO-2026-0007',
+            order_date='2026-10-13 09:00', customer='备注客户',
+            product_name='备注产品', product_barcode='SKU-NOTE-1',
+            quantity=2, item_note=item_note, order_note=order_note,
+            item_count=1, order_total_qty=2,
+        )
+
+    @staticmethod
+    def _export_rows(item_note: str, order_note: str):
+        """走真实 _get_order_logs（伪会话只提供两处 execute 的返回值）"""
+        from datetime import UTC, datetime
+        from types import SimpleNamespace
+
+        from fastapi_app.shared.report_data_service import _get_order_logs
+
+        _configure_orm_mappers()
+        order = SimpleNamespace(
+            id=7, order_no='SO-2026-0007', customer='备注客户', status='待备货',
+            order_date=datetime(2026, 10, 13, 9, 0, tzinfo=UTC),
+            quantity=4, note=order_note, product_id=1,
+            order_stockouts=[SimpleNamespace(quantity=3, returned_quantity=1, stockin_id=5)],
+        )
+        item = SimpleNamespace(
+            id=11, quantity=2, product_id=1, product_name='备注产品',
+            product_barcode='SKU-NOTE-1', note=item_note,
+        )
+        prod = SimpleNamespace(name='备注产品', barcode='SKU-NOTE-1')
+
+        stats_result = MagicMock()
+        stats_result.one.return_value = (1, 2, 0, 0)
+        session = MagicMock()
+        session.execute.side_effect = [stats_result, iter([(order, item, prod)])]
+
+        logs, _stats = _get_order_logs(session, '', '', '', '', '', '')
+        return logs
+
+    @pytest.mark.asyncio
+    async def test_note_parity_and_deduction_split(self, mock_async_db):
+        with _patch_generic() as m:
+            await get_order_logs(mock_async_db)
+        screen = m.call_args.kwargs['row_mapper'](
+            self._screen_row(item_note='SKU 备注甲', order_note='订单备注乙'))
+
+        exported = self._export_rows(item_note='SKU 备注甲', order_note='订单备注乙')
+
+        assert screen['note'] == 'SKU 备注甲'
+        assert exported[0]['note'] == 'SKU 备注甲'
+        assert exported[0]['deduction_note'] == '订单4抵扣备货2'
+        assert '抵扣备货' not in exported[0]['note']
+
+    def test_empty_item_note_falls_back_to_order_note(self):
+        exported = self._export_rows(item_note='', order_note='订单备注乙')
+
+        assert exported[0]['note'] == '订单备注乙'
+
+    def test_exporter_renders_deduction_note_in_own_column(self):
+        import io
+
+        from openpyxl import load_workbook
+
+        from utils.report_exporter import ReportExporter
+
+        data = ReportExporter().export_order_logs([{
+            'order_date': '2026-10-13 09:00', 'order_no': 'SO-2026-0007',
+            'customer': '备注客户', 'product_name': '备注产品',
+            'product_barcode': 'SKU-NOTE-1', 'quantity': 2,
+            'note': 'SKU 备注甲', 'deduction_note': '订单4抵扣备货2',
+        }])
+        ws = load_workbook(io.BytesIO(data)).active
+
+        assert [c.value for c in ws[1]][-2:] == ['备注', '抵扣说明']
+        assert ws.cell(row=2, column=7).value == 'SKU 备注甲'
+        assert ws.cell(row=2, column=8).value == '订单4抵扣备货2'
+
+
+class TestSoftDeletePredicateMatchesPartialIndex:
+    """缺陷 4（Low）：软删谓词 `= false OR IS NULL` 与 partial 索引谓词不匹配。
+
+    拦的错：改回 `(x.is_deleted = false OR x.is_deleted IS NULL)` —— 语义等价，
+    但 PG 不做谓词蕴含推断，吃不到 shared_models/order.py:131 声明的
+    `postgresql_where=text("is_deleted IS NOT TRUE")` 索引（查询全表扫）。
+    直接对拼进查询的 SQL 文本断言，钉住三条原生 SQL 路径。
+    """
+
+    @pytest.mark.asyncio
+    async def test_all_log_queries_use_is_not_true(self, mock_async_db):
+        cases = [
+            ('订单流水', get_order_logs),
+            ('出货流水', get_stockout_logs),
+            ('抵扣流水', get_deduction_logs),
+        ]
+        for name, endpoint in cases:
+            with _patch_generic() as m:
+                await endpoint(mock_async_db)
+            where_sql = ' AND '.join(m.call_args.kwargs['base_where'])
+            assert 'is_deleted IS NOT TRUE' in where_sql, f'{name}缺 IS NOT TRUE: {where_sql}'
+            assert '= false OR' not in where_sql, f'{name}仍在用 `= false OR`: {where_sql}'

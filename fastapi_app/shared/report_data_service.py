@@ -9,7 +9,7 @@
 退货）的源表本身就是 SKU 粒度（``product_id`` 在主表上），无需展开。
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.utils import parse_date_strict
 
 _YIELD_PER_BATCH = 500
 _MAX_EXPORT_ROWS = 10000  # 报表导出最大行数，避免内存溢出
@@ -57,46 +58,47 @@ def get_all_logs_data(
 
     Returns:
         (logs, stats) - logs 为记录列表，stats 为统计摘要
+
+    Raises:
+        ValueError: 筛选参数非法（如日期格式错误）——调用方据此返回 4xx。
+        Exception: 查询本身失败时**必须冒泡**（见下）。
     """
-    try:
-        logger.info(f'开始获取报表数据, 类型: {report_type}')
-        customer = customer.strip()[:100]
-        product = product.strip()[:100]
-        status = status.strip()[:20]
+    # 这里刻意不兜底异常：原实现在此 `except (ValueError, TypeError, OSError)` 后返回
+    # `[], {}`，调用方（report_service.export_report_to_excel / tasks.report_tasks）只看
+    # total_count==0，于是「查询失败」被渲染成「成功导出仅表头的空表」，用户以为该区间
+    # 确实没有数据。失败必须与零行分开：冒泡到端点成 4xx/5xx。
+    logger.info(f'开始获取报表数据, 类型: {report_type}')
+    customer = customer.strip()[:100]
+    product = product.strip()[:100]
+    status = status.strip()[:20]
 
-        if report_type == 'order':
-            return _get_order_logs(session, customer, product, status, start_date, end_date, factory)
-        elif report_type == 'stockin':
-            return _get_stockin_logs(session, customer, product, start_date, end_date, factory)
-        elif report_type == 'stockout':
-            return _get_stockout_logs(session, customer, product, start_date, end_date, factory)
-        elif report_type == 'deduction':
-            return _get_deduction_logs(session, customer, product, start_date, end_date, factory)
-        elif report_type == 'return':
-            return _get_return_logs(session, customer, product, start_date, end_date, factory)
-        else:
-            logger.warning(f'未知报表类型: {report_type}')
-            return [], {}
-
-    except (ValueError, TypeError, OSError) as e:
-        logger.error(f'获取报表数据错误: {e!s}', exc_info=True)
+    if report_type == 'order':
+        return _get_order_logs(session, customer, product, status, start_date, end_date, factory)
+    elif report_type == 'stockin':
+        return _get_stockin_logs(session, customer, product, start_date, end_date, factory)
+    elif report_type == 'stockout':
+        return _get_stockout_logs(session, customer, product, start_date, end_date, factory)
+    elif report_type == 'deduction':
+        return _get_deduction_logs(session, customer, product, start_date, end_date, factory)
+    elif report_type == 'return':
+        return _get_return_logs(session, customer, product, start_date, end_date, factory)
+    else:
+        logger.warning(f'未知报表类型: {report_type}')
         return [], {}
 
 
 def _apply_date_filters(query, date_field, start_date, end_date):
+    """日期区间筛选；非法日期直接抛 ValueError，绝不静默跳过。
+
+    原实现把解析失败吞成 logger.warning 后返回未过滤的 query：用户传
+    `2026/10/01`、`2026-13-01` 这类脏值时会拿到「全量」Excel 却以为已按日期筛选，
+    对账多行/缺行都无法察觉。改为与屏幕侧同源（services/report_service 用的
+    parse_date_strict），让 ValueError 冒泡到导出端点映射 400。
+    """
     if start_date:
-        try:
-            start = datetime.strptime(start_date, '%Y-%m-%d')
-            query = query.where(date_field >= start)
-        except ValueError:
-            # 非法日期参数被忽略时留痕，避免静默过滤失败难以排查
-            logger.warning('非法日期参数被忽略: start_date=%r', start_date)
+        query = query.where(date_field >= parse_date_strict(start_date, '开始'))
     if end_date:
-        try:
-            end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-            query = query.where(date_field < end)
-        except ValueError:
-            logger.warning('非法日期参数被忽略: end_date=%r', end_date)
+        query = query.where(date_field < parse_date_strict(end_date, '结束') + timedelta(days=1))
     return query
 
 
@@ -132,9 +134,9 @@ def _apply_order_filters(query, customer, product, status, start_date, end_date,
     SKU 产品」（见 ``_get_order_logs``），故条件天然落到明细行 —— 任一 SKU 命中即算
     命中，与屏幕口径一致。产品条件**不走**共享的 ``_apply_product_filter``，理由见下。
     """
-    # 与屏幕口径对齐（report_service.get_order_logs 的 "(o.is_deleted = false OR
-    # o.is_deleted IS NULL)"）：软删订单不进导出，否则导出数字会大于页面显示值。
-    # 该列可空，用 IS NOT TRUE 同时覆盖 false 与 NULL。
+    # 与屏幕口径对齐（report_service.get_order_logs 的 "o.is_deleted IS NOT TRUE"）：
+    # 软删订单不进导出，否则导出数字会大于页面显示值。
+    # 该列可空，用 IS NOT TRUE 同时覆盖 false 与 NULL，且与 partial 索引谓词同形。
     query = query.where(Order.is_deleted.isnot(True))
     if customer:
         query = query.where(Order.customer.like(f'%{escape_like(customer)}%'))
@@ -157,9 +159,9 @@ def _apply_order_filters(query, customer, product, status, start_date, end_date,
         )
     query = _apply_factory_filter(query, factory)
     if status:
-        # 与屏幕端（report_service.get_order_logs）同口径：非法状态必须报错。
-        # 必须用 BusinessError：本函数外层的 get_all_logs_data 会吞掉 ValueError
-        # 并返回空结果，端点拿不到 400，只会导出一个空 Excel。
+        # 与屏幕端（report_service.get_order_logs）同口径、同异常类型：非法状态一律
+        # 抛 BusinessError，避免导出侧 500、屏幕侧 400 的分叉（此前这里靠外层
+        # get_all_logs_data 吞掉 ValueError 才是「空表成功」，该兜底已删）。
         if status not in VALID_ORDER_STATUSES:
             raise BusinessError(f'状态参数无效: {status}')
         query = query.where(Order.status == status)
@@ -236,14 +238,21 @@ def _get_order_logs(session, customer, product, status, start_date, end_date, fa
             logger.warning('订单报表导出达到最大行数 %d，已截断', _MAX_EXPORT_ROWS)
             break
         deducted_quantity = sum(so.quantity - so.returned_quantity for so in order.order_stockouts if so.stockin_id) if hasattr(order, 'order_stockouts') and order.order_stockouts else 0
-        note = order.note or ''
-        if deducted_quantity > 0:
-            # order.quantity 为全部 SKU 之和，抵扣备注是订单级信息，逐 SKU 行重复展示
-            deduction_note = f'订单{order.quantity}抵扣备货{deducted_quantity}'
-            note = f'{deduction_note}，{note}' if note else deduction_note
         row = _order_log_row(order, item, prod)
-        row['note'] = note
+        # 备注口径与屏幕 report_service.get_order_logs 同源：item.note 优先回退 order.note
+        # （屏幕 row_mapper 就是 `item_note or order_note`）。原实现只取 order.note 并在
+        # 头部拼「订单X抵扣备货Y」，同一行页面显示 SKU 备注、Excel 却显示订单备注加抵扣
+        # 串：两口径不一致，SKU 备注整列丢失。
+        item_note = (item.note if item is not None else '') or ''
+        order_note = order.note or ''
+        row['item_note'] = item_note
+        row['order_note'] = order_note
+        row['note'] = item_note or order_note
         row['deducted_quantity'] = deducted_quantity
+        # 抵扣是订单级信息（order.quantity 为全部 SKU 之和），逐 SKU 行重复展示；
+        # 单独下发到 deduction_note，由导出器渲染独立列——不污染 note。
+        row['deduction_note'] = (
+            f'订单{order.quantity}抵扣备货{deducted_quantity}' if deducted_quantity > 0 else '')
         logs.append(row)
 
     stats = {

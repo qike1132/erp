@@ -15,11 +15,13 @@ from utils.report_exporter import ReportExporter, generate_filename
 
 # (导出方法, 工作表名, 表头, 行值取值键)
 # 2026-10-13：表头补「单号/订单号」与「条码」两列（把行里已有的字段渲染出来）。
+# 2026-11-16：订单流水补「抵扣说明」列——抵扣串原先被拼在备注里，与屏幕两口径；
+# 现由 report_data_service 单独下发 deduction_note，导出器渲染独立列。
 _CASES = [
     (
         'export_order_logs', '订单流水',
-        ['下单时间', '订单号', '客户', '产品名称', '条码', '数量', '备注'],
-        ['order_date', 'order_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note'],
+        ['下单时间', '订单号', '客户', '产品名称', '条码', '数量', '备注', '抵扣说明'],
+        ['order_date', 'order_no', 'customer', 'product_name', 'product_barcode', 'quantity', 'note', 'deduction_note'],
     ),
     (
         'export_stockin_logs', '备货流水',

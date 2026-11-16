@@ -49,7 +49,7 @@ class ReportExporter:
         ws.title = '订单流水'
 
         headers = [
-            '下单时间', '订单号', '客户', '产品名称', '条码', '数量', '备注'
+            '下单时间', '订单号', '客户', '产品名称', '条码', '数量', '备注', '抵扣说明'
         ]
 
         self._write_sheet(ws, headers, logs, self._format_order_row)
@@ -62,6 +62,7 @@ class ReportExporter:
         ws.column_dimensions['E'].width = 16  # 条码
         ws.column_dimensions['F'].width = 11  # 数量
         ws.column_dimensions['G'].width = 40  # 备注
+        ws.column_dimensions['H'].width = 24  # 抵扣说明
 
         return self._save_workbook(wb)
 
@@ -279,7 +280,10 @@ class ReportExporter:
             log.get('product_name', ''),
             log.get('product_barcode', ''),
             log.get('quantity', 0),
-            log.get('note', '')
+            log.get('note', ''),
+            # 抵扣说明单独一列：数据源（report_data_service）已把它从 note 拆出来，
+            # 备注列只放 SKU/订单备注，与屏幕口径一致
+            log.get('deduction_note', '')
         ]
 
     def _format_stockin_row(self, log: dict) -> list:
