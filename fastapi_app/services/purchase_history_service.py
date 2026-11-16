@@ -60,6 +60,9 @@ async def save_query(db: AsyncSession, data: dict, user_id: int, username: str) 
         creator_name=username,
     )
     db.add(sq)
+    # 自增 id 与 Python 侧 default(create_time) 都要 flush 之后才有值，
+    # 原来直接 to_dict() 会让响应里的 id/create_time 恒为 null（审计 A-53）。
+    await db.flush()
     return sq.to_dict()
 
 

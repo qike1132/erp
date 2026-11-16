@@ -77,6 +77,10 @@ class _FakeDb:
 # ① 成品库存端点（纯同步，直接行为断言）
 # ---------------------------------------------------------------------------
 
+    async def scalar(self, _query):
+        """导出前现在会先 COUNT 判上限（ensure_within_export_limit）——补最小桩。"""
+        return len(getattr(self, 'records', []) or [])
+
 def test_finished_stock_excel_sanitizes_formula_cells():
     from fastapi_app.api.v1.endpoints.finished_stock import _build_finished_stock_excel
 

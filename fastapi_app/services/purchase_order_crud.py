@@ -156,6 +156,11 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
             # 来源 BOM 作用域（默认BOM / 各角色）：写进备注，采购员能看出这条需求由谁产生。
             # 无 source_role（如手工单、旧路径）时保持 remark 原样，不产生多余文本。
             remark=item_data.get('remark') or _scope_remark(item_data.get('source_role')),
+            # 产品条码（2026-11-16 审计 A-52）：这一列此前全仓零写入，
+            # 于是 /orders/completed?barcode= 的 EXISTS 子查询永远不命中。
+            # 这里承接调用方给的条码（BOM 生成路径来自 SKU 快照的 product_barcode）；
+            # 上游没给时保持 NULL，不伪造。
+            barcode=item_data.get('barcode') or item_data.get('product_barcode') or None,
         )
         db.add(poi)
         total_amount += amount

@@ -185,6 +185,23 @@ def test_no_arq_registration():
 
 # ===== 删空 BOM → 撤销该产品 pending 采购单（2026-10-10 规则） =====
 
+class _Savepoint:
+    """`db.begin_nested()` 的 async 上下文管理器替身（撤销链逐单隔离用）。"""
+
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
+def _attach_savepoint(db):
+    """给 AsyncMock 会话补上 begin_nested()（AsyncMock 默认返回 coroutine，不能 async with）。"""
+    db.begin_nested = lambda: _Savepoint()
+    return db
+
+
+
 class _FakeResult:
     """极简 DB 结果桩：支持 .first() / .scalars().unique().all() / .all()。"""
 
@@ -262,7 +279,7 @@ async def test_revoke_deletes_pending_pos_and_resets_source_orders():
     order_obj.id = 68939
     order_obj.status = '已备货'
 
-    db = AsyncMock()
+    db = _attach_savepoint(AsyncMock())
     db.execute = AsyncMock(side_effect=[
         _FakeResult(scalars_list=[po_hit, po_other]),   # pending 采购单
         _FakeResult(rows=[(501, 68939)]),               # sku 行（source_record_type='order'）
@@ -320,7 +337,7 @@ async def test_revoke_for_stockin_deletes_pos_and_resets_source_orders():
     order_obj.id = 68939
     order_obj.status = '已备货'
 
-    db = AsyncMock()
+    db = _attach_savepoint(AsyncMock())
     db.execute = AsyncMock(side_effect=[
         _FakeResult(rows=[(601,)]),                  # sku：引用该备货的 pending 采购单 id
         _FakeResult(scalars_list=[po]),              # pending 采购单
@@ -352,7 +369,7 @@ async def test_revoke_for_order_deletes_pos_and_resets_other_orders():
     other_order.id = 68940
     other_order.status = '已备货'
 
-    db = AsyncMock()
+    db = _attach_savepoint(AsyncMock())
     db.execute = AsyncMock(side_effect=[
         _FakeResult(rows=[(701,)]),                    # sku：引用该订单的 pending 采购单 id
         _FakeResult(scalars_list=[po]),                # pending 采购单
@@ -484,3 +501,5 @@ async def test_auto_generation_logs_expected_business_failure(monkeypatch, caplo
     assert 'SOURCE_INVALID' in caplog.text
     assert '历史来源歧义' in caplog.text
     generate.assert_awaited_once()
+
+

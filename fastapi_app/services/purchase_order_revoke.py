@@ -46,8 +46,18 @@ async def _revoke_targets(db: AsyncSession, targets: list) -> dict:
         )).all() if sid
     }
 
+    failed_po_ids: list[int] = []
     for po in targets:
-        await delete_purchase_order(db, po.id)  # 一并清明细 + SKU 快照
+        # 逐单 savepoint 隔离（2026-11-16 上线前审计 A-27）：原来一张单删不掉
+        # （已有来料登记 / 并发已删 / 外键）会让**整批**回滚，该订单其余 pending 单
+        # 全部残留成孤儿，而 handler 又自吞异常、死信不落盘 —— 只留一条 ERROR 日志。
+        # 口径同 services/purchase/bom_sync.py 的逐单隔离。
+        try:
+            async with db.begin_nested():
+                await delete_purchase_order(db, po.id)  # 一并清明细 + SKU 快照
+        except Exception as exc:  # broad-except: 逐单隔离，单张失败不得拖垮其余单
+            failed_po_ids.append(po.id)
+            logger.error('撤销 pending 采购单失败 po_id=%s（该单已回滚）: %s', po.id, exc)
 
     orders_reset = 0
     if order_ids:
@@ -62,6 +72,10 @@ async def _revoke_targets(db: AsyncSession, targets: list) -> dict:
                 orders_reset += 1
         await db.flush()
 
+    if failed_po_ids:
+        # 失败单必须与「无变化」分开表达：混进 revoked 里，上游就只看得到成功数。
+        return {'revoked': len(targets) - len(failed_po_ids), 'orders_reset': orders_reset,
+                'failed_po_ids': failed_po_ids}
     return {'revoked': len(targets), 'orders_reset': orders_reset}
 
 

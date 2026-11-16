@@ -25,7 +25,10 @@ from fastapi_app.services.purchase._common import (
     fetch_po_sku_lines_map,
     fetch_po_sku_pids_map,
 )
-from fastapi_app.services.purchase_order_crud import _recalc_item_total_price
+from fastapi_app.services.purchase_order_crud import (
+    _recalc_item_total_price,
+    _scope_remark,
+)
 from fastapi_app.services.purchase_order_generate import (
     _load_bom_context,
     _load_product_names,
@@ -142,11 +145,15 @@ def _inherit_fields(
 
     fallback_pool: dict[tuple, tuple] = {}
     for key, entries in pool.items():
-        for loss_rate, unit_price, _remark, _quantity, _unit_usage in entries:
+        for loss_rate, unit_price, remark, _quantity, _unit_usage in entries:
             if loss_rate is not None or unit_price is not None:
                 fb = _fallback_key(key)
                 if fb not in fallback_pool:
-                    fallback_pool[fb] = (loss_rate, unit_price)
+                    # remark 也要带进回退池（2026-11-16 上线前审计 A-23）：
+                    # 改部位/新增行只能走回退键，原来这里把 remark 丢掉，
+                    # 于是「来源BOM：<角色>」在重建后变成 NULL，与生成路径
+                    # （purchase_order_crud.py:158 写 _scope_remark）不同源。
+                    fallback_pool[fb] = (loss_rate, unit_price, remark)
 
     assigned: set[int] = set()
     for item in target:
@@ -166,12 +173,14 @@ def _inherit_fields(
             continue
         fb = _fallback_key(_target_key(item))
         if fb not in reused:
-            reused[fb] = fallback_pool.get(fb, (None, None))
-        loss_rate, unit_price = reused[fb]
+            reused[fb] = fallback_pool.get(fb, (None, None, None))
+        loss_rate, unit_price, remark = reused[fb]
         if loss_rate is not None:
             item['loss_rate'] = loss_rate
         if unit_price is not None:
             item['unit_price'] = unit_price
+        if remark:
+            item['remark'] = remark
 
 
 async def _load_sku_lines_map(
@@ -294,7 +303,10 @@ async def _rewrite_items(
             quantity=Decimal(str(t.get('quantity') or 0)),
             unit_price=t.get('unit_price'),
             loss_rate=t.get('loss_rate'),
-            remark=t.get('remark'),
+            # 与生成路径 purchase_order_crud.py:158 同口径：没有任何备注时补
+            # 「来源BOM：<角色>」，否则重建后整个 remark 列变 NULL（审计 A-23）。
+            remark=t.get('remark') or _scope_remark(t.get('source_role')),
+            barcode=t.get('barcode') or t.get('product_barcode') or None,
             material_category=t.get('category') or '',
             part_name=t.get('part_name'),
             role_id=t.get('role_id'),
