@@ -568,6 +568,7 @@ export interface BatchStockoutResultItem {
 
 export interface image_post {
   file: string
+  version?: number | null
 }
 
 export interface Body_async_import_backup_api_v1_backup_async_import_post {

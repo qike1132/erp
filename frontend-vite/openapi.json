@@ -89,7 +89,7 @@
           "健康检查"
         ],
         "summary": "Readiness Probe",
-        "description": "K8s readiness probe - 检查所有依赖就绪\n\n失败时K8s将Pod从Service摘除，不接收流量。\n无缓存，实时检查DB+Redis。\n\nB2（2026-10-26）：额外要求「没有悬而未决的数据库还原」——恢复中断标记存在\n或不可读时，数据库可能是空壳，正常业务流量必须被挡住；进程与恢复端点保持\n可用，运维才有受控通道回滚并清除标记。\n\n2026-11-04（目标库隔离）：判定改由 ``restore_readiness`` 做「标记目标库 vs\n当前运行库」比较 —— 恢复演练写在 scratch 库上的标记不得把生产就绪打成 503。\n响应里两个字段分工明确：``restore_pending`` 保持旧契约（是否**阻断本库**\nreadiness，等价于是否需要摘流量），``restore_marker_present`` 才是「磁盘上\n有没有标记」（含演练/跨库标记），另附 ``restore`` 明细，保证误报与真故障都可见。",
+        "description": "K8s readiness probe - 检查所有依赖就绪\n\n失败时K8s将Pod从Service摘除，不接收流量。\n无缓存，实时检查DB+Redis。\n\nB2（2026-10-26）：额外要求「没有悬而未决的数据库还原」——恢复中断标记存在\n或不可读时，数据库可能是空壳，正常业务流量必须被挡住；进程与恢复端点保持\n可用，运维才有受控通道回滚并清除标记。\n\n2026-11-04（目标库隔离）：判定改由 ``restore_readiness`` 做「标记目标库 vs\n当前运行库」比较 —— 恢复演练写在 scratch 库上的标记不得把生产就绪打成 503。\n响应里两个字段分工明确：``restore_pending`` 保持旧契约（是否**阻断本库**\nreadiness，等价于是否需要摘流量），``restore_marker_present`` 才是「磁盘上\n有没有标记」（含演练/跨库标记），另附 ``restore`` 明细，保证误报与真故障都可见。\n\n2026-11-16 上线前审计 A-56：``restore`` 明细含生产库名、pre_restore 快照文件名与\n人工回滚 hint，原来对**匿名**请求也原样返回（本端点经 nginx /api/ 匿名可达）。\n现在只有本机直连（运维/服务管理器）拿全量明细，其余调用方只得到\n``{ok, state}`` —— 与同模块 backup/checks 等内部信号的开放口径一致。\n\n注意 ``request`` 是**必填**的 Request：FastAPI 不支持把 ``Request | None`` 当\n参数注入（会拿它当 Pydantic 字段，注册路由时直接 FastAPIError）。",
         "operationId": "readiness_probe_api_health_ready_get",
         "responses": {
           "200": {
@@ -6659,7 +6659,7 @@
           "订单批次号"
         ],
         "summary": "Batch Query List",
-        "description": "分页查询批次列表（含订单与入库记录合并视图）。\n\nArgs:\n    page: 页码，从 1 开始。\n    per_page: 每页条数，1-500。\n    batch_no: 批次号过滤（模糊匹配）。\n    status: 状态过滤。\n    customer: 客户名称过滤。\n    keyword: 关键字（订单号/产品名称等）。\n    db: 只读数据库会话。\n    _current_user: 当前操作用户（用于权限校验）。\n\nReturns:\n    BatchQueryListResponse: 批次查询结果分页响应。",
+        "description": "分页查询批次列表（含订单与入库记录合并视图）。\n\nArgs:\n    page: 页码，从 1 开始。\n    per_page: 每页条数，1-500。\n    batch_no: 批次号过滤（模糊匹配）。\n    status: 状态过滤。\n    customer: 客户名称过滤。\n    keyword: 关键字（订单号/产品名称等）。\n    db: 只读数据库会话。\n    _current_user: 当前操作用户（用于权限校验与备货行的工厂收窄）。\n\nReturns:\n    BatchQueryListResponse: 批次查询结果分页响应。",
         "operationId": "batch_query_list_api_v1_order_batch_batch_query_get",
         "parameters": [
           {
@@ -12395,7 +12395,7 @@
           "辅助接口"
         ],
         "summary": "Available Shipment",
-        "description": "获取可出货量（按客户+产品维度）。",
+        "description": "获取可出货量（按客户+产品维度）。\n\n权限码要按**调用页面**取，不是按数据来源取（2026-11-16 上线前审计 A-28）：\n本端点只认过 stock_view，于是「只授了出库管理（stockout_manage）」的用户在出货\n录入页恒 403，可出货量显示为空 → 前端超额闸门 fail-open 放行，只能靠提交时兜底。\n同文件的 /available-stockins 已按同一原则补过码。",
         "operationId": "available_shipment_api_v1_aux_available_shipment_get",
         "parameters": [
           {
@@ -14981,7 +14981,7 @@
           "生产报表"
         ],
         "summary": "List Records",
-        "description": "获取生产记录列表（支持按自然月或日期区间、部门、录单人筛选与分页）。\n\nArgs:\n    year: 年份；与 month 搭配。提供区间时忽略。\n    month: 月份，1-12。提供区间时忽略。\n    start_date: 区间起始日；与 end_date 必须成对。\n    end_date: 区间结束日（闭区间）。\n    department: 部门筛选；超出用户可见范围时忽略该参数。\n    production_date: 指定日期筛选，叠加在日期条件之上。\n    created_by: 录单人筛选；空白表示不限。\n    keyword: 产品名或 69 码关键词；空白表示不限。\n    sort: 排序方向，'desc' 或 'asc'。\n    page: 页码。\n    per_page: 每页数量，1-200。\n    scope: 用户可见部门范围（None 表示全部）。\n    db: 异步数据库会话（只读副本）。\n\nReturns:\n    ProductionRecordListResponse: 记录列表 + 分页信息 + 当前筛选下的统计。\n\nRaises:\n    HTTPException: 400（日期条件或 sort 非法）、500（数据库异常）。",
+        "description": "获取生产记录列表（支持按自然月或日期区间、部门、录单人筛选与分页）。\n\nArgs:\n    year: 年份；与 month 搭配。提供区间时忽略。\n    month: 月份，1-12。提供区间时忽略。\n    start_date: 区间起始日；与 end_date 必须成对。\n    end_date: 区间结束日（闭区间）。\n    department: 部门筛选；超出用户可见范围时忽略该参数。\n    production_date: 指定日期筛选，叠加在日期条件之上。\n    created_by: 录单人筛选；空白表示不限。\n    keyword: 产品名或 69 码关键词；空白表示不限。\n    customer_id: 客户 ID 筛选；None 表示不限（审计 #8：录入页「最近客户添加」用它取该客户近 90 天记录）。\n    customer_name: 客户名称筛选；空白表示不限，与 customer_id 取并集以兼容历史行。\n    sort: 排序方向，'desc' 或 'asc'。\n    page: 页码。\n    per_page: 每页数量，1-200。\n    scope: 用户可见部门范围（None 表示全部）。\n    db: 异步数据库会话（只读副本）。\n\nReturns:\n    ProductionRecordListResponse: 记录列表 + 分页信息 + 当前筛选下的统计。\n\nRaises:\n    HTTPException: 400（日期条件或 sort 非法）、500（数据库异常）。",
         "operationId": "list_records_api_v1_daily_production_records_get",
         "parameters": [
           {
@@ -15099,6 +15099,37 @@
               "title": "Keyword"
             },
             "description": "产品名或 69 码关键词；留空为不限"
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "客户ID筛选；留空为不限",
+              "title": "Customer Id"
+            },
+            "description": "客户ID筛选；留空为不限"
+          },
+          {
+            "name": "customer_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "客户名称筛选；留空为不限",
+              "default": "",
+              "title": "Customer Name"
+            },
+            "description": "客户名称筛选；留空为不限"
           },
           {
             "name": "sort",
@@ -15680,7 +15711,7 @@
           "生产计划"
         ],
         "summary": "Create Craft Work",
-        "description": "创建手工部生产记录。\n\nArgs:\n    data: 手工部记录创建参数（工人、数量、日期等）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，作为记录创建人。\n\nReturns:\n    CraftWorkActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "【已停用，恒返回 410】创建手工部生产记录。\n\n该入口写的是旧表 `craft_work`，而生产报表页面（`/production`）只读\n`daily_production_record` —— 从这里提交的记录任何页面都看不见（审计 #6）。\n保留路由与入参模型是为了让老前端的请求得到明确答复，而不是 404 或静默写入。\n\nRaises:\n    HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。",
         "operationId": "create_craft_work_api_v1_production_summary_craft_create_post",
         "requestBody": {
           "content": {
@@ -15968,7 +15999,7 @@
           "生产计划"
         ],
         "summary": "Create Packaging Record",
-        "description": "创建包装部记录。\n\nArgs:\n    data: 包装部记录创建参数（客户、产品、条码、数量、日期等）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，作为记录创建人。\n\nReturns:\n    PackagingRecordActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "【已停用，恒返回 410】创建包装部记录。\n\n与手工部 create 同一处置（审计 #6）：旧表 `packaging_record` 已无页面读取，\n写入等于让数据消失。批量导入 `/packaging/upload` 走的是同一张旧表，故一并保留\n现状但在服务层 docstring 标注了遗留原因。\n\nRaises:\n    HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。",
         "operationId": "create_packaging_record_api_v1_production_summary_packaging_create_post",
         "requestBody": {
           "content": {
@@ -23731,6 +23762,18 @@
             "contentMediaType": "application/octet-stream",
             "title": "File",
             "description": "产品图片文件"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "项目乐观锁版本号（缺省时跳过校验）"
           }
         },
         "type": "object",
