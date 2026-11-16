@@ -120,10 +120,10 @@ async function saveBatchNo(order: BatchQueryItem) {
     editingKey.value = null
     return
   }
-  if (!newValue) {
-    editingKey.value = null
-    return
-  }
+  // 清空必须真的提交 null：后端把 null 落库为 NULL（schemas/order_batch.py 的
+  // BatchNoUpdate 允许 batch_no=None；docs/superpowers/plans/2026-10-13-stockin-batch-no.md
+  // 明确要求「清空批次号（传 null）备货也要能落库为 NULL」）。
+  // 此前这里对空值直接 return，用户清空后输入框静默恢复旧值，批次号永远清不掉。
   saving.value = true
   try {
     await orderBatchApi.updateBatchNo(order.id, {
@@ -176,12 +176,12 @@ function openCompleteConfirm(order: BatchQueryItem) {
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
 }
 .bt-group-name {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
 }
 .bt-group-count {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
 }
 
@@ -215,12 +215,12 @@ function openCompleteConfirm(order: BatchQueryItem) {
   padding-top: 22px;
 }
 .bt-product-name {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text);
 }
 .bt-product-barcode {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: var(--font-mono);
   color: var(--color-text-muted);
 }
@@ -283,7 +283,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
   gap: 4px;
   padding: 6px 10px;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   background: white;
   border: 2px solid var(--color-border-light, #e2e8f0);
   transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
@@ -321,11 +321,11 @@ function openCompleteConfirm(order: BatchQueryItem) {
 }
 
 .bt-chip-date {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
 }
 .bt-chip-qty {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-text);
   line-height: 1.3;
@@ -335,7 +335,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
 .bt-batch-input {
   width: 120px;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-heading);
   background: white;
   border: 1px dashed var(--color-border, #d1d5db);
@@ -348,7 +348,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
 .bt-batch-input:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
 .bt-batch-input::placeholder {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .bt-batch-input:focus {
   border-color: var(--color-primary-400);
@@ -365,7 +365,7 @@ function openCompleteConfirm(order: BatchQueryItem) {
 /* ===== 完成批次按钮 ===== */
 .bt-complete-btn {
   padding: 1px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-success-600, #16a34a);
   background: var(--color-success-50, #f0fdf4);

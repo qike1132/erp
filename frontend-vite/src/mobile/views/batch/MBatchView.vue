@@ -152,6 +152,6 @@ function batchLabel(s: string | null | undefined) {
 .m-batch-group { }
 .m-group-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .m-group-customer { font-size: 15px; font-weight: 600; color: var(--m-text-primary); }
-.m-group-count { font-size: 12px; color: var(--m-text-secondary); }
-.m-batch-status { font-size: 12px; font-weight: 600; }
+.m-group-count { font-size: var(--fs-caption); color: var(--m-text-secondary); }
+.m-batch-status { font-size: var(--fs-caption); font-weight: 600; }
 </style>

@@ -30,6 +30,24 @@ const BATCH_PAGE_SIZE = 500
 /** 分页护栏：最多 20 页，防异常响应（恒满页）死循环（照 P1-23 模式） */
 const BATCH_MAX_PAGES = 20
 
+/** 翻页触顶的行数上限（20 页 × 500 行）：超过它的结果只能拿到前 N 行 */
+const BATCH_MAX_ROWS = BATCH_MAX_PAGES * BATCH_PAGE_SIZE
+
+/**
+ * 触顶提示文案：写明真实上限，避免与 BATCH_MAX_PAGES 改动后脱节。
+ * 静默截断会让「完成批次」基于残缺列表做决策，必须让用户看见。
+ */
+export const BATCH_TRUNCATED_HINT =
+  `结果超过 ${BATCH_MAX_ROWS} 行，已截断，请收窄筛选`
+
+/** 批次查询的完整结果：truncated=true 表示只拿到了前 BATCH_MAX_ROWS 行 */
+export interface BatchQueryResult {
+  data: BatchQueryItem[]
+  /** 后端返回的真实总数（触顶时**不得**退化成已拉取行数） */
+  total: number
+  truncated: boolean
+}
+
 /** 批次查询：主查询 + 白名单 + 分组 + 完成批次 */
 export function useBatchQuery() {
   const perPage = ref(500)
@@ -96,7 +114,7 @@ export function useBatchQuery() {
       () => filters.status,
       () => appliedKeyword.value,
     ],
-    queryFn: async () => {
+    queryFn: async (): Promise<BatchQueryResult> => {
       const base: Record<string, unknown> = {}
       if (filters.batch_no) base.batch_no = filters.batch_no
       if (filters.customer) base.customer = filters.customer
@@ -113,16 +131,26 @@ export function useBatchQuery() {
         total = (res as { total?: number }).total ?? total
         all.push(...pageItems)
         if (pageItems.length < BATCH_PAGE_SIZE || (total > 0 && all.length >= total)) {
-          return { ...res, data: all, total: all.length }
+          return { ...res, data: all, total, truncated: false }
         }
       }
-      return { data: all, total: all.length }
+      // 翻满 BATCH_MAX_PAGES 页仍未取完：记 truncated 由页面显式提示，
+      // 且 total 保持后端真实总数——伪装成 all.length 会把「还有 N 行没拿到」藏起来。
+      return { data: all, total, truncated: true }
     },
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   })
 
   const items = computed<BatchQueryItem[]>(() => result.value?.data ?? [])
+
+  /**
+   * 结果是否被翻页上限截断（后端真实总数 > 已拉取行数）。
+   *
+   * 页面必须据此给出可见提示：静默截断时用户以为「就这么多行」，
+   * 会拿残缺列表去做「完成批次」的决策。
+   */
+  const truncated = computed<boolean>(() => result.value?.truncated === true)
 
   // ---- Grouped data: customer → product → orders ----
   const grouped = computed<CustomerGroup[]>(() => {
@@ -220,6 +248,8 @@ export function useBatchQuery() {
     isFetching,
     isError,
     refetch,
+    truncated,
+    truncatedHint: BATCH_TRUNCATED_HINT,
     grouped,
     switchCustomer,
     refreshAfterWhitelistSaved,

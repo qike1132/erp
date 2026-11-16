@@ -90,7 +90,7 @@ async function saveWhitelist() {
   align-items: center;
   gap: 8px;
   padding: 6px 0;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text);
   cursor: pointer;
 }

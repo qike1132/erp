@@ -60,6 +60,14 @@
         <template v-else>
           <div v-if="isFetching" class="bt-fetching-bar"><div class="bt-fetching-progress" /></div>
 
+          <!-- 翻页触顶提示（上线前审计 2026-11-16 Low）：本页一次最多拉
+               20 页 × 500 行，超过就只能拿到前 N 行。不提示的话用户会以为
+               「就这么多」，拿残缺列表做「完成批次」决策 -->
+          <div v-if="truncated" class="bt-truncated-hint" role="status">
+            <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+            <span>{{ truncatedHint }}</span>
+          </div>
+
           <!-- 客户分组卡片（拆分为子组件） -->
           <BatchGroupList
             v-if="grouped.length"
@@ -119,6 +127,8 @@ const {
   isFetching,
   isError,
   refetch,
+  truncated,
+  truncatedHint,
   grouped,
   switchCustomer,
   refreshAfterWhitelistSaved,
@@ -163,13 +173,13 @@ const {
   gap: 10px;
 }
 .bt-card-title-group h3 {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
   margin: 0;
 }
 .bt-card-title-group small {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   margin: 0;
 }
@@ -182,7 +192,7 @@ const {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: var(--fs-heading-3);
   flex-shrink: 0;
 }
 .bt-icon-blue {
@@ -216,7 +226,7 @@ const {
   border: none;
   border-radius: 9px;
   background: transparent;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -255,7 +265,7 @@ const {
   align-items: center;
   gap: 10px;
   padding: 40px 20px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-muted);
 }
 .bt-empty i {
@@ -275,7 +285,7 @@ const {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   transition: background 0.2s ease, transform 0.2s ease;
 }
 .bt-whitelist-btn:hover {
@@ -285,8 +295,22 @@ const {
 
 /* ===== 完成批次确认弹窗（外壳由共享 UiDialog 提供） ===== */
 .bt-complete-body {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text);
+}
+
+/* ===== 翻页触顶提示 ===== */
+.bt-truncated-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 24px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-warning-200, #fde68a);
+  border-radius: 8px;
+  background: var(--color-warning-50, #fffbeb);
+  color: var(--color-warning-700, #b45309);
+  font-size: 13px;
 }
 
 /* ===== Fetching bar ===== */

@@ -10,6 +10,8 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.cache import CacheDomain
+from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
@@ -56,13 +58,14 @@ async def batch_query_list(
         customer: 客户名称过滤。
         keyword: 关键字（订单号/产品名称等）。
         db: 只读数据库会话。
-        _current_user: 当前操作用户（用于权限校验）。
+        _current_user: 当前操作用户（用于权限校验与备货行的工厂收窄）。
 
     Returns:
         BatchQueryListResponse: 批次查询结果分页响应。
     """
     result = await order_batch_service.get_batch_query_list(
-        db, page=page, per_page=per_page, batch_no=batch_no, status=status, customer=customer, keyword=keyword,
+        db, page=page, per_page=per_page, batch_no=batch_no, status=status, customer=customer,
+        keyword=keyword, user=_current_user,
     )
     return BatchQueryListResponse(data=result['items'], total=result['total'], page=page, per_page=per_page)
 
@@ -173,6 +176,14 @@ async def complete_batch(
     """
     async with db_transaction(db):
         result = await order_batch_service.complete_batch(db, batch_no=data.batch_no, user=user)
+    # 事务提交后失效缓存（与 approval.py 提交后同口径）：批次完成改的是
+    # Order.status（进历史批次）与备货归档时间，订单列表、批次历史与报表流水
+    # 都由这两张表派生，不失效会在 TTL 内继续展示归档前的旧数据
+    # （上线前审计 2026-11-16 Medium 2）。
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER | CacheDomain.REPORT,
+    )
     completed_count = result['completed_count']
     archived_stockins = result.get('completed_stockins', 0)
     failed_count = len(result['failed_orders'])
