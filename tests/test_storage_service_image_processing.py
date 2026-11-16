@@ -137,6 +137,68 @@ class TestTransparencyPreserved:
         assert "A" not in img.getbands()
 
 
+class TestPixelBudget:
+    """解码像素预算（2026-11-16 审计 Medium：上传图片没有解码像素预算）。
+
+    拦哪种错：把 Pillow 的 MAX_IMAGE_PIXELS 抬到 2 亿（等于关掉解压炸弹防线），
+    并且只在**解码之后**才发现图片过大。一张 20000x20000 的 1-bit PNG 头部只有
+    几十字节，解码却要 ~1.6GB 内存 —— 一次上传即可把进程打挂。
+    """
+
+    @staticmethod
+    def _png_declaring(width: int, height: int) -> bytes:
+        """声明 width×height 的最小 PNG（约 70 字节，无真实像素数据）。
+
+        这种文件正是攻击形态：体积几十字节、声明尺寸巨大，任何「先解码再判断」的
+        实现都会在解码时才吃满内存。必须带一个 IDAT 分块 —— 只给 IHDR 时 Pillow 认
+        不出这是 PNG，就测不到像素预算那条路径了。
+        """
+        import struct
+        import zlib
+
+        def _chunk(tag: bytes, payload: bytes) -> bytes:
+            crc = struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+            return struct.pack(">I", len(payload)) + tag + payload + crc
+
+        ihdr = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)  # 8bit 灰度
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", zlib.compress(b"\x00" * 64))
+            + _chunk(b"IEND", b"")
+        )
+
+    def test_declared_huge_png_raises_business_error(self):
+        """声明 4 亿像素的 70 字节 PNG 必须被拒，且异常是**业务异常**（端点能映射 4xx）。"""
+        from fastapi_app.core.exceptions import BusinessError
+
+        assert issubclass(svc.ImagePixelBudgetExceededError, BusinessError)
+        with pytest.raises(svc.ImagePixelBudgetExceededError):
+            svc._open_image(self._png_declaring(20000, 20000))
+
+    def test_thumbnail_generation_refuses_over_budget_png(self):
+        """预算必须能在对外入口（缩略图生成）挡住，而不是只在私有函数里生效。
+
+        1 亿像素：低于 Pillow 的炸弹阈值（2×上限），走本模块自己的预算判定。
+        """
+        with pytest.raises(svc.ImagePixelBudgetExceededError):
+            svc.make_thumbnail(self._png_declaring(10000, 10000))
+
+    def test_normal_phone_photo_still_accepted(self):
+        """1200 万像素（手机拍照常见）必须放行 —— 预算不能伤到正常业务。"""
+        img = svc._open_image(_make_jpeg(4000, 3000))
+        assert img is not None
+        img.close()
+
+    def test_pillow_bomb_threshold_not_relaxed(self):
+        """回归点：MAX_IMAGE_PIXELS 不得再被抬到 2 亿。"""
+        svc._open_image(_make_jpeg(10, 10))
+        from PIL import Image
+
+        assert Image.MAX_IMAGE_PIXELS == svc._MAX_IMAGE_PIXELS
+        assert svc._MAX_IMAGE_PIXELS <= 89_478_485  # Pillow 默认量级
+
+
 class TestKeyDerivation:
     def test_variant_key_suffixes(self):
         key = "customer-sampling/20260812/abc123.jpg"

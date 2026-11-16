@@ -113,3 +113,20 @@ async def test_upload_oversize_rejected(client):
     resp = await _upload(client, 'big.png', big)
     assert resp.status_code == 400
     assert '大小' in resp.json()['detail']
+
+
+@pytest.mark.asyncio
+async def test_upload_pixel_budget_exceeded_maps_to_400(client):
+    """解码像素超预算 → 400（不是 500）。
+
+    拦哪种错：让 `ImagePixelBudgetExceededError`（AppError 子类）直接冒泡 —— 前端只会看到
+    「服务器内部错误」，用户不知道是图太大，运维也分不清是攻击还是坏图。
+    """
+    from fastapi_app.services.storage_service import ImagePixelBudgetExceededError
+
+    boom = AsyncMock(side_effect=ImagePixelBudgetExceededError('图片像素数过大（20000x20000），上限 60 百万像素'))
+    with patch('fastapi_app.services.storage_service.save_upload', new=boom):
+        resp = await _upload(client, 'huge.png', PNG_BYTES)
+
+    assert resp.status_code == 400
+    assert '像素' in resp.json()['detail']

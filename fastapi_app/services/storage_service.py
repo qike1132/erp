@@ -21,6 +21,7 @@ from typing import Any
 
 from fastapi_app.core.circuit_breaker import CircuitBreakerOpenError, get_breaker
 from fastapi_app.core.config import settings
+from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -213,9 +214,33 @@ _BLUR_QUALITY = 20
 _FULL_MAX_SIZE = 1600
 _FULL_QUALITY = 82
 
+# 解码像素预算（2026-11-16 审计 Medium：上传图片没有解码像素预算）。
+#
+# 此前把 Pillow 的 MAX_IMAGE_PIXELS 抬到 2 亿，等于关掉解压炸弹防线：一张
+# 20000x20000 的 1-bit PNG 头部只有几十字节，解码却要 ~1.6GB 内存，一次上传即可
+# 把进程打挂。这里回到默认量级之下（Pillow 默认约 8948 万），并在**解码前**用
+# Image.open 只读头部尺寸做预算判定：超限抛业务异常，端点映射 4xx 而不是 500。
+# 6 千万像素约等于 8000x7500，远大于拍照/扫描件；上传入口本身还有 5MB 体积上限。
+_MAX_IMAGE_PIXELS = 60_000_000
+
+
+class ImagePixelBudgetExceededError(BusinessError):
+    """图片声明尺寸超出解码像素预算（业务异常：上传内容不合格，端点应回 4xx）。
+
+    刻意**不**继承 ValueError/RuntimeError：那两个异常在各调用链里会被当成
+    「可忽略的处理失败」吞掉（例如 OCR 导入的文本模式回退、缩略图生成失败返回
+    None），预算是安全边界，必须一路冒泡到端点。
+    """
+
+    def __init__(self, message: str = '图片像素数过大，无法处理') -> None:
+        super().__init__(message=message)
+
 
 def _open_image(content: bytes):
-    """PIL 打开图片字节流；失败返回 None"""
+    """PIL 打开图片字节流；无法识别返回 None，声明尺寸超预算抛业务异常。
+
+    只做头部解析（Image.open 不解码像素），预算因此能在分配内存**之前**判定。
+    """
     from io import BytesIO
 
     try:
@@ -223,14 +248,26 @@ def _open_image(content: bytes):
     except ImportError:
         logger.warning('Pillow 未安装，无法处理图片')
         return None
+    # 回到默认量级，不再放宽到 2 亿（理由见 _MAX_IMAGE_PIXELS 注释）。
+    # 同时让 Pillow 自身的炸弹阈值（2 × 上限）作为第二道防线。
+    Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
     try:
-        # 服务端处理受信用户上传（原图已通过大小/类型校验），
-        # 放宽解压炸弹阈值，避免大尺寸扫描件被误判拒绝
-        Image.MAX_IMAGE_PIXELS = 200_000_000
-        return Image.open(BytesIO(content))
+        img = Image.open(BytesIO(content))
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
+        # Pillow 按头部尺寸先一步拦下（炸弹阈值 / 超限警告）。归一成同一个业务异常：
+        # 否则 -W error 之类把警告当异常的环境里，这里会被下面的宽泛 except 吞成
+        # 「解码失败 → None」，端点就分不清是坏图还是超预算。
+        raise ImagePixelBudgetExceededError(f'图片像素数过大（{e}）') from e
     except Exception as e:  # broad-except: 服务层容错，记录异常并返回安全默认值
         logger.warning('图片解码失败: %s', e)
         return None
+    width, height = img.size
+    if width * height > _MAX_IMAGE_PIXELS:
+        img.close()
+        raise ImagePixelBudgetExceededError(
+            f'图片像素数过大（{width}x{height}），上限 {_MAX_IMAGE_PIXELS // 1_000_000} 百万像素'
+        )
+    return img
 
 
 def _image_for_webp(img):

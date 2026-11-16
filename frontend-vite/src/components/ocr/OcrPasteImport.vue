@@ -181,7 +181,7 @@ function handleImageSelect(e: Event) {
   border-radius: 9px;
   background: var(--color-ocean-deep);
   color: white;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .op-paste-text {
   display: flex;
@@ -192,25 +192,25 @@ function handleImageSelect(e: Event) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-ocean-text);
 }
 .op-paste-sub {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
   margin-top: 1px;
 }
 .op-paste-go {
   margin-left: auto;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   color: var(--color-primary-600);
 }
 .op-paste kbd {
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   padding: 1px 5px;
   border: 1px solid var(--color-slate-300, #cbd5e1);

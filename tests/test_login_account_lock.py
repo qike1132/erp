@@ -1,11 +1,15 @@
-"""登录账户级失败锁定（username 维度）单测。
+"""登录账户级失败锁定（账号维度，键含来源 IP）单测。
 
 背景：`api_login` 此前只有 **IP** 维度限流（`login_attempt:{ip}` / `login_burst:{ip}`），
-`authenticate_login` 失败时抛 401，但没有任何 username 维度的失败计数 —— 换 IP 即可
+`authenticate_login` 失败时抛 401，但没有任何账号维度的失败计数 —— 换 IP 即可
 对同一账号无限喷洒口令。
 
-本文件覆盖新增的计数窗口（`LOGIN_USER_FAIL_LIMIT` / `LOGIN_USER_FAIL_WINDOW`）、
-fail-open 降级，以及 `api_login` 的接线顺序（401 计数、400 不计数、成功清零）。
+2026-11-16 审计 Medium 补丁：计数/锁定键从「用户名」改为「IP + 账号」。只按用户名
+计数时，匿名者对任意已知账号打满额度就能把真实用户锁死（每 15 分钟补一次即可无限
+续期），属于跨来源剥夺。全局键仍写入（仅日志观测），但不参与判定。
+
+本文件覆盖计数窗口（`LOGIN_USER_FAIL_LIMIT` / `LOGIN_USER_FAIL_WINDOW`）、fail-open
+降级、跨来源隔离，以及 `api_login` 的接线顺序（401 计数、400 不计数、成功清零）。
 
 **自包含**：不依赖 `conftest.py` 的 DB fixture。Redis 用假实现 monkeypatch
 `fastapi_app.core.redis_wrapper.get_client` —— 端点里是函数内局部 import
@@ -251,9 +255,13 @@ async def test_api_login_returns_access_token_for_capacitor(redis_patched: _Fake
 
 
 async def test_api_login_blocked_before_authenticate_when_locked(redis_patched: _FakeRedis) -> None:
-    """已达上限时在校验凭据**之前**就 429：不再走口令哈希（省算力也避免继续喷洒）。"""
+    """已达上限时在校验凭据**之前**就 429：不再走口令哈希（省算力也避免继续喷洒）。
+
+    计数键含来源 IP（2026-11-16 审计：只按用户名锁会被第三方拿来锁死别人的账号），
+    所以这里必须用**与请求相同的来源 IP**（`_call_api_login` 默认 10.0.0.9）打满额度。
+    """
     for _ in range(auth.LOGIN_USER_FAIL_LIMIT):
-        await auth._record_login_failure('Dave')
+        await auth._record_login_failure('Dave', '10.0.0.9')
     authenticate = AsyncMock()
 
     with pytest.raises(HTTPException) as exc_info:
@@ -261,3 +269,72 @@ async def test_api_login_blocked_before_authenticate_when_locked(redis_patched: 
 
     assert exc_info.value.status_code == 429
     authenticate.assert_not_awaited()
+
+
+# ============================================================================
+# 跨来源剥夺（2026-11-16 审计 Medium）
+#
+# 原实现按**用户名**全局计数：任意匿名者对任意已知账号打满 LOGIN_USER_FAIL_LIMIT 次
+# （每 15 分钟补一次即可无限续期）就能把真实用户锁在门外 —— 攻击者无需知道口令，
+# 也不需要自己的 IP 被拉黑。锁定键改为「IP + 账号」后才不再产生跨来源剥夺。
+# ============================================================================
+async def test_different_ip_does_not_inherit_lock(redis_patched: _FakeRedis) -> None:
+    """A 来源打满额度只锁 A 自己：B 来源对同一账号仍可登录。"""
+    for _ in range(auth.LOGIN_USER_FAIL_LIMIT):
+        await auth._record_login_failure('Dave', '1.1.1.1')
+
+    await auth._check_user_lock('Dave', '2.2.2.2')  # 不抛
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth._check_user_lock('Dave', '1.1.1.1')
+    assert exc_info.value.status_code == 429
+
+
+async def test_third_party_failures_do_not_block_real_login(redis_patched: _FakeRedis) -> None:
+    """第三方从别的 IP 打满失败额度后，真实用户仍能登录成功（回归本审计的主诉）。"""
+    for _ in range(auth.LOGIN_USER_FAIL_LIMIT):
+        await auth._record_login_failure('Dave', '6.6.6.6')
+
+    authenticate = AsyncMock(return_value={
+        'user': SimpleNamespace(id=7, username='Dave', is_super=False, factory=None, permissions=[]),
+        'access_token': 'access-token',
+        'refresh_token': 'refresh-token',
+        'token_max_age': 3600,
+        'refresh_max_age': 86400,
+    })
+
+    result = await _call_api_login(authenticate)  # 来源 IP = 10.0.0.9
+
+    assert result.success is True
+    authenticate.assert_awaited_once()
+
+
+async def test_same_ip_and_account_still_locks(redis_patched: _FakeRedis) -> None:
+    """同一来源对同一账号连续失败仍要锁 —— 修复不能把「喷洒防护」一起改掉。"""
+    for _ in range(auth.LOGIN_USER_FAIL_LIMIT):
+        await auth._record_login_failure('Dave', '10.0.0.9')
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth._check_user_lock('Dave', '10.0.0.9')
+
+    assert exc_info.value.status_code == 429
+
+
+async def test_record_failure_keeps_global_counter_for_observability(
+    redis_patched: _FakeRedis,
+) -> None:
+    """来源键之外仍写全局键（日志/观测用），但判定只看来源键。"""
+    await auth._record_login_failure('Dave', '3.3.3.3')
+
+    assert redis_patched.store[auth._user_fail_key('Dave')] == 1
+    assert redis_patched.store[auth._user_fail_key('Dave', '3.3.3.3')] == 1
+
+
+async def test_reset_clears_source_and_global_keys(redis_patched: _FakeRedis) -> None:
+    """成功登录要连来源键一起清零，否则同 IP 下次登录一开始就带着旧计数。"""
+    await auth._record_login_failure('Dave', '3.3.3.3')
+
+    await auth._reset_login_failures('Dave', '3.3.3.3')
+
+    assert auth._user_fail_key('Dave') not in redis_patched.store
+    assert auth._user_fail_key('Dave', '3.3.3.3') not in redis_patched.store

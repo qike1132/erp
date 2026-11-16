@@ -26,7 +26,7 @@ from fastapi_app.schemas.ocr_import import (
     OcrPdfPreviewResult,
 )
 from fastapi_app.services import ocr_service as svc
-from fastapi_app.services.ocr._extractors import OcrDependencyError
+from fastapi_app.services.ocr._extractors import OcrDependencyError, OcrPageBudgetExceededError
 from fastapi_app.services.ocr_service import IMAGE_EXTENSIONS
 from fastapi_app.shared_models import User
 
@@ -186,6 +186,11 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
         if not pages and (not parsed_items):
             return OcrPdfPreviewResult(success=False, message='无法提取文本内容', filename=filename, page_count=0, pages=[], parsed_items=[])
         return OcrPdfPreviewResult(success=True, message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项', filename=filename, page_count=len(pages), pages=[OcrPdfPagePreview(page=p.get('page', 0), text=p.get('text', '')[:500]) for p in pages], parsed_items=[OcrPdfParsedItem.model_validate(it) for it in parsed_items])
+    except OcrPageBudgetExceededError as e:
+        # 页数/像素超预算 = 这份文档不适合预览（转全本页图会打挂进程）→ 400 并告知
+        # 上限；映射成 500 的话前端只会看到「服务器内部错误」，也说不清该换什么文件。
+        logger.warning('OCR 预览被预算拒绝: %s', e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except OcrDependencyError as e:
         # 缺 OCR 可选依赖是可预期的部署状态：明确告知修复方式。
         # 不这样兜的话，用户只看到「服务器内部错误」，真因只躺在日志里（2026-10-08 生产事故）。

@@ -10,6 +10,7 @@ WebSocket 实时通知端点
 - 连接建立前校验 Origin 白名单（防跨站劫持）
 - 建立连接后进行 Cookie/票据/消息 JWT 认证
 - 票据有效期 30 秒且一次性使用，不暴露长期 JWT
+- 凭据载荷继承原会话的 jti/exp/tv，建连与 60s 复核都按 token_version 判失效
 - disconnect 安全处理未注册连接（防二次异常）
 
 2026-10-11（复核 P2-14）结构拆分：websocket_notifications 原 155 行（C901 31+30），
@@ -54,9 +55,32 @@ _WS_PENDING_TICKETS: dict[str, tuple[int, float, dict]] = {}
 
 
 def _clean_auth_payload(payload: dict | None) -> dict:
+    """从 JWT 载荷里挑出长连接必须继承的会话字段。
+
+    `tv`（= 用户表 token_version）必须一起带上：改密/重置口令后 token_version 递增，
+    HTTP 侧随即 401，而长连接若只看 exp / jti 黑名单，旧 access token 仍能建连并
+    持续收业务事件（2026-11-16 审计 Medium）。票据只是 30s 握手凭据，撤销语义全靠
+    这里继承的原会话字段。
+    """
     if not isinstance(payload, dict):
         return {}
-    return {key: payload[key] for key in ('jti', 'exp') if payload.get(key) is not None}
+    return {key: payload[key] for key in ('jti', 'exp', 'tv') if payload.get(key) is not None}
+
+
+def _expected_token_version(auth_payload: dict) -> int | None:
+    """取凭据期望的会话版本；缺失返回 None（滚动发布期 30s 内的旧票据没有 tv）。
+
+    None 由 `_verify_user_active` 解释为「不比对版本」，即退回改动前的行为（只判
+    启用状态）；新签发的 access token 一律带 tv，因此正常路径恒走版本比对。
+    """
+    tv = auth_payload.get('tv') if isinstance(auth_payload, dict) else None
+    if tv is None:
+        return None
+    try:
+        return int(tv)
+    except (TypeError, ValueError):
+        # tv 不可解析：按 0 参与比对，让校验走向「不匹配 → 断开」（fail-closed）
+        return 0
 
 
 async def _issue_ws_ticket(user_id: int, auth_payload: dict | None = None) -> str:
@@ -257,14 +281,31 @@ async def _load_ws_user_from_session(
     return user, True
 
 
-async def _load_ws_user(user_id: int) -> tuple[WSUser | None, bool]:
-    """一次查询取回启用状态与完整权限，供建连和周期复核共用。"""
+async def _load_ws_user(
+    user_id: int, expected_token_version: int | None = None,
+) -> tuple[WSUser | None, bool, bool]:
+    """一次查询取回启用状态与完整权限，并复核会话版本。
+
+    返回 (用户, 查询是否成功, 会话版本是否仍有效)。版本比对**复用 HTTP 依赖**
+    `core.deps._verify_user_active`（同一份实现 + 同一份 10s 缓存），不在 WS 侧另写
+    一份判断——两份判断迟早漂移，而这里判错的代价是旧凭据能继续收事件。
+    """
     try:
         async with get_async_db_context() as db:
-            return await _load_ws_user_from_session(db, user_id)
+            user, query_ok = await _load_ws_user_from_session(db, user_id)
+            if not query_ok or user is None or expected_token_version is None:
+                # 用户不存在/已禁用由调用方按 principal is None 处理；没有 tv 可比的
+                # 旧票据退回改动前语义（只判启用状态）。
+                return user, query_ok, True
+            from fastapi_app.core.deps import _verify_user_active
+
+            tv_ok = await _verify_user_active(
+                user_id, db, expected_token_version=expected_token_version,
+            )
+            return user, True, tv_ok
     except SQLAlchemyError as e:
         logger.warning("WebSocket 用户与权限查询失败: %s", e)
-        return None, False
+        return None, False, True
 
 
 def _bump_rate_window(now: float, msg_count: int, msg_window_start: float) -> tuple[int, float, bool]:
@@ -316,7 +357,16 @@ async def _message_loop(
                 if not await _token_auth_valid(auth_payload):
                     await websocket.close(code=4001, reason="会话已过期或撤销")
                     break
-                principal, query_ok = await _load_ws_user(user_id)
+                principal, query_ok, token_version_ok = await _load_ws_user(
+                    user_id, _expected_token_version(auth_payload),
+                )
+                if query_ok and not token_version_ok:
+                    # 连接建立后改密/重置口令同样要踢线：60s 复核与 HTTP 同口径。
+                    logger.warning(
+                        "WebSocket 复核发现会话版本已变更，断开: user_id=%s", user_id
+                    )
+                    await websocket.close(code=4001, reason="会话已失效，请重新登录")
+                    break
                 if query_ok and principal is None:
                     await websocket.close(code=4003, reason="用户已被禁用")
                     break
@@ -355,12 +405,20 @@ def register_websocket(app: FastAPI) -> None:
         if not await _token_auth_valid(auth_payload):
             await websocket.close(code=4001, reason="会话已过期或撤销")
             return
-        principal, query_ok = await _load_ws_user(user_id)
+        principal, query_ok, token_version_ok = await _load_ws_user(
+            user_id, _expected_token_version(auth_payload),
+        )
         if not query_ok:
             await websocket.close(code=4503, reason="服务暂时不可用")
             return
         if principal is None:
             await websocket.close(code=4001, reason="用户不存在或已禁用")
+            return
+        if not token_version_ok:
+            # 改密/重置口令后旧 access token 必须先失去长连接资格，否则 HTTP 侧已
+            # 401 的凭据还能继续收业务事件（4001 = 会话无效，前端应重新登录）。
+            logger.warning("WebSocket 建连拒绝: 会话版本已变更 user_id=%s", user_id)
+            await websocket.close(code=4001, reason="会话已失效，请重新登录")
             return
 
         from fastapi_app.services.notification_service import manager

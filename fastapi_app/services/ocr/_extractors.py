@@ -7,12 +7,24 @@ import logging
 import os
 from typing import Any
 
+from fastapi_app.core.exceptions import BusinessError
+
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
 
 # OCR 可选依赖的安装指引（requirements/ocr.txt 同样是这一串）
 _OCR_INSTALL_HINT = 'pip install -r requirements/ocr.txt（约 500MB，可选装）'
+
+# PDF 渲染与识别预算（2026-11-16 审计 Medium：OCR 预览无页数/总像素预算）。
+#
+# 原实现逐页 get_pixmap(dpi=200) 并把**所有页**位图累积进 list：200dpi 的 A4 单页
+# 约 3.9M 像素（RGB 约 11MB），一本 200 页的 PDF 就是 2GB+，一个预览请求即可把进程
+# 打挂。现在改为逐页产出、识别完即释放，并在渲染前按页数/累计像素拒绝超预算文档。
+# 50 页 × A4@200dpi ≈ 1.95 亿像素，正常出货单远小于此。
+_PDF_RENDER_DPI = 200
+_MAX_PDF_PAGES = 50
+_MAX_PDF_TOTAL_PIXELS = 200_000_000
 
 
 class OcrDependencyError(RuntimeError):
@@ -26,6 +38,18 @@ class OcrDependencyError(RuntimeError):
     「服务器内部错误」，真正的 `ModuleNotFoundError: No module named 'numpy'` 只躺在
     日志里。缺依赖属于**可预期的部署状态**，应当自报家门。
     """
+
+
+class OcrPageBudgetExceededError(BusinessError):
+    """PDF 页数或累计渲染像素超出识别预算（业务异常：端点应回 4xx）。
+
+    刻意**不**继承 RuntimeError/ValueError：`_import.py` 把这两个都当成「识别失败，
+    回退文本模式」吞掉，那样预算会被无声绕过（文本模式同样要渲染整本 PDF）。预算
+    属于「这份文档不该处理」，必须直接冒泡到端点。
+    """
+
+    def __init__(self, message: str = '文档页数或像素数超出识别预算') -> None:
+        super().__init__(message=message)
 
 
 def _missing_modules(names: tuple[str, ...]) -> list[str]:
@@ -193,16 +217,15 @@ def extract_table_structure(file_content: bytes, filename: str='') -> list[dict]
     import numpy as np
     ext = os.path.splitext(filename or '')[1].lower()
     is_pdf = ext == '.pdf'
-    page_images = []
     if is_pdf:
+        # 生成器：逐页产出，识别完一页即可释放该页位图（见 _pdf_to_images）
         page_images = _pdf_to_images(file_content)
     else:
         img_array = np.frombuffer(file_content, dtype=np.uint8)
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        if img is not None:
-            page_images = [img]
-    if not page_images:
-        return []
+        if img is None:
+            return []
+        page_images = [img]
     table_engine = _get_table_extracter()
     ocr_engine = _get_img_extracter()
     results = []
@@ -219,22 +242,37 @@ def extract_table_structure(file_content: bytes, filename: str='') -> list[dict]
             continue
     return results
 
-def _pdf_to_images(pdf_content: bytes) -> list:
-    """将 PDF 每一页转为 numpy 图片数组"""
+def _pdf_to_images(pdf_content: bytes):
+    """逐页把 PDF 转成 numpy 图片数组（生成器）。
+
+    改成生成器的理由：调用方本来就是「取一页、识别一页」，整本缓存纯属浪费 —— 峰值
+    内存从「整本 PDF 的位图」降到「单页位图」。页数与累计像素在渲染前判定，超预算抛
+    `OcrPageBudgetExceededError`（不做「先渲染完再报错」）。
+    """
     _require_modules('cv2', 'fitz', 'numpy')
     import cv2
     import fitz
     import numpy as np
     doc = fitz.open(stream=pdf_content, filetype='pdf')
-    images = []
     try:
+        page_count = doc.page_count
+        if page_count > _MAX_PDF_PAGES:
+            raise OcrPageBudgetExceededError(
+                f'PDF 共 {page_count} 页，超过识别上限 {_MAX_PDF_PAGES} 页'
+            )
+        total_pixels = 0
         for page in doc:
-            pix = page.get_pixmap(dpi=200)
+            pix = page.get_pixmap(dpi=_PDF_RENDER_DPI)
+            total_pixels += pix.width * pix.height
+            if total_pixels > _MAX_PDF_TOTAL_PIXELS:
+                raise OcrPageBudgetExceededError(
+                    f'PDF 渲染像素累计超过 {_MAX_PDF_TOTAL_PIXELS // 1_000_000} 百万像素上限'
+                )
             img_data = pix.tobytes('png')
-            img_array = np.frombuffer(img_data, dtype=np.uint8)
-            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            del pix  # 及时释放本页位图，别让它活到下一页
+            img = cv2.imdecode(np.frombuffer(img_data, dtype=np.uint8), cv2.IMREAD_COLOR)
             if img is not None:
-                images.append(img)
+                yield img
     finally:
+        # 消费方提前结束（异常/中断）时生成器被关闭，同样会走到这里释放文档句柄
         doc.close()
-    return images

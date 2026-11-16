@@ -223,17 +223,25 @@ async def _check_login_rate_limit(key: str) -> None:
 
 
 # ==================== 账户级失败锁定 ====================
-# IP 维度限流（_check_login_rate_limit）挡不住「换 IP 喷洒同一账号」，这里补 username 维度。
+# IP 维度限流（_check_login_rate_limit）挡不住「换 IP 喷洒同一账号」，这里补账号维度。
+# 但**锁定判定必须带来源 IP**：只按用户名计数时，任意匿名者对任意已知账号打满
+# 10 次（每 15 分钟一次即可无限续期）就能把真实用户锁在门外（2026-11-16 审计
+# Medium：跨来源剥夺）。全局计数保留给日志观测，不参与判定。
 
-def _user_fail_key(username: str) -> str:
-    """账户级失败计数的 Redis 键（大小写/首尾空格归一，避免同一账号散成多份计数）。"""
-    return f"login_user_fail:{username.strip().lower()}"
+def _user_fail_key(username: str, client_ip: str = '') -> str:
+    """账户级失败计数的 Redis 键（大小写/首尾空格归一，避免同一账号散成多份计数）。
+
+    `client_ip` 为空时退回**全局**键，只用于观测/日志；锁定判定必须传真实来源 IP，
+    这样第三方只能锁住自己这一路来源，真实用户在别的 IP 上仍能登录。
+    """
+    base = f"login_user_fail:{username.strip().lower()}"
+    return f"{base}:{client_ip}" if client_ip else base
 
 
-async def _check_user_lock(username: str) -> None:
-    """账户级失败锁定：连续失败达上限后抛 429。
+async def _check_user_lock(username: str, client_ip: str = '') -> None:
+    """账户级失败锁定：**同一来源 IP** 对同一账号连续失败达上限后抛 429。
 
-    与 IP 维度限流**互补**：IP 限流挡不住「换 IP 对同一账号无限喷洒」。Redis 不可用时
+    键是「IP + 账号」，因此匿名者无法锁死别人的账号（见本节开头）。Redis 不可用时
     **fail-open**（记 warning 后放行）——缓存故障不能把全站登录锁死，此时仍由
     `_check_login_rate_limit` 的 IP 维度（含进程内存兜底）把关。日志只记计数，
     **不打印用户名**。
@@ -245,13 +253,13 @@ async def _check_user_lock(username: str) -> None:
         if not _redis:
             logger.warning("[Login] Redis 不可用，账户级失败锁已跳过（fail-open），仅剩 IP 限流")
             return
-        _fails = int(await _redis.get(_user_fail_key(username)) or 0)
+        _fails = int(await _redis.get(_user_fail_key(username, client_ip)) or 0)
     except Exception as e:  # defensive: 缓存故障不得锁死登录入口（fail-open）
         logger.warning("[Login] 账户级失败锁检查失败，已放行（fail-open）: %s", e)
         return
 
     if _fails >= LOGIN_USER_FAIL_LIMIT:
-        logger.warning("[Login] 账号已临时锁定: 窗口内连续失败%d次", _fails)
+        logger.warning("[Login] 账号已临时锁定: 窗口内同一来源连续失败%d次", _fails)
         raise HTTPException(
             status_code=429,
             detail="账号已临时锁定，请15分钟后重试",
@@ -259,11 +267,12 @@ async def _check_user_lock(username: str) -> None:
         )
 
 
-async def _record_login_failure(username: str) -> int | None:
-    """记一次账户级登录失败，返回窗口内累计失败次数（Redis 不可用返回 None）。
+async def _record_login_failure(username: str, client_ip: str = '') -> int | None:
+    """记一次账户级登录失败，返回**本次来源**窗口内累计失败次数（Redis 不可用返回 None）。
 
     incr 与 expire 必须同一 pipeline：照 `_check_login_rate_limit` 的既有写法，
     避免「incr 成功、expire 失败」留下**永不过期**的计数键（该账号会被永久 429）。
+    同时累加全局键（仅观测），两者在同一 pipeline 里完成，不额外多一次往返。
     """
     try:
         from fastapi_app.core.redis_wrapper import get_client
@@ -271,26 +280,35 @@ async def _record_login_failure(username: str) -> int | None:
         _redis = get_client()
         if not _redis:
             return None
-        _key = _user_fail_key(username)
+        _global_key = _user_fail_key(username)
+        _source_key = _user_fail_key(username, client_ip)
+        # 空来源 IP 时两个键相同，去重后再 incr，避免同一次失败被计成 2 次
+        _keys = list(dict.fromkeys((_global_key, _source_key)))
         _pipe = _redis.pipeline()
-        _pipe.incr(_key)
-        _pipe.expire(_key, LOGIN_USER_FAIL_WINDOW)
-        _fails, _ = await _pipe.execute()
-        return int(_fails)
+        for _key in _keys:
+            _pipe.incr(_key)
+            _pipe.expire(_key, LOGIN_USER_FAIL_WINDOW)
+        _results = await _pipe.execute()
+        # 结果按 [incr, expire, incr, expire] 成对返回；倒数第二个是来源键的计数
+        return int(_results[-2])
     except Exception as e:  # defensive: 计数失败不得改变登录响应（本次失败照样 401）
         logger.warning("[Login] 账户级失败计数写入失败（不影响本次响应）: %s", e)
         return None
 
 
-async def _reset_login_failures(username: str) -> None:
-    """登录成功后清零账户级失败计数（Redis 不可用时静默返回）。"""
+async def _reset_login_failures(username: str, client_ip: str = '') -> None:
+    """登录成功后清零失败计数（全局键 + 本次来源键；Redis 不可用时静默返回）。"""
     try:
         from fastapi_app.core.redis_wrapper import get_client
 
         _redis = get_client()
         if not _redis:
             return
-        await _redis.delete(_user_fail_key(username))
+        _keys = list(dict.fromkeys((_user_fail_key(username), _user_fail_key(username, client_ip))))
+        # 逐个 delete：成功登录才走到这里，多一次往返可忽略；不用 delete(*keys) 是为了
+        # 兼容既有单键调用方/测试替身的签名。
+        for _key in _keys:
+            await _redis.delete(_key)
     except Exception as e:  # defensive: 清零失败只影响下次登录的宽容度，不得阻断成功登录
         logger.warning("[Login] 账户级失败计数清零失败（不影响本次登录）: %s", e)
 
@@ -364,7 +382,8 @@ async def api_login(
         raise HTTPException(status_code=400, detail="密码长度不能超过128位")
 
     # 账户级失败锁：必须在校验凭据**之前**（否则喷洒方每个请求仍会走到哈希校验）。
-    await _check_user_lock(username)
+    # 键含来源 IP —— 只按用户名锁会让第三方用自己的失败次数锁死别人的账号。
+    await _check_user_lock(username, key)
 
     try:
         result = await authenticate_login(db, username, password, data.remember, key)
@@ -374,7 +393,7 @@ async def api_login(
         # main.py 的 AppError 处理器转 401），**不是** HTTPException，只捕 HTTPException
         # 会让这条计数永远不生效。
         if getattr(exc, 'status_code', None) == 401:
-            _fails = await _record_login_failure(username)
+            _fails = await _record_login_failure(username, key)
             # 只记 IP 与计数：不打印用户名/口令。
             logger.warning(
                 "[Login] 登录失败: IP=%s, 账号失败计数=%s/%d",
@@ -392,7 +411,7 @@ async def api_login(
 
     logger.info("[Login] 登录成功: IP=%s, user_id=%s", key, user.id)
     # 成功即清零账户级失败计数：否则「偶发打错几次」会累积到把号锁住。
-    await _reset_login_failures(username)
+    await _reset_login_failures(username, key)
 
     return LoginResponse(
         success=True,
@@ -678,15 +697,21 @@ async def upload_file(
     )
 
     # 使用对象存储服务保存文件，数据库存储元数据
-    from fastapi_app.services.storage_service import save_upload
-    result = await save_upload(
-        content=content,
-        original_filename=file.filename,
-        db=db,
-        uploader_id=user_id,
-        # 产品列表按 原图key + .thumb.webp 读取缩略图；/auth/upload 是产品新增/编辑
-        # 的图片入口，必须同步生成，否则只存原图，刷新后列表出现 404。
-        generate_thumbnail=True,
-    )
+    from fastapi_app.services.storage_service import ImagePixelBudgetExceededError, save_upload
+    try:
+        result = await save_upload(
+            content=content,
+            original_filename=file.filename,
+            db=db,
+            uploader_id=user_id,
+            # 产品列表按 原图key + .thumb.webp 读取缩略图；/auth/upload 是产品新增/编辑
+            # 的图片入口，必须同步生成，否则只存原图，刷新后列表出现 404。
+            generate_thumbnail=True,
+        )
+    except ImagePixelBudgetExceededError as exc:
+        # 声明像素超预算 = 上传内容不合格 → 4xx；若让它冒泡成 500，前端只会看到
+        # 「服务器内部错误」，运维也分不清是攻击还是坏图（2026-11-16 审计）。
+        logger.warning("[Upload] 图片像素超预算被拒: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return success_response(url=result["url"], filename=result["storage_key"], file_id=result["id"])
 

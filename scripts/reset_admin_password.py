@@ -33,8 +33,23 @@ def _validate_password_strength(password: str) -> None:
         raise ValueError(error_msg)
 
 
+# 重置语句抽成模块常量：「重置口令必须同时 bump token_version」是本脚本的契约，
+# 抽出来才能被纯文本断言而不必真连库（数据库只在生产/测试库上，脚本不允许被测试跑）。
+#
+# 为什么必须带上 token_version：HTTP 侧 `deps._verify_user_active` 与 WebSocket 60s
+# 复核都比对用户表的 token_version。只改 password 时，重置前签发的 access/refresh
+# token 仍能用满剩余有效期（默认 2 小时 / 7 天），等于「重置」没把旧会话踢下线
+# ——忘了密码的场景往往正怀疑凭据已外泄（2026-11-16 审计 Low）。
+# COALESCE 兜住历史行的 NULL，避免 NULL + 1 = NULL 让版本永远不变。
+_RESET_ADMIN_PASSWORD_SQL = (
+    'UPDATE "user" '
+    'SET password = :password, token_version = COALESCE(token_version, 0) + 1 '
+    'WHERE username = :username'
+)
+
+
 def reset_admin_password(new_password: str) -> bool:
-    """重置 admin 用户密码"""
+    """重置 admin 用户密码（同时让既有会话失效）"""
     _validate_password_strength(new_password)
 
     engine = create_engine(settings.DATABASE_URL)
@@ -44,9 +59,9 @@ def reset_admin_password(new_password: str) -> bool:
         # 生成新的密码哈希
         new_hash = hash_password(new_password)
 
-        # 更新 admin 用户的密码
+        # 更新 admin 用户的密码，并 bump token_version（见 _RESET_ADMIN_PASSWORD_SQL）
         result = session.execute(
-            text('UPDATE "user" SET password = :password WHERE username = :username'),
+            text(_RESET_ADMIN_PASSWORD_SQL),
             {"password": new_hash, "username": "admin"}
         )
 
