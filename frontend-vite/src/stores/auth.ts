@@ -115,7 +115,7 @@ export const useAuthStore = defineStore('auth', () => {
     return setUserInfo(payload)
   }
 
-  type NavApiItem = { name: string; url: string; icon?: string; code: string; permission_codes: string[] }
+  type NavApiItem = { name: string; url: string; icon?: string; code: string; permission_codes: string[]; superuser_only?: boolean }
   type NavApiSection = { name?: string; items?: NavApiItem[] }
 
   // 导航数据在途 Promise：init() 后台触发、路由守卫 await 同一 Promise，
@@ -140,6 +140,7 @@ export const useAuthStore = defineStore('auth', () => {
           icon: item.icon,
           permission: item.code,
           permissionCodes: item.permission_codes ?? [item.code],
+          superuserOnly: item.superuser_only === true,
         })),
       }))
     }
@@ -221,6 +222,9 @@ export const useAuthStore = defineStore('auth', () => {
       .map((section) => ({
         ...section,
         items: section.items.filter((item) => {
+          // 超管专属入口（如审批管理）：非超管即使被勾了权限码也不显示，
+          // 否则点开是清一色 403（审计 A-29）。
+          if (item.superuserOnly && !user.value?.is_super) return false
           const codes = item.permissionCodes ?? (item.permission ? [item.permission] : [])
           return codes.length === 0 || hasAnyPermission(codes)
         }),

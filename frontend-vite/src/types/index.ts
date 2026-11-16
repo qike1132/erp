@@ -399,6 +399,8 @@ export interface NavItem {
   icon?: string
   permission?: string
   permissionCodes?: string[]
+  /** 超管专属入口（后端 nav_context 的 superuser_only）：非超管不显示 */
+  superuserOnly?: boolean
 }
 
 export interface PermissionItem {

@@ -68,6 +68,14 @@ def nav_permission_codes(code: str) -> list[str]:
 # 已下线的导航项：不再显示独立导航入口，但权限保留（用户仍可访问页面与接口）
 HIDDEN_NAV_CODES = {'order_batch_manage'}
 
+# 只有超管用得上的导航项：对其他用户隐藏入口，但不影响超管自己的菜单。
+# 为什么需要它（2026-11-16 上线前审计 A-29）：审批管理的 5 个接口全部是
+# require_superuser('order_manage')（2026-10-02 与业务确认「审批仅超管」），而导航码
+# approval_manage 仍以 is_nav=True 挂在权限树里可被勾选 —— 勾了的人会看到「审批管理」
+# 菜单，点开全 403（"分配好权限却 403"那一类）。把它标成 superuser_only，
+# 前端 filteredNavSections 按 is_super 过滤：超管照旧看到，其他人看不到假入口。
+SUPERUSER_ONLY_NAV_CODES = {'approval_manage'}
+
 # 权限端点名 → 前端路由路径映射
 PERMISSION_URL_MAP = {
     'product.products': '/product',
@@ -186,6 +194,9 @@ async def get_nav_sections_async() -> dict:
                 'icon': item.icon,
                 'url': url,
                 'permission_codes': perm_codes,
+                # 超管专属功能（如审批管理）：前端据此对非超管隐藏入口，
+                # 避免「勾了权限码却点开全 403」的假入口（见 SUPERUSER_ONLY_NAV_CODES）。
+                'superuser_only': item.code in SUPERUSER_ONLY_NAV_CODES,
             })
 
         # 按 SECTION_ORDER 排序

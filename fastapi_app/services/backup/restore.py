@@ -259,6 +259,17 @@ async def restore_lock_heartbeat(
             await beat_task
 
 
+async def _revoke_sessions_after_committed_restore(reason: str) -> None:
+    """库已经提交的情况下强制全员重新登录（失败只记 ERROR，不得再跳过）。
+
+    审计 A-54：会话吊销挂在 happy-path 尾部时，任何「库已换、后续步骤炸」的路径都会
+    把撤销状态随事务一起回滚掉。这里把「必须做」与「失败也要留下证据」分开表达。
+    """
+    revocation = await revoke_all_sessions_after_restore()
+    if not revocation.get('ok', True):
+        logger.error('%s：会话失效失败 %s', reason, revocation.get('errors'))
+
+
 async def restore_from_zip(
     zip_bytes: bytes,
     db: AsyncSession,
@@ -332,9 +343,17 @@ async def restore_from_zip(
         reporter=_KernelProgressReporter(task_id) if task_id else None,
     )
 
+    # 库是否已经真换掉：数据库阶段成功即已提交（psql 单事务 + 清中断标记）。
+    db_committed = outcome.database.status != 'error'
+
     if outcome.database.status == 'error':
         raise RestoreError(f"数据库恢复失败: {outcome.database.message or outcome.message}")
     if outcome.status.value == 'error':
+        # 2026-11-16 上线前审计 A-54：库已经导入并提交，后续阶段（典型是连接池重建）
+        # 失败会在这里抛出，而下面的 revoke 永远走不到 —— 备份点之后被禁用/登出的凭据
+        # 于是重新可用，运维只看到一个 500。库已提交就必须补一次全员会话失效。
+        if db_committed:
+            await _revoke_sessions_after_committed_restore('恢复失败但数据库已提交')
         raise RestoreError(outcome.message or '恢复过程中出错')
 
     # B3：恢复会回滚 DB 与 Redis 里的撤销状态，必须强制全员重新登录。

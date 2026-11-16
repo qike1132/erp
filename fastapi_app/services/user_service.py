@@ -88,12 +88,17 @@ async def update_user(
     is_super: bool | None,
     factory: str | None = None,
     department: str | None = None,
+    *,
+    acting_user_id: int | None = None,
 ) -> User:
     """更新用户
 
     factory / department 参数语义一致：
     - None：不修改
     - 空字符串或合法值：写入（空字符串视为清除为 NULL）
+
+    acting_user_id 用于「不能降级自己」的守卫：调用方（端点）必须传当前操作者 id，
+    否则只能靠「最后一个超管」这条兜底（见 super_admin_demotion_error）。
     """
     result = await db.execute(select(User).where(User.id == user_id).with_for_update())
     user = result.scalar_one_or_none()
@@ -111,6 +116,16 @@ async def update_user(
         await bump_token_version(db, user)
 
     if is_super is not None and is_super != user.is_super:
+        # 与 toggle / delete 同口径地保护超管：这条路径曾经完全不设防（审计 A-24）
+        demotion_error = super_admin_demotion_error(
+            target_user_id=user.id,
+            target_is_super=user.is_super,
+            new_is_super=is_super,
+            acting_user_id=acting_user_id,
+            super_count=await count_super_users(db),
+        )
+        if demotion_error:
+            raise ValueError(demotion_error)
         user.is_super = is_super
         await bump_token_version(db, user)
 
@@ -311,3 +326,32 @@ async def count_super_users(db: AsyncSession) -> int:
         select(func.count()).select_from(User).where(User.is_super == True)  # noqa: E712
     )
     return int(super_count or 0)
+
+
+def super_admin_demotion_error(
+    *,
+    target_user_id: int,
+    target_is_super: bool,
+    new_is_super: bool | None,
+    acting_user_id: int | None,
+    super_count: int,
+) -> str | None:
+    """降级超管前的守卫，返回错误文案；None 表示放行。
+
+    为什么要有它（2026-11-16 上线前审计 A-24）：`toggle_user_status` 和 `delete_user`
+    都禁止动超管，唯独 `update_user` 可以把 `is_super` 直接写 False —— 而它同样收窄到
+    `require_superuser()`，于是一个超管能把**最后一个超管**（包括自己）降级，之后系统
+    在 UI 里再无超管，只能改库恢复。守卫必须与另两条路径同口径。
+
+    super_count 由调用方传入（已含目标用户自身），便于纯函数测试。
+    """
+    if new_is_super is None or new_is_super == target_is_super:
+        return None
+    if new_is_super:
+        return None
+    if acting_user_id is not None and acting_user_id == target_user_id:
+        return '不能修改自己的超级管理员标志；请让另一位超管操作'
+    if super_count <= 1:
+        return '系统必须保留至少一个超级管理员；请先把另一位用户设为超管'
+    return None
+

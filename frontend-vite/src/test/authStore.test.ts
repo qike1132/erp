@@ -186,6 +186,38 @@ describe('auth store', () => {
   })
 
   describe('filteredNavSections', () => {
+    it('超管专属入口对非超管隐藏，即使被授予了对应权限码（审计 A-29）', () => {
+      const s = freshStore()
+      // 非超管，但确实被勾了 approval_manage：以前会看到「审批管理」菜单，点开全 403
+      s.setUserInfo({ ...normalUser, permissions: ['approval_manage'] })
+      s.navSections = [
+        {
+          key: 'system',
+          title: '系统管理',
+          items: [
+            { title: '审批管理', path: '/approval', permissionCodes: ['approval_manage'], superuserOnly: true },
+            { title: '客户管理', path: '/customer', permissionCodes: ['approval_manage'] },
+          ],
+        },
+      ] as never
+
+      expect(s.filteredNavSections[0]!.items.map((i) => i.title)).toEqual(['客户管理'])
+    })
+
+    it('超管专属入口对超管仍然可见', () => {
+      const s = freshStore()
+      s.setUserInfo(superUser)
+      s.navSections = [
+        {
+          key: 'system',
+          title: '系统管理',
+          items: [{ title: '审批管理', path: '/approval', permissionCodes: ['approval_manage'], superuserOnly: true }],
+        },
+      ] as never
+
+      expect(s.filteredNavSections[0]!.items.map((i) => i.title)).toEqual(['审批管理'])
+    })
+
     it('按权限过滤导航项，并剔除空分组', () => {
       const s = freshStore()
       s.setUserInfo(normalUser)

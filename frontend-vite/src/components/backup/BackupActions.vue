@@ -126,37 +126,37 @@ const taskTitle = computed(() => {
 <style scoped>
 .ba-card { border: 1px solid var(--color-border-light); border-radius: var(--radius-md, 14px); background: #ffffff; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.06); }
 .ba-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.ba-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border: 2px solid var(--color-border-light); border-radius: var(--radius-button, 14px); font-size: 14px; font-weight: 600; font-family: inherit; line-height: 1.2; background: #ffffff; color: var(--color-text); cursor: pointer; transition: border-color .3s ease, color .3s ease, background .3s ease, box-shadow .3s ease, transform .3s ease; }
+.ba-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border: 2px solid var(--color-border-light); border-radius: var(--radius-button, 14px); font-size: var(--fs-body-sm); font-weight: 600; font-family: inherit; line-height: 1.2; background: #ffffff; color: var(--color-text); cursor: pointer; transition: border-color .3s ease, color .3s ease, background .3s ease, box-shadow .3s ease, transform .3s ease; }
 .ba-btn:disabled { opacity: .4; cursor: not-allowed; }
 .ba-btn-primary { color: #fff; border-color: transparent; background: linear-gradient(135deg, var(--color-success-500), var(--color-success-600)); box-shadow: 0 4px 12px rgba(40, 199, 111, 0.24); }
 .ba-btn-primary:hover:not(:disabled) { box-shadow: 0 6px 18px rgba(40, 199, 111, 0.32); transform: translateY(-1px); }
 .ba-btn-outline { color: var(--color-primary-600); }
 .ba-btn-outline:hover:not(:disabled) { background: var(--color-primary-50); border-color: var(--color-primary-300); color: var(--color-primary-700); box-shadow: 0 4px 12px rgba(0,0,0,.06); transform: translateY(-1px); }
-.ba-mutex-hint { font-size: 12px; color: var(--color-text-muted); }
-.ba-adv-toggle { border: none; background: none; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--color-primary-600); transition: color 0.2s ease; }
+.ba-mutex-hint { font-size: var(--fs-caption); color: var(--color-text-muted); }
+.ba-adv-toggle { border: none; background: none; cursor: pointer; font-size: var(--fs-caption); font-weight: 600; color: var(--color-primary-600); transition: color 0.2s ease; }
 .ba-adv-toggle:hover { color: var(--color-primary-700); }
 .ba-advanced { margin-top: 16px; padding: 16px; border: 1px dashed var(--color-border-light); border-radius: var(--radius-sm, 10px); display: flex; flex-direction: column; gap: 12px; }
 .ba-field { display: flex; flex-direction: column; gap: 6px; }
-.ba-field-label { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
-.ba-input { height: 36px; padding: 0 12px; border: 1px solid var(--color-border-light); border-radius: var(--radius-input, 12px); font-size: 14px; font-family: inherit; color: var(--color-text); background: #ffffff; }
+.ba-field-label { font-size: var(--fs-caption); font-weight: 600; color: var(--color-text-secondary); }
+.ba-input { height: 36px; padding: 0 12px; border: 1px solid var(--color-border-light); border-radius: var(--radius-input, 12px); font-size: var(--fs-body-sm); font-family: inherit; color: var(--color-text); background: #ffffff; }
 .ba-input:focus { outline: none; border-color: var(--color-primary-300); box-shadow: 0 0 0 3px var(--color-primary-50); }
 textarea.ba-input { height: auto; padding: 8px 12px; resize: vertical; font-family: var(--font-mono); }
-.ba-adv-hint { margin: 0; font-size: 12px; color: var(--color-text-muted); }
+.ba-adv-hint { margin: 0; font-size: var(--fs-caption); color: var(--color-text-muted); }
 .ba-task { margin-top: 16px; border: 1px solid var(--color-border-light); border-radius: var(--radius-md, 14px); background: #ffffff; padding: 16px; }
 .ba-task-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.ba-badge { min-width: 20px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.ba-badge { min-width: 20px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: var(--fs-caption); font-weight: 700; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
 .ba-badge-processing { background: var(--color-primary-50); color: var(--color-primary-700); }
 .ba-badge-success { background: var(--color-success-50); color: var(--color-success-700); }
 .ba-badge-danger { background: var(--color-danger-50); color: var(--color-danger-700); }
-.ba-task-title { font-size: 14px; font-weight: 500; color: var(--color-text); }
+.ba-task-title { font-size: var(--fs-body-sm); font-weight: 500; color: var(--color-text); }
 .ba-progress-row { display: flex; align-items: center; gap: 12px; }
 .ba-progress { flex: 1; height: 8px; background: var(--color-border-light); border-radius: 999px; overflow: hidden; }
 .ba-progress-fill { height: 100%; border-radius: 999px; transition: width .2s ease; }
 .ba-fill-processing { background: var(--color-primary-500, #5b8def); }
 .ba-fill-danger { background: var(--color-danger-500, #ea5455); }
-.ba-pct { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 500; color: var(--color-text-secondary); }
+.ba-pct { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; font-size: var(--fs-body-sm); font-weight: 500; color: var(--color-text-secondary); }
 .ba-task-meta { margin-top: 8px; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.ba-stage { font-size: 14px; color: var(--color-text-secondary); }
-.ba-error { font-size: 14px; color: var(--color-danger-500); }
-.ba-hint { margin-top: 12px; font-size: 14px; color: var(--color-text-muted); }
+.ba-stage { font-size: var(--fs-body-sm); color: var(--color-text-secondary); }
+.ba-error { font-size: var(--fs-body-sm); color: var(--color-danger-500); }
+.ba-hint { margin-top: 12px; font-size: var(--fs-body-sm); color: var(--color-text-muted); }
 </style>

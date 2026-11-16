@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.database import get_async_db, get_async_read_db
-from fastapi_app.core.deps import require_any_permission, require_permission
+from fastapi_app.core.deps import require_any_permission, require_permission, require_superuser
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.order import OrderItemSchema
@@ -131,7 +131,7 @@ router = APIRouter()
 
 @router.get("/cache/stats", response_model=dict)
 async def cache_stats(
-    user: User = Depends(require_permission("admin")),
+    user: User = Depends(require_superuser()),
 ):
     """获取缓存统计信息（需管理员权限）"""
     from fastapi_app.core.redis_wrapper import safe_get_stats
@@ -141,7 +141,7 @@ async def cache_stats(
 @router.post("/cache/clear", response_model=CacheClearResponse)
 async def clear_cache(
     pattern: str = Query("*", description="清除匹配的缓存键"),
-    user: User = Depends(require_permission("admin")),
+    user: User = Depends(require_superuser()),
 ):
     """清除缓存（需管理员权限）"""
     from fastapi_app.core.redis_wrapper import safe_delete_pattern
@@ -285,10 +285,16 @@ async def stockin_info(
 async def available_shipment(
     product_id: int | None = Query(None),
     customer: str = Query('', max_length=100),
-    user: User = Depends(require_permission("stock_view")),
+    user: User = Depends(require_any_permission("stock_view", "stockin_manage", "stockout_manage")),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """获取可出货量（按客户+产品维度）。"""
+    """获取可出货量（按客户+产品维度）。
+
+    权限码要按**调用页面**取，不是按数据来源取（2026-11-16 上线前审计 A-28）：
+    本端点只认过 stock_view，于是「只授了出库管理（stockout_manage）」的用户在出货
+    录入页恒 403，可出货量显示为空 → 前端超额闸门 fail-open 放行，只能靠提交时兜底。
+    同文件的 /available-stockins 已按同一原则补过码。
+    """
     if not product_id or not customer.strip():
         return {'order_quantity': 0, 'shipped_quantity': 0, 'available_quantity': 0}
 
@@ -532,7 +538,7 @@ async def batch_submit_stockouts(
 
 @router.get("/system/stats", response_model=SystemStatsResponse)
 async def system_stats(
-    user: User = Depends(require_permission("admin")),
+    user: User = Depends(require_superuser()),
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """系统统计信息（缓存命中率/性能数据）"""

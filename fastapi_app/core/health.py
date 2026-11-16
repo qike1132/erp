@@ -430,7 +430,7 @@ async def liveness_probe():
     return {"status": "alive"}
 
 
-async def readiness_probe():
+async def readiness_probe(request: Request):
     """K8s readiness probe - 检查所有依赖就绪
 
     失败时K8s将Pod从Service摘除，不接收流量。
@@ -445,6 +445,14 @@ async def readiness_probe():
     响应里两个字段分工明确：``restore_pending`` 保持旧契约（是否**阻断本库**
     readiness，等价于是否需要摘流量），``restore_marker_present`` 才是「磁盘上
     有没有标记」（含演练/跨库标记），另附 ``restore`` 明细，保证误报与真故障都可见。
+
+    2026-11-16 上线前审计 A-56：``restore`` 明细含生产库名、pre_restore 快照文件名与
+    人工回滚 hint，原来对**匿名**请求也原样返回（本端点经 nginx /api/ 匿名可达）。
+    现在只有本机直连（运维/服务管理器）拿全量明细，其余调用方只得到
+    ``{ok, state}`` —— 与同模块 backup/checks 等内部信号的开放口径一致。
+
+    注意 ``request`` 是**必填**的 Request：FastAPI 不支持把 ``Request | None`` 当
+    参数注入（会拿它当 Pydantic 字段，注册路由时直接 FastAPIError）。
     """
     db_ok = await verify_db_connectivity()
     redis_ok = True
@@ -472,6 +480,10 @@ async def readiness_probe():
     # * restore_marker_present —— 磁盘上是否**存在**标记（含演练/跨库标记，只告警）
     # * restore_blocks_readiness —— 与 restore_pending 同义，显式命名便于新调用方
     restore_pending = not restore['ok']
+    # 明细只给本机直连（运维/服务管理器）；请求对象缺失 = 进程内调用，按内部处理。
+    restore_payload: dict = restore
+    if request is not None and not _is_direct_loopback(request):
+        restore_payload = {'ok': restore.get('ok'), 'state': restore.get('state', 'absent')}
     result = {
         "status": "ready" if ready else "not_ready",
         "database": db_ok,
@@ -479,7 +491,7 @@ async def readiness_probe():
         "restore_pending": restore_pending,
         "restore_marker_present": restore.get('state', 'absent') != 'absent',
         "restore_blocks_readiness": restore_pending,
-        "restore": restore,
+        "restore": restore_payload,
     }
     if not ready:
         return Response(

@@ -112,6 +112,31 @@ def restore_filestore(zf: zipfile.ZipFile) -> dict:  # log-context: internal hel
     return {'status': 'ok' if not errors else 'partial', 'restored': restored, 'errors': errors}
 
 
+#: 组件包（config/ 与 root/ 命名空间）**不允许**还原的路径特征。
+#:
+#: 为什么（2026-11-16 上线前审计 A-55）：``root/`` 前缀直接映射到 PROJECT_ROOT，
+#: 而成员名是上传者可控的。没有这条白名单，一个组件包就能覆写工作区里的源码/脚本，
+#: 下次重启即变成代码执行。超管本来就等于主机运维（他已能还原 .env 与现役私钥），
+#: 所以这不是提权，但「恢复配置」没有任何理由具备改源码的能力。
+_FORBIDDEN_RESTORE_SUFFIXES = (
+    '.py', '.pyc', '.pyo', '.ps1', '.bat', '.cmd', '.sh', '.exe', '.dll', '.msi', '.vbs',
+)
+_FORBIDDEN_RESTORE_DIRS = (
+    'fastapi_app/', 'frontend-vite/src/', 'server_manager/', 'migrations/',
+    '.githooks/', 'scripts/', 'tests/', 'utils/',
+)
+
+
+def _reject_non_config_member(rel_path: str) -> str | None:
+    """返回拒绝原因；None 表示允许还原。"""
+    lowered = rel_path.replace('\\', '/').lower()
+    if lowered.endswith(_FORBIDDEN_RESTORE_SUFFIXES):
+        return f'{rel_path}: 源码/可执行文件不在恢复范围，已跳过'
+    if any(lowered.startswith(seg) or f'/{seg}' in lowered for seg in _FORBIDDEN_RESTORE_DIRS):
+        return f'{rel_path}: 源码目录不在恢复范围，已跳过'
+    return None
+
+
 def _restore_roots() -> tuple[tuple[str, Path], ...]:
     """归档命名空间 → 还原目标根（调用时求值，便于测试重定向）。
 
@@ -147,6 +172,11 @@ def restore_config(zf: zipfile.ZipFile, confirm_sensitive: bool = False) -> dict
         if rel_path in _SENSITIVE_AND_EXCLUDED_FILES and not confirm_sensitive:
             skipped_sensitive.append(rel_path)
             logger.warning(f"跳过敏感文件恢复（需要确认）: {rel_path}")
+            continue
+        non_config_reason = _reject_non_config_member(rel_path)
+        if non_config_reason:
+            errors.append(non_config_reason)
+            logger.warning('跳过非配置成员恢复: %s', non_config_reason)
             continue
         target = root / rel_path
         try:

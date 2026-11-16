@@ -288,12 +288,22 @@ def _stub_ready_dependencies(monkeypatch):
     return health_mod
 
 
+def _direct_request():
+    """构造一个「本机直连、无 X-Forwarded-For」的 Request（供 readiness_probe 判定内部）。"""
+    from starlette.requests import Request
+
+    return Request({'type': 'http', 'method': 'GET', 'path': '/api/health/ready',
+                    'headers': [], 'client': ('127.0.0.1', 12345), 'query_string': b''})
+
+
 async def test_readiness_probe_stays_ready_for_foreign_marker(marker_dir, monkeypatch):
     health_mod = _stub_ready_dependencies(monkeypatch)
     guard.mark_restore_started('erp_system_restore_test', 'drill-task')
     monkeypatch.setattr(guard, 'current_db_name', lambda: 'erp_system')
 
-    payload = await health_mod.readiness_probe()
+    # 传一个「本机直连」的假请求：这些用例断言的正是**内部**明细（审计 A-56 之后
+    # 明细只对直连开放），不带 XFF 才会拿到完整 restore 段。
+    payload = await health_mod.readiness_probe(_direct_request())
 
     assert isinstance(payload, dict), '跨库演练标记不得返回 503 Response'
     assert payload['status'] == 'ready'
@@ -311,7 +321,7 @@ async def test_readiness_probe_503_for_current_db_marker(marker_dir, monkeypatch
     guard.mark_restore_started('erp_system', None)
     monkeypatch.setattr(guard, 'current_db_name', lambda: 'erp_system')
 
-    response = await health_mod.readiness_probe()
+    response = await health_mod.readiness_probe(_direct_request())
 
     assert getattr(response, 'status_code', None) == 503
     body = json.loads(response.body)

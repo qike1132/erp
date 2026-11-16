@@ -128,15 +128,15 @@ function handleSave() {
 <style scoped>
 .sc-card { border: 1px solid var(--color-border-light); border-radius: var(--radius-md, 14px); background: #ffffff; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.06); }
 .sc-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--color-border-light); }
-.sc-label { font-size: 14px; color: var(--color-text); }
+.sc-label { font-size: var(--fs-body-sm); color: var(--color-text); }
 .sc-switch { position: relative; width: 38px; height: 22px; border-radius: 999px; background: var(--color-border); border: none; cursor: pointer; transition: background 0.2s ease; flex-shrink: 0; }
 .sc-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: left .15s ease; }
 .sc-switch.on { background: var(--color-primary-600); }
 .sc-switch.on::after { left: 18px; }
-.sc-select, .sc-input { height: 36px; padding: 0 12px; border: 1px solid var(--color-border-light); border-radius: var(--radius-input, 12px); font-size: 14px; font-family: inherit; color: var(--color-text); background: #ffffff; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+.sc-select, .sc-input { height: 36px; padding: 0 12px; border: 1px solid var(--color-border-light); border-radius: var(--radius-input, 12px); font-size: var(--fs-body-sm); font-family: inherit; color: var(--color-text); background: #ffffff; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
 .sc-select:focus, .sc-input:focus { outline: none; border-color: var(--color-primary-300); box-shadow: 0 0 0 3px var(--color-primary-50); }
 .sc-actions { display: flex; gap: 12px; margin-top: 16px; }
-.sc-btn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border: 2px solid transparent; border-radius: var(--radius-button, 14px); font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
+.sc-btn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border: 2px solid transparent; border-radius: var(--radius-button, 14px); font-size: var(--fs-body-sm); font-weight: 600; font-family: inherit; cursor: pointer; transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease, color 0.2s ease; }
 .sc-btn-primary { background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700)); color: #fff; box-shadow: 0 4px 12px rgba(91, 141, 239, 0.24); }
 .sc-btn-primary:disabled { background: var(--color-border-light); color: var(--color-text-muted); cursor: not-allowed; box-shadow: none; }
 .sc-btn-primary:hover:not(:disabled) { box-shadow: 0 6px 18px rgba(91, 141, 239, 0.32); transform: translateY(-1px); }
@@ -144,10 +144,10 @@ function handleSave() {
 .sc-btn-outline:hover { border-color: var(--color-primary-300); background: var(--color-primary-50); color: var(--color-primary-700); }
 .mono { font-family: var(--font-mono); }
 .sc-list { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
-.sc-item { display: flex; align-items: center; gap: 12px; border: 1px solid var(--color-border-light); border-radius: var(--radius-sm, 10px); padding: 10px 14px; font-size: 14px; background: #ffffff; }
+.sc-item { display: flex; align-items: center; gap: 12px; border: 1px solid var(--color-border-light); border-radius: var(--radius-sm, 10px); padding: 10px 14px; font-size: var(--fs-body-sm); background: #ffffff; }
 .sc-item-name { font-weight: 600; color: var(--color-text); }
 .sc-item-cron { color: var(--color-text-muted); flex: 1; }
-.sc-item-status { font-size: 12px; color: var(--color-text-secondary); }
+.sc-item-status { font-size: var(--fs-caption); color: var(--color-text-secondary); }
 .sc-item-del { border: none; background: none; color: var(--color-danger-500); cursor: pointer; font-family: inherit; }
-.sc-empty { font-size: 14px; color: var(--color-text-muted); }
+.sc-empty { font-size: var(--fs-body-sm); color: var(--color-text-muted); }
 </style>

@@ -9,6 +9,12 @@
 ⚠️ 部署侧注意：导航项「审批管理」的权限码是 `approval_manage`，与本接口要求的
 order_manage/is_super 不是同一码。若把 approval_manage 授予非超管用户，对方会看到侧栏入口
 但打开即 403（"分配好权限却 403"那一类）。授予时请只给超管。
+
+2026-11-16 上线前审计 A-29 的收口：既然「仅超管」是业务既定决策，就不该让
+approval_manage 产生假入口。该导航项已在 `core/nav_context.py` 的
+`SUPERUSER_ONLY_NAV_CODES` 里声明为**超管专属**（响应带 `superuser_only: true`），
+前端 `filteredNavSections` 对非超管隐藏它 —— 权限码仍保留（不破坏存量授权），
+但不会再出现「勾了却点开全 403」。
 """
 import logging
 
