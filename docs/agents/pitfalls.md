@@ -299,6 +299,24 @@ Start-Process -FilePath 'C:\Program Files\PowerShell\7\pwsh.exe' `
 - 参数/日志文件名要按次唯一（`_pytest_args.<yyyyMMddHHmmss>.txt`），否则并发会话会把「全量」
   跑成对方的子集（2026-10-12 踩过，见 `run_full_tests.sh` 注释）。
 
+## 清理临时文件：宽 glob 会连「别人的常驻脚本」一起删掉
+
+2026-11-16 事故：收尾清理 `logs/` 时用了
+`Get-ChildItem logs -File -Filter '*.ps1' | Remove-Item`，把 `logs/_run_pytest_elevated.ps1`
+（**AGENTS §4 / 多份文档引用的提权跑测唯一正路**）和几份历史一次性运维脚本一起删了。
+`logs/` 被 `.gitignore` 覆盖 = **不入库 = 删了没有 git 可回滚**，`Remove-Item -Force`
+也不进回收站。
+
+判据与做法：
+1. **只删自己这一轮新建的文件**：用一个显式的文件名清单，或按 `LastWriteTime -gt <本次会话开始时刻>` 过滤；
+   永远不要用「目录 + 扩展名」当删除条件。
+2. 删除前先 `git ls-files <path>` 看一眼：不在版本控制里的东西，删掉就是永久丢失。
+3. `logs/` 下的 `*.ps1`、`*.md`、`*.json` 是**常驻工具/证据**，不是临时文件；
+   临时产物请用 `_` 前缀 + 时间戳，并在收尾时逐个列名删除。
+4. 该脚本已按原契约重建（`-ArgsFile` 逐行参数 / `-OutFile` 落盘 / 自带 `--basetemp`
+   / 输出中文不乱码），重建后实测 6 passed、EXITCODE=0。**重建不是无损恢复**：
+   原脚本里若还有别的兼容分支，已随删除丢失。
+
 ## 关联
 
 - 运维护栏（红线之外的第二道人防）在 `AGENTS.md` §6.1——**常驻**，动手前必看。
