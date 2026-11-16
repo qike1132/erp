@@ -122,7 +122,7 @@ async def update_user(
             target_is_super=user.is_super,
             new_is_super=is_super,
             acting_user_id=acting_user_id,
-            super_count=await count_super_users(db),
+            super_count=await count_super_users(db, for_update=True),
         )
         if demotion_error:
             raise ValueError(demotion_error)
@@ -320,12 +320,22 @@ async def get_user_auth_row_by_id(db: AsyncSession, user_id: int):
     return result.first()
 
 
-async def count_super_users(db: AsyncSession) -> int:
-    """统计超级管理员数量（用于保护最后一个超管）"""
-    super_count = await db.scalar(
-        select(func.count()).select_from(User).where(User.is_super == True)  # noqa: E712
+async def count_super_users(db: AsyncSession, *, for_update: bool = False) -> int:
+    """统计超级管理员数量（用于保护最后一个超管）。
+
+    for_update=True 时对超管行加行锁再计数：降级守卫若只做普通 SELECT，
+    两个超管互降会各自读到「还有 2 个」而双双通过，最终把超管清成 0
+    （评审 F13，READ COMMITTED 下不加锁看不到对方未提交的写入）。
+    """
+    stmt = (
+        select(User.id)
+        .where(User.is_super == True)  # noqa: E712
+        .order_by(User.id)
     )
-    return int(super_count or 0)
+    if for_update:
+        stmt = stmt.with_for_update()
+    rows = (await db.execute(stmt)).scalars().all()
+    return len(rows)
 
 
 def super_admin_demotion_error(

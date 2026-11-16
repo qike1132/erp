@@ -350,25 +350,22 @@ async def test_extract_cell_images_normal_workbook_still_empty(tmp_path):
 # 端点层：预算拒绝必须落成 400（评审 finding 3），不得 500
 # ---------------------------------------------------------------------------
 
-async def test_packaging_upload_budget_violation_is_400(client, monkeypatch):
-    """包装部上传链：service 层抛 XlsxBudgetError → 端点转 400（而非全局 500）。"""
-    from unittest.mock import AsyncMock
+async def test_packaging_upload_endpoint_is_retired(client):
+    """包装部上传端点已停用：写的是死表 packaging_record，必须 410 而不是照常 200。
 
-    from fastapi_app.services import production_summary_service
-
-    monkeypatch.setattr(
-        production_summary_service, 'upload_packaging_excel',
-        AsyncMock(side_effect=XlsxBudgetError('文件解压后总量过大（999999999 字节，上限 134217728）')),
-    )
+    2026-11-16 审计 A-16 收尾（评审 F11）：两个 create 端点改 410 后，这个上传端点
+    仍能往旧表插数据，旧客户端/脚本会「上传成功但 /production 永远看不到」。
+    预算透传链路由 test_production_plan_upload_budget_violation_is_400 覆盖。
+    """
     resp = await client.post(
         '/api/v1/production-summary/packaging/upload',
         files={'file': ('b.xlsx', b'PK\x03\x04' + b'0' * 100,
                         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')},
     )
-    assert resp.status_code == 400, (
-        f'预算拒绝必须 400 且带可读原因，实际 {resp.status_code} {resp.text[:150]}'
+    assert resp.status_code == 410, (
+        f'退役端点必须 410，实际 {resp.status_code} {resp.text[:150]}'
     )
-    assert '上限' in resp.json()['detail']
+    assert '/production' in resp.json()['detail']
 
 
 async def test_production_plan_upload_budget_violation_is_400(client, monkeypatch):

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from fastapi_app.services import order_batch_service
-from fastapi_app.shared_models import Base, Order, Product, StockIn
+from fastapi_app.shared_models import Base, Order, OrderItem, Product, StockIn
 
 
 def _user(*, factory, is_super):
@@ -110,7 +110,11 @@ class TestUpdateStockinBatchNoFactoryGate:
 
 @pytest_asyncio.fixture
 async def sqlite_session():
-    """真实异步内存 SQLite：只建 product / order / stock_in 三张表，绝不碰生产库。"""
+    """真实异步内存 SQLite：只建 product / order / order_item / stock_in，绝不碰生产库。
+
+    order_item 必须建：订单分支的工厂判定按 order_item → product 全量口径
+    （与写侧 assert_orders_factory_scoped 同源），不建表就无从验证混厂场景。
+    """
     engine = create_async_engine(
         'sqlite+aiosqlite:///:memory:',
         poolclass=StaticPool,
@@ -119,7 +123,7 @@ async def sqlite_session():
     async with engine.begin() as conn:
         await conn.run_sync(
             lambda c: Base.metadata.create_all(
-                c, tables=[Product.__table__, Order.__table__, StockIn.__table__],
+                c, tables=[Product.__table__, Order.__table__, OrderItem.__table__, StockIn.__table__],
             )
         )
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
@@ -219,6 +223,16 @@ class TestOrderBranchFactoryFilter:
             Order(id=22, order_no='PO-22', customer='贝乐', quantity=1, product_id=2),
             Order(id=23, order_no='PO-23', customer='贝乐', quantity=1, product_id=3),
             Order(id=24, order_no='PO-24', customer='贝乐', quantity=1, product_id=4),
+            # 混厂订单：首个 SKU 是本厂（兼容字段 product_id=1），另含一条他厂 SKU
+            Order(id=25, order_no='PO-25', customer='贝乐', quantity=2, product_id=1),
+        ])
+        session.add_all([
+            OrderItem(order_id=21, product_id=1, quantity=1),
+            OrderItem(order_id=22, product_id=2, quantity=1),
+            OrderItem(order_id=23, product_id=3, quantity=1),
+            OrderItem(order_id=24, product_id=4, quantity=1),
+            OrderItem(order_id=25, product_id=1, quantity=1),
+            OrderItem(order_id=25, product_id=2, quantity=1),
         ])
         await session.flush()
 
@@ -229,9 +243,13 @@ class TestOrderBranchFactoryFilter:
         rows = (await session.execute(branch)).all()
         ids = sorted(row.record_id for row in rows)
 
+        # 判定按 order_item → product **全量**（与写侧 assert_orders_factory_scoped 同源）：
+        # 21 本厂 / 23 未分配 / 24 空串放行；22 全他厂排除；
+        # 25 混厂也必须排除 —— 否则「列表看得见、改批次号 404」（评审 F4）。
         assert ids == [21, 23, 24], (
             f'厂绑定用户只应看到本厂(21)、未分配工厂(23)、空串工厂(24)的订单行，实得 {ids}'
         )
+        assert 25 not in ids, '混厂订单（含他厂 SKU）必须整体不可见，与写侧 404 同口径'
 
     @pytest.mark.asyncio
     async def test_superuser_sees_all_factory_rows(self, sqlite_session):
@@ -270,14 +288,21 @@ class TestOrderBranchFactoryFilter:
         assert 'product' not in sql.lower()
         assert 'is_deleted' in sql
 
-    def test_branch_joins_product_once_with_keyword(self):
-        """订单分支 keyword 与工厂过滤共用一次 JOIN（重复 JOIN 会报歧义）。"""
+    def test_branch_uses_correlated_exists_for_factory(self):
+        """工厂条件走 order_item 的关联 EXISTS，keyword 用 LEFT JOIN product。
+
+        评审 F4 之后的口径：工厂判定不能再靠「主查询 JOIN product」——那只能看到
+        Order.product_id（首个 SKU 的兼容字段），混厂订单会「列表看得见、改批次号 404」。
+        同时 keyword 仍需要 product.name，故主查询保留**一次 LEFT OUTER JOIN**
+        （INNER 会让 product_id 为空的历史订单整行消失）。
+        """
         branch = order_batch_service._build_batch_order_branch(
             whitelist=None, batch_no=None, status=None, customer=None, keyword='PO-1',
             factory_scope='一分厂',
         )
-        sql = str(branch.compile())
+        sql = str(branch.compile()).upper()
 
-        assert sql.count('JOIN product') == 1
-        assert 'product.factory IS NULL' in sql
-        assert 'product.name' in sql
+        assert 'LEFT OUTER JOIN PRODUCT' in sql
+        assert 'EXISTS' in sql, '工厂条件应走关联 EXISTS（order_item → product 全量判定）'
+        assert 'ORDER_ITEM' in sql
+        assert 'PRODUCT.NAME' in sql

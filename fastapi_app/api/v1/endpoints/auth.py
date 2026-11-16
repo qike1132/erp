@@ -36,7 +36,11 @@ LOGIN_BURST_LIMIT = 30         # 1 分钟内最大尝试次数
 LOGIN_BURST_WINDOW = 60        # 突发窗口（秒）
 LOGIN_ATTEMPT_LIMIT = 100      # 5 分钟内最大尝试次数
 LOGIN_ATTEMPT_WINDOW = 300     # 持续窗口（秒）
-LOGIN_USER_FAIL_LIMIT = 10     # 账户级连续失败上限（换 IP 也拦得住）
+LOGIN_USER_FAIL_LIMIT = 10     # 同一来源对同一账号的连续失败上限
+# 全局账户兜底：换 IP 喷洒同一账号时，来源键各算各的，需要一条**远高于单人误输**的
+# 全局限流把「横扫同一账号」拦住（评审 F15）。阈值取 10 倍：正常人 15 分钟内输错
+# 10 次已很罕见，100 次只能是脚本；命中只锁该账号 15 分钟，不影响其他账号。
+LOGIN_USER_GLOBAL_FAIL_LIMIT = 100
 LOGIN_USER_FAIL_WINDOW = 900   # 账户级失败计数窗口（秒，15 分钟）
 
 
@@ -263,6 +267,19 @@ async def _check_user_lock(username: str, client_ip: str = '') -> None:
         raise HTTPException(
             status_code=429,
             detail="账号已临时锁定，请15分钟后重试",
+            headers={"Retry-After": str(LOGIN_USER_FAIL_WINDOW)},
+        )
+
+    # 全局兜底（评审 F15）：来源键挡不住「换 IP 喷洒同一账号」，这里用远高于
+    # 单人误输的阈值兜一道；Redis 不可用时同样 fail-open（上面已提前 return）。
+    global_fails = int(await _redis.get(_user_fail_key(username)) or 0)
+    if global_fails >= LOGIN_USER_GLOBAL_FAIL_LIMIT:
+        logger.warning(
+            "[Login] 账号已触发全局失败上限（多来源）: 窗口内累计%d次", global_fails,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="该账号登录失败次数过多，请15分钟后重试",
             headers={"Retry-After": str(LOGIN_USER_FAIL_WINDOW)},
         )
 

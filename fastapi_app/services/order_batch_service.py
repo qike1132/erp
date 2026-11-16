@@ -35,7 +35,16 @@ from fastapi_app.shared.factory_scope import (
     factory_scope_of,
 )
 from fastapi_app.shared.time_format import format_local_time
-from fastapi_app.shared_models import Order, OrderBatchAuditLog, OrderSyncConfig, Product, StockIn, StockOut, User
+from fastapi_app.shared_models import (
+    Order,
+    OrderBatchAuditLog,
+    OrderItem,
+    OrderSyncConfig,
+    Product,
+    StockIn,
+    StockOut,
+    User,
+)
 from fastapi_app.shared_models.order import ORDER_STATUS_BATCH_COMPLETED, ORDER_STATUS_SHIPPED
 
 logger = logging.getLogger(__name__)
@@ -170,11 +179,28 @@ def _build_batch_order_branch(whitelist, batch_no, status, customer, keyword, fa
         order_branch = order_branch.where(Order.status == status)
     if customer:
         order_branch = order_branch.where(Order.customer == customer)
-    # keyword 与工厂过滤都要 JOIN Product：合并成一次 JOIN，避免同表 JOIN 两次
-    if keyword or factory_scope:
-        order_branch = order_branch.join(Product, Order.product_id == Product.id)
+    # keyword 需要 Product 的名字/条码，用 **LEFT JOIN**：order.product_id 可空
+    # （ondelete='SET NULL'），INNER JOIN 会让 product_id 为空的历史订单整行消失。
+    if keyword:
+        order_branch = order_branch.join(Product, Order.product_id == Product.id, isouter=True)
     if factory_scope:
-        order_branch = order_branch.where(_factory_match(factory_scope))
+        # 工厂条件按 order_item → product **全量**判定，与写侧
+        # factory_scope.assert_orders_factory_scoped 同源：任一条 SKU 属他厂即不可见。
+        # 只看 Order.product_id（首个 SKU 的兼容字段）会让混厂订单「列表看得见、
+        # 改批次号 404」——正是本条审计要消除的症状（评审 F4）。
+        foreign_sku = (
+            select(literal(1))
+            .select_from(OrderItem)
+            .join(Product, Product.id == OrderItem.product_id)
+            .where(
+                OrderItem.order_id == Order.id,
+                Product.factory.isnot(None),
+                Product.factory != '',
+                Product.factory != factory_scope,
+            )
+            .exists()
+        )
+        order_branch = order_branch.where(~foreign_sku)
     if keyword:
         kw = f"%{escape_like(keyword)}%"
         order_branch = order_branch.where(

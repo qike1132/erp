@@ -19,8 +19,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fastapi_app.core.cache import CacheDomain
-from fastapi_app.core.cache_invalidation import InvalidationStrategy
 from fastapi_app.services import order_batch_service
 
 
@@ -116,24 +114,26 @@ async def test_complete_batch_schedules_post_commit_invalidation(issued_patterns
 
 
 @pytest.mark.asyncio
-async def test_complete_batch_endpoint_invalidates_after_commit(client):
-    """端点侧：db_transaction 提交后必须下发 ORDER + REPORT 域失效。"""
+async def test_complete_batch_endpoint_does_not_double_invalidate(client):
+    """端点侧：失效由 service 统一负责，端点不再重复遍历一遍 Redis。
+
+    评审 F9：service 的 complete_batch 已有「提交前清一次 + post-commit 再清一次」，
+    端点再来一次就是同一域集合跑第三遍（每遍一次 Redis SCAN）。本用例钉住
+    「端点不直接调 cache_mgr」，避免有人以为 service 没做而把失效挪回端点。
+    """
     from fastapi_app.api.v1.endpoints import order_batch as order_batch_endpoint
 
     invalidate = AsyncMock()
     fake_result = {'completed_count': 1, 'completed_stockins': 0, 'failed_orders': []}
 
-    with patch.object(order_batch_endpoint.cache_mgr, 'invalidate', new=invalidate), \
-         patch.object(
-             order_batch_endpoint.order_batch_service, 'complete_batch',
-             new=AsyncMock(return_value=fake_result),
-         ):
+    with patch.object(order_batch_endpoint.order_batch_service, 'complete_batch',
+                      new=AsyncMock(return_value=fake_result)):
         resp = await client.post(
             '/api/v1/order-batch/batch/complete', json={'batch_no': 'B9'},
         )
 
     assert resp.status_code == 200, resp.text
-    invalidate.assert_any_call(
-        InvalidationStrategy.DOMAIN,
-        CacheDomain.ORDER | CacheDomain.REPORT,
+    assert not hasattr(order_batch_endpoint, 'cache_mgr'), (
+        '端点又引入了 cache_mgr：失效点应统一在 service（见 complete_batch）'
     )
+    invalidate.assert_not_called()

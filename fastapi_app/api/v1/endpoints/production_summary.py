@@ -183,7 +183,11 @@ async def export_craft_works(
             headers={'Content-Disposition': 'attachment; filename=craft_work_export.xlsx'},
         )
     except ValueError as e:
-        # 行数上界（审计 #5）：服务层超限抛 ValueError，映射 413 引导缩小范围，
+        # 只有「行数上界」才是 413；日期非法也是 ValueError，必须回 400，
+        # 否则用户拿到 413 会去缩范围（缩了也没用）——评审 F1。
+        if '日期' in str(e):
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        # 行数上界（审计 A-15）：服务层超限抛 ValueError，映射 413 引导缩小范围，
         # 而不是像从前那样静默截断后照常 200 出一份缺行的文件。
         raise HTTPException(status_code=413, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
@@ -313,6 +317,15 @@ async def upload_packaging_excel(
     Raises:
         HTTPException: 文件格式不支持或读取失败时抛出 400。
     """
+    # 2026-11-16 审计 A-16 收尾（评审 F11）：本端点写的是**旧表** packaging_record，
+    # 与两个 create 端点同源；任何页面都不再读它，继续放行等于让旧客户端/脚本
+    # 「上传成功、但 /production 永远看不到」。与 create 同口径直接 410。
+    raise HTTPException(
+        status_code=410,
+        detail='该入口已停用，请在 /production 录入生产记录'
+               '（本入口写入的是历史旧表，任何页面都不再读取它）',
+    )
+
     filename = file.filename or ''
     if not filename.endswith('.xlsx'):
         raise HTTPException(status_code=400, detail='仅支持 .xlsx 格式文件，.xls 已不再支持')
@@ -369,7 +382,9 @@ async def export_packaging_records(
             headers={'Content-Disposition': 'attachment; filename=packaging_export.xlsx'},
         )
     except ValueError as e:
-        # 行数上界（审计 #5）：同手工部导出，超限 413 而不是静默截断出文件
+        # 同手工部导出：日期非法回 400，只有行数上界才是 413（评审 F1）。
+        if '日期' in str(e):
+            raise HTTPException(status_code=400, detail=str(e)) from e
         raise HTTPException(status_code=413, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e

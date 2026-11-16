@@ -72,7 +72,14 @@ import { useAuthStore } from '@/stores/auth'
 // 「有没有预设维护权限」，改权限码后与后端写接口、与 Tab 显隐三处同源。
 const authStore = useAuthStore()
 const router = useRouter()
-const blocked = computed(() => !authStore.hasPermission('outsource_preset_manage'))
+// 与 HubeiRouteTabs 的 canOutsource + canManagePresets 同口径：只勾了
+// outsource_preset_manage、却没有 outsource_view 的账号（/user 允许单独勾）
+// 若被放进来，子组件 setup 就会发读接口拿 403 —— 用户看到的是「没有预设」
+// 而不是「权限不足」（评审 F7）。
+const blocked = computed(() => (
+  !authStore.hasAnyPermission(['outsource_manage', 'outsource_view'])
+  || !authStore.hasPermission('outsource_preset_manage')
+))
 onMounted(() => {
   if (blocked.value) void router.replace('/outsource')
 })

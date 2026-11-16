@@ -10,8 +10,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.cache import CacheDomain
-from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.exceptions import db_transaction
@@ -176,14 +174,9 @@ async def complete_batch(
     """
     async with db_transaction(db):
         result = await order_batch_service.complete_batch(db, batch_no=data.batch_no, user=user)
-    # 事务提交后失效缓存（与 approval.py 提交后同口径）：批次完成改的是
-    # Order.status（进历史批次）与备货归档时间，订单列表、批次历史与报表流水
-    # 都由这两张表派生，不失效会在 TTL 内继续展示归档前的旧数据
-    # （上线前审计 2026-11-16 Medium 2）。
-    await cache_mgr.invalidate(
-        InvalidationStrategy.DOMAIN,
-        CacheDomain.ORDER | CacheDomain.REPORT,
-    )
+    # 缓存失效已由 service 承担（order_batch_service.complete_batch: 提交前清一次
+    # + schedule_post_commit_invalidation 再清一次），此处不再重复遍历 Redis
+    # （评审 F9：域集合完全相同，三次同域失效纯属浪费，且注释会让人以为 service 没做）。
     completed_count = result['completed_count']
     archived_stockins = result.get('completed_stockins', 0)
     failed_count = len(result['failed_orders'])

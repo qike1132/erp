@@ -155,9 +155,16 @@ async def _compute_inventory_stats(db: AsyncSession, conditions: list) -> dict:
     total_items, total_stock = (await db.execute(stats_stmt)).one()
 
     async def _sum_direction(direction: str) -> int:
-        q = select(func.coalesce(func.sum(CaseMovement.quantity), 0)).where(CaseMovement.direction == direction)
+        # 与上面的 count/sum 同口径：只算主件。之前只有 SKU 数与总库存加了
+        # parent 过滤，累计入/出库仍按全表求和（含配件流水）——同一页脚的四个数字
+        # 因此不同源（评审 F3）。无 search 时也必须 join Case 才能过滤。
+        q = (
+            select(func.coalesce(func.sum(CaseMovement.quantity), 0))
+            .join(Case, CaseMovement.case_id == Case.id)
+            .where(CaseMovement.direction == direction, Case.parent_id.is_(None))
+        )
         if conditions:
-            q = q.join(Case, CaseMovement.case_id == Case.id).where(*conditions)
+            q = q.where(*conditions)
         return int((await db.execute(q)).scalar() or 0)
 
     return {

@@ -25,6 +25,26 @@ user_permission = Table(
 )
 
 
+# 需要超管身份的权限前缀。
+SENSITIVE_PREFIXES = ('user_',)
+_SENSITIVE_PREFIXES = SENSITIVE_PREFIXES
+
+# manage 不得经继承放行的业务子码（须逐个显式授权）。
+# 提到模块级而不是留在 has_permission 函数体里：这份清单本身是安全边界，
+# 需要有测试能直接断言「某个码在里面」（评审 F8）。
+NO_MANAGE_INHERIT = frozenset({
+    'outsource_ship', 'outsource_receive',
+    # 工序预设维护：靠「顶层权限行」实现职责分离，这里再兜一道，
+    # 防止日后被挂成 outsource_manage 的子行后父码无条件放行。
+    'outsource_preset_manage',
+    'order_edit', 'order_delete',
+    'stockin_edit', 'stockin_delete',
+    'stockout_edit', 'stockout_delete',
+    'deduction_edit', 'deduction_delete',
+    'return_edit', 'return_delete',
+})
+
+
 class User(Base):
     """用户模型"""
     __tablename__ = 'user'
@@ -67,17 +87,7 @@ class User(Base):
           stockout_edit/delete、deduction_edit/delete、return_edit/delete（迁移 079）
           是出货/抵扣/退货三类报表流水的同类职责分离码，同样必须显式授权。
         """
-        SENSITIVE_PREFIXES = ['user_']
-
-        # manage 不得经继承放行的业务子码（须逐个显式授权）
-        NO_MANAGE_INHERIT = {
-            'outsource_ship', 'outsource_receive',
-            'order_edit', 'order_delete',
-            'stockin_edit', 'stockin_delete',
-            'stockout_edit', 'stockout_delete',
-            'deduction_edit', 'deduction_delete',
-            'return_edit', 'return_delete',
-        }
+        SENSITIVE_PREFIXES = _SENSITIVE_PREFIXES
 
         for prefix in SENSITIVE_PREFIXES:
             if permission_code.startswith(prefix):

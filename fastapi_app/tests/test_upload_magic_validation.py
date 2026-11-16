@@ -154,7 +154,8 @@ def test_require_upload_magic_keeps_custom_detail():
 # (路径, 表单字段名, 文件名, 内容, 所需权限码)
 _FAKE_UPLOADS = [
     ('/api/v1/production-plans/upload', 'file', 'evil.xlsx', b'not an excel workbook', ('production_plan_manage',)),
-    ('/api/v1/production-summary/packaging/upload', 'file', 'evil.xlsx', b'not an excel workbook', ('production_summary_manage',)),
+    # 包装部上传端点已退役（2026-11-16 审计 A-16：它写的 packaging_record 是死表，
+    # 端点现返回 410），magic 校验覆盖由上面的 production-plans/upload 承担。
     ('/api/v1/auth/upload', 'file', 'evil.png', b'<html>not an image</html>', None),
     ('/api/v1/ocr-import/preview', 'file', 'evil.png', b'not an image at all', ('batch_import',)),
     ('/api/v1/backup/validate', 'file', 'evil.zip', b'not a zip archive', ('backup_read',)),

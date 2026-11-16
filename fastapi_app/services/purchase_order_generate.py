@@ -159,6 +159,7 @@ def _material_row(
     spec: _MaterialSpec, row, qty: int | float,
     product_name: str, customer_name: str, scope_label: str,
     role_id: int | None = None,
+    product_barcode: str | None = None,
 ) -> dict:
     """把一条 BOM 行展开为一条采购明细（字段口径与重构前逐字对齐）。
 
@@ -172,6 +173,10 @@ def _material_row(
     else:
         material_name = getattr(row, spec.name_attr) or spec.default_name
     return {
+        # 产品条码（2026-11-16 审计 A-52）：明细上的 barcode 列此前全仓零写入，
+        # 于是 /orders/completed?barcode= 的 EXISTS 永远零命中。条码属于**产品**
+        # （整单同一个），从 SKU 来源一路带下来；上游没有时留 None，不伪造。
+        'barcode': product_barcode or None,
         'material_name': material_name,
         'material_code': row.material_code or '',
         'part_name': getattr(row, 'part_name', None),
@@ -196,6 +201,12 @@ def build_expected_items(sku_lines, ctx: _BomContext, name_to_pid, customer_name
     非盲盒保持历史上限「每个作用域都用完整数量」。
     """
     pid_name_map = {pid: name for name, pid in name_to_pid.items()}
+    # SKU 快照里带 product_barcode；按 pid 收敛（同 pid 多行取首个非空）
+    pid_barcode: dict[int, str] = {}
+    for line in sku_lines or []:
+        _pid = name_to_pid.get((line.get('product_name') or '').strip())
+        if _pid is not None and line.get('product_barcode'):
+            pid_barcode.setdefault(_pid, line['product_barcode'])
     items: list[dict] = []
     merged: dict[int, dict] = {}
     for line in sku_lines or []:
@@ -230,7 +241,8 @@ def build_expected_items(sku_lines, ctx: _BomContext, name_to_pid, customer_name
                         continue
                     items.append(_material_row(
                         spec, row, scope_qty, product_name, customer_name,
-                        scope_label, role_id=role_id))
+                        scope_label, role_id=role_id,
+                        product_barcode=pid_barcode.get(pid)))
     return items
 
 
@@ -247,6 +259,15 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
     重复进位）；该 SKU 的明细按合并口径**整体产出一次**（默认 BOM 仍用完整 N）。
     未配置配比的 SKU 走历史逐行全量路径，行为零变化。
     """
+    # 产品条码（审计 A-52）：Order.items / StockIn 自带 product_barcode，按 pid 收敛
+    pid_barcode: dict[int, str] = {}
+    for rec in records:
+        for it in (getattr(rec, 'items', None) or []):
+            if getattr(it, 'product_barcode', None):
+                pid_barcode.setdefault(it.product_id, it.product_barcode)
+        if getattr(rec, 'product_barcode', None) and getattr(rec, 'product_id', None):
+            pid_barcode.setdefault(rec.product_id, rec.product_barcode)
+
     # 先把盲盒 SKU 在本组内的数量合并为「订单总数量」（均分必须对总量做一次）
     merged_blind_qty: dict[int, float] = {}
     if ctx.blind_box_pids:
@@ -291,6 +312,7 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
                                 _material_row(
                                     spec, row, scope_qty, product_name, customer_name,
                                     scope_label, role_id=role_id,
+                                    product_barcode=pid_barcode.get(pid),
                                 )
                             )
                 continue
@@ -305,6 +327,7 @@ def _build_material_items(records: list, ctx: _BomContext, pid_name_map: dict[in
                             _material_row(
                                 spec, row, qty, product_name, customer_name,
                                 scope_label, role_id=role_id,
+                                product_barcode=pid_barcode.get(pid),
                             )
                         )
     return result_items

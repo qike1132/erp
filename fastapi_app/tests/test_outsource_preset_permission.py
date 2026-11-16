@@ -43,8 +43,9 @@ def test_preset_write_endpoints_require_preset_manage():
     assert _route_permission('/process-types/batch', 'POST') == 'outsource_preset_manage'
     assert _route_permission('/process-types/{pt_id}', 'PUT') == 'outsource_preset_manage'
     assert _route_permission('/process-types/{pt_id}', 'DELETE') == 'outsource_preset_manage'
-    # 订单级删除工序：同样属于「删工序」，一并收窄（审计已点名）
-    assert _route_permission('/processes/{process_id}', 'DELETE') == 'outsource_preset_manage'
+    # 订单级删除工序 **不** 收窄到预设码：删的是某张订单的外发工序（订单级写操作），
+    # 不是工序预设维护（评审 F10）。只持 outsource_manage 的集成不该突然 403。
+    assert _route_permission('/processes/{process_id}', 'DELETE') == 'outsource_manage'
 
 
 def test_outsource_manage_alone_is_rejected():
@@ -61,12 +62,19 @@ def test_outsource_manage_alone_is_rejected():
     # 拆码的核心断言：旧码不派生新码
     assert holder.has_permission('outsource_preset_manage') is False
 
-    # 对照：若把它登记成 outsource_manage 的子权限，则会经 children 继承放行
-    # —— 这正是「只加登记也要加在顶层」的原因
+    # 对照 + 兜底（评审 F8）：即使有人把它挂成 outsource_manage 的子权限，
+    # NO_MANAGE_INHERIT 也会挡住父码的 children 无条件继承，缺陷不会原样复活。
+    from fastapi_app.shared_models.user import NO_MANAGE_INHERIT
+
+    assert 'outsource_preset_manage' in NO_MANAGE_INHERIT, (
+        '该码必须进 NO_MANAGE_INHERIT：否则 parent_id 写错就会经 children 继承放行'
+    )
     manage.children.append(
         Permission(id=2, name='维护外发工序预设', code='outsource_preset_manage', parent_id=1)
     )
-    assert holder.has_permission('outsource_preset_manage') is True
+    assert holder.has_permission('outsource_preset_manage') is False, (
+        'NO_MANAGE_INHERIT 里的码不能被父权限的 children 继承放行'
+    )
 
 
 def test_preset_permission_registered_as_top_level_seed():

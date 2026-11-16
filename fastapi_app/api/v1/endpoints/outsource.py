@@ -366,7 +366,10 @@ async def receive_order_processes_batch(
 async def delete_order_process(
     process_id: int,
     db: AsyncSession = Depends(get_async_db),
-    _user: User = Depends(require_permission(PERM_PRESET_MANAGE)),
+    # 这是**订单级**写操作（删的是某张订单的外发工序），不是工序预设维护，
+    # 因此留在 outsource_manage（评审 F10：本文件头把两者分开表述后，这一处
+    # 曾被一并收窄到预设码，会让只持 outsource_manage 的集成突然 403）。
+    _user: User = Depends(require_permission("outsource_manage")),
 ) -> OrderActionResponse:
     """删除订单外发工序。"""
     async with db_transaction(db):

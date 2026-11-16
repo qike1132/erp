@@ -124,6 +124,9 @@ _FORBIDDEN_RESTORE_SUFFIXES = (
 _FORBIDDEN_RESTORE_DIRS = (
     'fastapi_app/', 'frontend-vite/src/', 'server_manager/', 'migrations/',
     '.githooks/', 'scripts/', 'tests/', 'utils/',
+    # .git/ 必须在列：hooks/* 是无扩展名的可执行脚本，后缀白名单拦不住；
+    # 覆写 .git/hooks/pre-commit 等价于下次提交即执行（评审 F12）。
+    '.git/', '.gitmodules', '.gitignore', '.gitattributes',
 )
 
 
