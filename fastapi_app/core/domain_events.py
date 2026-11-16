@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+from fastapi_app.core.deadletter_path import DEADLETTER_FILENAME, deadletter_dir
+
 logger = logging.getLogger(__name__)
 
 # ---- 跨进程广播的超时与退避（2026-10-30 审计 A-M1）----
@@ -268,17 +270,20 @@ async def publish_with_retry(event: DomainEvent, max_retries: int = 1, delay: fl
 
 
 def _append_deadletter(event: DomainEvent, error: Exception | None) -> None:
-    """把发布失败的事件追加到 logs/domain_events_deadletter.jsonl（供人工/脚本重放）。"""
-    from pathlib import Path as _Path
-    log_dir = _Path(__file__).resolve().parents[2] / 'logs'
-    log_dir.mkdir(exist_ok=True)
+    """把发布失败的事件追加到 logs/domain_events_deadletter.jsonl（供人工/脚本重放）。
+
+    记录**不带 ``stage`` 字段**是既有契约：``inspect_deadletter.py`` 与
+    ``deadletter_patrol_task`` 都靠「无 stage = 广播死信」分类，别给它加 stage。
+    """
+    log_dir = deadletter_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
     record = {
         'ts': datetime.now(UTC).isoformat(),
         'event_type': event.event_type.value,
         'payload': event.payload,
         'error': str(error) if error else None,
     }
-    with open(log_dir / 'domain_events_deadletter.jsonl', 'a', encoding='utf-8') as f:
+    with open(log_dir / DEADLETTER_FILENAME, 'a', encoding='utf-8') as f:
         f.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
 
 
@@ -290,10 +295,9 @@ def _append_deadletter_handler(
     stage: 'handler'（进程内）/ 'handler_cross_process'（Redis 监听器）。
     写文件失败不得影响主流程：这里已是异常处理路径，再抛会盖掉原始错误。
     """
-    from pathlib import Path as _Path
     try:
-        log_dir = _Path(__file__).resolve().parents[2] / 'logs'
-        log_dir.mkdir(exist_ok=True)
+        log_dir = deadletter_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
         record = {
             'ts': datetime.now(UTC).isoformat(),
             'stage': stage,
@@ -303,7 +307,7 @@ def _append_deadletter_handler(
             'error': str(error),
             'error_type': type(error).__name__,
         }
-        with open(log_dir / 'domain_events_deadletter.jsonl', 'a', encoding='utf-8') as f:
+        with open(log_dir / DEADLETTER_FILENAME, 'a', encoding='utf-8') as f:
             f.write(json.dumps(record, ensure_ascii=False, default=str) + '\n')
     except Exception:  # defensive: 死信写入失败不覆盖原始异常
         logger.warning('handler 死信写入失败: event=%s', event.event_type.value, exc_info=True)

@@ -3,7 +3,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from scripts.inspect_deadletter import main, summarize
+from scripts.inspect_deadletter import default_deadletter_file, main, summarize
 
 
 def _write(tmp_path: Path, records: list[dict]) -> Path:
@@ -52,3 +52,26 @@ def test_main_exit_codes(tmp_path, capsys):
     assert main(['--file', str(with_handler)]) == 2, 'handler 级死信必须 exit 2 引起注意'
     out = capsys.readouterr().out
     assert 'handler_cross_process' in out
+
+
+def test_default_file_shares_one_resolver_with_writer_and_patrol(monkeypatch, tmp_path):
+    """B-2（2026-11-16 审计）：运维脚本必须与写入口/ARQ 巡检解析出**同一个**死信文件。
+
+    三个消费者各算一遍路径 = 第二真相源：演练把写盘指到别处后，脚本会继续读仓库
+    `logs/`，两边看到的不是同一份数据，「0 条」基线再次分叉。
+    变异检查：把 `default_deadletter_file()` 改回硬编码 `logs/`，本用例第二段必红。
+    """
+    from fastapi_app.core.deadletter_path import deadletter_file
+    from fastapi_app.tasks import deadletter_patrol_task as patrol
+
+    monkeypatch.delenv('ERP_DEADLETTER_DIR', raising=False)
+    default_path = default_deadletter_file()
+    assert default_path == patrol.default_deadletter_path() == deadletter_file()
+    assert default_path.name == 'domain_events_deadletter.jsonl'
+    assert default_path.parent.name == 'logs'
+
+    monkeypatch.setenv('ERP_DEADLETTER_DIR', str(tmp_path))
+    expected = tmp_path / 'domain_events_deadletter.jsonl'
+    assert default_deadletter_file() == expected, '脚本必须跟随 ERP_DEADLETTER_DIR 覆盖'
+    assert patrol.default_deadletter_path() == expected
+    assert deadletter_file() == expected

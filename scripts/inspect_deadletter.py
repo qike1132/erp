@@ -22,9 +22,28 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-DEFAULT_FILE = Path(__file__).resolve().parents[1] / 'logs' / 'domain_events_deadletter.jsonl'
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 RECENT_DAYS = 7
+
+
+def default_deadletter_file() -> Path:
+    """死信文件路径：与写入口、ARQ 巡检**同源**（含 ``ERP_DEADLETTER_DIR`` 覆盖）。
+
+    为什么不能再各算一遍（2026-11-16 审计 B-2）：本仓给死信目录加了覆盖开关，
+    写入口与 ARQ 巡检都走 ``core/deadletter_path.py``，只有本脚本还硬编码 ``logs/``。
+    演练/测试把写盘指到别处后，本脚本会继续读旧文件 —— 两边看到的不是同一份数据，
+    「0 条」这个基线再次分叉，而这正是当初加开关要消除的问题。
+
+    注意只 import 那个**纯标准库**的解析模块：整条 ``fastapi_app.core.config``
+    链会 ``load_dotenv``，非提权进程直接 PermissionError（.env 的 ACL 只给
+    Administrators/SYSTEM），运维脚本不能因此起不来。
+    """
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from fastapi_app.core.deadletter_path import deadletter_file
+
+    return deadletter_file()
 
 
 def summarize(path: Path, days: int = RECENT_DAYS, now: datetime | None = None) -> dict:
@@ -71,10 +90,12 @@ def summarize(path: Path, days: int = RECENT_DAYS, now: datetime | None = None) 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='领域事件死信巡检（只读）')
-    parser.add_argument('--file', type=Path, default=DEFAULT_FILE)
+    parser.add_argument('--file', type=Path, default=None)
     parser.add_argument('--days', type=int, default=RECENT_DAYS)
     args = parser.parse_args(argv)
 
+    if args.file is None:
+        args.file = default_deadletter_file()
     if not args.file.exists():
         print(f'[OK] 死信文件不存在：{args.file}')
         return 0

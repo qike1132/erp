@@ -85,6 +85,14 @@ def _isolate_maintenance_sentinel(tmp_path_factory):
     monkeypatch.undo()
 
 
+# 测试期运行期证据隔离（死信目录 + 审计溢出文件）：实现见
+# fastapi_app/tests/evidence_isolation.py，两棵测试树共用一份，避免两份实现漂移。
+# pytest 会收集 conftest 命名空间里被 import 的 fixture。
+from fastapi_app.tests.evidence_isolation import (  # noqa: F401
+    _isolate_runtime_evidence_files,
+)
+
+
 @pytest.fixture(autouse=True)
 def _clear_l1_cache():
     """每个测试前清空 L1 进程内缓存，避免缓存键命中上一轮测试结果导致假阳性"""

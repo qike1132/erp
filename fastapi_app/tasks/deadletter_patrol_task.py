@@ -25,10 +25,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from fastapi_app.core.deadletter_path import DEADLETTER_FILENAME
 from fastapi_app.core.logger import logger
-
-#: 与 core/domain_events.py 的死信落点同口径（repo 根 / logs）
-DEADLETTER_FILENAME = 'domain_events_deadletter.jsonl'
 
 #: Redis 死信队列键（与 core/arq_callbacks.py DLQ_KEY 同口径）
 ARQ_DLQ_KEY = 'arq:dead_letter'
@@ -37,7 +35,15 @@ HANDLER_STAGES = ('handler', 'handler_cross_process')
 
 
 def default_deadletter_path() -> Path:
-    return Path(__file__).resolve().parents[2] / 'logs' / DEADLETTER_FILENAME
+    """与写入口**同一个**解析点（`core/deadletter_path.py`，含 ERP_DEADLETTER_DIR 覆盖）。
+
+    巡检和写盘各算一遍路径会制造第二真相源：测试把写盘指到 tmp 后，巡检若仍读仓库
+    logs/，两边看到的就是不同文件（2026-11-16 引入覆盖开关时一并收敛；审计 B-2 又补上了
+    第三个消费者 `scripts/inspect_deadletter.py`）。
+    """
+    from fastapi_app.core.deadletter_path import deadletter_file
+
+    return deadletter_file()
 
 
 def summarize_deadletter(path: Path, since: datetime) -> dict:
