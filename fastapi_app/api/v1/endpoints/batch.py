@@ -39,6 +39,7 @@ from fastapi_app.services.batch_import_service import (
     preview_products_service,
     read_template_bytes,
 )
+from fastapi_app.shared.factory_scope import factory_scope_of
 from fastapi_app.shared_models import User
 
 router = APIRouter()
@@ -89,9 +90,14 @@ async def batch_import_orders(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
+    # 工厂闸门（2026-11-16 上线前审计 High）：本端点此前是唯一不传 scoped_factory
+    # 的导入入口 —— 厂绑定用户上传含他厂产品名的「订单管理」表即可给他厂建单
+    # （单条接口 order.py 有 assert_product_factory_scoped，批量这边漏网）。
+    # 用 factory_scope_of 现算（超管/未绑定厂得空串→None = 不限）。
+    scoped_factory = factory_scope_of(current_user) or None
     return await run_guarded_import(
         db, file, TYPE_ORDERS, current_user,
-        lambda f: import_orders_service(db, f),
+        lambda f: import_orders_service(db, f, scoped_factory=scoped_factory),
     )
 
 
@@ -259,7 +265,8 @@ async def batch_import_comprehensive(
     Returns:
         ComprehensiveImportResult: 包含各类型导入数量和错误列表的响应。
     """
-    # 工厂闸门（审查 H1）：仅透传给备货/出货 Sheet（订单/产品 Sheet 语义待业务确认）
+    # 工厂闸门（审查 H1）：透传给订单/备货/出货三个 Sheet（产品 Sheet 自身带「工厂」列，
+    # 不属跨厂写单据，语义待业务确认）
     scoped_factory = current_user.factory if (current_user.factory and not current_user.is_super) else None
     return await run_guarded_import(
         db, file, TYPE_COMPREHENSIVE, current_user,

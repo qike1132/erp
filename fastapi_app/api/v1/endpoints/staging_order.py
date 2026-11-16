@@ -20,6 +20,7 @@ from fastapi_app.schemas.staging import (
 )
 from fastapi_app.services import staging_service as svc
 from fastapi_app.services.purchase._auto_generate import schedule_auto_generate_purchase_orders
+from fastapi_app.shared.factory_scope import factory_scope_of
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -94,8 +95,14 @@ async def delete_staging_order(order_id: int, db: AsyncSession=Depends(get_async
 async def confirm_staging_orders(session_id: str=Query('default', max_length=50, description='会话ID'), db: AsyncSession=Depends(get_async_db), current_user: User=Depends(require_any_permission('batch_import', 'order_manage'))):
     """确认暂存订单 - 转移到正式订单表"""
     scoped_session = f'u{current_user.id}:{session_id}'
+    # 工厂闸门（2026-11-16 上线前审计 High）：确认链路写 order + inventory_log（抵扣
+    # 分支还写 stock_out），此前全程无工厂校验 —— 厂绑定用户可借暂存导入+确认给
+    # 他厂产品建单/扣库存。与单条下单接口（order.py 的 assert_product_factory_scoped）
+    # 同口径，按行拒绝不整批失败。
+    scoped_factory = factory_scope_of(current_user) or None
     async with db_transaction(db):
-        confirmed, errors = await svc.confirm_staging_orders(db, scoped_session)
+        confirmed, errors = await svc.confirm_staging_orders(
+            db, scoped_session, scoped_factory=scoped_factory)
         if confirmed:
             # 采购订单自动生成：提交后投递扫描任务（替代采购中心人工「一键审核」）
             schedule_auto_generate_purchase_orders(db)

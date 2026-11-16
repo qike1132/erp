@@ -808,11 +808,16 @@ async def import_products_from_data(
     )
 
 
-async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None) -> tuple[int, list]:
+async def import_orders_from_data(
+    db: AsyncSession, data_list: list, *, deps: ImportDeps | None = None,
+    scoped_factory: str | None = None,
+) -> tuple[int, list]:
     """从数据列表导入订单
 
     Args:
         deps: 可注入的依赖包（默认解析模块级实现）。
+        scoped_factory: 厂绑定用户的工厂闸门（非空时他厂产品的行被拒绝，
+            见 :func:`_row_factory_rejected`；由综合导入/端点传入）。
     """
     deps = deps or default_import_deps()
 
@@ -836,6 +841,13 @@ async def import_orders_from_data(db: AsyncSession, data_list: list, *, deps: Im
         if product is None or customer is None:
             return False
         product_id = product.id
+
+        # 工厂闸门（2026-11-16 上线前审计 High）：厂绑定用户不能借导入给他厂产品
+        # 建单。订单 Sheet 是四条批量写路径里唯一没接闸门的（备货/出货早已有）。
+        if _row_factory_rejected(scoped_factory, product.factory):
+            debug_messages.append(
+                f'行{idx}: 产品不在你的工厂范围，已拒绝该行（{product_name}）')
+            return False
 
         qty = _parse_positive_quantity(
             quantity, idx, label='订单', product_name=product_name, customer=customer)

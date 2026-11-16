@@ -15,7 +15,11 @@ from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
 from fastapi_app.core.validators import validate_quantity_range
-from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
+from fastapi_app.services.batch_import_core import (
+    _import_idem_key,
+    _row_factory_rejected,
+    _row_failure_message,
+)
 from fastapi_app.services.batch_service import process_order_deduction
 from fastapi_app.services.numbering import generate_order_number
 from fastapi_app.services.staging._generic import (
@@ -137,11 +141,86 @@ async def _purge_rejected_rows(db: AsyncSession, session_id: str) -> None:
     await db.flush()
 
 
-async def confirm_staging_orders(
-    db: AsyncSession, session_id: str
-) -> tuple[int, list[str]]:
+async def _write_confirmed_order(
+    db: AsyncSession, staging: StagingOrder, *, scoped_factory: str | None,
+) -> None:
+    """把一条暂存订单写成正式订单（含抵扣与返单外发工序）；失败抛 ValueError。
+
+    从 :func:`confirm_staging_orders` 抽出的单行写入体（只为满足函数长度门禁，
+    语句顺序与原内联版逐字一致）。工厂闸门（H1）放在产品解析之后：他厂行抛
+    ValueError，由调用方的行级 except 兜成「该行错误 + 状态 REJECT」，
+    其余行照常确认（与导入路径的逐行拒绝同语义）。
+    """
     from fastapi_app.shared.stock_concurrency import get_product_for_update
 
+    validate_quantity_range(staging.quantity)
+
+    order_no = await generate_order_number(db)
+
+    order = Order(
+        order_no=order_no,
+        customer=staging.customer,
+        order_date=staging.order_date or datetime.now(UTC),  # aware UTC：order_date 列为 timestamptz，naive 值会被按本地时区解释致早 8h
+        product_id=staging.product_id,
+        quantity=staging.quantity,
+        note=staging.note,
+        status=ORDER_STATUS_PENDING_STOCK,
+    )
+    db.add(order)
+    await db.flush()
+
+    # P2-A2 类型收窄：staging.product_id 列可空；None 时抛出的文案与 get_product_for_update 内部逐字一致
+    staging_product_id = staging.product_id
+    if staging_product_id is None:
+        raise ValueError(f'产品ID {staging_product_id} 不存在')
+    product = await get_product_for_update(db, staging_product_id)
+    if not product:
+        raise ValueError(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
+    # 工厂闸门（H1，2026-11-16 审计 High）：厂绑定用户不得确认他厂产品的暂存行
+    if _row_factory_rejected(scoped_factory, product.factory):
+        raise ValueError('产品不在你的工厂范围，已拒绝该订单')
+    # 订单不改物理库存（2026-10-24 修复 P0）：原先此处
+    # apply_stock_delta_locked(+quantity) 与 create_order 等三条路径口径相反。
+    log = InventoryLog(
+        product_id=staging.product_id,
+        change_type='订单',
+        change_quantity=staging.quantity,
+        related_id=order_no,
+        idem_key=_import_idem_key(
+            'order', staging.customer, staging_product_id, staging.quantity,
+            staging.order_date or datetime.now(UTC),
+        ),
+        note=f'批量导入订单：{order_no}',
+    )
+    db.add(log)
+
+    if staging.deduct_stock and staging.deduct_quantity and staging.deduct_quantity > 0:
+        await process_order_deduction(
+            db, order,
+            staging_product_id,
+            staging.quantity,
+            deduct_stock=True,
+            custom_deduct_quantity=staging.deduct_quantity,
+            product=product,
+        )
+
+    # 返单自动带出外发工序：按 SKU 预设生成湖北外发工序（失败不影响订单创建）
+    from fastapi_app.services.outsource_service import auto_generate_for_order
+    await auto_generate_for_order(db, order)
+
+
+async def confirm_staging_orders(
+    db: AsyncSession, session_id: str, *, scoped_factory: str | None = None,
+) -> tuple[int, list[str]]:
+    """把暂存订单确认为正式订单，返回 ``(确认条数, 错误消息)``。
+
+    Args:
+        scoped_factory: 厂绑定用户的工厂闸门（H1，2026-11-16 审计 High）：本函数
+            写 order + inventory_log，抵扣分支还经 process_order_deduction 写
+            stock_out —— 此前该链路全程无工厂校验，厂绑定用户可确认他厂产品的
+            暂存行来跨厂建单/扣库存。非空时他厂行按行拒绝，其余行照常确认；
+            None = 超管/未绑定厂，行为不变。
+    """
     result = await db.execute(
         select(StagingOrder).where(
             StagingOrder.session_id == session_id,
@@ -162,58 +241,8 @@ async def confirm_staging_orders(
         for staging in staging_orders:
             try:
                 async with db.begin_nested():
-                    validate_quantity_range(staging.quantity)
-
-                    order_no = await generate_order_number(db)
-
-                    order = Order(
-                        order_no=order_no,
-                        customer=staging.customer,
-                        order_date=staging.order_date or datetime.now(UTC),  # aware UTC：order_date 列为 timestamptz，naive 值会被按本地时区解释致早 8h
-                        product_id=staging.product_id,
-                        quantity=staging.quantity,
-                        note=staging.note,
-                        status=ORDER_STATUS_PENDING_STOCK,
-                    )
-                    db.add(order)
-                    await db.flush()
-
-                    # P2-A2 类型收窄：staging.product_id 列可空；None 时抛出的文案与 get_product_for_update 内部逐字一致
-                    staging_product_id = staging.product_id
-                    if staging_product_id is None:
-                        raise ValueError(f'产品ID {staging_product_id} 不存在')
-                    product = await get_product_for_update(db, staging_product_id)
-                    if not product:
-                        raise ValueError(f'订单{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
-                    # 订单不改物理库存（2026-10-24 修复 P0）：原先此处
-                    # apply_stock_delta_locked(+quantity) 与 create_order 等三条路径口径相反。
-                    log = InventoryLog(
-                        product_id=staging.product_id,
-                        change_type='订单',
-                        change_quantity=staging.quantity,
-                        related_id=order_no,
-                        idem_key=_import_idem_key(
-                            'order', staging.customer, staging_product_id, staging.quantity,
-                            staging.order_date or datetime.now(UTC),
-                        ),
-                        note=f'批量导入订单：{order_no}',
-                    )
-                    db.add(log)
-
-                    if staging.deduct_stock and staging.deduct_quantity and staging.deduct_quantity > 0:
-                        await process_order_deduction(
-                            db, order,
-                            staging_product_id,
-                            staging.quantity,
-                            deduct_stock=True,
-                            custom_deduct_quantity=staging.deduct_quantity,
-                            product=product,
-                        )
-
-                    # 返单自动带出外发工序：按 SKU 预设生成湖北外发工序（失败不影响订单创建）
-                    from fastapi_app.services.outsource_service import auto_generate_for_order
-                    await auto_generate_for_order(db, order)
-
+                    await _write_confirmed_order(
+                        db, staging, scoped_factory=scoped_factory)
                     staging.status = staging_machine.transition(staging.status, StagingAction.APPROVE)
                     confirmed += 1
 

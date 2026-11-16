@@ -97,7 +97,29 @@ async def _resolve_product_locked(db, product_identifier: str) -> Product | None
     return result.scalar_one_or_none()
 
 
-async def _resolve_row_product(db, row: dict) -> tuple[Product | None, str | None]:
+def _row_factory_gate(scoped_factory: str | None, product: Product) -> str | None:
+    """行级工厂闸门：返回拒绝原因，``None`` 表示放行（2026-11-16 审计 High）。
+
+    判定复用 ``batch_import_core._row_factory_rejected``（与
+    ``shared/factory_scope.assert_product_factory_scoped`` 同口径），不另立规则：
+    超管/未绑定厂 → 放行；产品未分配工厂（NULL/空串）→ 放行；他厂 → 拒绝。
+
+    为什么按行拒绝而不让整个任务失败：ARQ 导入逐行独立写入，一行越权不该把同批
+    合法行一起拖掉（与同步导入路径的逐行拒绝语义一致，用户能在结果里看到行号）。
+    未绑定厂时先短路：既省一次属性读取，也让「无闸门上下文」的调用方行为不变。
+    """
+    if not scoped_factory:
+        return None
+    from fastapi_app.services.batch_import_core import _row_factory_rejected
+
+    if _row_factory_rejected(scoped_factory, product.factory):
+        return f'产品不在你的工厂范围，已拒绝该行（{product.name}）'
+    return None
+
+
+async def _resolve_row_product(
+    db, row: dict, scoped_factory: str | None = None,
+) -> tuple[Product | None, str | None]:
     """解析行内产品标识并加行锁；返回 (product, 错误消息)。缺少必填字段/产品不存在返回错误消息。"""
     product_identifier = row.get('产品名称', row.get('产品编号', ''))
     customer = row.get('客户名称', '')
@@ -113,6 +135,10 @@ async def _resolve_row_product(db, row: dict) -> tuple[Product | None, str | Non
     product = await _resolve_product_locked(db, product_identifier)
     if not product:
         return None, f"产品 '{product_identifier}' 不存在"
+    # 工厂闸门（H1）：订单/备货两个 ARQ 导入任务共用本解析，故在产品解析出来后
+    # 统一拒绝他厂行 —— worker 侧此前完全没有工厂上下文（2026-11-16 审计 High）。
+    if (factory_error := _row_factory_gate(scoped_factory, product)) is not None:
+        return None, factory_error
     return product, None
 
 
@@ -252,7 +278,8 @@ async def _run_batch_import_async(file_path: str, job_id: str, task_label: str, 
                 os.unlink(file_path)
 
 
-async def batch_import_orders_task(ctx, file_path: str, original_filename: str, user_id: int):
+async def batch_import_orders_task(ctx, file_path: str, original_filename: str, user_id: int,
+                                   scoped_factory: str | None = None):
     """异步批量导入订单
 
     Args:
@@ -260,6 +287,8 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
         file_path: 已保存的临时文件路径
         original_filename: 原始文件名
         user_id: 操作用户ID
+        scoped_factory: 入队端点算好的工厂闸门（H1）；``None`` = 超管/未绑定厂，
+            全部放行。默认值让「上线前已入队、参数只有 3 个」的历史任务照常重放。
 
     Returns:
         dict: 导入结果 {success, imported_count, errors, task_id}
@@ -272,7 +301,7 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
         from fastapi_app.services.batch_import_core import _import_idem_key
         from fastapi_app.services.numbering import generate_order_number
         from fastapi_app.shared_models import InventoryLog, Order
-        product, row_error = await _resolve_row_product(db, row)
+        product, row_error = await _resolve_row_product(db, row, scoped_factory)
         if row_error:
             return row_error
         # row_error 为 None ⇒ 产品必然存在
@@ -306,8 +335,14 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
     return await _run_batch_import_async(file_path, job_id, '订单', _orders_row, idempotency=idempotency)
 
 
-async def batch_import_stockins_task(ctx, file_path: str, original_filename: str, user_id: int):
-    """异步批量导入备货"""
+async def batch_import_stockins_task(ctx, file_path: str, original_filename: str, user_id: int,
+                                     scoped_factory: str | None = None):
+    """异步批量导入备货
+
+    Args:
+        scoped_factory: 入队端点算好的工厂闸门（H1）；``None`` = 超管/未绑定厂，
+            全部放行（本任务会直写 StockIn + 库存增量，闸门必须在写之前生效）。
+    """
     job_id = ctx['job_id']
 
     async def _stockins_row(db, row: dict, i: int) -> str | None:
@@ -317,7 +352,7 @@ async def batch_import_stockins_task(ctx, file_path: str, original_filename: str
         from fastapi_app.services.batch_import_parser import parse_date_value
         from fastapi_app.services.numbering import generate_stockin_number
         from fastapi_app.shared_models import InventoryLog, StockIn
-        product, row_error = await _resolve_row_product(db, row)
+        product, row_error = await _resolve_row_product(db, row, scoped_factory)
         if row_error:
             return row_error
         # row_error 为 None ⇒ 产品必然存在

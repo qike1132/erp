@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
+from fastapi_app.shared.factory_scope import factory_scope_of
 from fastapi_app.shared_models import User
 
 # ARQ Job 状态 → 对外状态映射
@@ -188,11 +189,18 @@ async def async_import_orders(
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
+    # 工厂闸门（2026-11-16 上线前审计 High）：worker 进程里没有 current_user，
+    # 闸门必须在入队时算好放进任务参数，否则厂绑定用户可经异步导入给他厂建单。
+    scoped_factory = factory_scope_of(current_user) or None
+
     from fastapi_app.core.arq_app import get_arq_pool
     from fastapi_app.tasks.batch_tasks import batch_import_orders_task
     try:
         pool = await get_arq_pool()
-        job = await pool.enqueue_job(batch_import_orders_task.__name__, tmp_path, file.filename, current_user.id)
+        job = await pool.enqueue_job(
+            batch_import_orders_task.__name__, tmp_path, file.filename, current_user.id,
+            scoped_factory,
+        )
     except Exception:  # defensive: 入队失败须清理临时文件，异常类型取决于 Redis 驱动
         # 第八轮审计：入队失败（如 Redis 不可用）时清理临时文件，避免 %TEMP% 堆积
         with contextlib.suppress(OSError):
@@ -227,11 +235,17 @@ async def async_import_stockins(
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
+    # 工厂闸门（H1）：与 /tasks/import-orders 同口径，闸门随任务参数进 worker
+    scoped_factory = factory_scope_of(current_user) or None
+
     from fastapi_app.core.arq_app import get_arq_pool
     from fastapi_app.tasks.batch_tasks import batch_import_stockins_task
     try:
         pool = await get_arq_pool()
-        job = await pool.enqueue_job(batch_import_stockins_task.__name__, tmp_path, file.filename, current_user.id)
+        job = await pool.enqueue_job(
+            batch_import_stockins_task.__name__, tmp_path, file.filename, current_user.id,
+            scoped_factory,
+        )
     except Exception:  # defensive: 入队失败须清理临时文件，异常类型取决于 Redis 驱动
         # 第八轮审计：入队失败（如 Redis 不可用）时清理临时文件，避免 %TEMP% 堆积
         with contextlib.suppress(OSError):
