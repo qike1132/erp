@@ -145,7 +145,11 @@ async def get_case_inventory(db: AsyncSession, page: int = 1, per_page: int = 50
 
 async def _compute_inventory_stats(db: AsyncSession, conditions: list) -> dict:
     """整体统计：SKU 数、总库存、总入库、总出库（受 search 约束）。"""
-    stats_stmt = select(func.count(Case.id), func.coalesce(func.sum(Case.current_stock), 0))
+    # 列表与分页 total 只取主件（Case.parent_id IS NULL），统计必须同口径：
+    # 否则「皮套种类」把配件也算进去，与表格行数对不上（2026-11-16 审计 A-39）。
+    stats_stmt = select(func.count(Case.id), func.coalesce(func.sum(Case.current_stock), 0)).where(
+        Case.parent_id.is_(None),
+    )
     if conditions:
         stats_stmt = stats_stmt.where(*conditions)  # sql-safe: 绑定参数
     total_items, total_stock = (await db.execute(stats_stmt)).one()

@@ -227,7 +227,7 @@ onMounted(loadStock)
 }
 
 .m-stock-qty-val {
-  font-size: 20px;
+  font-size: var(--fs-heading-3);
   font-weight: 700;
   color: var(--m-text-primary);
   font-variant-numeric: tabular-nums;

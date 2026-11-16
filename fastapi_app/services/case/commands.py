@@ -89,7 +89,9 @@ async def update_movement(db: AsyncSession, movement_id: int, update_data: dict)
         case_obj = await _get_case_for_update(db, movement.case_id)
         assert_stock_available(
             case_obj.current_stock, delta,
-            message=f"调整后库存不足，当前库存: {case_obj.current_stock + delta}",
+            # 文案里的「当前库存」必须是**变更前**的值：原来写的是 current_stock+delta，
+            # 而这条 message 只在 current_stock+delta<0 时才会被用到，印出来必是负数（审计 A-40）。
+            message=f"调整后库存不足，当前库存: {case_obj.current_stock}，需要: {abs(delta)}",
         )
         case_obj.current_stock += delta
         case_obj.version += 1

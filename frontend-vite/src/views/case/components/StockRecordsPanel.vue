@@ -131,7 +131,7 @@ const {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
 }
@@ -141,7 +141,7 @@ const {
 .srp-btn {
   padding: 6px 12px;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
@@ -172,7 +172,7 @@ const {
 }
 .srp-filter-field { display: flex; flex-direction: column; }
 .srp-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
   margin-bottom: 6px;
@@ -194,15 +194,15 @@ const {
   border-radius: 7px;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
 }
 .srp-seg > button.active { background: var(--color-primary-50); color: var(--color-primary-700); }
 .srp-filter-actions { display: flex; gap: 8px; align-items: center; padding-bottom: 2px; }
-.srp-filter-hint { font-size: 12px; color: var(--color-text-muted); }
+.srp-filter-hint { font-size: var(--fs-caption); color: var(--color-text-muted); }
 
-.srp-dir { padding: 2px 10px; border-radius: 16px; font-size: 12px; font-weight: 600; }
+.srp-dir { padding: 2px 10px; border-radius: 16px; font-size: var(--fs-caption); font-weight: 600; }
 .srp-dir-in { background: var(--color-success-50); color: var(--color-success-600); }
 .srp-dir-out { background: var(--color-danger-50); color: var(--color-danger-600); }
 
@@ -226,7 +226,7 @@ const {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   transition: background 0.2s ease;
 }
 .srp-icon-edit { background: var(--color-warning-50); color: var(--color-warning-500); }

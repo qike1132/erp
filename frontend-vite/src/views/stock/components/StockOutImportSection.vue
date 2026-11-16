@@ -214,7 +214,7 @@ function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
   display: flex !important;
   margin-bottom: 0;
   cursor: pointer;
-  font-size: 14px !important;
+  font-size: var(--fs-body-sm) !important;
   font-weight: 400 !important;
   color: var(--color-text-muted) !important;
 }
@@ -222,7 +222,7 @@ function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
   color: var(--color-text-muted) !important;
 }
 .so-section-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
   padding: 8px 0 4px;
@@ -231,20 +231,20 @@ function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
   gap: 6px;
 }
 .so-section-label i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 .form-label {
   display: block;
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 .label-icon {
   color: var(--color-danger-500);
   margin-right: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .so-droppable { cursor: pointer; }
 .so-droppable.so-drag-over {
@@ -252,7 +252,7 @@ function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
   background: var(--color-success-50);
 }
 .so-file-inline {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 400;
   display: inline-flex;
   align-items: center;
@@ -269,7 +269,7 @@ function buildStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean {
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 6px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
   cursor: pointer;

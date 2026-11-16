@@ -28,8 +28,13 @@
           <button class="ip-btn ip-btn-ghost" aria-label="刷新" @click="invRefetch()">
             <FontAwesomeIcon icon="sync-alt" style="margin-right: 4px" aria-hidden="true" />刷新
           </button>
-          <button class="ip-btn ip-btn-ghost" aria-label="导出 Excel" @click="exportInventory()">
-            <FontAwesomeIcon icon="file-excel" style="margin-right: 4px" aria-hidden="true" />导出
+          <button
+            class="ip-btn ip-btn-ghost"
+            aria-label="导出 Excel"
+            :disabled="exporting"
+            @click="exportInventory()"
+          >
+            <FontAwesomeIcon icon="file-excel" style="margin-right: 4px" aria-hidden="true" />{{ exporting ? '导出中…' : '导出' }}
           </button>
         </div>
       </div>
@@ -114,6 +119,7 @@ import UiLoadingIcon from '@/components/ui/UiLoadingIcon.vue'
 import InventoryLogDrawer from './InventoryLogDrawer.vue'
 import { caseApi } from '@/api'
 import type { CaseItem, CaseInventoryNode } from '@/api/case'
+import { useExport } from '@/composables/useExport'
 import { useCaseInventory } from '../composables/useCaseInventory'
 
 const {
@@ -168,8 +174,13 @@ function goPage(page: number) {
   onInvPageChange({ page: page - 1, rows: invPerPage.value })
 }
 
+// 导出统一走 useExport（与 /stock、/finished-stock 同一范式）：
+// 原实现 `void caseApi.exportXlsx(...)` 既无 catch 也无 loading，导出失败时（超上限 400、
+// 网络断、权限不足）页面零反馈，用户只看到「点了没反应」；按钮也仍可连点重复下载。
+const { exporting, runExport } = useExport()
+
 function exportInventory() {
-  void caseApi.exportXlsx({ scope: 'inventory', search: invSearch.value || undefined })
+  void runExport(() => caseApi.exportXlsx({ scope: 'inventory', search: invSearch.value || undefined }))
 }
 </script>
 
@@ -177,8 +188,8 @@ function exportInventory() {
 .ip-wrap { display: flex; flex-direction: column; gap: 16px; }
 .ip-stat-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .ip-stat-main { flex: 0 0 220px; }
-.ip-stat-side { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; color: var(--color-text-secondary); }
-.ip-stat-side b { font-size: 16px; font-weight: 800; color: var(--color-text); font-variant-numeric: tabular-nums; margin-left: 2px; }
+.ip-stat-side { display: flex; gap: 18px; flex-wrap: wrap; font-size: var(--fs-body-sm); color: var(--color-text-secondary); }
+.ip-stat-side b { font-size: var(--fs-body); font-weight: 800; color: var(--color-text); font-variant-numeric: tabular-nums; margin-left: 2px; }
 .ip-stat-side .ip-side-in { color: var(--color-success-600); }
 .ip-stat-side .ip-side-out { color: var(--color-danger-500); }
 
@@ -193,22 +204,22 @@ function exportInventory() {
   padding: 12px 16px; border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   flex-wrap: wrap; gap: 8px;
 }
-.ip-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--color-text); }
+.ip-title { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body-sm); font-weight: 700; color: var(--color-text); }
 .ip-sub { color: var(--color-text-muted); font-weight: 400; }
 .ip-actions { display: flex; gap: 8px; align-items: center; }
 
 .ip-btn {
-  padding: 6px 12px; border-radius: 9px; font-size: 12px; font-weight: 600;
+  padding: 6px 12px; border-radius: 9px; font-size: var(--fs-caption); font-weight: 600;
   cursor: pointer; display: inline-flex; align-items: center;
 }
 .ip-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .ip-btn-ghost { border: 2px solid var(--color-border-light, #e2e8f0); background: white; color: var(--color-text-secondary); }
 .ip-btn-ghost:hover:not(:disabled) { background: var(--color-primary-50); color: var(--color-primary-600); }
 
-.ip-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ip-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body-sm); }
 .ip-table thead th {
   background: var(--color-surface); padding: 9px 12px; text-align: center;
-  font-size: 12px; font-weight: 600; color: var(--color-text-secondary);
+  font-size: var(--fs-caption); font-weight: 600; color: var(--color-text-secondary);
   border-bottom: 2px solid var(--color-border);
 }
 .ip-table td { padding: 9px 12px; border-bottom: 1px solid var(--color-border-light); text-align: center; font-variant-numeric: tabular-nums; }
@@ -228,14 +239,14 @@ function exportInventory() {
 .ip-stock-zero { color: var(--color-danger-500); }
 
 .ip-tag {
-  display: inline-flex; align-items: center; font-size: 12px; padding: 2px 7px;
+  display: inline-flex; align-items: center; font-size: var(--fs-caption); padding: 2px 7px;
   border-radius: 6px; background: var(--color-primary-50); color: var(--color-primary-700);
   font-weight: 600; margin-left: 6px;
 }
 .ip-tag-part { background: var(--color-border-light); color: var(--color-text-secondary); font-weight: 500; }
 
 .ip-pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 12px; }
-.ip-page-info { font-size: 14px; color: var(--color-text-secondary); }
+.ip-page-info { font-size: var(--fs-body-sm); color: var(--color-text-secondary); }
 
 .ip-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px;

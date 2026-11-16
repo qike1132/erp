@@ -216,7 +216,7 @@ const columns: TableColumn[] = [
   gap: 10px;
   padding: 32px 16px;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 /* 卡片样式走全局 .page-card 系列（src/styles/app.css，18px 圆角），与 /report 一致 */
 
@@ -238,7 +238,7 @@ const columns: TableColumn[] = [
   border: 2px solid var(--color-border-light);
   border-radius: var(--radius-button, 14px);
   background: white;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease;
@@ -271,7 +271,7 @@ const columns: TableColumn[] = [
 .badge {
   display: inline-block;
   padding: 2px 10px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   border: 1px solid;
 }

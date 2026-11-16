@@ -601,11 +601,12 @@ class TestDomainMultiPatternEngine:
 
     async def test_inventory_domain_issues_inventory_product_list_and_customers(self, record_patterns):
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.INVENTORY)
-        assert record_patterns == ['erp:inventory:*', 'erp:product:list:*', 'erp:customers:*']
+        assert record_patterns == ['erp:inventory:*', 'erp:stock:stats*',
+                                   'erp:product:list:*', 'erp:customers:*']
 
     async def test_order_and_inventory_issues_four_no_dup(self, record_patterns):
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.ORDER_AND_INVENTORY)
-        assert record_patterns == ['erp:orders:*', 'erp:inventory:*', 'erp:product:list:*',
+        assert record_patterns == ['erp:orders:*', 'erp:inventory:*', 'erp:stock:stats*', 'erp:product:list:*',
                                    'erp:customers:*']
         assert len(record_patterns) == len(set(record_patterns)), '不得重复下发同一 pattern'
 

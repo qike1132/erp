@@ -4,6 +4,7 @@ SKU 主档（主件/配件）CRUD、统一出入库流水（增删改/批量）�
 所有端点均需 case_manage 权限；写操作经 db_transaction 保证事务一致性，并在提交后
 发布 case_stock_changed 事件供前端实时刷新。
 """
+import asyncio
 import io
 import logging
 from urllib.parse import quote
@@ -231,13 +232,16 @@ async def export_cases(scope: str = Query('movements', description='movements/in
                        user: User = Depends(require_permission('case_manage')),
                        db: AsyncSession = Depends(get_async_read_db)) -> StreamingResponse:
     """导出皮套出入库流水或库存汇总为 .xlsx。"""
+    # openpyxl 构表是纯同步 CPU 活（行数上限 20000），直接在 async 处理器里做会
+    # 占住整个 worker 的事件循环——同 worker 的其它请求与健康探针只能排队（审计 A-11）。
+    # 与 stock.py:496 / finished_stock.py:128 同写法：丢线程池。
     if scope == 'inventory':
         rows = await fetch_inventory_for_export(db, search)
-        content = inventory_to_xlsx(rows)
+        content = await asyncio.to_thread(inventory_to_xlsx, rows)
         filename = '皮套库存汇总.xlsx'
     else:
         rows = await fetch_movements_for_export(db, case_id, direction, customer, start_date, end_date)
-        content = movements_to_xlsx(rows)
+        content = await asyncio.to_thread(movements_to_xlsx, rows)
         filename = '皮套出入库流水.xlsx'
     headers = {'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}"}
     return StreamingResponse(

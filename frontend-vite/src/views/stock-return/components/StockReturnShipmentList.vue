@@ -83,7 +83,7 @@ const emit = defineEmits<{ pick: [row: ShipmentOption] }>()
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 16px;
+  font-size: var(--fs-body);
 }
 .sr-ship-table thead th {
   position: sticky;
@@ -147,7 +147,7 @@ const emit = defineEmits<{ pick: [row: ShipmentOption] }>()
 }
 .sr-prod-sub {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-muted, #64748b);
   white-space: nowrap;
 }

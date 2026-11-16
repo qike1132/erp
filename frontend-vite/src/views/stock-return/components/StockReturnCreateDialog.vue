@@ -200,7 +200,7 @@ function fillMax() {
   background: #f8fafc;
   border-bottom: 1px solid var(--color-border, #e4e7ed);
   border-radius: 12px 12px 0 0;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-text);
 }
@@ -211,7 +211,7 @@ function fillMax() {
 }
 .sr-count {
   margin-left: auto;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-muted, #64748b);
 }
@@ -227,7 +227,7 @@ function fillMax() {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
 }
 .sr-entry-head .mono {
@@ -272,7 +272,7 @@ function fillMax() {
   min-width: 0;
 }
 .sr-field label {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text-secondary);
 }
@@ -294,7 +294,7 @@ function fillMax() {
   padding: 8px 14px;
   border: 1px solid var(--color-border, #e4e7ed);
   border-radius: 10px;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-family: inherit;
   color: var(--color-text);
   background: white;
@@ -318,7 +318,7 @@ function fillMax() {
   border: 1px solid var(--color-border, #e4e7ed);
   border-radius: 10px;
   background: white;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   white-space: nowrap;
   color: var(--color-text-secondary);
@@ -343,7 +343,7 @@ function fillMax() {
 .sr-search-row .sr-input,
 .sr-search-row .sr-btn {
   min-height: 52px;
-  font-size: 16px;
+  font-size: var(--fs-body);
 }
 
 @media (max-width: 1100px) {

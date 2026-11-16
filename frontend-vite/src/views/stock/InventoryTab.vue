@@ -322,7 +322,7 @@ watch(() => [filters.customer, debouncedProduct.value], () => {
   height: 28px;
   opacity: 0.5;
 }
-.sk-empty span { font-size: 14px; }
+.sk-empty span { font-size: var(--fs-body-sm); }
 
 .sk-fetching-bar {
   height: 2px;

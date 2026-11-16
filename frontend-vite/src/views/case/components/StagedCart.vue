@@ -157,11 +157,11 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
 }
-.sc-count { color: var(--color-text-secondary); font-size: 14px; }
+.sc-count { color: var(--color-text-secondary); font-size: var(--fs-body-sm); }
 
 .sc-list {
   max-height: 320px;
@@ -190,13 +190,13 @@ const emit = defineEmits<{
 .sc-item-in { border-color: var(--color-primary-200); }
 .sc-item-out { border-color: var(--color-danger-100); }
 .sc-item-main { flex: 1; min-width: 0; }
-.sc-item-name { font-weight: 600; margin-bottom: 4px; font-size: 14px; color: var(--color-text); }
+.sc-item-name { font-weight: 600; margin-bottom: 4px; font-size: var(--fs-body-sm); color: var(--color-text); }
 .sc-item-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .sc-item-note {
   max-width: 200px;
@@ -211,7 +211,7 @@ const emit = defineEmits<{
   padding: 0 6px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   color: var(--color-text);
   background: #fff;
@@ -226,10 +226,10 @@ const emit = defineEmits<{
   gap: 8px;
   flex-shrink: 0;
 }
-.sc-dir { display: inline-block; padding: 1px 8px; border: none; border-radius: 12px; font-size: 12px; font-weight: 600; margin-right: 6px; font-family: inherit; cursor: pointer; }
+.sc-dir { display: inline-block; padding: 1px 8px; border: none; border-radius: 12px; font-size: var(--fs-caption); font-weight: 600; margin-right: 6px; font-family: inherit; cursor: pointer; }
 .sc-dir-in { background: var(--color-success-50); color: var(--color-success-600); }
 .sc-dir-out { background: var(--color-danger-50); color: var(--color-danger-600); }
-.sc-type { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: 12px; font-weight: 700; margin-right: 6px; color: #fff; }
+.sc-type { display: inline-block; padding: 1px 8px; border-radius: 12px; font-size: var(--fs-caption); font-weight: 700; margin-right: 6px; color: #fff; }
 .sc-type-main { background: var(--color-primary-500); }
 .sc-type-part { background: var(--color-warning-500); }
 
@@ -243,7 +243,7 @@ const emit = defineEmits<{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .sc-qty-btn:first-child { border-radius: 7px 0 0 7px; }
 .sc-qty-btn:last-child { border-radius: 0 7px 7px 0; }
@@ -255,7 +255,7 @@ const emit = defineEmits<{
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-left: none;
   border-right: none;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text);
   font-family: inherit;
   background: white;
@@ -274,7 +274,7 @@ const emit = defineEmits<{
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   background: var(--color-danger-50);
   color: var(--color-danger-500);
   transition: background 0.2s ease;
@@ -287,7 +287,7 @@ const emit = defineEmits<{
   border-radius: 9px;
   background: var(--color-danger-50);
   color: var(--color-danger-700);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .sc-failures-title { font-weight: 600; margin-bottom: 4px; display: flex; gap: 6px; align-items: center; }
 .sc-failures ul { margin: 0; padding-left: 18px; }
@@ -303,7 +303,7 @@ const emit = defineEmits<{
   padding: 9px 16px;
   border: none;
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;

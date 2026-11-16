@@ -75,7 +75,7 @@ const quantityError = computed(() => {
 .erd-field { margin-bottom: 12px; }
 .erd-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   letter-spacing: 0.05em;
   color: var(--color-text-secondary);
@@ -87,7 +87,7 @@ const quantityError = computed(() => {
   padding: 8px 12px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text);
   font-family: inherit;
   background: white;
@@ -101,13 +101,13 @@ const quantityError = computed(() => {
 }
 .erd-input:disabled { background: var(--color-surface, #f8fafc); color: var(--color-text-muted); }
 .erd-input-error { border-color: var(--color-danger-400); }
-.erd-error { color: var(--color-danger-600); font-size: 12px; margin-top: 4px; display: block; }
-.erd-hint { color: var(--color-text-muted); font-size: 12px; margin-top: 4px; display: block; }
+.erd-error { color: var(--color-danger-600); font-size: var(--fs-caption); margin-top: 4px; display: block; }
+.erd-hint { color: var(--color-text-muted); font-size: var(--fs-caption); margin-top: 4px; display: block; }
 .erd-textarea { resize: vertical; }
 .erd-btn {
   padding: 6px 14px;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s ease;

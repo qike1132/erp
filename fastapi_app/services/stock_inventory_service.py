@@ -418,13 +418,21 @@ async def get_inventory(db: AsyncSession, search_customer: str='', search_produc
     }
 
 
-@cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=60,
+@cache_result(key_prefix="inventory:paginated", ttl=120, local_ttl=0,
              key_builder=lambda **kwargs: f"{kwargs.get('search_customer','')}-{kwargs.get('search_product','')}-{kwargs.get('stock_status','')}-{kwargs.get('page',1)}-{kwargs.get('per_page',50)}-f:{kwargs.get('factory','') or ''}")
 async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', search_product: str = '',
                                   page: int = 1, per_page: int = 50,
                                   stock_status: str = '', factory: str = '') -> dict:
     """
     库存分页查询 - SQL CTE 优化版
+
+    `local_ttl=0`（2026-11-16 上线前审计 A-3）：生产是 8 worker，而
+    `CACHE_L1_BROADCAST_ENABLED` 默认 false（启动日志会打印这条告警），
+    失效只清当前进程的 L1 —— 别的 worker 只能等 `local_ttl` 过期。原来 60s
+    意味着「刚入库后刷新库存，可能看到 60 秒前的旧行」，且与同一响应里的
+    其他数字自相矛盾。同文件 `customers:all`（:811）与 `orders:list`
+    （`services/order/queries.py`）已按同一理由降为 0。
+    彻底解法是生产开启 L1 广播（属运维开关，不在代码里改）。
     将4次聚合查询合并为单次 CTE 查询，在数据库层面完成合并、过滤和分页，
     避免加载全量数据到 Python 内存。20K+ 条数据时响应时间从秒级降至百毫秒级。
 
@@ -451,6 +459,15 @@ async def get_inventory_paginated(db: AsyncSession, search_customer: str = '', s
 
     # 独立查询所有客户列表（不受客户筛选影响，确保客户栏始终显示全部客户）
     all_customers = await _get_all_customers(db, pids_param if search_product else None, factory)
+
+    if not rows and page > 1:
+        # 越界页（并发删单/他标签页操作把数据变少）：回退到第 1 页重查，而不是返回
+        # total_items=0 —— 后者会让前端 `paginator = totalItems > perPage` 直接隐藏
+        # 分页器，用户被卡在一个空的第 N 页上出不来（2026-11-16 审计 A-38）。
+        # 报表侧 report_service.py:84-87 早就是这个口径，库存侧漏了。
+        params['offset'] = 0
+        page = 1
+        rows = (await db.execute(cte_sql, params)).all()
 
     if not rows:
         return _empty_inventory_response(page, per_page, all_customers=all_customers)

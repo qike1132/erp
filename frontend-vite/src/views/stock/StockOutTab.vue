@@ -220,10 +220,12 @@ async function removeStagedItem(idx: number) {
 
 const stagedTotalQty = computed(() => staged.value.reduce((sum: number, item: StagedStockout) => sum + (item.quantity || 0), 0))
 
-/** 批次级闸门：「已暂存同批次量 + 本次数量」≤ 批次可用（否则提交被后端拒=「部分出货成功」）；excludeId 排除被编辑项 */
+/** 批次级闸门：「已暂存同批次量 + 本次数量」≤ 批次可用（否则提交被后端拒=「部分出货成功」）；excludeId 排除被编辑项。
+ *  累计口径只按 (product_id, batch_no)，不含客户：后端 get_batch_available 的判据就是 (产品, 批次)，
+ *  批次可用量跨客户共享；带客户维度时两客户各自暂存同批次都能过闸，超额部分到提交才被后端逐行拒 →「部分出货成功」。
+ *  另：composables/useStockOutBatches.ts 有份同口径实现但全仓零 import 且无回归覆盖，勿再引入（会重新长出漂移）。 */
 function checkBatchAvailability(opts: {
   productId: string
-  customer: string
   batchNo: string
   quantity: number
   excludeId?: number
@@ -243,7 +245,7 @@ function checkBatchAvailability(opts: {
     return false
   }
   const stagedSameBatch = staged.value
-    .filter((s) => s.product_id === opts.productId && s.customer === opts.customer
+    .filter((s) => s.product_id === opts.productId
       && (s.batch_no || '') === opts.batchNo && s.id !== opts.excludeId)
     .reduce((sum, s) => sum + (s.quantity || 0), 0)
   if (stagedSameBatch + opts.quantity > opt.available_quantity) {
@@ -287,7 +289,6 @@ async function addStaged() {
 
   if (!checkBatchAvailability({
     productId: form.productId,
-    customer: form.customer,
     batchNo: form.batchNo,
     quantity: form.quantity,
   })) return
@@ -384,7 +385,7 @@ async function saveEditStaged() {
     const editBatches = item.batch_no ? await fetchBatchesForProduct(item.product_id, editBatchSeq) : []
     if (!sameItem()) { abandonStaleEdit(); return }
     if (!checkBatchAvailability({
-      productId: item.product_id, customer: draft.customer,
+      productId: item.product_id,
       batchNo: item.batch_no || '', quantity: draft.quantity,
       excludeId: itemId, batches: editBatches === 'failed' ? null : editBatches, missingHint: '请删除该行后重新添加',
     })) return

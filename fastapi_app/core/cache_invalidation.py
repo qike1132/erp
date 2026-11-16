@@ -74,6 +74,11 @@ class CacheInvalidationManager:
         """失效库存+订单相关缓存（stock_service 常用组合）"""
         count = 0
         count += await self._invalidate_by_pattern('inventory:*')
+        # /stock 顶部统计（key_prefix='stock:stats'）必须跟着库存一起失效，
+        # 否则同页「订单数量/备货数量」与库存行在 TTL 内对不上（审计 A-26）。
+        # 本方法直连 _invalidate_by_pattern、不经过 _DOMAIN_PATTERN_MAP，
+        # 故与 cache.py 里 INVENTORY 域新增的那条**不是重复**（同上文 product:list 的说明）。
+        count += await self._invalidate_by_pattern('stock:stats*')
         count += await self._invalidate_by_pattern('orders:*')
         count += await self._invalidate_by_pattern('stockins:*')
         count += await self._invalidate_by_pattern('stockouts:*')

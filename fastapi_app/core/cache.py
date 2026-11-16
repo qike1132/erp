@@ -154,7 +154,10 @@ _DOMAIN_PATTERN_MAP: dict[CacheDomain, tuple[str, ...]] = {
     # 否则新客户会出现「表格看得见、chips 筛不了」——2026-11-06 批量备货
     # （orchestrate_batch_stockins 只发 ORDER_AND_INVENTORY|STOCKIN|REPORT）
     # 实测：备货后表格已有该客户的行，chips 里没有，直到缓存 TTL 到期。
-    CacheDomain.INVENTORY: ("inventory:*", PRODUCT_LIST_CACHE_PATTERN, "customers:*"),
+    # stock:stats* = /stock 顶部「订单数量 / 备货数量」统计（endpoints/stock.py）。
+    # 它不在这张表里的话，入库/出库/退货写入后该统计只能等 TTL（60s）自愈，
+    # 与同响应里的库存行自相矛盾（2026-11-16 上线前审计 A-26）。
+    CacheDomain.INVENTORY: ("inventory:*", "stock:stats*", PRODUCT_LIST_CACHE_PATTERN, "customers:*"),
     CacheDomain.STOCKIN: ("stockins:*",),
     CacheDomain.PRODUCT: ("products:*",),
     CacheDomain.CUSTOMER: ("customers:*",),

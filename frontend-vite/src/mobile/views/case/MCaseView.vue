@@ -315,7 +315,7 @@ onMounted(() => {
 .m-form-group { margin-bottom: 16px; }
 .m-form-label { display: block; font-size: 13px; font-weight: 600; color: var(--m-text-secondary); margin-bottom: 6px; }
 .m-input { width: 100%; padding: 10px 12px; border: none; border-radius: 10px; background: var(--m-bg-grouped); font-size: 15px; color: var(--m-text-primary); font-family: inherit; box-sizing: border-box; }
-.m-submit-btn { width: 100%; height: 44px; border: none; border-radius: 12px; background: var(--m-accent); color: white; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit; margin-top: 8px; }
+.m-submit-btn { width: 100%; height: 44px; border: none; border-radius: 12px; background: var(--m-accent); color: white; font-size: var(--fs-body); font-weight: 600; cursor: pointer; font-family: inherit; margin-top: 8px; }
 .m-submit-btn:disabled { opacity: 0.45; }
 .m-submit-btn:active:not(:disabled) { opacity: 0.85; }
 .m-results { margin-top: 8px; background: var(--m-bg-card); border-radius: 10px; box-shadow: var(--m-shadow-card); overflow: hidden; max-height: 260px; overflow-y: auto; }
@@ -325,7 +325,7 @@ onMounted(() => {
 .m-part-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--m-bg-grouped); }
 .m-part-name { flex: 1; min-width: 0; font-size: 15px; color: var(--m-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-part-del { height: 32px; padding: 0 12px; border: none; border-radius: 8px; background: var(--color-danger-50); color: var(--color-danger-600); font-size: 13px; font-weight: 600; cursor: pointer; }
-.m-part-empty { padding: 16px 0; text-align: center; color: var(--m-text-secondary); font-size: 14px; }
+.m-part-empty { padding: 16px 0; text-align: center; color: var(--m-text-secondary); font-size: var(--fs-body-sm); }
 .m-part-add { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
 .m-case-search-error { margin: 6px 0 0; color: var(--m-accent-red, #d93025); font-size: 13px; }
 </style>

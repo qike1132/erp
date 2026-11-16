@@ -71,19 +71,19 @@ const accent = computed(() => (props.direction === 'in' ? 'var(--color-primary-5
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
 }
 .bi-arrow { color: var(--color-text-muted); transition: transform 0.25s ease; }
 .bi-arrow.expanded { transform: rotate(180deg); }
 .bi-content { padding: 0 16px 14px; border-top: 1px solid var(--color-border-light, #f1f5f9); padding-top: 12px; }
-.bi-file-selected { margin-top: 8px; font-size: 14px; color: var(--color-text-secondary); }
+.bi-file-selected { margin-top: 8px; font-size: var(--fs-body-sm); color: var(--color-text-secondary); }
 .bi-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
 .bi-btn {
   padding: 6px 12px;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;

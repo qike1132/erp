@@ -274,7 +274,9 @@ async def test_update_case_movement_quantity_denies_and_allows(monkeypatch):
     with pytest.raises(ValueError) as ei:
         await case_commands.update_movement(db, 1, {"quantity": 13})
     assert type(ei.value) is ValueError
-    assert str(ei.value) == "调整后库存不足，当前库存: -3"
+    # 文案报「变更前」的库存与缺口（2026-11-16 审计 A-40：原来报的是调整后的值，
+    # 而该分支只在调整后为负时触发，于是永远印出负数）
+    assert str(ei.value) == "调整后库存不足，当前库存: 5，需要: 8"
     assert case_obj.current_stock == 5
     assert db.added == []
 

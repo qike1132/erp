@@ -81,14 +81,14 @@ const openModel = computed({
 .form-label {
   display: block;
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 .form-input {
   width: 100%;
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: 1.5;
   color: var(--color-text);
   background: white;

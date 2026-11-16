@@ -119,3 +119,70 @@ def test_get_all_customers_disables_l1():
         '生产 8 worker 且 CACHE_L1_BROADCAST_ENABLED=false：开 L1 后其他 worker 会'
         '在 local_ttl 内继续返回旧的客户 chips'
     )
+
+
+def test_get_inventory_paginated_disables_l1():
+    """库存分页缓存不得开 L1（2026-11-16 审计 A-3）。
+
+    原来 local_ttl=60：任一库存写入后，落到别的 worker 的读最长 60 秒仍返回旧行，
+    而且与同一响应里的「订单数量/备货数量」自相矛盾。口径同 chips 与 orders:list。
+    """
+    source = (PROJECT_ROOT / 'fastapi_app/services/stock_inventory_service.py').read_text(encoding='utf-8')
+    match = re.search(r'^async def get_inventory_paginated\(', source, re.MULTILINE)
+    assert match, '未找到 get_inventory_paginated 定义'
+    head = source[:match.start()]
+    deco_start = head.rfind('@cache_result(')
+    assert deco_start != -1, 'get_inventory_paginated 上未找到 @cache_result 装饰器'
+    block = head[deco_start:]
+
+    assert "key_prefix=\"inventory:paginated\"" in block or "key_prefix='inventory:paginated'" in block
+    ttl = re.search(r'local_ttl\s*=\s*(\d+)', block)
+    assert ttl, 'get_inventory_paginated 的 @cache_result 未显式声明 local_ttl'
+    assert ttl.group(1) == '0', (
+        f'inventory:paginated 的 local_ttl={ttl.group(1)}s 必须为 0：生产 8 worker 且 '
+        'CACHE_L1_BROADCAST_ENABLED=false，其他 worker 无法被失效'
+    )
+
+
+async def test_inventory_domain_clears_stock_stats_cache(fallback_cache):
+    """/stock 顶部统计（stock:stats）必须随库存一起失效（审计 A-26）。
+
+    拦哪种错：`stock:stats` 曾经不在任何失效清单里，入库/出库/退货后同页
+    「订单数量/备货数量」只能等 TTL（60s）自愈，与库存行自相矛盾。
+    """
+    await safe_set('erp:stock:stats:today', {'order_qty': 3}, timeout=60)
+    await safe_set('erp:inventory:paginated:x', {'rows': []}, timeout=60)
+
+    await invalidate_related_caches(CacheDomain.INVENTORY)
+
+    assert await safe_get('erp:inventory:paginated:x') is None
+    assert await safe_get('erp:stock:stats:today') is None, (
+        '库存变了但 stock:stats 还在：同页统计与库存行会不一致'
+    )
+
+
+async def test_invalidate_stock_and_order_issues_stock_stats_pattern(monkeypatch):
+    """`invalidate_stock_and_order` 直连 `_invalidate_by_pattern`，绕过域映射表，
+    必须自己下发 stock:stats*（审计 A-26 的第二个入口）。"""
+    from fastapi_app.core.cache_invalidation import CacheInvalidationManager
+
+    issued: list[str] = []
+
+    async def fake_invalidate_cache(pattern):
+        issued.append(pattern)
+        return 0
+
+    async def fake_dashboard():
+        return 0
+
+    manager = CacheInvalidationManager()
+    monkeypatch.setattr(manager, 'invalidate_dashboard', fake_dashboard)
+    # CacheInvalidationManager 在模块导入时就把名字绑进了自己的命名空间，
+    # patch cache 模块的属性不会改到它调用点（审计自测踩过一次）。
+    monkeypatch.setattr('fastapi_app.core.cache_invalidation.invalidate_cache', fake_invalidate_cache)
+
+    await manager.invalidate_stock_and_order()
+
+    assert 'stock:stats*' in issued, f'库存写路径未失效 stock:stats，实际下发: {issued}'
+    for legacy in ('inventory:*', 'orders:*', 'reports:*', 'product:list:*', 'customers:*'):
+        assert legacy in issued, f'既有失效项回归缺失: {legacy}'

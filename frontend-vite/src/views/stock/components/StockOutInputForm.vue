@@ -198,14 +198,14 @@ function onSearchInput() {
   align-items: center;
   padding: 10px 20px;
   border-bottom: 1px solid var(--color-border, #cbd5e1);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
 }
 .so-col-title i {
   color: var(--color-danger-500);
   margin-right: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .so-col-scroll {
   flex: 1;
@@ -222,19 +222,19 @@ function onSearchInput() {
 .form-label {
   display: block;
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 .label-icon {
   color: var(--color-danger-500);
   margin-right: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .form-input {
   width: 100%;
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: 1.5;
   color: var(--color-text);
   background: white;
@@ -258,7 +258,7 @@ function onSearchInput() {
 textarea.form-input { resize: vertical; }
 textarea.form-input::placeholder {
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 400;
   opacity: 1;
 }
@@ -266,12 +266,12 @@ textarea.form-input::placeholder {
   display: block;
   margin-top: 4px;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .shipment-detail {
   margin-left: 4px;
   color: var(--color-text-tertiary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 @media (max-width: 767.98px) {
