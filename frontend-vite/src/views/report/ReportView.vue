@@ -123,7 +123,11 @@ import { useReportRowActions, TAB_ROW_PERMISSIONS, type ReportActionTab } from '
 
 const activeTab = ref<TabType>('order')
 const page = ref(1)
-const perPage = ref(15)
+// 20 = 分页器「每页条数」的默认项（UiDataTable.pageSizeOptions 的 [10,20,50,100]）。
+// 原为 15：既不在可选项里，UiPagination 的条数下拉找不到匹配项就渲染成空白 —— 用户看到
+// 「每页<空>条」，且一旦动过下拉就再也回不到 15。改初值对齐默认选项比给 ReportTable
+// 传特例 page-size-options 更省事（/stock 的 InventoryTab 也是同一修法）。
+const perPage = ref(20)
 /** 当前排序（服务端分页不变，这是当前页内的客户端排序） */
 const sort = ref<{ field: string; order: number } | null>(null)
 
@@ -367,7 +371,7 @@ async function exportReport() {
   color: var(--color-primary-600);
 }
 .rp-title h1 {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-text);
   white-space: nowrap;

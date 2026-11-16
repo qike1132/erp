@@ -240,6 +240,10 @@ const aliasToCanonical: Record<string, string> = {
   'search': 'magnifying-glass',
   'search-minus': 'magnifying-glass-minus',
   'search-plus': 'magnifying-glass-plus',
+  // FA5 旧名：scripts/fix_purchase_center_nav.py 的权限管理行用的是 'fa-shield-alt'，
+  // 缺这条映射时它会一路查不到（页面回退成兜底圆点）。补上让种子脚本的图标名可解析，
+  // 与 scripts/*nav*.py 的图标守卫测试（src/test/navSeedIconsResolvable.test.ts）对齐。
+  'shield-alt': 'shield-halved',
   'shipping-fast': 'truck-fast',
   'shopping-cart': 'cart-shopping',
   'shuttle-van': 'van-shuttle',
@@ -262,6 +266,8 @@ const aliasToCanonical: Record<string, string> = {
 }
 
 const pending = new Map<string, Promise<IconDefinition>>()
+/** 已 warn 过的未收录图标名：同一名字只警告一次（见 loadIcon 未收录分支） */
+const warnedMissingIcons = new Set<string>()
 
 /** 全部懒加载条目；测试从这里推导清单，新增条目即自动被覆盖。 */
 export const iconLoaders = loaders
@@ -308,7 +314,18 @@ function fallbackFromIndex(id: string): Promise<IconDefinition> {
 export function loadIcon(name: string): Promise<IconDefinition | null> {
   const canonical = canonicalIconName(name)
   const loader = loaders[canonical]
-  if (!loader) return Promise.resolve(null)
+  if (!loader) {
+    // 未收录名（新增图标忘登记 loaders、后端种子/数据里的图标名拼错）不再完全静默：
+    // dev 下 warn 一次/名字——图标名可能由渲染反复触发，不去重会刷爆控制台。
+    // 返回值仍是 null（「查不到」是事实，由调用方决定回退）；生产 esbuild drop console，不会打日志。
+    if (import.meta.env.DEV && !warnedMissingIcons.has(canonical)) {
+      warnedMissingIcons.add(canonical)
+      console.warn(
+        `[fontAwesomeLoader] 图标未收录：'${name}'（归一后 '${canonical}'），将回退兜底圆点；请核对图标名或补登记 loaders`,
+      )
+    }
+    return Promise.resolve(null)
+  }
 
   let p = pending.get(canonical)
   if (!p) {
@@ -345,6 +362,8 @@ export function loadIcon(name: string): Promise<IconDefinition | null> {
 export function resetIconLoaderForTest(): void {
   library.reset()
   pending.clear()
+  // 未收录告警的去重表也复位：否则前一个用例 warn 过的名字会让后续用例漏掉告警
+  warnedMissingIcons.clear()
   const ns = (globalThis as Record<string, unknown>)['___FONT_AWESOME___'] as
     | { styles?: Record<string, unknown> }
     | undefined

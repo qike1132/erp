@@ -376,7 +376,7 @@ h6 { font-size: 0.875rem; }
 .field-error-text {
   display: block;
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.5;
   color: var(--color-danger-600);
 }
@@ -456,7 +456,7 @@ h6 { font-size: 0.875rem; }
     text-align: center;
     font-weight: 600;
     color: var(--color-text-secondary);
-    font-size: 12px;
+    font-size: var(--fs-caption);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     border-bottom: 2px solid var(--color-border);
@@ -477,7 +477,7 @@ h6 { font-size: 0.875rem; }
     padding: 1px 6px;
     background: var(--color-danger-500);
     color: var(--color-text-inverse);
-    font-size: 12px;
+    font-size: var(--fs-caption);
     font-weight: 600;
     border-radius: 10px;
     min-width: 18px;
@@ -497,7 +497,7 @@ h6 { font-size: 0.875rem; }
     background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
     color: var(--color-text-inverse);
     border-radius: 20px;
-    font-size: 14px;
+    font-size: var(--fs-body-sm);
     font-weight: 600;
     white-space: nowrap;
   }
@@ -506,7 +506,7 @@ h6 { font-size: 0.875rem; }
   .count-badge-subtle {
     display: inline-flex;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--fs-caption);
     padding: 3px 8px;
     border-radius: 8px;
     background: var(--color-border-light);
@@ -572,7 +572,7 @@ h6 { font-size: 0.875rem; }
     height: 44px;
     padding: 0 12px;
     flex-shrink: 0;
-    font-size: 14px;
+    font-size: var(--fs-body-sm);
     font-weight: 600;
     line-height: 1.4;
     color: var(--color-text);
@@ -590,7 +590,7 @@ h6 { font-size: 0.875rem; }
   /* 列头右侧的计数 / 合计等尾部信息 */
   .mc-col-tail {
     margin-left: auto;
-    font-size: 12px;
+    font-size: var(--fs-caption);
     font-weight: 500;
     color: var(--color-text-muted);
     white-space: nowrap;
@@ -630,7 +630,7 @@ h6 { font-size: 0.875rem; }
     border-radius: 4px;
     background: transparent;
     color: var(--color-text-secondary);
-    font-size: 12px;
+    font-size: var(--fs-caption);
     font-weight: 500;
     line-height: 1;
     white-space: nowrap;
@@ -650,7 +650,7 @@ h6 { font-size: 0.875rem; }
   .mc-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--fs-caption);
     /* 必须显式声明 line-height：靠继承 body 行高会让行高随全局样式漂移
        （实测继承 1.6 时行高 32.2px，显式 1.35 → 29.2px，与「紧凑表 30px 量级」的设计意图一致） */
     line-height: 1.35;
@@ -664,7 +664,7 @@ h6 { font-size: 0.875rem; }
   .mc-table thead th {
     padding: 5px 8px;
     text-align: left;
-    font-size: 12px;
+    font-size: var(--fs-caption);
     font-weight: 600;
     color: var(--color-text-muted);
     background: var(--color-slate-50);

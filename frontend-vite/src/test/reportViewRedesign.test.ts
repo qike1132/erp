@@ -157,14 +157,16 @@ const TABLE_COLUMNS = [
   { field: 'actions', header: '操作', align: 'center' as const, width: '9%' },
 ]
 
+// 与 useReportConfig 的 TAB_CONFIG 同形（2026-11-16：死配置 countKey 已从两边一并删除——
+// 数量列写死 field:'quantity'，cfg.countKey 全仓零消费）
 const ORDER_CFG = {
   label: '订单流水', endpoint: '/reports/order-logs', dateKey: 'order_date',
-  countKey: 'order_count', dateLabel: '下单时间', countLabel: '数量', noteKey: 'note',
+  dateLabel: '下单时间', countLabel: '数量', noteKey: 'note',
   noLabel: '订单号', noKey: 'order_no',
 }
 const STOCKIN_CFG = {
   label: '备货流水', endpoint: '/reports/stockin-logs', dateKey: 'stockin_date',
-  countKey: 'stockin_count', dateLabel: '备货时间', countLabel: '备货数量', noteKey: 'note',
+  dateLabel: '备货时间', countLabel: '备货数量', noteKey: 'note',
   noLabel: '备货单号', noKey: 'record_no',
 }
 
@@ -180,7 +182,7 @@ function mountTable(
       columns: TABLE_COLUMNS,
       isLoading: false,
       isFetching: false,
-      perPage: 15,
+      perPage: 20,
       pagination: { total: logs.length, pages: 1 },
       currentCfg: activeTab === 'order' ? ORDER_CFG : STOCKIN_CFG,
       activeTab,
@@ -556,5 +558,22 @@ describe('ReportTable —— 行内操作列（订单/备货流水）', () => {
     expect(w.findAll('.rp-btn-danger').length).toBe(0)
 
     mocks.hasAnyPermission.mockReturnValue(true)
+  })
+})
+describe('/report 分页器每页条数必须落在可选项内（2026-11-16 审计 Low）', () => {
+  it('初始 perPage=20 命中条数下拉的可选项，下拉不再显示空白', async () => {
+    const wrapper = await mountViewWithData()
+    const select = wrapper.find('select.ui-page-size')
+    expect(select.exists()).toBe(true)
+
+    // 用户实际看到的选项：ReportTable 未传 page-size-options 特例，走 UiDataTable 默认 [10,20,50,100]
+    const optionValues = select.findAll('option').map((o) => o.attributes('value'))
+    expect(optionValues).toEqual(['10', '20', '50', '100'])
+
+    // 选中项必须是其中一项：perPage 不在选项里时 <select> 的 value 落成空串，
+    // 界面上就是「每页<空>条」（原值 15 即此症状）
+    const selected = (select.element as HTMLSelectElement).value
+    expect(selected).toBe('20')
+    expect(optionValues).toContain(selected)
   })
 })

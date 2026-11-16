@@ -21,6 +21,22 @@ export const FontAwesomeIconLazy = defineComponent({
     const ready = ref(false)
     let resolvedIcon: IconProp = props.icon
 
+    /**
+     * 回退到兜底图标（'fas','circle'）。
+     *
+     * 必须先走 loadIcon('circle') 把 circle 注册进 library 再置 ready：vue-fontawesome
+     * 渲染 ['prefix','iconName'] 时要查库，查不到就静默渲染成空 svg —— 那样「回退」等于
+     * 换了个名字继续空白（首次进入未加载过 circle 的页面正是这种情形）。
+     */
+    function fallbackToCircle() {
+      loadIcon('circle')
+        .catch(() => null)
+        .then(() => {
+          resolvedIcon = ['fas', 'circle']
+          ready.value = true
+        })
+    }
+
     function resolveIcon() {
       const raw = props.icon
 
@@ -51,15 +67,19 @@ export const FontAwesomeIconLazy = defineComponent({
 
       ready.value = false
       loadIcon(canonical)
-        .then(() => {
+        .then((def) => {
+          // P2（2026-10-24）+ 2026-11-16 审计：解析结果为 null 与「加载抛错」是同一处境的
+          // 两种表现（未收录名走的是 loadIcon 的 `return Promise.resolve(null)` 分支，
+          // 根本不会进 catch）——原先只挂 .catch 时，未收录图标会被当成「已就绪」渲染成
+          // 空白 svg，页面静默缺图标且零报错。这里把 null 也归到回退分支。
+          if (!def) throw new Error(`[FontAwesomeIconLazy] 图标不可用: ${canonical}`)
           resolvedIcon = [parsed.prefix, canonical]
           ready.value = true
         })
         .catch(() => {
           // P2（2026-10-24）：加载失败时回退到兜底图标，而不是用原值渲染（页面静默空白）。
           // 与 layouts/composables/useSidebarNav.ts 的 resolveIcon 兜底口径一致。
-          resolvedIcon = ['fas', 'circle']
-          ready.value = true
+          fallbackToCircle()
         })
     }
 

@@ -197,7 +197,7 @@ function fmtQty(v: unknown): string {
   height: 28px;
   opacity: 0.5;
 }
-.rp-empty span { font-size: 14px; }
+.rp-empty span { font-size: var(--fs-body-sm); }
 .rp-qty { font-weight: 700; }
 .rp-note { color: var(--color-text-secondary); }
 .rp-no { color: var(--color-primary-700, #2d5ab8); font-weight: 600; }
@@ -221,7 +221,7 @@ function fmtQty(v: unknown): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   cursor: pointer;
   transition: background 0.2s ease;
 }

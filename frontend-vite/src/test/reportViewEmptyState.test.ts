@@ -180,7 +180,7 @@ describe('ReportView — 进页面自动查询（2026-10-23 owner 要求）', ()
     await flushPromises()
 
     expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
-    expect(mocks.orderLogs).toHaveBeenCalledWith({ page: 1, per_page: 15 })
+    expect(mocks.orderLogs).toHaveBeenCalledWith({ page: 1, per_page: 20 })
     expect(wrapper.find('.t-count').text()).toBe('0')
   })
 

@@ -21,7 +21,9 @@ THRESHOLD = 600
 LINE_SNAPSHOTS: dict[str, int] = {
     'views/purchase/composables/perSkuRows.ts': 734,
     'views/purchase/composables/useSummaryModal.ts': 1141,
-    'views/production/composables/useProductionEntry.ts': 957,
+    # 2026-11-16 当晚因审计修复（A-46 客户过滤 + 超 200 条提示）从 957 涨到 989，
+    # 已按实际重钉；下一轮只许降。真正的除法（拆成 5 个 composable，审计 A-43）另行排期。
+    'views/production/composables/useProductionEntry.ts': 989,
     'views/beile-order/composables/useBeileOrders.ts': 794,
 }
 

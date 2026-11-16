@@ -104,7 +104,7 @@ function jumpToPage() {
   gap: 6px;
   padding: 4px 12px;
   border-top: 1px solid var(--color-border-light, #f1f5f9);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1;
 }
 
@@ -116,7 +116,7 @@ function jumpToPage() {
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 4px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   font-family: inherit;
   box-sizing: border-box;
@@ -167,14 +167,14 @@ function jumpToPage() {
   min-width: 36px;
   padding: 0 2px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
 }
 
 .ui-page-total {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -185,7 +185,7 @@ function jumpToPage() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   white-space: nowrap;
 }

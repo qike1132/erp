@@ -7,7 +7,6 @@ export interface TabConfig {
   label: string
   endpoint: string
   dateKey: string
-  countKey: string
   dateLabel: string
   countLabel: string
   noteKey: string
@@ -22,7 +21,6 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     label: '订单流水',
     endpoint: '/reports/order-logs',
     dateKey: 'order_date',
-    countKey: 'order_count',
     dateLabel: '下单时间',
     countLabel: '数量',
     noteKey: 'note',
@@ -33,7 +31,6 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     label: '备货流水',
     endpoint: '/reports/stockin-logs',
     dateKey: 'stockin_date',
-    countKey: 'stockin_count',
     dateLabel: '备货时间',
     countLabel: '备货数量',
     noteKey: 'note',
@@ -44,7 +41,6 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     label: '出货流水',
     endpoint: '/reports/stockout-logs',
     dateKey: 'stockout_date',
-    countKey: 'stockout_count',
     dateLabel: '出货时间',
     countLabel: '出货数量',
     noteKey: 'note',
@@ -55,7 +51,6 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     label: '备货抵扣流水',
     endpoint: '/reports/deduction-logs',
     dateKey: 'deduction_time',
-    countKey: 'deduction_count',
     dateLabel: '抵扣时间',
     countLabel: '抵扣数量',
     noteKey: 'order_note',
@@ -67,7 +62,6 @@ export const TAB_CONFIG: Record<TabType, TabConfig> = {
     label: '退货流水',
     endpoint: '/reports/return-logs',
     dateKey: 'return_date',
-    countKey: 'return_count',
     dateLabel: '退货时间',
     countLabel: '退货数量',
     // 退货的备注列展示「原因；备注」合并串（行内编辑仍按分开的 reason/note 回写）

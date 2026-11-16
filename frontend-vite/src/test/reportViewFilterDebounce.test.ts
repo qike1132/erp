@@ -99,7 +99,7 @@ const TableStub = defineComponent({
   template: `
     <div class="table-stub">
       <span class="t-count">{{ logs.length }}</span>
-      <button class="t-page2" @click="$emit('page', { page: 1, rows: 15 })">第2页</button>
+      <button class="t-page2" @click="$emit('page', { page: 1, rows: 20 })">第2页</button>
     </div>
   `,
 })
@@ -144,7 +144,7 @@ describe('ReportView — 筛选防抖与提交语义', () => {
     mountView()
     await flushPromises()
     expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
-    expect(mocks.orderLogs).toHaveBeenCalledWith({ page: 1, per_page: 15 })
+    expect(mocks.orderLogs).toHaveBeenCalledWith({ page: 1, per_page: 20 })
   })
 
   it('连续键入三个字符：防抖窗口内零请求，停顿 300ms 后只发 1 次（不逐键请求）', async () => {
@@ -161,7 +161,7 @@ describe('ReportView — 筛选防抖与提交语义', () => {
     await sleep(400)
     await flushPromises()
     expect(mocks.orderLogs).toHaveBeenCalledTimes(1)
-    expect(mocks.orderLogs).toHaveBeenCalledWith({ page: 1, per_page: 15, product: '保温杯' })
+    expect(mocks.orderLogs).toHaveBeenCalledWith({ page: 1, per_page: 20, product: '保温杯' })
   })
 
   it('键入中途继续打字：防抖窗口重置，只应用最终输入', async () => {
@@ -212,7 +212,7 @@ describe('ReportView — 筛选防抖与提交语义', () => {
     await wrapper.find('.f-product').setValue('杯')
     await sleep(400)
     await flushPromises()
-    expect(mocks.orderLogs).toHaveBeenLastCalledWith({ page: 1, per_page: 15, product: '杯' })
+    expect(mocks.orderLogs).toHaveBeenLastCalledWith({ page: 1, per_page: 20, product: '杯' })
   })
 
   it('重置：清空筛选并回到第 1 页（命中首屏缓存时不重复请求）', async () => {
@@ -306,7 +306,7 @@ describe('ReportView — OCR-4 修复（page≥2 重查 M:223 / 导出快照一�
     await wrapper.find('.f-search').trigger('click')
     await flushPromises()
     expect(mocks.orderLogs).toHaveBeenCalledTimes(3)
-    expect(mocks.orderLogs).toHaveBeenLastCalledWith({ page: 1, per_page: 15, product: '保温杯' })
+    expect(mocks.orderLogs).toHaveBeenLastCalledWith({ page: 1, per_page: 20, product: '保温杯' })
   })
 
   it('Low:247: 草稿与已提交快照不一致时点「导出」：导出口径必须等于输入框当前所见', async () => {
