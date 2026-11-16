@@ -9,7 +9,7 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.exceptions import BusinessError, NotFoundError
+from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
 from fastapi_app.shared_models import (
     CustomerSamplingProject,
     FileRecord,
@@ -17,7 +17,7 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
-from .common import _ensure_project_exists, _get_user_name, _write_change_log
+from .common import _get_user_name, _write_change_log
 
 # 产品图片大小上限（与 storage_service 安全策略一致）
 _IMAGE_MAX_SIZE = 10 * 1024 * 1024
@@ -131,6 +131,7 @@ async def upload_project_image(
     original_filename: str,
     content_type: str | None = None,
     user_id: int | None = None,
+    version: int | None = None,
 ) -> dict:
     """上传产品图片
 
@@ -138,11 +139,28 @@ async def upload_project_image(
     - 更新 project.product_image_file_id
     - 前置条件：content/type/大小已由 validate_project_image 校验通过
       （endpoint 在进入事务前调用，本函数不再重复校验）
+
+    **乐观锁（与 projects.update_project 同口径）**：上传会改写图片字段，因此也要
+    校验并递增 project.version。
+    - 传了 version 且与库中不一致 → ConflictError(409)；
+    - version 缺省（老客户端）跳过校验，但**仍然自增**：
+      旧版表单打开时拿的是上传前的 version，上传后 version 变了，它再提交就是 409，
+      而不是拿旧表单的图片字段静默覆盖新图并把新图登记为待删除。
     """
     from fastapi_app.services.storage_service import save_upload
 
-    # 校验项目存在
-    await _ensure_project_exists(db, project_id)
+    # 行锁 + 版本校验都在保存文件之前：过期的上传不该先把文件写进存储再回滚
+    result = await db.execute(
+        select(CustomerSamplingProject)
+        .where(CustomerSamplingProject.id == project_id)
+        .with_for_update()
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise NotFoundError('打样项目不存在')
+
+    if version is not None and project.version != version:
+        raise ConflictError('该打样项目已被他人更新，请刷新后重试')
 
     # 复用 storage_service 保存文件（同步生成 400px WebP 缩略图供列表使用）
     upload_result = await save_upload(
@@ -154,15 +172,10 @@ async def upload_project_image(
         generate_thumbnail=True,
     )
 
-    # 更新项目的 product_image_file_id
-    result = await db.execute(
-        select(CustomerSamplingProject).where(CustomerSamplingProject.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    if project is None:
-        raise NotFoundError('打样项目不存在')
+    # 更新项目的 product_image_file_id 并递增乐观锁版本
     old_image_file_id = project.product_image_file_id
     project.product_image_file_id = upload_result['id']
+    project.version += 1
     await db.flush()
 
     # 旧图片不再被引用时清理（FileRecord 行事务内删除，存储对象 commit 后删除）
@@ -176,13 +189,15 @@ async def upload_project_image(
     )
 
     logger.info(
-        '上传产品图片: project_id=%s, file_id=%s, url=%s',
-        project_id, upload_result['id'], upload_result['url'],
+        '上传产品图片: project_id=%s, file_id=%s, url=%s, version=%s',
+        project_id, upload_result['id'], upload_result['url'], project.version,
     )
     return {
         'file_id': upload_result['id'],
         'url': upload_result['url'],
         'thumbnail_url': upload_result.get('thumbnail_url'),
+        # 回传新版本号：前端局部回写，避免上传后的下一次编辑仍带旧 version 吃 409
+        'version': project.version,
     }
 
 

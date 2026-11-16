@@ -10,7 +10,7 @@ import asyncio
 import functools
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -235,6 +235,10 @@ async def _validate_project_image_async(content: bytes, content_type: str | None
 async def api_upload_project_image(
     project_id: int,
     file: UploadFile = File(..., description='产品图片文件'),
+    # 乐观锁版本号。本端点是 multipart（没有 JSON body），故用 Form 而非请求模型承接；
+    # 缺省（老前端未传）表示跳过校验，但服务层仍会自增 version —— 这样旧表单带着
+    # 上传前的 version 再保存项目就会 409，而不是静默覆盖新图并清掉它。
+    version: int | None = Form(None, description='项目乐观锁版本号（缺省时跳过校验）'),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
@@ -256,6 +260,7 @@ async def api_upload_project_image(
             original_filename=file.filename or 'upload.bin',
             content_type=file.content_type,
             user_id=current_user.id,
+            version=version,
         )
     return success_response(**{'message': '上传成功', **result})
 

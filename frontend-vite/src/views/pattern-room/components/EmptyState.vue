@@ -41,14 +41,14 @@ withDefaults(defineProps<{
 }
 
 .empty-title {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 600;
   margin: 0 0 8px;
   color: var(--color-text-primary, #374151);
 }
 
 .empty-desc {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   margin: 0 0 20px;
   max-width: 320px;
   line-height: 1.5;

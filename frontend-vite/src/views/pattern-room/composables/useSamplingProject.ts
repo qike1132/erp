@@ -171,7 +171,11 @@ export function useSamplingProject() {
     submitting.value = true
     error.value = null
     try {
-      const res = await patternRoomApi.uploadProjectImage(id, file)
+      const res = await patternRoomApi.uploadProjectImage(id, file, currentProject.value?.version)
+      // 服务端上传后自增了 version：本地同步 +1，否则紧接着的保存会因版本过期被 409
+      if (res?.success && currentProject.value?.id === id) {
+        currentProject.value.version = (currentProject.value.version ?? 0) + 1
+      }
       return res
     } catch (e) {
       console.error('[useSamplingProject] 上传产品图片失败:', e)

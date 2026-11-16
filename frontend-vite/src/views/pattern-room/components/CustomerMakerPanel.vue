@@ -44,7 +44,7 @@ defineProps<{
   border-left: 3px solid transparent;
   background: transparent;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text-primary);
   text-align: left;
@@ -64,7 +64,7 @@ defineProps<{
   white-space: nowrap;
 }
 .cgl-customer-count {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   padding: 1px 6px;
   border-radius: 8px;

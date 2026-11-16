@@ -170,7 +170,10 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
    * 并刷新分组列表让卡片缩略图更新；失败：仅记录日志，不打扰主流程。
    */
   function uploadPendingImage(projectId: number, image: File) {
-    void patternRoomApi.uploadProjectImage(projectId, image)
+    const baseVersion = projectHook.currentProject.value?.id === projectId
+      ? projectHook.currentProject.value?.version
+      : undefined
+    void patternRoomApi.uploadProjectImage(projectId, image, baseVersion)
       .then((upRes) => {
         if (upRes?.success) {
           // 本地打补丁：详情图片即时显示（上传接口已返回 URL/缩略图 URL）
@@ -179,6 +182,8 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
             if (upRes.url) proj.product_image_url = upRes.url
             if (upRes.thumbnail_url) proj.product_image_thumbnail_url = upRes.thumbnail_url
             if (upRes.file_id != null) proj.product_image_file_id = upRes.file_id
+            // 服务端上传后自增了 version，本地同步（否则保存会 409）
+            proj.version = (proj.version ?? 0) + 1
           }
           // 刷新分组列表，让卡片缩略图显示新图片
           void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')

@@ -76,7 +76,7 @@ const drawerOpen = defineModel<boolean>('drawerOpen', { default: false })
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   transition: all 0.2s ease;
 }
 .prs-drawer-trigger:hover {

@@ -149,7 +149,7 @@
   border-radius: 10px;
   background: rgba(22, 163, 74, 0.92);
   color: #fff;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   line-height: 1.6;
   pointer-events: none;
@@ -183,7 +183,7 @@
   border: 0;
   background: none;
   font-family: inherit;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.4;
   color: var(--color-text-primary);
@@ -208,7 +208,7 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: 1.5;
 }
 
@@ -227,7 +227,7 @@
 
 /* 时间：最弱层级，仅作参考 */
 .cgl-card-time {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted, #64748b);
 }
 
@@ -249,7 +249,7 @@
   border: 1px solid var(--color-border-light, #e5e7eb);
   border-radius: 6px;
   background: #fff;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-primary);
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;

@@ -272,9 +272,13 @@ export const patternRoomApi = {
     del<ActionResponse>(`/pattern-room/projects/${id}`),
 
   // ---------- 7. 上传产品图片（multipart/form-data） ----------
-  uploadProjectImage: (id: number, file: File) => {
+  uploadProjectImage: (id: number, file: File, version?: number) => {
     const formData = new FormData()
     formData.append('file', file)
+    // 乐观锁版本号（2026-11-16 审计 A-20）：上传会改写图片字段并自增 version，
+    // 不传版本就等于放弃校验 —— 另一端拿着旧表单提交图片字段时会静默覆盖新图、
+    // 甚至把刚上传的图登记成待删除。
+    if (version != null) formData.append('version', String(version))
     return upload<ActionResponse>(`/pattern-room/projects/${id}/image`, formData)
   },
 

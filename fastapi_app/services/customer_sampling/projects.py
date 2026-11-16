@@ -461,7 +461,7 @@ async def list_projects(
 ) -> dict:
     """分页查询打样项目列表
 
-    keyword 匹配序列号与产品名称（ILIKE），pattern_maker_id 筛选版师。
+    keyword 匹配序列号、产品名称与版师姓名（ILIKE），pattern_maker_id 筛选版师。
     status 缺省（None）时默认仅返回"进行中"项目（与 grouped-list 一致，前端漏传状态时的兜底）；
     显式传 'all' 返回全部状态的项目；传 in_progress/completed/cancelled 按对应状态过滤。
     """
@@ -477,6 +477,10 @@ async def list_projects(
             or_(
                 CustomerSamplingProject.sequence_no.ilike(like, escape='\\'),
                 CustomerSamplingProject.product_name.ilike(like, escape='\\'),
+                # 与 grouping.py 的 get_grouped_list 同口径：搜索框承诺「搜索版师
+                # 或项目」，列表页漏了版师姓名就会与分组页结果不一致（同一关键词
+                # 在一个接口命中、另一个不命中）。
+                CustomerSamplingProject.pattern_maker_name.ilike(like, escape='\\'),
             )
         )
     if pattern_maker_id is not None:

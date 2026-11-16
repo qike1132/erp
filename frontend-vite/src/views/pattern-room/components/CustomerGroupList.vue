@@ -14,8 +14,21 @@
     -->
     <UiLoadingStatus :loading="loading" label="加载中…" />
 
+    <!--
+      空态必须区分「没有匹配结果」与「一条数据都没有」：
+      后端关键词是服务端过滤（序列号/产品名/版师名），零结果时模板若一律说
+      「暂无打样项目」并引导「新建第一个项目」，用户会以为库里没数据而重复建单，
+      实际只是关键词打错了。带关键词时既不提示新建，也给一条可放弃搜索的文案。
+    -->
     <EmptyState
-      v-if="!loading && !hasData"
+      v-if="!loading && !hasData && hasKeyword"
+      icon="magnifying-glass"
+      title="没有匹配的打样项目"
+      description="换个关键词试试（支持序列号、产品名、版师姓名），或清空搜索框查看全部"
+    />
+
+    <EmptyState
+      v-else-if="!loading && !hasData"
       icon="boxes"
       title="暂无打样项目"
       description="点击上方「新建打样」创建第一个项目"
@@ -55,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, toRef } from 'vue'
+import { computed, ref, toRef } from 'vue'
 import UiLoadingStatus from '@/components/ui/UiLoadingStatus.vue'
 import UiPagination from '@/components/ui/UiPagination.vue'
 import EmptyState from './EmptyState.vue'
@@ -70,6 +83,11 @@ const props = defineProps<{
   groups: PatternMakerGroup[]
   loading: boolean
   hasData: boolean
+  /**
+   * 当前生效的关键词（用于区分「没有匹配结果」与「一条数据都没有」两种空态）。
+   * 必须由父级传入：hasData 只反映返回数据，无法表达「是不是搜索导致的空」。
+   */
+  keyword: string
   selectedProjectId: number | null
   canManage: boolean
   /** 当前状态筛选（透传给搜索栏做受控高亮） */
@@ -101,6 +119,9 @@ const {
 } = useProjectGrouping(groupsRef, selectedProjectIdRef)
 
 const previewImage = ref<string | null>(null)
+
+/** 是否处于关键词搜索态（空态文案据此分流，见模板注释） */
+const hasKeyword = computed(() => props.keyword.trim() !== '')
 
 function openImagePreview(url: string) {
   previewImage.value = url

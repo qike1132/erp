@@ -93,14 +93,14 @@ function onSearchInput(e: Event) {
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-text-secondary, #9ca3af);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .cgl-search-input {
   width: 100%;
   padding: 8px 12px 8px 30px;
   border: 1px solid var(--color-border-light, #e5e7eb);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-primary);
   box-sizing: border-box;
 }
@@ -119,7 +119,7 @@ function onSearchInput(e: Event) {
   padding: 8px 14px;
   border: none;
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-primary-700);
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-primary-100));
@@ -146,7 +146,7 @@ function onSearchInput(e: Event) {
   padding: 4px 12px;
   border: 1px solid transparent;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text-secondary, #6b7280);
   background: transparent;

@@ -179,6 +179,48 @@ class TestCustomerSamplingApi:
         data = resp.json()
         assert data["total_projects"] == 1
 
+    async def test_grouped_list_keyword_matches_pattern_maker_name(self, cs_api):
+        """按版师姓名关键字必须命中该分组（缺陷 #1，搜索框承诺「搜索版师或项目」）。
+
+        拦哪种错：get_grouped_list / list_projects 的 or_ 只拼 sequence_no 与
+        product_name，按版师名搜（如「李师傅」）恒为零结果，用户会以为库里没数据。
+        这里产品名刻意不含关键字 —— 命中只可能来自 pattern_maker_name。
+        """
+        client, db = cs_api
+        from fastapi_app.shared_models import PatternMaker
+
+        maker = PatternMaker(name="李师傅")
+        db.add(maker)
+        await db.flush()
+
+        pid, _ = await _create_project_via_api(
+            client, "与关键字无关的产品", pattern_maker_id=maker.id,
+        )
+        await _create_project_via_api(client, "另一件无关产品")
+
+        resp = await client.get(f"{API_PREFIX}/grouped-list", params={"keyword": "李师傅"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_projects"] == 1
+        assert [p["id"] for g in data["groups"] for p in g["projects"]] == [pid]
+        # 命中分组就是该版师，分组标题回显版师姓名（不是「未分类」）
+        assert [g["pattern_maker_name"] for g in data["groups"]] == ["李师傅"]
+
+        # 列表接口同口径：两处 or_ 必须一致，否则同一关键词在分组页命中、列表页不命中
+        listed = (await client.get(f"{API_PREFIX}/projects", params={"keyword": "李师傅"})).json()
+        assert [it["id"] for it in listed["items"]] == [pid]
+
+    async def test_grouped_list_keyword_still_matches_sequence_no(self, cs_api):
+        """防回归：加了版师姓名分支后，序列号关键词仍要命中（原有能力不许丢）。"""
+        client, _ = cs_api
+        pid, seq = await _create_project_via_api(client, "序列号关键词产品")
+        assert seq
+        await _create_project_via_api(client, "另一件序列号关键词产品")
+
+        data = (await client.get(f"{API_PREFIX}/grouped-list", params={"keyword": seq})).json()
+        assert data["total_projects"] == 1
+        assert [p["id"] for g in data["groups"] for p in g["projects"]] == [pid]
+
     async def test_grouped_list_default_in_progress(self, cs_api):
         """GET /grouped-list status 缺省默认只返回进行中项目（前端漏传状态时的兜底）"""
         client, _ = cs_api
@@ -733,6 +775,84 @@ class TestCustomerSamplingApi:
             files={"file": ("test.png", b"\x89PNG", "image/png")},
         )
         assert resp.status_code == 404
+
+    async def test_upload_image_rejects_stale_version(self, cs_api):
+        """上传携带过期 version → 409（缺陷 #3，端点必须把 Form.version 透传进服务层）。
+
+        拦哪种错：端点此前不接 version、服务层不校验也不递增 version，于是上传期间
+        打开的表单仍带着上传前的 version，保存时静默覆盖并删图。此用例走真实 HTTP
+        路径，验证「端点 -> 服务层」这条链确实拿到了前端传的 version。
+        合法 PNG 在校验通过后被版本校验拦下，不会写入存储。
+        """
+        from io import BytesIO
+
+        from PIL import Image
+
+        client, _ = cs_api
+        pid, _ = await _create_project_via_api(client, "上传版本透传产品")
+        version = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()["version"]
+
+        buf = BytesIO()
+        Image.new("RGB", (2, 2), "white").save(buf, format="PNG")
+        resp = await client.post(
+            f"{API_PREFIX}/projects/{pid}/image",
+            files={"file": ("test.png", buf.getvalue(), "image/png")},
+            data={"version": str(version + 5)},
+        )
+        assert resp.status_code == 409, resp.text
+
+    async def test_upload_image_bumps_version(self, cs_api, monkeypatch):
+        """上传成功后 version+1；缺省 version（老前端）跳过校验但仍自增（缺陷 #3）。
+
+        拦哪种错：只写 product_image_file_id 不递增 version 时，旧表单的 version 仍
+        有效，提交即静默覆盖并删掉新图；「缺省也自增」保证老客户端同样让旧表单失效。
+        """
+        from fastapi_app.services import customer_sampling_service as svc
+        from fastapi_app.services import storage_service
+        from fastapi_app.shared_models import CustomerSamplingProject, FileRecord
+
+        client, db = cs_api
+        pid, _ = await _create_project_via_api(client, "上传递增版本产品")
+        version = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()["version"]
+
+        async def _fake_save_upload(**kwargs):
+            """替身：不落盘，只登记一条 FileRecord（product_image_file_id 有外键）。"""
+            rec = FileRecord(original_filename="fake.png", storage_key=f"test/fake-{pid}.png")
+            kwargs["db"].add(rec)
+            await kwargs["db"].flush()
+            return {
+                "id": rec.id,
+                "url": "/static/fake.png",
+                "thumbnail_url": "/static/fake-thumb.png",
+            }
+
+        # 服务层是「调用时导入」 storage_service.save_upload，故打模块属性即可生效
+        monkeypatch.setattr(storage_service, "save_upload", _fake_save_upload)
+
+        # 正确 version：成功且回传新版本号
+        ok = await svc.upload_project_image(
+            db, pid, content=b"fake", original_filename="fake.png", version=version,
+        )
+        assert ok["version"] == version + 1
+
+        next_version = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()["version"]
+        assert next_version == version + 1
+        project = await db.get(CustomerSamplingProject, pid)
+        assert project.product_image_file_id == ok["file_id"]
+
+        # 缺省 version：跳过校验但**仍然自增**
+        no_version = await svc.upload_project_image(
+            db, pid, content=b"fake", original_filename="fake.png",
+        )
+        assert no_version["version"] == next_version + 1
+        after = (await client.get(f"{API_PREFIX}/projects/{pid}")).json()
+        assert after["version"] == next_version + 1
+        # 旧表单（version 停留在上传前）再编辑项目必须 409，而不是覆盖并删图
+        stale = await client.put(
+            f"{API_PREFIX}/projects/{pid}",
+            json={"product_name": "旧表单覆盖", "version": version},
+        )
+        assert stale.status_code == 409
 
     # ==================== 完整业务流程 ====================
 

@@ -104,7 +104,7 @@ defineEmits<{
   border-radius: 8px;
   background: #fff;
   color: var(--color-text-secondary, #6b7280);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;

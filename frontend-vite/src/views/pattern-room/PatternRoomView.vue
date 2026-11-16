@@ -24,6 +24,7 @@
               :groups="groupHook.groups.value"
               :loading="groupHook.loading.value"
               :has-data="groupHook.hasData.value"
+              :keyword="searchKeyword"
               :selected-project-id="selectedProjectId"
               :can-manage="canManage"
               :status-filter="statusFilter"

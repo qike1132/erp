@@ -95,7 +95,7 @@ function onDrop(e: DragEvent) {
   border: 1px solid var(--color-border-light);
   background: #fff;
   color: #ef4444;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -116,7 +116,7 @@ function onDrop(e: DragEvent) {
   cursor: pointer;
   transition: border-color 0.2s;
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .diu-upload-area:hover {
   border-color: var(--color-primary-400);
@@ -149,18 +149,18 @@ function onDrop(e: DragEvent) {
   border: 2px dashed var(--color-primary-500);
   border-radius: 10px;
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   background: color-mix(in srgb, var(--color-primary-500) 6%, transparent);
 }
 .diu-upload-area i {
-  font-size: 24px;
+  font-size: var(--fs-heading-2);
   opacity: 0.6;
 }
 .diu-file-input {
   display: none;
 }
 .diu-upload-hint {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   opacity: 0.6;
 }
 </style>

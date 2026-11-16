@@ -54,6 +54,7 @@ async def get_grouped_list(
     - 组内项目按 updated_at 倒序
     - status 缺省（None）时默认仅返回"进行中"项目（前端漏传状态时的兜底）
     - 显式传 'all' 返回全部状态的项目；传 in_progress/completed/cancelled 按对应状态过滤
+    - keyword 匹配序列号、产品名称与版师姓名（ILIKE）
     - page/per_page 按"分组"分页（每页返回完整分组，组内项目不拆分）：
       先对全部匹配项目按版师全量分组，再对分组列表分页
 
@@ -76,6 +77,13 @@ async def get_grouped_list(
                     kw_pattern, escape='\\',
                 ),
                 CustomerSamplingProject.product_name.ilike(
+                    kw_pattern, escape='\\',
+                ),
+                # 版师姓名：搜索框（CustomerGroupSearchBar）的 placeholder 与
+                # aria-label 都承诺「搜索版师或项目」，只搜序列号/产品名会让按版师名
+                # 搜「张师傅」恒为零结果。pattern_maker_name 是项目表上的冗余列
+                # （create/update 时写入），直接过滤即可，无需 join 版师表。
+                CustomerSamplingProject.pattern_maker_name.ilike(
                     kw_pattern, escape='\\',
                 ),
             )

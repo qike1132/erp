@@ -154,7 +154,7 @@ function cancelAdd() {
   padding: 8px 12px;
   border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
@@ -162,7 +162,7 @@ function cancelAdd() {
   box-sizing: border-box;
 }
 .dms-trigger i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary, #94a3b8);
   flex-shrink: 0;
   margin-left: 8px;
@@ -202,7 +202,7 @@ function cancelAdd() {
   border: none;
   background: transparent;
   text-align: left;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-family: inherit;
   color: var(--color-text-primary);
   cursor: pointer;
@@ -223,7 +223,7 @@ function cancelAdd() {
   background: transparent;
   color: var(--color-text-muted, #94a3b8);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   transition: all 0.15s ease;
 }
 .dms-del:hover {
@@ -240,7 +240,7 @@ function cancelAdd() {
   background: transparent;
   color: var(--color-text-secondary, #6b7280);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   align-self: flex-start;
   transition: all 0.15s ease;
@@ -262,7 +262,7 @@ function cancelAdd() {
   padding: 8px 12px;
   border: 1px solid var(--color-border-light);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-family: inherit;
   background: var(--color-surface);
   color: var(--color-text-primary);
@@ -282,7 +282,7 @@ function cancelAdd() {
   background: transparent;
   color: var(--color-text-secondary, #6b7280);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   transition: all 0.15s ease;
 }

@@ -221,7 +221,7 @@ function closeDialog() {
 .batch-part-form__head {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--color-border-light);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -255,7 +255,7 @@ function closeDialog() {
   padding: 6px 10px;
   border: 1px solid var(--color-border-light);
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-family: inherit;
   background: #fff;
   color: var(--color-text-primary);
@@ -279,7 +279,7 @@ function closeDialog() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   transition: all 0.15s;
 }
 
@@ -294,7 +294,7 @@ function closeDialog() {
   gap: 6px;
   align-self: flex-start;
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-primary-600);
   border: 1px dashed var(--color-primary-300);

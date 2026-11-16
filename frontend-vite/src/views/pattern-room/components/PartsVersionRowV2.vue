@@ -205,7 +205,7 @@ function actionLabel(action: string, part: PartDetail, group: GroupedRow): strin
   /* 24px：WCAG 2.5.8 下限，原 22px 不达标（审查 A11Y-14） */
   height: 24px;
   padding: 0 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   font-family: inherit;
   color: var(--color-text-muted, #94a3b8);
@@ -259,7 +259,7 @@ function actionLabel(action: string, part: PartDetail, group: GroupedRow): strin
   justify-content: center;
   width: 26px;
   height: 26px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   border: 1px solid;
   border-radius: 4px;
@@ -267,7 +267,7 @@ function actionLabel(action: string, part: PartDetail, group: GroupedRow): strin
   transition: all 0.15s;
 }
 .pvt-action-btn i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .pvt-action-btn:disabled {
   cursor: not-allowed;
@@ -336,7 +336,7 @@ function actionLabel(action: string, part: PartDetail, group: GroupedRow): strin
   padding: 4px 6px;
   border: 1px solid var(--color-warning-400, #fb923c);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   box-sizing: border-box;
   background: #fff;

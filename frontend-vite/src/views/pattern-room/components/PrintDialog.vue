@@ -177,13 +177,13 @@ defineExpose({ updatePrintTime })
 }
 
 .pd-meta-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: #75808e;
   letter-spacing: 0.08em;
 }
 
 .pd-meta-value {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: #16202e;
   font-variant-numeric: tabular-nums;
@@ -225,7 +225,7 @@ defineExpose({ updatePrintTime })
   align-items: center;
   gap: 8px;
   color: #9aa4b1;
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 
 .pd-image-placeholder svg {
@@ -251,21 +251,21 @@ defineExpose({ updatePrintTime })
 }
 
 .pd-role-title {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: #16202e;
   letter-spacing: 0.04em;
 }
 
 .pd-role-count {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: #75808e;
 }
 
 .pd-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-variant-numeric: tabular-nums;
   /* 固定列宽：每个角色分段是独立 <table>，auto 布局会各按自身内容算列宽，
      导致同一列在不同分段下左右漂移。用 colgroup + fixed 让全部分段共用列位置。 */
@@ -283,7 +283,7 @@ defineExpose({ updatePrintTime })
 }
 
 .pd-table th {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   color: #44515f;
   background: #f6f8fa;
@@ -310,7 +310,7 @@ defineExpose({ updatePrintTime })
   margin-top: 20px;
   padding-top: 12px;
   border-top: 1px dashed #d5dbe3;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: #75808e;
   display: flex;
   justify-content: flex-end;

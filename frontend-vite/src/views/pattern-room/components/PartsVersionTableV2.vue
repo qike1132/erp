@@ -103,10 +103,10 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   gap: 8px;
   padding: 40px 16px;
   color: var(--color-text-muted, #94a3b8);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .pvt-empty-parts svg {
-  font-size: 32px;
+  font-size: var(--fs-display);
   opacity: 0.4;
   color: var(--color-text-secondary, #475569);
 }
@@ -117,7 +117,7 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
 .pvt-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   table-layout: fixed;
 }
 .pvt-table th {
@@ -148,7 +148,7 @@ const { selectedVersion, toggleVersion, toggleExpand, groupedRows } = usePartsVe
   position: sticky;
   top: 0;
   z-index: 1;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   text-align: center;
 }
 .pvt-table tbody tr:hover {
