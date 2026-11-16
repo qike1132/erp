@@ -65,14 +65,14 @@ import UiAutocomplete from '@/components/ui/UiAutocomplete.vue'
 import { outsourceApi } from '@/api'
 import type { HubeiProductSearchItem } from '@/api/outsource'
 import { useAuthStore } from '@/stores/auth'
-import { isBeileUser } from '@/utils/beile'
 
-// 路由直达兜底：Tab 只对贝乐隐藏，但收藏/手输 URL 仍能进来，而贝乐持有
-// outsource_manage（预设读写接口都放行）。必须用渲染级门控（v-if）挡住子组件，
-// 只在 onMounted 里跳转来不及——子组件 setup 时已经发出读了。
+// 路由直达兜底：进这个页面要能维护工序预设（细粒度码 outsource_preset_manage）。
+// 必须用渲染级门控（v-if）挡住子组件——只在 onMounted 里跳转来不及，子组件 setup
+// 时已经发出读了。2026-11-16 审计 A-22：原来按用户名（贝乐）判断，但真正的判据是
+// 「有没有预设维护权限」，改权限码后与后端写接口、与 Tab 显隐三处同源。
 const authStore = useAuthStore()
 const router = useRouter()
-const blocked = computed(() => isBeileUser(authStore.user?.username))
+const blocked = computed(() => !authStore.hasPermission('outsource_preset_manage'))
 onMounted(() => {
   if (blocked.value) void router.replace('/outsource')
 })
