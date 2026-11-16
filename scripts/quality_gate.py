@@ -76,6 +76,7 @@ PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 DEFAULTS = {
     "max_function_length": 80,
     "max_vue_component_length": 400,
+    "max_ts_module_length": 600,
     "pip_audit_max_days": 180,
 }
 
@@ -124,6 +125,8 @@ class Gate:
             base += ["--max-length", str(thresholds["max_function_length"])]
         elif self.key == "vue_component_length":
             base += ["--max-length", str(thresholds["max_vue_component_length"])]
+        elif self.key == "ts_module_length":
+            base += ["--max-length", str(thresholds["max_ts_module_length"])]
         if probe_dir is not None and self.accepts_paths:
             base += [str(probe_dir)]
         return base
@@ -167,13 +170,24 @@ GATES: tuple[Gate, ...] = (
         accepts_paths=True,
     ),
     Gate(
+        key="ts_module_length",
+        title="前端超长 TS 模块 / composable",
+        mode=MODE_JSON,
+        script="scripts/check_ts_module_length.py",
+        extra_args=("--json",),
+        fix_hint="按职责拆 composable，或把纯计算下沉成无状态函数（单 .ts ≤ 阈值行）；"
+        "把逻辑从 .vue 挪进 .ts 不算拆分，这里同样量",
+        accepts_paths=True,
+    ),
+    Gate(
         key="service_commit",
         title="service 层手动 commit()",
         mode=MODE_JSON,
         script="scripts/check_service_commit.py",
         extra_args=("--json",),
         fix_hint="改 flush-only，提交交给 get_async_db / db_transaction；"
-        "确需独立事务时按 docs/TRANSACTION_BOUNDARY_GUIDE.md 标注 `# manual-tx: <理由>`",
+        "确需独立事务时按 docs/TRANSACTION_BOUNDARY_GUIDE.md §2.2 走评审——"
+        "注意 `# manual-tx: <理由>` 只是评审说明，**不减免本项计数**（例外须持续可见）",
         accepts_paths=True,
     ),
     Gate(
@@ -1055,6 +1069,8 @@ _LONG_FUNC_BAD = (
 )
 _VUE_BAD = ("<template>\n" + "<div>cell</div>\n" * 420 + "</template>\n").encode()
 _VUE_CLEAN = b"<template>\n<div>cell</div>\n</template>\n"
+_TS_BAD = ("export const value = 1\n" * 620).encode()
+_TS_CLEAN = b"export const value = 1\n"
 # 30 个 if 分支 → 圈复杂度 31 > ruff.toml [lint.mccabe] max-complexity(25) → C901 命中
 _COMPLEX_BAD = ("def f(x):\n" + "".join(f"    if x == {i}:\n        return {i}\n" for i in range(30))
                 + "    return -1\n").encode()
@@ -1073,6 +1089,10 @@ SELFTEST_FIXTURES: dict[str, tuple[tuple[str, bytes], tuple[str, bytes]]] = {
     "vue_component_length": (
         ("probe.vue", _VUE_BAD),
         ("probe.vue", _VUE_CLEAN),
+    ),
+    "ts_module_length": (
+        ("probe.ts", _TS_BAD),
+        ("probe.ts", _TS_CLEAN),
     ),
     "service_commit": (
         ("probe.py", b"async def probe(db):\n    await db.commit()\n"),
@@ -1414,6 +1434,7 @@ def main() -> int:
     print(
         f"阈值：函数 ≤{thresholds['max_function_length']} 行 / "
         f"Vue 组件 ≤{thresholds['max_vue_component_length']} 行 / "
+        f"TS 模块 ≤{thresholds['max_ts_module_length']} 行 / "
         f"pip-audit 豁免单条 ≤{thresholds['pip_audit_max_days']} 天"
     )
     if probe_dir is not None:
