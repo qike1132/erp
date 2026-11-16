@@ -76,7 +76,7 @@ function onSelect(value: string) {
   border-radius: 50%;
   background: var(--color-border-light);
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1;
   cursor: pointer;
 }

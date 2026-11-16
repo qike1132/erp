@@ -257,7 +257,7 @@ function handleQuickAction(action: QuickAction) {
 }
 
 .m-quick-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--m-text-secondary);
   text-align: center;

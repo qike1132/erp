@@ -113,7 +113,7 @@ function pick(c: (typeof cells.value)[number]): void {
 }
 
 .sp-grid-head span {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-muted);
   text-align: center;
@@ -205,14 +205,14 @@ function pick(c: (typeof cells.value)[number]): void {
 }
 
 .sp-day {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 800;
   color: var(--color-heading);
   line-height: 1;
 }
 
 .sp-wd {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-muted);
 }
@@ -228,7 +228,7 @@ function pick(c: (typeof cells.value)[number]): void {
 
 .sp-mark {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   line-height: 1;
   padding: 3px 6px;
@@ -242,7 +242,7 @@ function pick(c: (typeof cells.value)[number]): void {
 
 .sp-qty {
   margin-top: auto;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 800;
   line-height: 1;
   color: var(--color-heading);
@@ -250,7 +250,7 @@ function pick(c: (typeof cells.value)[number]): void {
 }
 
 .sp-qty small {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-muted);
   margin-left: 1px;
@@ -258,7 +258,7 @@ function pick(c: (typeof cells.value)[number]): void {
 
 .sp-today-hint {
   margin-top: auto;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   color: var(--color-primary-600);
 }

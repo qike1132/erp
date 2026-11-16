@@ -73,7 +73,7 @@ function onSelectFromSearch(p: MaterialCalcProduct) {
 .mc-cap-hint {
   padding: 6px 10px;
   margin: 0 12px 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-warning-800);
   background: var(--color-warning-50);
   border-radius: 6px;

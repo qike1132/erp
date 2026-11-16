@@ -68,7 +68,7 @@ const emit = defineEmits<{
 }
 .pr-entry-dropdown-hint {
   padding: 8px 14px 6px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text-muted);
   border-bottom: 1px solid var(--color-border-light);
@@ -76,7 +76,7 @@ const emit = defineEmits<{
 }
 .pr-entry-dropdown-state {
   padding: 24px;
-  font-size: 16px;
+  font-size: var(--fs-body);
   color: var(--color-text-muted);
   text-align: center;
   display: flex;
@@ -85,7 +85,7 @@ const emit = defineEmits<{
   gap: 8px;
 }
 .pr-entry-dropdown-state i {
-  font-size: 16px;
+  font-size: var(--fs-body);
 }
 .pr-entry-dropdown-error {
   color: var(--color-danger-600);
@@ -118,7 +118,7 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: var(--fs-body);
   flex-shrink: 0;
 }
 .pr-entry-dropdown-item.active .pr-entry-dropdown-icon {
@@ -133,7 +133,7 @@ const emit = defineEmits<{
   gap: 3px;
 }
 .pr-entry-dropdown-name {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-text);
   overflow: hidden;
@@ -144,7 +144,7 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-muted);
 }
 .pr-entry-dropdown-barcode {
@@ -153,10 +153,10 @@ const emit = defineEmits<{
   gap: 4px;
 }
 .pr-entry-dropdown-barcode i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .pr-entry-dropdown-enter {
   color: var(--color-primary-700);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 </style>

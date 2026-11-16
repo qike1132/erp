@@ -74,7 +74,7 @@ defineProps<{
   justify-content: space-between;
   padding: 13px 16px;
 }
-.ios-row-label { font-size: 14px; color: #86868b; }
+.ios-row-label { font-size: var(--fs-body-sm); color: #86868b; }
 .ios-row-value { font-size: 17px; font-weight: 700; color: #1d1d1f; letter-spacing: -0.3px; }
 .ios-accent { color: #0071e3; }
 .ios-hairline {

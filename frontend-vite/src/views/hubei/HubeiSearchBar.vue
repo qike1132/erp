@@ -168,11 +168,11 @@ async function searchCustomers(q: string): Promise<CustomerSuggestion[]> {
 .hu-ac-name {
   color: var(--color-text);
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .hu-ac-barcode {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: var(--font-mono);
 }
 .hu-filter-actions {
@@ -185,7 +185,7 @@ async function searchCustomers(q: string): Promise<CustomerSuggestion[]> {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;

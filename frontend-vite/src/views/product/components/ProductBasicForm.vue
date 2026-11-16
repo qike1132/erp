@@ -201,7 +201,7 @@ async function handleAdd() {
 }
 .pd-label {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
   margin-bottom: 6px;
@@ -216,14 +216,14 @@ async function handleAdd() {
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   z-index: 10;
   pointer-events: none;
 }
 .pd-input {
   width: 100%;
   padding: 8px 12px 8px 36px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: 1.5;
   color: var(--color-text);
   background: white;
@@ -252,7 +252,7 @@ async function handleAdd() {
 
 .pd-btn {
   padding: 7px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   border-radius: 9px;
   border: 2px solid var(--color-border-light);
@@ -300,7 +300,7 @@ async function handleAdd() {
   display: flex !important;
   margin-bottom: 0;
   cursor: pointer;
-  font-size: 14px !important;
+  font-size: var(--fs-body-sm) !important;
   font-weight: 400 !important;
   color: var(--color-text-muted) !important;
   align-items: center;
@@ -309,7 +309,7 @@ async function handleAdd() {
   color: var(--color-text-muted) !important;
 }
 .pd-file-inline {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 500;
   display: inline-flex;
   align-items: center;

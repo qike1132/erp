@@ -138,7 +138,7 @@ function handleDelete(row: UserRow) {
   display: inline-block;
   padding: 4px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 .us-badge-info {
@@ -167,7 +167,7 @@ function handleDelete(row: UserRow) {
 }
 .us-badge-muted-text {
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 
 /* Action Buttons */
@@ -182,7 +182,7 @@ function handleDelete(row: UserRow) {
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 4px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
@@ -224,6 +224,6 @@ function handleDelete(row: UserRow) {
   opacity: 0.5;
 }
 .us-empty span {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 </style>

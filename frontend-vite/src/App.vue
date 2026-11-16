@@ -83,7 +83,7 @@ onUnmounted(() => {
   background: var(--color-ocean);
   color: white;
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   border-radius: 0 0 8px 0;
   text-decoration: none;
   transition: top 0.2s ease;

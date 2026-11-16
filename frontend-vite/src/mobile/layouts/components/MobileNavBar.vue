@@ -104,7 +104,7 @@ function handleBack() {
 }
 
 .m-navbar-subtitle {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--m-text-secondary);
   margin: 2px 0 0;
   line-height: 1.2;

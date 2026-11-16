@@ -112,7 +112,7 @@ function orderLines(m: MaterialItem): { order_no: string; quantity: number }[] {
   align-items: baseline;
   gap: 12px;
   padding: 2px 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.5;
 }
 .src-no {

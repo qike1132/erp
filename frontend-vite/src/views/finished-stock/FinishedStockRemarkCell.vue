@@ -88,21 +88,21 @@ function onEsc(e: KeyboardEvent) {
 .fr-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .fr-view {
   flex: 1; min-width: 0; text-align: left; padding: 4px 8px; border: 1px solid transparent;
-  border-radius: 8px; background: transparent; font-family: inherit; font-size: 12px;
+  border-radius: 8px; background: transparent; font-family: inherit; font-size: var(--fs-caption);
   color: var(--color-text); cursor: text; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .fr-view:hover { border-color: var(--color-border); background: var(--color-surface); }
 .fr-input {
   flex: 1; min-width: 0; padding: 4px 8px; border: 1.5px solid var(--color-primary-500);
-  border-radius: 8px; font-family: inherit; font-size: 12px; color: var(--color-text);
+  border-radius: 8px; font-family: inherit; font-size: var(--fs-caption); color: var(--color-text);
   background: var(--color-surface-card); outline: none;
 }
 .fr-input::placeholder { color: var(--color-text-placeholder); }
 .fr-ok, .fr-cancel {
-  flex-shrink: 0; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  flex-shrink: 0; padding: 4px 10px; border-radius: 8px; font-size: var(--fs-caption); font-weight: 600;
   font-family: inherit; cursor: pointer; white-space: nowrap;
 }
 .fr-ok { border: 1.5px solid var(--color-primary-600); background: var(--color-primary-600); color: var(--color-text-inverse); }
 .fr-cancel { border: 1.5px solid var(--color-border); background: var(--color-surface-card); color: var(--color-text-secondary); }
-.fr-saving { flex-shrink: 0; font-size: 12px; color: var(--color-text-muted); white-space: nowrap; }
+.fr-saving { flex-shrink: 0; font-size: var(--fs-caption); color: var(--color-text-muted); white-space: nowrap; }
 </style>

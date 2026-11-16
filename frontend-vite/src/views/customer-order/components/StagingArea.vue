@@ -121,14 +121,14 @@ const submitLabel = computed(() => {
   justify-content: space-between;
   gap: 8px;
   padding: 12px 20px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border, #cbd5e1);
   flex-shrink: 0;
 }
 .co-col-title i {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 
@@ -163,14 +163,14 @@ const submitLabel = computed(() => {
   flex-wrap: wrap;
 }
 .co-staged-tag {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 .co-staged-tag i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .co-staged-product {
   display: flex;
@@ -186,7 +186,7 @@ const submitLabel = computed(() => {
   gap: 3px;
 }
 .co-plan-chip i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .co-staged-actions {
   display: flex;
@@ -197,7 +197,7 @@ const submitLabel = computed(() => {
 
 /* ===== 类型徽章 ===== */
 .co-type-badge {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   padding: 2px 8px;
   border-radius: 6px;
   font-weight: 600;
@@ -224,7 +224,7 @@ const submitLabel = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   cursor: pointer;
   transition: background 0.2s ease, transform 0.2s ease;
 }
@@ -270,6 +270,6 @@ const submitLabel = computed(() => {
 }
 .co-empty-state p {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 </style>

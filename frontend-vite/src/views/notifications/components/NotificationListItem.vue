@@ -209,7 +209,7 @@ function handleItemClick(item: ParsedNotification) {
   background: linear-gradient(135deg, var(--color-primary-50), var(--color-ocean-light));
   border: 1px solid var(--color-primary-100);
   color: var(--color-primary-600);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   flex-shrink: 0;
 }
 
@@ -220,7 +220,7 @@ function handleItemClick(item: ParsedNotification) {
 }
 
 .nc-item-title {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-heading);
   line-height: 1.4;
@@ -239,7 +239,7 @@ function handleItemClick(item: ParsedNotification) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -248,13 +248,13 @@ function handleItemClick(item: ParsedNotification) {
 }
 
 .nc-item-time i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   opacity: 0.8;
 }
 
 /* 纯文本内容 */
 .nc-item-text {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
   line-height: 1.6;
   padding: 12px 14px;
@@ -271,7 +271,7 @@ function handleItemClick(item: ParsedNotification) {
   flex-wrap: wrap;
   gap: 4px 18px;
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: 1.5;
   background: var(--color-surface, #f8fafc);
   border: 1px solid var(--color-border-light, #e2e8f0);
@@ -289,7 +289,7 @@ function handleItemClick(item: ParsedNotification) {
 }
 
 .nc-order-time i {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-primary-500);
 }
 
@@ -324,7 +324,7 @@ function handleItemClick(item: ParsedNotification) {
   align-items: center;
   justify-content: center;
   padding: 1px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   border-radius: 999px;
   background: var(--color-primary-50, #eff3fb);
@@ -349,7 +349,7 @@ function handleItemClick(item: ParsedNotification) {
   .nc-item-type-icon {
     width: 30px;
     height: 30px;
-    font-size: 14px;
+    font-size: var(--fs-body-sm);
     border-radius: 9px;
   }
 
@@ -360,7 +360,7 @@ function handleItemClick(item: ParsedNotification) {
   .nc-order-line {
     padding: 8px 12px;
     gap: 4px 14px;
-    font-size: 12px;
+    font-size: var(--fs-caption);
   }
 }
 

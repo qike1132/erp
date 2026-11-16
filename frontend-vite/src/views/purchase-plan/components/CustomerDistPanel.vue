@@ -43,7 +43,7 @@ const rows = computed(() => {
 .sp-dist-empty {
   padding: 22px 0;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-muted, #8c96ad);
 }
 
@@ -61,7 +61,7 @@ const rows = computed(() => {
 .sp-dist-name {
   width: 88px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary, #5a6b8c);
   white-space: nowrap;
   overflow: hidden;
@@ -90,7 +90,7 @@ const rows = computed(() => {
   width: 40px;
   flex-shrink: 0;
   text-align: right;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted, #8c96ad);
 }
 </style>

@@ -255,7 +255,7 @@ onUnmounted(() => {
   border-radius: 50%;
 }
 .m-pull-spinning { animation: m-pull-spin 0.7s linear infinite; }
-.m-pull-text { font-size: 12px; font-weight: 500; color: #86868b; }
+.m-pull-text { font-size: var(--fs-caption); font-weight: 500; color: #86868b; }
 @keyframes m-pull-spin {
   to { transform: rotate(360deg); }
 }
@@ -326,7 +326,7 @@ onUnmounted(() => {
   justify-content: space-between;
 }
 .m-hero-eyebrow {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   letter-spacing: 0.4px;
   opacity: 0.85;
@@ -360,7 +360,7 @@ onUnmounted(() => {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.18);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   opacity: 0.85;
 }
@@ -402,7 +402,7 @@ onUnmounted(() => {
   border: none;
   border-radius: 9px;
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
 }

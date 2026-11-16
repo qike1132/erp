@@ -147,8 +147,8 @@ onMounted(() => { loadOverview(); loadRecords() })
 .m-center { display: flex; justify-content: center; padding: 48px 0; }
 .m-stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .m-icon-bg { width: 100%; height: 100%; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-.m-badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.m-badge { font-size: var(--fs-caption); font-weight: 600; padding: 2px 8px; border-radius: 10px; }
 .m-badge.done { color: var(--m-accent-emerald); background: rgba(48,209,88,0.1); }
 .m-badge.pending { color: var(--m-accent-amber); background: rgba(255,149,0,0.1); }
-.m-retry-btn { margin-top: 12px; height: 36px; padding: 0 20px; border: none; border-radius: 10px; background: var(--m-accent); color: white; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.m-retry-btn { margin-top: 12px; height: 36px; padding: 0 20px; border: none; border-radius: 10px; background: var(--m-accent); color: white; font-size: var(--fs-body-sm); font-weight: 600; cursor: pointer; font-family: inherit; }
 </style>

@@ -9,7 +9,7 @@
         <div><div class="mr-det-lb">状态</div><div class="mr-det-vl"><span :class="['mr-badge', 'mr-badge-' + detailData.status]">{{ STATUS_MAP[detailData.status] || detailData.status }}</span></div></div>
         <div><div class="mr-det-lb">总进度</div><div class="mr-det-vl" style="display:flex;align-items:center;gap:8px;"><div class="mr-pbar" style="flex:1;min-width:120px;"><div :class="['mr-pfill', detailData.progress >= 100 ? 'completed' : 'pending']" :style="{ width: (detailData.progress || 0) + '%' }" /></div><span>{{ detailData.progress }}% (已到货 {{ detailData.total_received }} / 数量 {{ detailData.total_ordered }})</span></div></div>
       </div>
-      <h4 style="margin:18px 0 14px;font-size:16px;"><FontAwesomeIcon icon="cubes" style="color:var(--color-primary-500);" /> SKU物料来料进度</h4>
+      <h4 style="margin:18px 0 14px;font-size: var(--fs-body);"><FontAwesomeIcon icon="cubes" style="color:var(--color-primary-500);" /> SKU物料来料进度</h4>
       <VirtualList
         :items="mergedItems"
         :item-height="90"

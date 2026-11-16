@@ -252,8 +252,8 @@ loadCompleted()
 .m-page-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--m-gap-md); padding-bottom: calc(var(--m-gap-lg) + var(--m-tabbar-safe)); -webkit-overflow-scrolling: touch; }
 .m-center { display: flex; justify-content: center; padding: 48px 0; }
 .m-icon-bg { width: 100%; height: 100%; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-.m-status-badge { font-size: 12px; font-weight: 600; }
+.m-status-badge { font-size: var(--fs-caption); font-weight: 600; }
 .m-detail-body { display: flex; flex-direction: column; gap: 12px; }
 .m-detail-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 0.5px solid rgba(0,0,0,0.06); }
-.m-detail-label { font-size: 14px; color: var(--m-text-secondary); }
+.m-detail-label { font-size: var(--fs-body-sm); color: var(--m-text-secondary); }
 </style>

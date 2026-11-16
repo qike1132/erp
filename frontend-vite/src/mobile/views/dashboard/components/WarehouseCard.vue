@@ -102,6 +102,6 @@ defineProps<{
   color: #86868b;
 }
 .ios-wh-label svg { width: 13px; height: 13px; }
-.ios-wh-value { font-size: 20px; font-weight: 800; color: #1d1d1f; letter-spacing: -0.4px; }
+.ios-wh-value { font-size: var(--fs-heading-3); font-weight: 800; color: #1d1d1f; letter-spacing: -0.4px; }
 .ios-wh-sub { font-size: 11px; font-weight: 500; color: #aeaeb2; }
 </style>

@@ -253,7 +253,7 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
   padding: 8px 12px;
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text);
   font-family: inherit;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
@@ -283,14 +283,14 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
   justify-content: space-between;
   gap: 8px;
   padding: 12px 20px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border, #cbd5e1);
   flex-shrink: 0;
 }
 .co-col-title i {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 .co-col-scroll {
@@ -310,7 +310,7 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
 }
 .co-label {
   display: block;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 500;
   margin-bottom: 4px;
   color: var(--color-text-secondary);
@@ -334,7 +334,7 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
 }
 .co-form-hint {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 .co-textarea {
@@ -342,7 +342,7 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 10px;
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   resize: vertical;
   outline: none;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
@@ -356,7 +356,7 @@ function buildOcrStaged(drafts: OcrDraftItem[], ctx: OcrStagingContext): boolean
 }
 .co-textarea::placeholder {
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 400;
   opacity: 1;
 }

@@ -73,7 +73,7 @@ function isDiff(row: DiffStoredRow): boolean {
 .sm-diff-banner > td {
   background: #fffaf0;
   color: #7a4a00;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   text-align: left;
 }
 .sm-diff-row > td {

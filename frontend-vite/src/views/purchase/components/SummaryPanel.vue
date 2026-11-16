@@ -233,7 +233,7 @@ onUnmounted(cancelPendingRateEdits)
   gap: 6px;
   height: 32px;
   padding: 0 12px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   border: 1px solid var(--color-border-light);
   border-radius: 9px;
@@ -264,7 +264,7 @@ onUnmounted(cancelPendingRateEdits)
   gap: 6px;
   height: 32px;
   padding: 0 12px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   border-radius: 9px;
   cursor: pointer;
@@ -312,7 +312,7 @@ onUnmounted(cancelPendingRateEdits)
   padding: 8px 14px;
   border: none;
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;

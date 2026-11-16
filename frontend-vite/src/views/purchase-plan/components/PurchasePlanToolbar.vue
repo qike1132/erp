@@ -64,7 +64,7 @@ const kw = defineModel<string>('globalKw', { default: '' })
   border-radius: 9px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   color: var(--color-primary-600);

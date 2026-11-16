@@ -138,7 +138,7 @@ function downloadTemplate() {
 
 <style scoped>
 .pd-section-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
   padding: 8px 0 4px;
@@ -170,7 +170,7 @@ function downloadTemplate() {
   display: flex !important;
   margin-bottom: 0;
   cursor: pointer;
-  font-size: 14px !important;
+  font-size: var(--fs-body-sm) !important;
   font-weight: 400 !important;
   color: var(--color-text-muted) !important;
   align-items: center;
@@ -187,7 +187,7 @@ function downloadTemplate() {
   padding: 3px 8px;
   border: 1px solid var(--color-border-light);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   background: white;
@@ -211,7 +211,7 @@ function downloadTemplate() {
   cursor: not-allowed;
 }
 .pd-file-inline {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 500;
   display: inline-flex;
   align-items: center;

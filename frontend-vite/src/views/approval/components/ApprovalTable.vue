@@ -87,11 +87,11 @@ const emit = defineEmits<{
 .ap-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .ap-table thead th {
   padding: 10px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -102,7 +102,7 @@ const emit = defineEmits<{
 }
 .ap-table tbody td {
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   text-align: center;
   transition: background 0.2s ease;
@@ -115,7 +115,7 @@ const emit = defineEmits<{
   display: inline-block;
   padding: 5px 12px;
   border-radius: 16px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 .ap-badge-success { background: var(--color-success-50); color: var(--color-success-600); }
@@ -126,7 +126,7 @@ const emit = defineEmits<{
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
@@ -165,5 +165,5 @@ const emit = defineEmits<{
   color: var(--color-text-muted);
 }
 .ap-empty i { font-size: 28px; opacity: 0.5; }
-.ap-empty span { font-size: 14px; }
+.ap-empty span { font-size: var(--fs-body-sm); }
 </style>

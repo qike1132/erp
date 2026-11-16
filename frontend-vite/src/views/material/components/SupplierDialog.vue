@@ -4,7 +4,7 @@
     <div v-if="supplierDetail">
       <div v-for="g in supplierDetail.supplierGroups" :key="g.supplierName" class="mr-source-card" style="margin-bottom:16px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <div style="font-weight:600;font-size:14px;"><FontAwesomeIcon icon="truck" style="color:var(--color-primary-500);margin-right:6px;" />{{ g.supplierName }}<span style="color:var(--color-text-muted);margin-left:8px;font-weight:400;font-size:12px;">{{ g.items.length }} 项</span></div>
+          <div style="font-weight:600;font-size: var(--fs-body-sm);"><FontAwesomeIcon icon="truck" style="color:var(--color-primary-500);margin-right:6px;" />{{ g.supplierName }}<span style="color:var(--color-text-muted);margin-left:8px;font-weight:400;font-size: var(--fs-caption);">{{ g.items.length }} 项</span></div>
           <span :class="['mr-badge', g.pct >= 100 ? 'mr-badge-completed' : g.pct > 0 ? 'mr-badge-pending' : 'mr-badge-overdue']">{{ g.pct }}%</span>
         </div>
         <div v-for="m in g.items" :key="m.name" class="mr-det-mat-card">
@@ -62,7 +62,7 @@ defineEmits<{
   justify-content: center;
   gap: 10px;
   padding: 48px 0;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 500;
   color: var(--color-text-secondary, #64748b);
 }
@@ -97,14 +97,14 @@ defineEmits<{
   box-sizing: border-box;
 }
 .mr-det-mat-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text-muted, #94a3b8);
   line-height: 1.2;
   margin: 0;
 }
 .mr-det-mat-value {
-  font-size: 20px;
+  font-size: var(--fs-heading-3);
   font-weight: 700;
   color: var(--color-text, #1e293b);
   line-height: 1.2;
@@ -127,7 +127,7 @@ defineEmits<{
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-success-600, #059669);
   background: var(--color-success-50, #f0fdf4);
@@ -141,7 +141,7 @@ defineEmits<{
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-warning-600, #d97706);
   background: var(--color-warning-50, #fffbeb);
@@ -164,6 +164,6 @@ defineEmits<{
   .mr-det-mat-info { max-width: 100%; flex: 1 1 100%; }
   .mr-det-mat-metrics { flex: 1 1 100%; justify-content: flex-start; gap: 6px; }
   .mr-det-mat-metric { min-width: 65px; padding: 8px 12px; }
-  .mr-det-mat-value { font-size: 16px; }
+  .mr-det-mat-value { font-size: var(--fs-body); }
 }
 </style>

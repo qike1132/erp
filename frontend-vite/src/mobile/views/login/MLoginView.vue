@@ -186,7 +186,7 @@ function togglePasswordVisibility() {
 
 .m-login-tagline {
   margin: 14px 0 0;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--m-text-secondary);
 }
 

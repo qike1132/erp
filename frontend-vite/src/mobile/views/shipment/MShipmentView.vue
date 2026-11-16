@@ -247,11 +247,11 @@ onMounted(() => { loadData() })
   display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px;
 }
 .m-month-text {
-  font-size: 16px; font-weight: 800; color: var(--m-text-primary); min-width: 120px; text-align: center; user-select: none;
+  font-size: var(--fs-body); font-weight: 800; color: var(--m-text-primary); min-width: 120px; text-align: center; user-select: none;
 }
 .m-date-btn {
   width: 32px; height: 32px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; background: var(--m-bg-surface);
-  font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: inherit;
+  font-size: var(--fs-body); cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: inherit;
   color: var(--m-text-primary);
 }
 .m-date-btn:active { background: var(--m-border-light); }
@@ -294,7 +294,7 @@ onMounted(() => { loadData() })
   display: flex; flex-direction: column; align-items: center; gap: 2px;
 }
 .m-summary-label { font-size: 11px; color: var(--m-text-tertiary); }
-.m-summary-val { font-size: 20px; font-weight: 800; color: var(--m-text-primary); font-variant-numeric: tabular-nums; }
+.m-summary-val { font-size: var(--fs-heading-3); font-weight: 800; color: var(--m-text-primary); font-variant-numeric: tabular-nums; }
 .m-summary-done { color: var(--m-accent-emerald); }
 .m-summary-remain { color: var(--m-accent-amber); }
 .m-summary-progress { display: flex; align-items: center; gap: 8px; }
@@ -304,7 +304,7 @@ onMounted(() => { loadData() })
   background: linear-gradient(90deg, var(--m-accent-emerald), #34d399);
   transition: width 0.4s ease;
 }
-.m-summary-pct { font-size: 12px; font-weight: 700; color: var(--m-text-secondary); min-width: 36px; text-align: right; }
+.m-summary-pct { font-size: var(--fs-caption); font-weight: 700; color: var(--m-text-secondary); min-width: 36px; text-align: right; }
 
 /* 计划列表项 */
 .m-item-dot {

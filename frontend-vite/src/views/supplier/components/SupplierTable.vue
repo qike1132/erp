@@ -114,7 +114,7 @@ function onPageChange(event: { page: number }) {
   display: inline-block;
   padding: 4px 12px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   user-select: none;
@@ -158,7 +158,7 @@ function onPageChange(event: { page: number }) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   cursor: pointer;
   padding: 0;

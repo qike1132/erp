@@ -37,7 +37,7 @@ defineEmits<{ search: [] }>()
 .pc-filter-input-icon {
   position: absolute;
   left: 11px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
   pointer-events: none;
   transition: color 0.15s ease;
@@ -49,7 +49,7 @@ defineEmits<{ search: [] }>()
   padding: 0 12px 0 30px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-family: inherit;
   color: var(--color-text);
   background: #fff;

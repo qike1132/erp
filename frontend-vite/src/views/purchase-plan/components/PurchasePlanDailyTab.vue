@@ -205,7 +205,7 @@ function selectDate(date: string): void {
 .sp-inline-legend {
   display: flex;
   gap: 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text-muted, #8c96ad);
 }
@@ -228,7 +228,7 @@ function selectDate(date: string): void {
 
 .sp-search-hint {
   padding: 0 18px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-primary-600);
 }
 
@@ -241,7 +241,7 @@ function selectDate(date: string): void {
   background: transparent;
   padding: 0;
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-primary-600);
   cursor: pointer;

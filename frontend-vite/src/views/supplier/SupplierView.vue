@@ -128,7 +128,7 @@ const {
   border: 2px solid var(--color-border-light);
   border-radius: 9px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;

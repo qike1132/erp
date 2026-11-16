@@ -2,7 +2,7 @@
   <div class="page-card-toolbar">
     <div class="page-toolbar-left">
       <button class="menu-toggle-btn" aria-label="切换侧边栏" @click="sidebarStore.toggle()">
-        <FontAwesomeIcon :icon="!sidebarStore.isCollapsed ? 'angles-left' : 'angles-right'" style="font-size: 20px" aria-hidden="true" />
+        <FontAwesomeIcon :icon="!sidebarStore.isCollapsed ? 'angles-left' : 'angles-right'" style="font-size: var(--fs-heading-3)" aria-hidden="true" />
       </button>
     </div>
     <div class="page-toolbar-right">
@@ -59,7 +59,7 @@ const sidebarStore = useSidebarStore()
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: var(--fs-heading-3);
   transition: transform 0.2s ease, background 0.2s ease;
   box-shadow: 0 2px 8px rgba(176, 224, 230, 0.25);
   will-change: transform;
@@ -99,7 +99,7 @@ const sidebarStore = useSidebarStore()
   align-items: center;
   gap: 6px;
   color: var(--color-text-tertiary);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -128,7 +128,7 @@ const sidebarStore = useSidebarStore()
   justify-content: center;
   color: var(--color-text-inverse);
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   box-shadow: 0 3px 10px color-mix(in srgb, var(--color-ocean) 25%, transparent);
   flex-shrink: 0;
 }
@@ -141,14 +141,14 @@ const sidebarStore = useSidebarStore()
 }
 
 .tb-name {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
   line-height: 1.2;
 }
 
 .tb-role {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-tertiary);
   opacity: 0.85;
   line-height: 1.2;
@@ -164,7 +164,7 @@ const sidebarStore = useSidebarStore()
   background: transparent;
   color: var(--color-danger-700);
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.2s ease, color 0.2s ease;

@@ -188,14 +188,14 @@ function handleImageError(event: Event, row: Product) {
   gap: 8px;
   padding: 0 20px;
   height: 52px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   flex-shrink: 0;
 }
 .pd-col-title i {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 .pd-col-actions {
@@ -210,7 +210,7 @@ function handleImageError(event: Event, row: Product) {
   min-height: 40px;
   height: 40px;
   padding: 0 2.5rem 0 0.75rem;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: 1;
   border-radius: 10px;
 }
@@ -219,7 +219,7 @@ function handleImageError(event: Event, row: Product) {
   min-height: 40px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: 1;
   border-radius: 10px;
 }
@@ -239,14 +239,14 @@ function handleImageError(event: Event, row: Product) {
   overflow: hidden;
   border: 1px solid var(--color-border-light, #e2e8f0);
 }
-.pd-factory { font-size: 14px; font-weight: 500; color: var(--color-text); }
+.pd-factory { font-size: var(--fs-body-sm); font-weight: 500; color: var(--color-text); }
 
 /* ===== 客户列 ===== */
 .pd-customers { display: flex; flex-wrap: wrap; gap: 4px; }
 .pd-customer-tag {
   display: inline-block;
   padding: 1px 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-primary-600);
   background: var(--color-primary-50);
@@ -255,7 +255,7 @@ function handleImageError(event: Event, row: Product) {
   white-space: nowrap;
 }
 .pd-customer-none {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   background: var(--color-surface, #f8fafc);
   border: 1px solid var(--color-border-light, #e2e8f0);
@@ -290,9 +290,9 @@ function handleImageError(event: Event, row: Product) {
   font-size: 36px;
   opacity: 0.5;
 }
-.pd-name { font-size: 14px; font-weight: 500; color: var(--color-text); line-height: 1.5; }
-.pd-barcode { font-size: 12px; color: var(--color-text-secondary); font-family: var(--font-mono); letter-spacing: 0.02em; }
-.pd-price { font-size: 14px; font-weight: 600; color: var(--color-danger-500); }
+.pd-name { font-size: var(--fs-body-sm); font-weight: 500; color: var(--color-text); line-height: 1.5; }
+.pd-barcode { font-size: var(--fs-caption); color: var(--color-text-secondary); font-family: var(--font-mono); letter-spacing: 0.02em; }
+.pd-price { font-size: var(--fs-body-sm); font-weight: 600; color: var(--color-danger-500); }
 
 /* ===== 操作按钮 ===== */
 .pd-actions { display: flex; gap: 4px; justify-content: center; }
@@ -304,7 +304,7 @@ function handleImageError(event: Event, row: Product) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   transition: background 0.2s ease, transform 0.2s ease;
   cursor: pointer;
 }
@@ -318,5 +318,5 @@ function handleImageError(event: Event, row: Product) {
 /* ===== 空状态 & 加载 ===== */
 .pd-empty { padding: 40px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .pd-empty-icon { font-size: 28px; color: var(--color-text-secondary); opacity: 0.5; }
-.pd-empty-text { font-size: 14px; color: var(--color-text-secondary); margin: 0; }
+.pd-empty-text { font-size: var(--fs-body-sm); color: var(--color-text-secondary); margin: 0; }
 </style>

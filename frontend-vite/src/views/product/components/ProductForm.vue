@@ -27,14 +27,14 @@ const emit = defineEmits<{
   gap: 8px;
   padding: 0 20px;
   height: 52px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   flex-shrink: 0;
 }
 .pd-col-title i {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 .pd-col-scroll {

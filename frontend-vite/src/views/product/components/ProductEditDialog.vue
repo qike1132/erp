@@ -248,11 +248,11 @@ defineExpose({ open })
 .edit-span2 { grid-column: 1 / -1; }
 @media (max-width: 800px) { .edit-grid { grid-template-columns: 1fr; } }
 .edit-grid :deep(.pcs-field) { min-height: 44px; padding: 8px 34px 8px 14px; border-radius: 12px; }
-.edit-grid :deep(.pcs-placeholder) { font-size: 16px; }
+.edit-grid :deep(.pcs-placeholder) { font-size: var(--fs-body); }
 .pd-form-group { margin-bottom: 0; }
 .pd-label {
   display: block;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   margin-bottom: 8px;
@@ -266,14 +266,14 @@ defineExpose({ open })
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-text-secondary);
-  font-size: 16px;
+  font-size: var(--fs-body);
   z-index: 10;
   pointer-events: none;
 }
 .pd-input {
   width: 100%;
   padding: 11px 14px 11px 40px;
-  font-size: 16px;
+  font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--color-text);
   background: white;
@@ -326,7 +326,7 @@ defineExpose({ open })
   display: flex !important;
   margin-bottom: 0;
   cursor: pointer;
-  font-size: 14px !important;
+  font-size: var(--fs-body-sm) !important;
   font-weight: 400 !important;
   color: var(--color-text-muted) !important;
   align-items: center;
@@ -335,7 +335,7 @@ defineExpose({ open })
   color: var(--color-text-muted) !important;
 }
 .pd-file-inline {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -361,7 +361,7 @@ defineExpose({ open })
   border: none;
   background: rgba(0,0,0,0.4);
   color: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   cursor: pointer;
   margin-left: 2px;
   transition: background 0.2s ease;
@@ -371,13 +371,13 @@ defineExpose({ open })
 .bom-btn-cancel {
   padding: 11px 22px; background: white; color: var(--color-text);
   border: 2px solid var(--color-border-light, #e2e8f0); border-radius: 11px;
-  font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
+  font-size: var(--fs-body-sm); font-weight: 600; cursor: pointer; transition: background 0.3s ease, transform 0.3s ease;
 }
 .bom-btn-cancel:hover { background: var(--color-surface, #f8fafc); transform: translateY(-1px); }
 .bom-btn-save {
   padding: 11px 22px; background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-600));
   color: white; border: 2px solid var(--color-primary-500); border-radius: 11px;
-  font-size: 14px; font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
+  font-size: var(--fs-body-sm); font-weight: 600; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease;
   display: flex; align-items: center; gap: 6px;
 }
 .bom-btn-save:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.3); }

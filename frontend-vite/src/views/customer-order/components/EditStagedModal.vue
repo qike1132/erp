@@ -115,7 +115,7 @@
             </button>
           </div>
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px">
-            <UiButton variant="outline" style="padding: 4px 12px; font-size: 12px" @click="addPlanSplit">添加一批</UiButton>
+            <UiButton variant="outline" style="padding: 4px 12px; font-size: var(--fs-caption)" @click="addPlanSplit">添加一批</UiButton>
             <small v-if="splitInvalid" style="color: var(--color-danger-600); font-weight: 500">{{ splitInvalid }}</small>
           </div>
         </template>
@@ -240,11 +240,11 @@ const openModel = computed({
 <style scoped>
 .co-form-group { margin-bottom: 14px; }
 .co-label {
-  display: block; font-size: 14px; font-weight: 500; margin-bottom: 4px; color: var(--color-text-secondary);
+  display: block; font-size: var(--fs-body-sm); font-weight: 500; margin-bottom: 4px; color: var(--color-text-secondary);
 }
 .co-textarea {
   width: 100%; border: 1px solid var(--color-border, #cbd5e1); border-radius: 10px;
-  padding: 8px 12px; font-size: 14px; resize: vertical; outline: none;
+  padding: 8px 12px; font-size: var(--fs-body-sm); resize: vertical; outline: none;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease; font-family: inherit;
 }
 .co-textarea:focus-visible { outline: 2px solid var(--color-primary-500); outline-offset: 2px; }
@@ -252,10 +252,10 @@ const openModel = computed({
   border-color: var(--color-primary-400); background: white;
   box-shadow: 0 0 0 3px rgba(0, 148, 191, 0.1);
 }
-.co-textarea::placeholder { color: var(--color-text-muted); font-size: 14px; font-weight: 400; opacity: 1; }
+.co-textarea::placeholder { color: var(--color-text-muted); font-size: var(--fs-body-sm); font-weight: 400; opacity: 1; }
 .form-number-input {
   width: 100%; padding: 8px 12px; border: 1px solid var(--color-border, #cbd5e1);
-  border-radius: 10px; font-size: 14px; color: var(--color-text); font-family: inherit;
+  border-radius: 10px; font-size: var(--fs-body-sm); color: var(--color-text); font-family: inherit;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease; outline: none;
   -moz-appearance: textfield;
 }
@@ -267,14 +267,14 @@ const openModel = computed({
 }
 /* 分批出货计划行（2026-10-06 v2） */
 .es-batch-no {
-  font-size: 12px; font-weight: 600; color: var(--color-primary-600);
+  font-size: var(--fs-caption); font-weight: 600; color: var(--color-primary-600);
   flex-shrink: 0; width: 38px;
 }
 .es-remove-btn {
   width: 28px; height: 28px; border: none; border-radius: 7px;
   background: var(--color-danger-50); color: var(--color-danger-500);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; font-size: 12px; transition: background 0.2s ease;
+  flex-shrink: 0; font-size: var(--fs-caption); transition: background 0.2s ease;
 }
 .es-remove-btn:hover:not(:disabled) { background: var(--color-danger-100); }
 .es-remove-btn:disabled { opacity: 0.35; cursor: not-allowed; }

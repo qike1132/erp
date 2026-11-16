@@ -148,14 +148,14 @@ function removeSplit(idx: number) {
   gap: 8px;
 }
 .plan-label {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text);
   cursor: pointer;
   user-select: none;
 }
 .plan-hint {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 .plan-date-wrap {
@@ -181,7 +181,7 @@ function removeSplit(idx: number) {
   gap: 6px;
 }
 .plan-batch-no {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-primary-700, var(--color-primary-600));
   flex-shrink: 0;
@@ -193,7 +193,7 @@ function removeSplit(idx: number) {
   padding: 0 10px;
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text);
   outline: none;
   background: white;
@@ -231,7 +231,7 @@ function removeSplit(idx: number) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   transition: background 0.2s ease;
 }
 .plan-remove-btn:hover:not(:disabled) {
@@ -254,7 +254,7 @@ function removeSplit(idx: number) {
   color: var(--color-primary-600);
   border-radius: 8px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
@@ -266,7 +266,7 @@ function removeSplit(idx: number) {
   background: var(--color-primary-50);
 }
 .plan-total {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-success-700, var(--color-text-secondary));
   font-weight: 500;
 }

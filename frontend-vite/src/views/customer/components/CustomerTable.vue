@@ -139,7 +139,7 @@ function onPageChange(event: { page: number }) {
   color: var(--color-text);
 }
 .cu-customer-code {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 .cu-text-body {
@@ -152,7 +152,7 @@ function onPageChange(event: { page: number }) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 .cu-status-on {
@@ -215,7 +215,7 @@ function onPageChange(event: { page: number }) {
   border: 2px solid var(--color-border-light);
   border-radius: 4px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;
@@ -236,7 +236,7 @@ function onPageChange(event: { page: number }) {
   gap: 10px;
   padding: 40px 20px;
   color: var(--color-text-muted, #94a3b8);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .cu-empty i {
   font-size: 28px;

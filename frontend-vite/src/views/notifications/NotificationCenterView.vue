@@ -155,13 +155,13 @@ const {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-primary-700);
 }
 
 .nc-batch-info i {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 
@@ -206,14 +206,14 @@ const {
 }
 
 .nc-state-text {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-heading);
   margin: 0;
 }
 
 .nc-state-hint {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-muted);
   margin: 0;
 }
@@ -235,7 +235,7 @@ const {
 }
 
 .nc-select-count {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
   font-weight: 500;
 }
@@ -258,7 +258,7 @@ const {
 }
 
 .nc-checkbox-text {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   user-select: none;
@@ -281,7 +281,7 @@ const {
   gap: 6px;
   padding: 8px 16px;
   border-radius: var(--radius-button);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   font-family: var(--font-sans);
   cursor: pointer;
@@ -294,7 +294,7 @@ const {
   background: var(--gradient-primary);
   color: #fff;
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   border-radius: 10px;
   border: none;
@@ -312,7 +312,7 @@ const {
   background: transparent;
   color: var(--color-text-secondary);
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   border-radius: 10px;
   border: 1px solid var(--color-border);

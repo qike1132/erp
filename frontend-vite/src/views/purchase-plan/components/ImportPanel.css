@@ -36,20 +36,20 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 400;
   color: var(--color-text-muted);
   font-family: inherit;
 }
 .csd-upload-label i {
   color: var(--color-text-muted);
-  font-size: 16px;
+  font-size: var(--fs-body);
 }
 .csd-file-selected {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-success-600);
 }
@@ -62,7 +62,7 @@
   padding: 4px 10px;
   border: 1px solid var(--color-border-light, #e2e8f0);
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
@@ -106,7 +106,7 @@
   margin-top: 8px;
   padding: 8px 12px;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 500;
   display: flex;
   align-items: center;
@@ -135,7 +135,7 @@
 .csd-stat {
   padding: 4px 10px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   background: var(--color-surface);
   border: 1px solid var(--color-border-light, #e2e8f0);
@@ -174,7 +174,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-danger-600);
 }
@@ -186,7 +186,7 @@
   display: flex;
   gap: 10px;
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1.6;
   color: var(--color-text-secondary);
   border-bottom: 1px solid var(--color-border-light, #e2e8f0);
@@ -207,7 +207,7 @@
 }
 .csd-error-more {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
   background: var(--color-surface);
 }

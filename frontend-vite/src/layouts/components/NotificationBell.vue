@@ -55,7 +55,7 @@ onUnmounted(() => {
   border-radius: 10px;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 16px;
+  font-size: var(--fs-body);
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease;
 }
@@ -75,7 +75,7 @@ onUnmounted(() => {
   border-radius: 999px;
   background: linear-gradient(135deg, var(--color-danger-400), var(--color-danger-600));
   color: #fff;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   display: inline-flex;
   align-items: center;

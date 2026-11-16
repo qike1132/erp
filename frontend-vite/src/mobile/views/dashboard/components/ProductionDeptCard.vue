@@ -94,7 +94,7 @@ defineProps<{
   padding: 16px 16px 14px;
 }
 .ios-prod-label { font-size: 13px; color: #86868b; }
-.ios-prod-value { font-size: 24px; font-weight: 800; color: #0071e3; letter-spacing: -0.5px; }
+.ios-prod-value { font-size: var(--fs-heading-2); font-weight: 800; color: #0071e3; letter-spacing: -0.5px; }
 .ios-hairline-full {
   height: 0.5px;
   background: rgba(60, 60, 67, 0.29);
@@ -122,10 +122,10 @@ defineProps<{
 .ios-rank-other { background: #f2f2f7; color: #86868b; }
 .ios-dept-info { flex: 1; min-width: 0; }
 .ios-dept-name { font-size: 15px; font-weight: 600; color: #1d1d1f; }
-.ios-dept-sub { font-size: 12px; color: #aeaeb2; margin-top: 1px; }
+.ios-dept-sub { font-size: var(--fs-caption); color: #aeaeb2; margin-top: 1px; }
 .ios-dept-stats { text-align: right; }
-.ios-dept-output { font-size: 16px; font-weight: 700; color: #1d1d1f; letter-spacing: -0.2px; }
-.ios-dept-amount { font-size: 12px; font-weight: 500; color: #0071e3; margin-top: 1px; }
+.ios-dept-output { font-size: var(--fs-body); font-weight: 700; color: #1d1d1f; letter-spacing: -0.2px; }
+.ios-dept-amount { font-size: var(--fs-caption); font-weight: 500; color: #0071e3; margin-top: 1px; }
 .ios-hairline-inset {
   position: absolute;
   left: 54px;

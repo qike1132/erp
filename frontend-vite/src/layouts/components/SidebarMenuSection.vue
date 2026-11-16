@@ -58,7 +58,7 @@ const emit = defineEmits<{ 'toggle': [] }>()
   background: white;
   color: var(--color-text-secondary);
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   letter-spacing: 0;
   cursor: pointer;
   transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
@@ -105,7 +105,7 @@ const emit = defineEmits<{ 'toggle': [] }>()
   text-decoration: none;
   color: var(--color-heading);
   font-weight: 800;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   position: relative;
   background: white;
   border: 1px solid var(--color-border-light);
@@ -130,7 +130,7 @@ const emit = defineEmits<{ 'toggle': [] }>()
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
   background: var(--color-surface);
   flex-shrink: 0;

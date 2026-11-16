@@ -69,7 +69,7 @@ const emit = defineEmits<{
   position: absolute;
   left: 8px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   z-index: 2;
   pointer-events: none;
 }
@@ -80,7 +80,7 @@ const emit = defineEmits<{
   padding: 0 26px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text);
   outline: none;
   background: #fff;
@@ -158,7 +158,7 @@ const emit = defineEmits<{
 }
 
 .mc-dropdown-item-name {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text);
   white-space: nowrap;
@@ -167,7 +167,7 @@ const emit = defineEmits<{
 }
 
 .mc-dropdown-item-meta {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 
@@ -175,7 +175,7 @@ const emit = defineEmits<{
   flex-shrink: 0;
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   border: 1px solid;
 }

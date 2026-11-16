@@ -25,7 +25,7 @@
 }
 
 .coq-pill-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--coq-text-muted);
 }
@@ -38,7 +38,7 @@
   border-radius: 999px;
   background: var(--color-primary-50, #eff5ff);
   color: var(--coq-navy);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 
@@ -47,7 +47,7 @@
   background: transparent;
   color: var(--coq-navy);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: 1;
   padding: 0 2px;
   font-family: inherit;
@@ -61,7 +61,7 @@
   border: none;
   background: transparent;
   color: var(--coq-text-muted);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   cursor: pointer;
   text-decoration: underline;
@@ -81,7 +81,7 @@
   padding: 0 14px;
   border: 1px solid var(--coq-border);
   border-radius: 9px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   font-family: inherit;
   color: var(--coq-text-secondary);
@@ -131,7 +131,7 @@
      否则「产品名称」会独占剩余宽度，右侧两列被挤在一起 */
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -146,7 +146,7 @@
   background: var(--coq-bg-soft);
   font-weight: 600;
   color: var(--coq-text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   letter-spacing: 0.05em;
   border-bottom: 2px solid var(--coq-border);
   white-space: nowrap;
@@ -228,7 +228,7 @@
 
 .coq-td-muted {
   color: var(--coq-text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   white-space: nowrap;
 }
 
@@ -245,7 +245,7 @@
   border: 1px solid var(--coq-border);
   border-radius: 6px;
   background: #fff;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   color: var(--coq-text-secondary);
   cursor: pointer;
@@ -299,7 +299,7 @@
 
 .coq-empty-text {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--coq-text-secondary);
 }

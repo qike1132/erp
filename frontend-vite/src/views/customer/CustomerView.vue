@@ -106,7 +106,7 @@ const {
   padding: 8px 14px;
   border: none;
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;

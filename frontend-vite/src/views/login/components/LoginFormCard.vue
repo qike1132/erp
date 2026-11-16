@@ -111,20 +111,20 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
 .login-card-header { margin-bottom: 40px; }
 
 .login-heading {
-  font-size: 32px;
+  font-size: var(--fs-display);
   font-weight: 700;
   color: var(--color-text);
   margin-bottom: 10px;
 }
 
 .login-subheading {
-  font-size: 16px;
+  font-size: var(--fs-body);
   color: var(--color-text-secondary);
 }
 
 .form-label {
   display: block;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 500;
   color: var(--color-text);
   margin-bottom: 8px;
@@ -140,7 +140,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
 .btn-login {
   width: 100%;
   height: 48px;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 600;
   border-radius: var(--radius-md);
   background: var(--color-ocean-deep);
@@ -170,12 +170,12 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
 }
 
 .footer-text {
-  font-size: 16px;
+  font-size: var(--fs-body);
   color: var(--color-text-muted);
 }
 
 .footer-version {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-muted);
   margin-top: 5px;
 }
@@ -192,7 +192,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
   position: absolute;
   left: 12px;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   pointer-events: none;
 }
 
@@ -204,7 +204,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
   color: var(--color-text-muted);
   cursor: pointer;
   padding: 4px 8px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 
 .input-suffix-btn:hover {
@@ -216,7 +216,7 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
   padding: 12px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 16px;
+  font-size: var(--fs-body);
   color: var(--color-text);
   background: var(--color-surface-card);
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -244,13 +244,13 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
 }
 
 .login-error-msg {
   color: var(--color-danger-600);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   margin-bottom: 8px;
   padding: 8px 12px;
   background: var(--color-danger-50);
@@ -270,6 +270,6 @@ const showPassword = defineModel<boolean>('showPassword', { default: false }) //
 
 @media (max-width: 480px) {
   .login-card { padding: 32px 24px; border-radius: var(--radius-xl); }
-  .login-heading { font-size: 20px; }
+  .login-heading { font-size: var(--fs-heading-3); }
 }
 </style>

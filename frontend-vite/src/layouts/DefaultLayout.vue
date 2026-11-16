@@ -77,7 +77,7 @@ onUnmounted(() => {
   border-radius: 8px;
   background: var(--color-primary-700, #2d5ab8);
   color: #fff;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   text-decoration: none;
   transform: translateY(-200%);

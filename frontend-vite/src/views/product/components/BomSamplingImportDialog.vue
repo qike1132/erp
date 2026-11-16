@@ -238,7 +238,7 @@ function omittedFieldValues(part: PartDetail): string {
 .sampling-search-line { display: flex; gap: 10px; }
 .sampling-input { flex: 1; min-width: 0; padding: 11px 14px; border: 1px solid #8592a3; border-radius: 10px; font-size: 15px; color: var(--color-text); background: #fff; }
 .sampling-input:focus { outline: 2px solid var(--color-primary-400); outline-offset: 1px; }
-.sampling-side-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 14px; color: var(--color-text-secondary); font-size: 14px; }
+.sampling-side-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 14px; color: var(--color-text-secondary); font-size: var(--fs-body-sm); }
 .sampling-chips { display: flex; gap: 8px; flex: none; }
 .sampling-chip { padding: 5px 14px; border: 1px solid var(--color-border-light); border-radius: 999px; background: #fff; color: var(--color-text-secondary); font-size: 13.5px; cursor: pointer; white-space: nowrap; }
 .sampling-chip.on { border-color: var(--color-primary-700); background: var(--color-primary-50); color: var(--color-primary-700); font-weight: 600; }
@@ -266,12 +266,12 @@ function omittedFieldValues(part: PartDetail): string {
 .sampling-preview-heading h3 { margin: 0; color: var(--color-text); font-size: 17px; }
 .sampling-preview-heading span { color: var(--color-text-secondary); font-size: 13.5px; }
 .sampling-preview-empty { flex: 1; }
-.sampling-preview-empty strong { font-size: 16px; color: var(--color-text); }
-.sampling-preview-empty span { font-size: 14px; }
+.sampling-preview-empty strong { font-size: var(--fs-body); color: var(--color-text); }
+.sampling-preview-empty span { font-size: var(--fs-body-sm); }
 .sampling-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 20px; border: 1px solid var(--color-border-light); border-radius: 10px; font-size: 15px; background: #fff; color: var(--color-text); cursor: pointer; white-space: nowrap; }
 .sampling-btn:disabled { opacity: .5; cursor: not-allowed; }
 .sampling-btn-primary { border-color: var(--color-primary-700); background: var(--color-primary-700); color: #fff; }
-.sampling-alert { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; border-radius: 8px; font-size: 14px; line-height: 1.5; }
+.sampling-alert { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; border-radius: 8px; font-size: var(--fs-body-sm); line-height: 1.5; }
 .sampling-alert-error { background: var(--color-danger-50); color: var(--color-danger-700); }
 .sampling-alert-warning { margin-bottom: 10px; background: var(--color-warning-50); color: var(--color-warning-700); }
 .sampling-table-wrap { overflow: auto; }
@@ -291,8 +291,8 @@ function omittedFieldValues(part: PartDetail): string {
 .sampling-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 120px; padding: 22px; color: var(--color-text-secondary); text-align: center; }
 .sampling-empty > .svg-inline--fa { font-size: 34px; color: #9fb0c8; }
 .sampling-side-state { flex: 1; }
-.sampling-mapping-note { margin: 8px 0 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
-.sampling-selected-count { margin-right: auto; color: var(--color-text-secondary); font-size: 14px; }
+.sampling-mapping-note { margin: 8px 0 0; color: var(--color-text-secondary); font-size: var(--fs-caption); line-height: 1.6; }
+.sampling-selected-count { margin-right: auto; color: var(--color-text-secondary); font-size: var(--fs-body-sm); }
 .font-semibold { font-weight: 600; }
 
 /* 中等屏：左侧等比收窄，避免挤压右侧预览 */

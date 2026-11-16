@@ -35,7 +35,7 @@ const form = defineModel<FormState>('form', { required: true })
   border: none;
   border-radius: 9px;
   background: transparent;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease;

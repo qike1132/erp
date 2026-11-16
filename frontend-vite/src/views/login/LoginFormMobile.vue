@@ -113,14 +113,14 @@ function togglePasswordVisibility() {
 }
 
 .m-login-title {
-  font-size: 24px;
+  font-size: var(--fs-heading-2);
   font-weight: 700;
   color: #1C1C1E;
   letter-spacing: -0.3px;
 }
 
 .m-login-sub {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: #8E8E93;
   margin-top: 4px;
   font-weight: 500;
@@ -139,7 +139,7 @@ function togglePasswordVisibility() {
 
 .m-login-field label {
   display: block;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: #1C1C1E;
   margin-bottom: 8px;
@@ -151,7 +151,7 @@ function togglePasswordVisibility() {
   padding: 0 16px;
   border: 1px solid #E5E5EA;
   border-radius: 12px;
-  font-size: 16px;
+  font-size: var(--fs-body);
   color: #1C1C1E;
   background: #F9F9FB;
   outline: none;
@@ -193,7 +193,7 @@ function togglePasswordVisibility() {
 
 .m-login-error-msg {
   color: #FF3B30;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   margin-top: 0;
   margin-bottom: 4px;
   display: none;
@@ -216,7 +216,7 @@ function togglePasswordVisibility() {
   border-radius: 14px;
   background: var(--m-accent, #0071E3);
   color: white;
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.3s var(--m-ease-spring, cubic-bezier(0.175, 0.885, 0.32, 1.275)),
@@ -256,7 +256,7 @@ function togglePasswordVisibility() {
   align-items: flex-end;
   justify-content: center;
   padding-bottom: 24px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: #999999;
   flex-shrink: 0;
 }

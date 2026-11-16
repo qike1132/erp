@@ -45,7 +45,7 @@ defineProps<{
 }
 
 .m-empty-subtitle {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--m-text-secondary);
   margin-top: 4px;
   max-width: 280px;

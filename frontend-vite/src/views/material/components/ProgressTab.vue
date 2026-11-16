@@ -107,16 +107,16 @@ function onPageSize(rows: number) {
   background: #fafbfe;
   flex-wrap: wrap;
 }
-.mr-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary, #475569); }
+.mr-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--color-text-secondary, #475569); }
 .mr-legend .sw { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-.mr-legend .lg-note { font-size: 12px; color: var(--color-text-muted, #64748b); margin-left: auto; }
+.mr-legend .lg-note { font-size: var(--fs-caption); color: var(--color-text-muted, #64748b); margin-left: auto; }
 
 /* === Loading === */
 .mr-loading {
   padding: 40px 20px;
   text-align: center;
   color: var(--color-text-muted, #64748b);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 
 /* === Empty State === */
@@ -124,7 +124,7 @@ function onPageSize(rows: number) {
   text-align: center;
   padding: 40px 20px;
   color: var(--color-text-muted, #64748b);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   display: flex;
   flex-direction: column;
   align-items: center;

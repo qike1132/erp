@@ -51,7 +51,7 @@ const defaultColor = computed(() => {
 .m-progress-label {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--m-text-secondary);
   margin-bottom: 4px;
 }

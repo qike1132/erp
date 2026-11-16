@@ -37,7 +37,7 @@ const emit = defineEmits<{
   padding: 8px 12px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   font-family: inherit;
@@ -56,7 +56,7 @@ const emit = defineEmits<{
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 9px;
   background: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s ease, border-color 0.3s ease, transform 0.3s ease;

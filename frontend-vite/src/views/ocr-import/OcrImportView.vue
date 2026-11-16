@@ -7,7 +7,7 @@
         <div class="upload-dragger-content" :class="{ 'is-disabled': uploading }">
           <FontAwesomeIcon icon="cloud-upload-alt" style="font-size: 48px; color: var(--color-text-muted)" aria-hidden="true" />
           <p style="margin-top: 12px">{{ uploading ? '识别中，请稍候…' : '拖拽文件到这里，或点击上传' }}</p>
-          <p style="color: var(--color-text-muted); font-size: 12px">支持 PDF/PNG/JPG/BMP/TIFF/WEBP</p>
+          <p style="color: var(--color-text-muted); font-size: var(--fs-caption)">支持 PDF/PNG/JPG/BMP/TIFF/WEBP</p>
         </div>
       </UiUpload>
     </UiCard>

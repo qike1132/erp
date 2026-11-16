@@ -118,14 +118,14 @@ async function handleAdd() {
   align-items: center;
   gap: 8px;
   padding: 12px 20px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   flex-shrink: 0;
 }
 .us-col-title i {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 .us-col-scroll {
@@ -150,7 +150,7 @@ async function handleAdd() {
   gap: 8px;
 }
 .us-checkbox-label {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text);
   cursor: pointer;
@@ -158,7 +158,7 @@ async function handleAdd() {
 }
 .us-form-group label {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -173,7 +173,7 @@ async function handleAdd() {
   padding: 8px 12px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
   font-family: inherit;
@@ -206,7 +206,7 @@ async function handleAdd() {
 }
 .us-form-error {
   color: var(--color-danger-500);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   margin-bottom: 8px;
 }
 .us-submit-btn {
@@ -216,7 +216,7 @@ async function handleAdd() {
   border-radius: 9px;
   background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
   color: white;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.3s ease, box-shadow 0.3s ease;

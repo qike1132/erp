@@ -140,7 +140,7 @@ function fmt(n: number): string {
   border-radius: 16px;
   background: white;
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--color-text-secondary);
   cursor: pointer;

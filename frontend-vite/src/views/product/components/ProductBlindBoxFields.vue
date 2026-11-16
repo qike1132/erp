@@ -89,7 +89,7 @@ watch(() => model.value.isBlindBox, (on) => {
 .bb-group--compact { margin-bottom: 0; }
 .bb-check {
   display: flex; align-items: center; gap: 8px;
-  font-size: 14px; color: var(--color-text-primary, #111827);
+  font-size: var(--fs-body-sm); color: var(--color-text-primary, #111827);
   cursor: pointer; user-select: none;
 }
 .bb-checkbox {
@@ -105,7 +105,7 @@ watch(() => model.value.isBlindBox, (on) => {
 .bb-input-wrap { position: relative; }
 .bb-input-icon {
   position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-  color: var(--color-text-muted, #9ca3af); font-size: 14px;
+  color: var(--color-text-muted, #9ca3af); font-size: var(--fs-body-sm);
 }
 /* 边框用 #8592a3（3.16:1，满足非文本对比度）；不用 --color-border-light
    （#e2e8f0 仅 1.2:1，会跌破 WCAG 输入框边界要求） */
@@ -115,7 +115,7 @@ watch(() => model.value.isBlindBox, (on) => {
   color: var(--color-text);
   background: white;
   border: 2px solid #8592a3; border-radius: 10px;
-  font-size: 14px; font-family: inherit; line-height: 1.5;
+  font-size: var(--fs-body-sm); font-family: inherit; line-height: 1.5;
   outline: none;
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
@@ -125,11 +125,11 @@ watch(() => model.value.isBlindBox, (on) => {
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
 }
 /* 编辑弹窗的 .pd-input 是 16px / 11px 14px / radius 12，紧凑模式跟随，避免同排不同高 */
-.bb-group--compact .bb-input { padding: 11px 14px 11px 40px; font-size: 16px; border-radius: 12px; }
+.bb-group--compact .bb-input { padding: 11px 14px 11px 40px; font-size: var(--fs-body); border-radius: 12px; }
 .bb-group--compact .bb-input-icon { left: 14px; }
 .bb-input:disabled { background: #f3f4f6; cursor: not-allowed; color: #6b7280; }
 .bb-hint {
   display: block; margin-top: 6px;
-  color: var(--color-text-secondary); font-size: 12px; line-height: 1.5;
+  color: var(--color-text-secondary); font-size: var(--fs-caption); line-height: 1.5;
 }
 </style>

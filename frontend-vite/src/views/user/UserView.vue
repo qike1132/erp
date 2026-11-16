@@ -128,13 +128,13 @@ const {
   gap: 12px;
 }
 .us-card-title-group h3 {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-text);
   margin: 0;
 }
 .us-card-title-group small {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   display: block;
   margin-top: 2px;
@@ -148,7 +148,7 @@ const {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: var(--fs-heading-3);
   flex-shrink: 0;
 }
 .us-icon-blue {
@@ -183,7 +183,7 @@ const {
   border-radius: 20px;
   background: linear-gradient(135deg, var(--color-primary-500), var(--color-primary-700));
   color: white;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 </style>

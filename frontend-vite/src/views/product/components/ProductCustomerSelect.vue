@@ -206,16 +206,16 @@ onBeforeUnmount(() => {
   border-color: var(--color-primary-400);
   box-shadow: 0 0 0 4px rgba(0, 148, 191, 0.1);
 }
-.pcs-placeholder { font-size: 14px; color: var(--color-text-muted, #94a3b8); }
+.pcs-placeholder { font-size: var(--fs-body-sm); color: var(--color-text-muted, #94a3b8); }
 .pcs-caret {
   position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-  color: var(--color-text-secondary); font-size: 12px; pointer-events: none;
+  color: var(--color-text-secondary); font-size: var(--fs-caption); pointer-events: none;
 }
 
 .pcs-chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 6px 2px 10px;
-  font-size: 12px; font-weight: 600;
+  font-size: var(--fs-caption); font-weight: 600;
   color: var(--color-primary-600);
   background: var(--color-primary-50);
   border: 1px solid var(--color-primary-100);
@@ -223,7 +223,7 @@ onBeforeUnmount(() => {
 }
 .pcs-chip-x {
   border: none; background: transparent; cursor: pointer;
-  color: var(--color-primary-600); opacity: 0.65; font-size: 14px; line-height: 1;
+  color: var(--color-primary-600); opacity: 0.65; font-size: var(--fs-body-sm); line-height: 1;
   padding: 0 2px;
 }
 .pcs-chip-x:hover { opacity: 1; }
@@ -251,14 +251,14 @@ onBeforeUnmount(() => {
 .pcs-search {
   flex: none;
   width: 100%; border: none; outline: none;
-  padding: 9px 12px; font-size: 14px;
+  padding: 9px 12px; font-size: var(--fs-body-sm);
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
   font-family: inherit;
 }
 .pcs-list { flex: 1; min-height: 0; overflow-y: auto; }
 .pcs-option {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 8px 12px; font-size: 14px; text-align: left;
+  padding: 8px 12px; font-size: var(--fs-body-sm); text-align: left;
   background: transparent; border: none; cursor: pointer;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border-light, #f1f5f9);
@@ -269,12 +269,12 @@ onBeforeUnmount(() => {
 .pcs-check {
   width: 15px; height: 15px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 12px; color: var(--color-primary-600);
+  font-size: var(--fs-caption); color: var(--color-primary-600);
 }
-.pcs-empty { margin: 0; padding: 10px 12px; font-size: 12px; color: var(--color-text-muted, #94a3b8); }
+.pcs-empty { margin: 0; padding: 10px 12px; font-size: var(--fs-caption); color: var(--color-text-muted, #94a3b8); }
 .pcs-hint {
   flex: none;
-  margin: 0; padding: 6px 12px; font-size: 12px;
+  margin: 0; padding: 6px 12px; font-size: var(--fs-caption);
   color: var(--color-text-muted, #94a3b8);
   background: var(--color-surface, #f8fafc);
 }

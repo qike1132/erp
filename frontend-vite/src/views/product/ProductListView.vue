@@ -178,7 +178,7 @@ function openImageModal(src: string) {
 }
 
 /* ===== 图片模态框（外壳由 UiDialog 提供，此处仅保留图片区视觉） ===== */
-.pd-modal-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
+.pd-modal-title { font-size: var(--fs-body-sm); font-weight: 700; color: var(--color-text); }
 .pd-modal-body {
   padding: 20px; background: var(--color-surface, #f8fafc);
   display: flex; align-items: center; justify-content: center; min-height: 50vh;

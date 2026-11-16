@@ -35,7 +35,7 @@ defineProps<{
   padding: 8px 14px;
   border: none;
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;
@@ -67,7 +67,7 @@ defineProps<{
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   background: var(--color-border-light);
   color: var(--color-text-secondary);

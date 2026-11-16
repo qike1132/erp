@@ -42,7 +42,7 @@ defineProps<{
   text-decoration: none;
   color: var(--color-heading);
   font-weight: 800;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   position: relative;
   background: white;
   border: 1px solid var(--color-border-light);
@@ -63,7 +63,7 @@ defineProps<{
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
   background: var(--color-surface);
   flex-shrink: 0;

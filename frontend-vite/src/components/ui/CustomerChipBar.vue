@@ -60,7 +60,7 @@ defineEmits<{ select: [name: string] }>()
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
   white-space: nowrap;
@@ -92,7 +92,7 @@ defineEmits<{ select: [name: string] }>()
   border-radius: 999px;
   background: white;
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   line-height: inherit;
   color: var(--color-text-secondary);
@@ -117,7 +117,7 @@ defineEmits<{ select: [name: string] }>()
   justify-content: center;
   flex-shrink: 0;
   padding: 0 4px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 .sk-bar-fade-enter-active { transition: opacity 0.2s ease; }

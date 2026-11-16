@@ -270,7 +270,7 @@ onMounted(() => {
   padding: 8px 14px;
   border: none;
   border-radius: 9px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
   background: transparent;
@@ -300,7 +300,7 @@ onMounted(() => {
   padding: 12px 20px;
   border-radius: 10px;
   color: white;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   /* 与全局 toast 同档：原先硬编码 2000 会被 PrimeVue 抽屉遮罩（2100）压住 */
   z-index: var(--z-toast);
   display: none;

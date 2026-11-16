@@ -51,13 +51,13 @@ const emit = defineEmits<{
   align-items: center;
 }
 .sp-sku-detail-title {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 700;
   color: var(--color-heading);
 }
 
 .sp-sku-detail-sub {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
   margin-top: 2px;
 }
@@ -66,7 +66,7 @@ const emit = defineEmits<{
   text-align: center;
   color: var(--color-text-muted);
   padding: 40px 0;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 
 .sp-sku-detail-list {
@@ -85,7 +85,7 @@ const emit = defineEmits<{
 }
 
 .sp-sku-detail-header-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
 }
@@ -107,13 +107,13 @@ const emit = defineEmits<{
 }
 
 .sp-sku-detail-date {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-heading);
 }
 
 .sp-sku-detail-qty {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 800;
   color: var(--color-primary-700);
   font-variant-numeric: tabular-nums;

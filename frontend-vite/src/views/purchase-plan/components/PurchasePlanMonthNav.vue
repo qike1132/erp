@@ -44,7 +44,7 @@ const emit = defineEmits<{
   border-radius: 9px;
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -60,7 +60,7 @@ const emit = defineEmits<{
 
 .sp-nav-lbl {
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-heading);
   min-width: 96px;
   text-align: center;

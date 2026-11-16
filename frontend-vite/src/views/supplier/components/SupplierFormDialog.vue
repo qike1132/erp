@@ -79,7 +79,7 @@ const disabled = computed(() => !form.value.name?.trim() || props.submitting)
   gap: 6px;
 }
 .sp-form-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -88,14 +88,14 @@ const disabled = computed(() => !form.value.name?.trim() || props.submitting)
 .sp-form-label i {
   margin-right: 4px;
   color: var(--color-primary-500);
-  font-size: 12px;
+  font-size: var(--fs-caption);
 }
 .sp-form-input {
   width: 100%;
   padding: 10px 14px;
   border: 2px solid var(--color-border-light, #e2e8f0);
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   outline: none;
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
   background: white;

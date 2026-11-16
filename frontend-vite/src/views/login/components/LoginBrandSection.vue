@@ -141,7 +141,7 @@
 }
 
 .brand-title {
-  font-size: 32px;
+  font-size: var(--fs-display);
   font-weight: 700;
   color: var(--color-text);
   margin-bottom: 16px;
@@ -149,7 +149,7 @@
 }
 
 .brand-tagline {
-  font-size: 20px;
+  font-size: var(--fs-heading-3);
   color: var(--color-text-secondary);
   line-height: 1.7;
   margin-bottom: 62px;
@@ -193,21 +193,21 @@
 }
 
 .feature-title {
-  font-size: 16px;
+  font-size: var(--fs-body);
   font-weight: 600;
   color: var(--color-text);
   margin-bottom: 4px;
 }
 
 .feature-desc {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-text-secondary);
 }
 
 @media (max-width: 1024px) {
   .brand-section { padding: 48px; }
   .logo-frame { width: 120px; height: 120px; }
-  .brand-title { font-size: 24px; }
+  .brand-title { font-size: var(--fs-heading-2); }
 }
 
 @media (max-width: 768px) {
@@ -221,6 +221,6 @@
 @media (max-width: 480px) {
   .brand-section { padding: 32px 24px; }
   .logo-frame { width: 90px; height: 90px; }
-  .brand-title { font-size: 24px; }
+  .brand-title { font-size: var(--fs-heading-2); }
 }
 </style>

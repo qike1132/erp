@@ -167,17 +167,17 @@ function countOf(n: PermissionItem): string {
   border-bottom: 1px solid var(--color-border-light, #e8ecf1);
 }
 .pd-right-icon {
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   color: var(--color-primary-500);
 }
 .pd-right-head h4 {
   flex: 1;
   margin: 0;
-  font-size: 16px;
+  font-size: var(--fs-body);
   color: var(--color-text);
 }
 .pd-right-cnt {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 .pd-right-cnt b {
@@ -191,7 +191,7 @@ function countOf(n: PermissionItem): string {
 }
 .pd-group {
   margin: 4px 0 8px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 700;
   color: var(--color-text-placeholder, #94a3b8);
 }
@@ -200,7 +200,7 @@ function countOf(n: PermissionItem): string {
   padding: 0;
   border: none;
   background: none;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-primary-600);
   cursor: pointer;
@@ -211,7 +211,7 @@ function countOf(n: PermissionItem): string {
 .pd-empty {
   margin: 24px 0;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-placeholder, #94a3b8);
 }
 
@@ -233,7 +233,7 @@ function countOf(n: PermissionItem): string {
 .pd-tnm {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
   color: var(--color-text-secondary);
 }

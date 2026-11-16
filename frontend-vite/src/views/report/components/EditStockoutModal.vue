@@ -109,5 +109,5 @@ const openModel = computed({
 
 <style scoped lang="scss">
 @use './edit-modals.scss' as *;
-.field-hint-text { margin: 4px 0 0; font-size: 12px; color: var(--color-text-muted); }
+.field-hint-text { margin: 4px 0 0; font-size: var(--fs-caption); color: var(--color-text-muted); }
 </style>

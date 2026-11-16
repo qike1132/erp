@@ -346,7 +346,7 @@ const {
 /* 名称格的「合计 N」副行 / 角色数量格的「（隐藏款）」标记：小字弱化，不抢主数据 */
 .sm-sku-total-sub {
   margin-top: 2px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-muted);
 }
 
@@ -367,13 +367,13 @@ const {
   width: 56px;
   padding: 4px;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   line-height: normal;
   box-sizing: border-box;
 }
 .sm-qty-save {
   padding: 0 6px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   line-height: normal;
   color: var(--color-primary-600);
   border: 1px solid var(--color-primary-500);

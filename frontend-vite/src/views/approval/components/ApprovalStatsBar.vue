@@ -50,17 +50,17 @@ defineProps<{ stats: ApprovalStats | null }>()
   transform: translateY(-1px);
 }
 .ap-stat-icon {
-  font-size: 20px;
+  font-size: var(--fs-heading-3);
   margin-bottom: 4px;
 }
 .ap-stat-value {
-  font-size: 32px;
+  font-size: var(--fs-display);
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .ap-stat-label {
-  font-size: 12px;
+  font-size: var(--fs-caption);
   color: var(--color-text-secondary);
   margin-top: 2px;
 }

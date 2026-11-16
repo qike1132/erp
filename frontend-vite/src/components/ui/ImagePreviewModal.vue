@@ -44,7 +44,7 @@ function onOpenChange(open: boolean) {
   /* UiDialog 默认 rounded-2xl(16px)；此处维持迁移前的 18px 圆角 */
   border-radius: 18px !important;
 }
-.pim-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
+.pim-title { font-size: var(--fs-body-sm); font-weight: 700; color: var(--color-text); }
 .pim-body {
   display: flex; align-items: center; justify-content: center;
   min-height: 50vh; padding: 20px; background: var(--color-surface);

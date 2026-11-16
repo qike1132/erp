@@ -82,9 +82,9 @@ async function onLogout() {
 .m-page { display: flex; flex-direction: column; height: 100%; background: var(--m-bg-deep); }
 .m-page-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--m-gap-md); padding-bottom: calc(var(--m-gap-lg) + var(--m-tabbar-safe)); -webkit-overflow-scrolling: touch; }
 .m-profile-header { display: flex; align-items: center; gap: 16px; padding: calc(var(--m-safe-top) + 8px) 0 24px; }
-.m-profile-avatar { width: 60px; height: 60px; border-radius: 18px; background: var(--m-accent); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: 700; flex-shrink: 0; }
-.m-profile-name { font-size: 20px; font-weight: 700; color: var(--m-text-primary); }
-.m-profile-role { font-size: 14px; color: var(--m-text-secondary); margin-top: 2px; }
+.m-profile-avatar { width: 60px; height: 60px; border-radius: 18px; background: var(--m-accent); display: flex; align-items: center; justify-content: center; color: white; font-size: var(--fs-heading-2); font-weight: 700; flex-shrink: 0; }
+.m-profile-name { font-size: var(--fs-heading-3); font-weight: 700; color: var(--m-text-primary); }
+.m-profile-role { font-size: var(--fs-body-sm); color: var(--m-text-secondary); margin-top: 2px; }
 .m-menu-icon { width: 100%; height: 100%; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
 .m-app-info { text-align: center; padding: 24px 0 8px; font-size: 13px; color: var(--m-text-tertiary); }
 </style>

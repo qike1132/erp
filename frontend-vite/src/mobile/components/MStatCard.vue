@@ -79,7 +79,7 @@ const displayValue = computed(() => {
   display: flex;
   align-items: center;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--m-text-tertiary);
 }

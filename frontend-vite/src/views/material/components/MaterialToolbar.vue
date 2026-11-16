@@ -85,14 +85,14 @@ function fmt(n: number): string {
 }
 .mr-title { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
 .mr-title svg { width: 18px; height: 18px; color: var(--color-primary-600, #3a6bd6); }
-.mr-title h1 { font-size: 16px; font-weight: 700; color: var(--color-text, #1a1a2e); white-space: nowrap; }
+.mr-title h1 { font-size: var(--fs-body); font-weight: 700; color: var(--color-text, #1a1a2e); white-space: nowrap; }
 
 .mr-search { position: relative; flex-shrink: 0; }
 .mr-search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; color: var(--color-text-muted, #64748b); pointer-events: none; }
 .mr-search-input {
   width: 250px;
   padding: 7px 12px 7px 30px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-family: inherit;
   border: 1.5px solid var(--color-border, #e4e7ed);
   border-radius: 9px;
@@ -116,8 +116,8 @@ function fmt(n: number): string {
 .kpi-item + .kpi-item { border-left: 1px solid var(--color-border-light, #f0f2f5); }
 .kpi-top { display: flex; align-items: center; gap: 5px; }
 .kpi-dot { width: 6px; height: 6px; border-radius: 2px; flex-shrink: 0; }
-.kpi-label { font-size: 12px; color: var(--color-text-secondary, #475569); font-weight: 500; white-space: nowrap; }
-.kpi-value { font-size: 16px; font-weight: 700; color: var(--color-text, #1a1a2e); line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kpi-label { font-size: var(--fs-caption); color: var(--color-text-secondary, #475569); font-weight: 500; white-space: nowrap; }
+.kpi-value { font-size: var(--fs-body); font-weight: 700; color: var(--color-text, #1a1a2e); line-height: 1.2; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .kpi-value.kpi-danger { color: #d03b3b; }
 
 .mr-export-btn {
@@ -125,7 +125,7 @@ function fmt(n: number): string {
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
   font-family: inherit;
   color: var(--color-success-600, #1e9e55);
@@ -143,7 +143,7 @@ function fmt(n: number): string {
   .mr-kpi { margin-left: 0; }
   .kpi-item { padding: 0 11px; }
   .kpi-label { font-size: 11px; }
-  .kpi-value { font-size: 14px; }
+  .kpi-value { font-size: var(--fs-body-sm); }
 }
 
 @media (max-width: 760px) {
