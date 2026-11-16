@@ -203,6 +203,22 @@ async def _resolve_customer_name(db: AsyncSession, customer_id: int | None) -> s
 
 # ==================== CRUD ====================
 
+def _customer_filter_conditions(customer_id: int | None, customer_name: str) -> list:
+    """客户筛选条件（审计 #8）。id 与冗余名称取并集，兼容历史行 id 为空的情况。
+
+    抽成独立函数只为让 `_build_record_conditions` 保持在 80 行内（本仓风格）；
+    两种输入都为空时返回空列表，调用方原样 extend 即可。
+    """
+    if customer_id is None and not (customer_name and customer_name.strip()):
+        return []
+    parts: list = []
+    if customer_id is not None:
+        parts.append(DailyProductionRecord.customer_id == customer_id)
+    if customer_name and customer_name.strip():
+        parts.append(DailyProductionRecord.customer_name == customer_name.strip())
+    return [or_(*parts)]
+
+
 def _build_record_conditions(
     *,
     year: int | None,
@@ -213,6 +229,8 @@ def _build_record_conditions(
     created_by: str,
     production_date: str = '',
     keyword: str = '',
+    customer_id: int | None = None,
+    customer_name: str = '',
 ) -> list:
     """构造生产记录查询条件（纯函数，便于单测覆盖组合边界）。
 
@@ -225,6 +243,8 @@ def _build_record_conditions(
         created_by: 录单人；空白视为不限。
         production_date: 指定单日，叠加在日期条件之上。
         keyword: 产品名或 69 码关键词；空白视为不限，LIKE 通配符按字面量转义。
+        customer_id / customer_name: 客户筛选（审计 #8）；都为空表示不限，
+            判定细节见 `_customer_filter_conditions`。
 
     Returns:
         SQLAlchemy 条件列表。
@@ -272,6 +292,11 @@ def _build_record_conditions(
                 DailyProductionRecord.barcode == keyword.strip(),
             )
         )
+
+    # 客户筛选（审计 #8）：前端「最近客户添加」要按客户取近 90 天的记录，原先接口
+    # 没有客户条件，只能拉最新 200 行再在前端筛 —— 该客户近期录入被别人的记录挤掉
+    # 时右侧列表就空（静默漏数据）。
+    conditions.extend(_customer_filter_conditions(customer_id, customer_name))
 
     return conditions
 
@@ -377,6 +402,8 @@ async def get_records(
     per_page: int = 50,
     production_date: str = '',
     keyword: str = '',
+    customer_id: int | None = None,
+    customer_name: str = '',
 ) -> dict:
     """获取生产记录列表（分页 + 统计）。
 
@@ -391,6 +418,7 @@ async def get_records(
         per_page: 每页数量，服务端收敛到 1..200。
         production_date: 指定单日，叠加在日期条件之上。
         keyword: 产品名或 69 码关键词；空白视为不限，LIKE 通配符按字面量转义。
+        customer_id / customer_name: 客户筛选（审计 #8）；都为空表示不限。
 
     Returns:
         {'data', 'total', 'page', 'per_page', 'pages', 'stats'}
@@ -404,6 +432,7 @@ async def get_records(
     conditions = _build_record_conditions(
         year=year, month=month, start_date=start_date, end_date=end_date,
         departments=departments, created_by=created_by, production_date=production_date, keyword=keyword,
+        customer_id=customer_id, customer_name=customer_name,
     )
 
     per_page = max(1, min(per_page, 200))
@@ -747,6 +776,51 @@ async def get_daily_summary(
 
 # ==================== 月度汇总 ====================
 
+async def _monthly_sku_counts(
+    db: AsyncSession, start: date, end: date, dept_keys: list[str],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """整月一次算出两套 SKU 去重口径（2026-11-16 上线前审计 #7）。
+
+    Returns:
+        (per_dept, per_day)：
+        - per_dept：{department: 整月 distinct product_name 数} —— 月度部门行的 SKU 数。
+        - per_day：{'YYYY-MM-DD': 当日跨部门 distinct product_name 数} —— 日合计的 SKU 数，
+          与 get_daily_summary 的 set 口径一致（当日三个部门的并集大小）。
+
+    为什么不能沿用「按日按部门的 distinct 数逐项相加」：那是把「单元格」当「集合」求和。
+    同一产品跨 2 天生产、且分别在 2 个部门生产时，相加得 4，而业务问的是
+    「这个月做了几个 SKU」——答案是 1。去重只能在整月/整日的粒度上做一次。
+    """
+    month_result = await db.execute(
+        select(
+            DailyProductionRecord.department,
+            func.count(func.distinct(DailyProductionRecord.product_name)).label('sku_count'),
+        )
+        .where(and_(
+            DailyProductionRecord.production_date >= start,
+            DailyProductionRecord.production_date <= end,
+            DailyProductionRecord.department.in_(dept_keys),
+        ))
+        .group_by(DailyProductionRecord.department)
+    )
+    per_dept = {row.department: int(row.sku_count) for row in month_result.all()}
+
+    day_result = await db.execute(
+        select(
+            DailyProductionRecord.production_date,
+            func.count(func.distinct(DailyProductionRecord.product_name)).label('sku_count'),
+        )
+        .where(and_(
+            DailyProductionRecord.production_date >= start,
+            DailyProductionRecord.production_date <= end,
+            DailyProductionRecord.department.in_(dept_keys),
+        ))
+        .group_by(DailyProductionRecord.production_date)
+    )
+    per_day = {row.production_date.isoformat(): int(row.sku_count) for row in day_result.all()}
+    return per_dept, per_day
+
+
 async def get_monthly_summary(
     db: AsyncSession,
     year: int,
@@ -794,6 +868,10 @@ async def get_monthly_summary(
     )
     rows = result.all()
 
+    # 月度部门 SKU 数 / 日合计 SKU 数在整月、整日粒度各去重一次（审计 #7），
+    # 不再把「按日按部门」的 distinct 数相加（跨天、跨部门会重复计数）。
+    monthly_dept_sku, daily_total_sku = await _monthly_sku_counts(db, start, end, dept_keys)
+
     # 组织为 daily_data
     daily_map: dict[str, dict] = {}
     for row in rows:
@@ -830,7 +908,7 @@ async def get_monthly_summary(
             'value': _sum_money_to_json([
                 entry['filling']['value'], entry['handcraft']['value'], entry['packaging']['value']
             ]),
-            'sku_count': entry['filling']['sku_count'] + entry['handcraft']['sku_count'] + entry['packaging']['sku_count'],
+            'sku_count': daily_total_sku.get(d_str, 0),
         }
         daily_data.append(entry)
 
@@ -839,7 +917,7 @@ async def get_monthly_summary(
     for dept_key in dept_keys:
         dept_total_qty = sum(d[dept_key]['quantity'] for d in daily_data)
         dept_total_val = _sum_money_to_json([d[dept_key]['value'] for d in daily_data])
-        dept_total_sku = sum(d[dept_key]['sku_count'] for d in daily_data)
+        dept_total_sku = monthly_dept_sku.get(dept_key, 0)
         monthly_depts.append({
             'department': dept_key,
             'department_label': DEPARTMENT_LABELS.get(dept_key, dept_key),

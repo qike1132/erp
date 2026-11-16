@@ -26,6 +26,11 @@
         本次库存数据获取超时，下方「库存 / 缺口」数字不可信（显示为 0 不代表真的没货），请稍后重试。
       </div>
 
+      <!-- 审计 #4：生产进度分配降级时后端返回全 0，0 会被当成「一件都没生产」的真值 -->
+      <div v-if="fifoDegraded" class="pp-degraded pp-fifo-degraded" role="alert">
+        本次生产进度分配失败，下方「已生产 / 待生产」显示为 0 不代表真的没生产，请稍后重试。
+      </div>
+
       <PurchasePlanDailyTab
         v-if="viewTab === 'daily'"
         v-model:sel="sel"
@@ -126,7 +131,7 @@ watch(factory, () => { custFilter.value = ''; });
 const {
   d, isLoading, isFetching, isError, refetch,
   rows: rawRows, skuSummary: rawSkuSummary, skuDateIndex: rawSkuDateIndex, customers: rawCustomers,
-  inventoryDegraded,
+  inventoryDegraded, fifoDegraded,
 } = usePurchasePlanData(y, m, viewTab);
 
 // 工厂维度拆分：一次性拿到整月聚合后本地切换，切换零延迟（见 useFactorySplit）。
@@ -292,7 +297,7 @@ function exportCSV() {
   padding: 8px 16px;
   background: var(--color-warning-50);
   color: var(--color-warning-700);
-  font-size: 12px;
+  font-size: var(--fs-caption);
   font-weight: 600;
 }
 </style>

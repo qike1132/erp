@@ -178,3 +178,103 @@ class TestStatsCteEffectivePrice:
             assert rows_sum == 750  # 7×100 + 5×10，行内展示用的是回退价
             assert result['stats']['total_value'] == rows_sum
         await engine.dispose()
+
+
+class TestCustomerFilter:
+    """审计 #8：`/daily-production/records` 必须支持按客户过滤。
+
+    录入页右侧「最近客户添加」要的是**该客户**近 90 天录入过的 SKU，而接口此前没有
+    客户条件：前端只能拉最新 200 行再自己筛，该客户近期录入被别人的记录挤出 200 行
+    就静默变空（用户以为这个客户从没录过）。
+    """
+
+    def test_customer_id_is_applied(self):
+        conditions = _build_record_conditions(
+            year=2026, month=9, start_date='', end_date='',
+            departments=None, created_by='', customer_id=7,
+        )
+        assert 'customer_id' in _texts(conditions)
+
+    def test_no_customer_input_does_not_narrow(self):
+        # 拦的错：把 customer_id 默认值（None/0）写进条件 → 列表整页变空
+        conditions = _build_record_conditions(
+            year=2026, month=9, start_date='', end_date='',
+            departments=None, created_by='', customer_id=None, customer_name='   ',
+        )
+        assert 'customer' not in _texts(conditions)
+        assert len(conditions) == 2
+
+    def test_blank_customer_name_is_not_applied(self):
+        conditions = _build_record_conditions(
+            year=2026, month=9, start_date='', end_date='',
+            departments=None, created_by='', customer_id=None, customer_name='',
+        )
+        assert len(conditions) == 2
+
+    async def test_only_requested_customer_rows_are_returned(self):
+        """真 SQL：两个客户的记录混在一张表里，按 customer_id 取只能拿到自己的。"""
+        engine = create_async_engine(
+            'sqlite+aiosqlite:///:memory:',
+            poolclass=StaticPool,
+            connect_args={'check_same_thread': False},
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda c: Base.metadata.create_all(
+                c, tables=[DailyProductionRecord.__table__, ProductModel.__table__],
+            ))
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            for rid, (cid, name) in enumerate([(1, '白兔公仔'), (2, '黑猫公仔'), (1, '灰兔公仔')], start=1):
+                db.add(DailyProductionRecord(
+                    id=rid, department='filling', customer_id=cid, customer_name=f'客户{cid}',
+                    product_name=name, barcode='', unit_price=1, quantity=10,
+                    production_date=date(2026, 9, 20),
+                ))
+            await db.flush()
+
+            from fastapi_app.services.daily_production_service import get_records
+            result = await get_records(db, year=2026, month=9, customer_id=1)
+            # 反向对照：不带客户条件时三条都该在，证明「变窄」是客户条件做的，
+            # 而不是那三条数据本来就只有两条（否则断言恒真）
+            unfiltered = await get_records(db, year=2026, month=9)
+
+            names = sorted(r['product_name'] for r in result['data'])
+            assert names == ['灰兔公仔', '白兔公仔']
+            # total 与数据必须同口径（不同源会算出「共 3 条只显示 2 条」）
+            assert result['total'] == 2
+            assert unfiltered['total'] == 3
+        await engine.dispose()
+
+    async def test_customer_name_also_matches_legacy_rows_without_id(self):
+        """历史行的 customer_id 可能为空、只有冗余名称；只按 id 筛会把这些记录丢掉。"""
+        engine = create_async_engine(
+            'sqlite+aiosqlite:///:memory:',
+            poolclass=StaticPool,
+            connect_args={'check_same_thread': False},
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda c: Base.metadata.create_all(
+                c, tables=[DailyProductionRecord.__table__, ProductModel.__table__],
+            ))
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            db.add(DailyProductionRecord(
+                id=1, department='filling', customer_id=None, customer_name='客户1',
+                product_name='旧数据公仔', barcode='', unit_price=1, quantity=5,
+                production_date=date(2026, 9, 21),
+            ))
+            db.add(DailyProductionRecord(
+                id=2, department='filling', customer_id=2, customer_name='客户2',
+                product_name='别人的公仔', barcode='', unit_price=1, quantity=5,
+                production_date=date(2026, 9, 21),
+            ))
+            await db.flush()
+
+            from fastapi_app.services.daily_production_service import get_records
+            result = await get_records(
+                db, year=2026, month=9, customer_id=1, customer_name='客户1',
+            )
+
+            assert [r['product_name'] for r in result['data']] == ['旧数据公仔']
+        await engine.dispose()
+

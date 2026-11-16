@@ -38,6 +38,9 @@ export function usePurchasePlanData(y: Ref<number>, m: Ref<number>, _viewTab: Re
   const customers = computed<CustSumItem[]>(() => (d.value?.customers ?? []) as unknown as CustSumItem[]);
   // Z02-R6：后端库存映射降级（查询超时/失败）时值是空映射，页面会把「没货」显示成 0
   const inventoryDegraded = computed(() => d.value?.inventory_degraded === true);
+  // 审计 #4：FIFO 生产量分配降级时后端返回全 0 的已生产/待生产 —— 与库存降级同理，
+  // 不显式告警就会被当成「这个月真的一件都没生产」
+  const fifoDegraded = computed(() => d.value?.fifo_degraded === true);
 
-  return { d, isLoading, isFetching, isError, refetch, rows, skuSummary, skuDateIndex, customers, inventoryDegraded };
+  return { d, isLoading, isFetching, isError, refetch, rows, skuSummary, skuDateIndex, customers, inventoryDegraded, fifoDegraded };
 }

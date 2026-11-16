@@ -78,7 +78,13 @@ async def list_plans(year: int=Query(..., description='年份'), month: int=Quer
     """
     try:
         result = await purchase_plan_service.get_plan_list(db, year, month, customer_id, status)
-        return PlanListResponse(plans=result['plans'], total=result['total'])
+        # fifo_degraded 必须如实透传：服务层在 FIFO 不可用时返回全 0 的出货/余量，
+        # 丢掉这个标记前端就只能把「一件都没出」当真值渲染（审计 #3）。
+        return PlanListResponse(
+            plans=result['plans'],
+            total=result['total'],
+            fifo_degraded=result.get('fifo_degraded', False),
+        )
     except (OperationalError, DisconnectionError) as e:
         logger.error(f'获取计划列表失败: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail=f'获取计划列表失败: {settings.sanitize_error(e)}') from e

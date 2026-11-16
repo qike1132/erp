@@ -54,7 +54,21 @@ async def get_plan_list(db: AsyncSession, year: int, month: int, customer_id: in
         conditions.append(PurchasePlan.customer_id == customer_id)
     if status:
         conditions.append(PurchasePlan.status == status)
-    result = await db.execute(select(PurchasePlan).options(selectinload(PurchasePlan.details).load_only(PurchasePlanDetail.id, PurchasePlanDetail.quantity, PurchasePlanDetail.plan_id, PurchasePlanDetail.product_name)).where(*conditions).order_by(PurchasePlan.create_time.desc()))
+    # load_only 的列集合必须覆盖 **下游 FIFO 分配实际读到的每一列**，不能按「本函数自己
+    # 用到哪几列」裁剪：`_get_shipped_fifo_map_safe` 链路上的 fifo_allocation 会读
+    # d.product_id / d.plan_date（fifo_allocation.py 的 _fifo_query_with_timeout）。
+    # 少加载这两列时，异步会话在已过期的实例上访问未加载属性 → MissingGreenlet →
+    # 被下游宽 except 转成 FIFO_ALLOCATION_UNAVAILABLE → _get_shipped_fifo_map_safe 返回
+    # ({}, True)，于是列表里所有计划 total_shipped 静默变成 0（2026-11-16 上线前审计 #2）。
+    fifo_detail_columns = (
+        PurchasePlanDetail.id,
+        PurchasePlanDetail.plan_id,
+        PurchasePlanDetail.quantity,
+        PurchasePlanDetail.product_name,
+        PurchasePlanDetail.product_id,
+        PurchasePlanDetail.plan_date,
+    )
+    result = await db.execute(select(PurchasePlan).options(selectinload(PurchasePlan.details).load_only(*fifo_detail_columns)).where(*conditions).order_by(PurchasePlan.create_time.desc()))
     plans = result.scalars().all()
     # FIFO 分配出货数量：整月查询，传 plan_month 走 Redis 缓存（与日历/汇总一致），
     # 避免每次列表请求都全量重查 FIFO

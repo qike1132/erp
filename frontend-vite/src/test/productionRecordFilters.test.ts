@@ -100,6 +100,64 @@ describe('buildRecordsQuery', () => {
   })
 })
 
+/**
+ * 审计 #1：抽屉查询/抽屉导出的日期基准必须是**页面选中日期**，不是「今天」。
+ *
+ * 拦的错：报表页按 selectedDate 取日报，抽屉却按当前自然月查 —— 点 12 月某天的
+ * 部门卡，抽屉里看到的是本月数据；抽屉导出的区间同样偏到本月。
+ * 这里传入 'YYYY-MM-DD' 字符串（与页面 selectedDate 同形），断言年月跟着走。
+ */
+describe('日期基准（审计 #1）', () => {
+  const SELECTED = '2025-12-15'
+
+  it('选中日期的月份决定抽屉查询的 year/month', () => {
+    const q = buildRecordsQuery(filters({ preset: 'month' }), SELECTED)
+
+    expect(q.year).toBe(2025)
+    expect(q.month).toBe(12)
+    expect(q).not.toHaveProperty('start_date')
+  })
+
+  it('「今日」预设取的是选中日期当天，而不是今天', () => {
+    const q = buildRecordsQuery(filters({ preset: 'today' }), SELECTED)
+
+    expect(q.production_date).toBe('2025-12-15')
+    expect(q.year).toBe(2025)
+    expect(q.month).toBe(12)
+  })
+
+  it('「本周」预设从选中日期所在周的周一起算（不跨到当前周）', () => {
+    const q = buildRecordsQuery(filters({ preset: 'week' }), SELECTED)
+
+    expect(q.start_date).toBe('2025-12-15') // 2025-12-15 是周一
+    expect(q.end_date).toBe('2025-12-15')
+  })
+
+  it('导出区间按选中日期所在月折算，而不是当前自然月', () => {
+    expect(buildExportRange(filters({ preset: 'month' }), SELECTED)).toEqual({
+      start_date: '2025-12-01',
+      end_date: '2025-12-31',
+    })
+  })
+
+  it('非法日期串退回「今天」，不会把 NaT 传出去', () => {
+    // 兼容性护栏：调用方万一传了空串/坏串，行为必须等价于既有的默认参数
+    const q = buildRecordsQuery(filters({ preset: 'month' }), '')
+
+    expect(typeof q.year).toBe('number')
+    expect(typeof q.month).toBe('number')
+  })
+
+  it('不传第二参数时沿用既有默认值（其他调用方兼容）', () => {
+    const q = buildRecordsQuery(filters({ preset: 'month' }))
+
+    // 手写断言：默认就是「今天」所在月，不能退化成固定值或 undefined
+    const now = new Date()
+    expect(q.year).toBe(now.getFullYear())
+    expect(q.month).toBe(now.getMonth() + 1)
+  })
+})
+
 describe('buildExportRange', () => {
   // 导出接口只吃 start_date/end_date（没有 year/month），所以每个预设都要折算成闭区间。
   it('今日：区间收成同一天', () => {

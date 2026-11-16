@@ -13,7 +13,10 @@ import { ref, computed, watch, nextTick, onUnmounted, type WritableComputedRef }
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { customerApi, dailyProductionApi, productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
-import type { Product, ProductionDepartment } from '@/types'
+import type { Product, ProductionDepartment, RecordsQuery } from '@/types'
+
+/** 「最近客户添加」一次拉取的行数（后端 per_page 上限就是 200，再多要翻页） */
+const RECENT_PAGE_SIZE = 200
 
 /** 生产部门选项 */
 export interface DepartmentOption {
@@ -134,6 +137,14 @@ export function useProductionEntry(
   /** 右侧「最近客户添加」：该客户最近录入过生产记录的 SKU（按最近一次录入倒序） */
   const customerRecent = ref<RecentSku[]>([])
   const recentLoading = ref(false)
+  /**
+   * 该客户近 90 天记录超过一页（200 条）时为 true。
+   * 面板只拉一页，去重后的 SKU 可能不全 —— loadCustomerRecent 会据此弹一次提示，
+   * 同时把该值暴露出去，后续给面板做常驻说明时不必再改取数逻辑。
+   */
+  const recentTruncated = ref(false)
+  /** 截断提示只弹一次（每次切换都弹会被当成噪音，见 loadCustomerRecent） */
+  let _truncationNotified = false
   let _recentSeq = 0
 
   // ===== 行（录入主体） =====
@@ -439,13 +450,17 @@ export function useProductionEntry(
   /**
    * 右侧「最近客户添加」：该客户近 90 天录入过的 SKU，按最近一次录入去重。
    *
-   * 记录接口没有 customer_id 过滤参数，但每行都带 customer_id / customer_name，
-   * 一次 200 行足够覆盖活跃客户的近期 SKU；优先按 id 匹配，历史数据 id 为空时用名字兜底。
+   * 客户条件由后端过滤（审计 #8：`/daily-production/records` 新增 customer_id /
+   * customer_name）。原先是「拉全库最新 200 行再前端筛」—— 该客户近期录入被别人的
+   * 记录挤出 200 行时，面板就静默变空，用户会以为这个客户从没录过。
+   * 现在这 200 行**只含该客户**，跨天的 SKU 覆盖率大幅提高；仍超一页时置
+   * recentTruncated 并弹一次提示，不静默。
    */
   async function loadCustomerRecent() {
     const cid = customerId.value
     if (cid == null) {
       customerRecent.value = []
+      recentTruncated.value = false
       recentLoading.value = false
       return
     }
@@ -453,21 +468,24 @@ export function useProductionEntry(
     recentLoading.value = true
     try {
       const end = selectedDateModel.value
-      const res = await dailyProductionApi.records({
+      // dailyProductionApi.records 的参数类型（RecordsQuery）尚未声明 customer_id，
+      // 而 @/types 不在本次改动范围：这里用交叉类型在调用点补上，避免加 any。
+      const params: RecordsQuery & { customer_id?: number; customer_name?: string } = {
         start_date: daysBefore(end, 90),
         end_date: end,
         sort: 'desc',
         page: 1,
-        per_page: 200,
-      })
+        per_page: RECENT_PAGE_SIZE,
+        customer_id: cid,
+        customer_name: customerName.value || undefined,
+      }
+      const res = await dailyProductionApi.records(params)
       if (seq !== _recentSeq) return
-      const name = customerName.value
       const seen = new Set<number>()
       const list: RecentSku[] = []
       for (const rec of res?.data ?? []) {
-        const sameCustomer = rec.customer_id != null
-          ? rec.customer_id === cid
-          : !!name && rec.customer_name === name
+        // 后端已按客户过滤；仍按 id 校验一次（后端兼容历史行时可能用名字兜底命中）
+        const sameCustomer = rec.customer_id != null ? rec.customer_id === cid : true
         if (!sameCustomer || rec.product_id == null || seen.has(rec.product_id)) continue
         seen.add(rec.product_id)
         list.push({
@@ -479,8 +497,21 @@ export function useProductionEntry(
         if (list.length >= 10) break
       }
       customerRecent.value = list
+      recentTruncated.value = (res?.total ?? 0) > RECENT_PAGE_SIZE
+      // 「不要静默」：数据被截断必须让用户知道。只在首次触发时提示一次 ——
+      // 每次切客户/切日期都弹会变成噪音，用户反而学会无视它。
+      if (recentTruncated.value && !_truncationNotified) {
+        _truncationNotified = true
+        showToast(
+          `该客户近 90 天记录超过 ${RECENT_PAGE_SIZE} 条，右侧仅按最近 ${RECENT_PAGE_SIZE} 条去重展示`,
+          'warning',
+        )
+      }
     } catch {
-      if (seq === _recentSeq) customerRecent.value = []
+      if (seq === _recentSeq) {
+        customerRecent.value = []
+        recentTruncated.value = false
+      }
     } finally {
       if (seq === _recentSeq) recentLoading.value = false
     }
@@ -911,6 +942,7 @@ export function useProductionEntry(
     pasteOpen,
     customerRecent,
     recentLoading,
+    recentTruncated,
     addRecentSku,
     browseProducts,
     rows,

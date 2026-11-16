@@ -65,6 +65,8 @@ async def list_records(
     production_date: str = Query('', max_length=10, description='指定日期筛选 (YYYY-MM-DD)'),
     created_by: str = Query('', max_length=50, description='录单人筛选；留空为不限'),
     keyword: str = Query('', max_length=100, description='产品名或 69 码关键词；留空为不限'),
+    customer_id: int | None = Query(None, description='客户ID筛选；留空为不限'),
+    customer_name: str = Query('', max_length=100, description='客户名称筛选；留空为不限'),
     sort: str = Query('desc', description="排序：desc（最新在前，默认）或 asc"),
     page: int = Query(1, ge=1, description='页码'),
     per_page: int = Query(50, ge=1, le=200, description='每页数量'),
@@ -82,6 +84,8 @@ async def list_records(
         production_date: 指定日期筛选，叠加在日期条件之上。
         created_by: 录单人筛选；空白表示不限。
         keyword: 产品名或 69 码关键词；空白表示不限。
+        customer_id: 客户 ID 筛选；None 表示不限（审计 #8：录入页「最近客户添加」用它取该客户近 90 天记录）。
+        customer_name: 客户名称筛选；空白表示不限，与 customer_id 取并集以兼容历史行。
         sort: 排序方向，'desc' 或 'asc'。
         page: 页码。
         per_page: 每页数量，1-200。
@@ -109,6 +113,8 @@ async def list_records(
             per_page=per_page,
             production_date=production_date,
             keyword=keyword,
+            customer_id=customer_id,
+            customer_name=customer_name,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

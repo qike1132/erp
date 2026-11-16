@@ -12,10 +12,18 @@ import { dailyProductionApi } from '@/api/production'
 import type { RecordFilters } from './recordFilters'
 import { buildRecordsQuery } from './recordFilters'
 
-export function useProductionRecords(filters: Ref<RecordFilters>) {
+/**
+ * @param filters 抽屉的筛选状态。
+ * @param baseDate 日期基准（页面选中的 `selectedDate`）。
+ *   必须由调用方传入 —— 抽屉的「本月/本周/今日」锚在这天，而不是锚在「今天」：
+ *   否则在 12 月 15 日的日报页点部门卡，抽屉查的是当前自然月（审计 #1）。
+ *   省略时沿用 `buildRecordsQuery` 的 `new Date()` 默认值，保持既有调用方兼容。
+ */
+export function useProductionRecords(filters: Ref<RecordFilters>, baseDate?: Ref<string>) {
   const queryClient = useQueryClient()
 
-  const query = computed(() => buildRecordsQuery(filters.value))
+  // 基准日期也是缓存键的一部分：漏掉它，跨月切换时抽屉会命中上一天的缓存
+  const query = computed(() => buildRecordsQuery(filters.value, baseDate?.value))
 
   const recordsQuery = useQuery({
     queryKey: computed(() => ['daily-production-records', query.value]),

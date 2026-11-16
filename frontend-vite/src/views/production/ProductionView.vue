@@ -64,7 +64,9 @@
 
     <RecordEditDialog v-model:open="editOpen" :record="editingRecord" @saved="onRecordSaved" />
 
-    <ProductionEntryDialog ref="entryDialogRef" v-model:open="entryOpen" v-model:selected-date="selectedDate" />
+    <!-- 录入面板已由模板顶部的 ProductionEntryPanel + entryOpen 承载（951911ef 改名），
+         这里原先还留着改名前的 <ProductionEntryDialog ref="entryDialogRef"> 死标签：
+         组件已不存在、ref 也没声明，每次渲染都会打一条 resolve 失败警告（审计 A-42）。 -->
 
     <Transition name="pr-toast">
       <div v-if="exportStatus.show" :class="['pr-export-toast', exportStatus.type]">
@@ -187,7 +189,9 @@ const { trendQuery } = useProductionTrend(TREND_DAYS)
 const trendData = computed(() => trendQuery.data.value ?? null)
 const trendLoading = computed(() => trendQuery.isFetching.value)
 
-const { recordsQuery, removeRecord, invalidateAll } = useProductionRecords(recordsFilters)
+// 第二参数是页面选中日期：抽屉的「本月/今日/本周」必须与上方日报同一基准，
+// 否则点 12 月的部门卡会看到当前自然月的数据（审计 #1）
+const { recordsQuery, removeRecord, invalidateAll } = useProductionRecords(recordsFilters, selectedDate)
 
 /** 可见部门：优先用今日汇总返回的（它已按权限收窄），否则回落到趋势返回的 */
 const visibleDepartments = computed(() => {
@@ -270,6 +274,9 @@ async function handleExport() {
 /**
  * 抽屉内的导出：与当前筛选语义一致（规格 §1.2 缺陷 3 / §6.6）——
  * 日期区间随预设折算，部门随筛选带上；工具栏那个仍是单日导出（它只有一个选中日期）。
+ *
+ * 折算基准同样传 `selectedDate`：不传的话「本月」按当前自然月算，
+ * 结果就是「抽屉里看的是选中日所在月、导出的是今天所在月」（审计 #1）。
  */
 async function handleDrawerExport() {
   exportStatus.show = true
@@ -277,7 +284,7 @@ async function handleDrawerExport() {
   exportStatus.message = '正在导出报表…'
   try {
     await dailyProductionApi.export({
-      ...buildExportRange(recordsFilters.value),
+      ...buildExportRange(recordsFilters.value, selectedDate.value),
       department: recordsFilters.value.department || undefined,
     })
     exportStatus.type = 'success'
@@ -332,7 +339,7 @@ defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
   border-radius: 10px;
   background: var(--color-danger-50, #fef2f2);
   color: var(--color-danger-700, #b91c1c);
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
 }
 .pr-export-toast {
   position: fixed;
@@ -342,7 +349,7 @@ defineExpose({ openRecordsFor, recordsOpen, recordsFilters })
   z-index: var(--z-toast);
   padding: 10px 18px;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-body-sm);
   font-weight: 600;
 }
 .pr-export-toast.info { background: var(--color-primary-50); color: var(--color-primary-700); }

@@ -44,6 +44,13 @@ router = APIRouter()
 #: 抵达端点前被 413（M2，2026-10-25 上线前检查）。
 MAX_PACKAGING_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
+#: 旧表写入口（craft/packaging create）的停用说明。文案直接给出去处，
+#: 让仍在调这两个接口的旧前端/脚本知道该去哪录，而不是只看到一个 410 码。
+LEGACY_WRITE_GONE_DETAIL = (
+    '该入口已停用，请在 /production 录入生产记录'
+    '（本入口写入的是历史旧表，任何页面都不再读取它，继续写入等于数据消失）'
+)
+
 
 @router.get('/craft/list', response_model=CraftWorkListResponse)
 async def list_craft_works(
@@ -83,23 +90,19 @@ async def create_craft_work(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission('production_summary_manage')),
 ) -> CraftWorkActionResponse:
-    """创建手工部生产记录。
+    """【已停用，恒返回 410】创建手工部生产记录。
 
-    Args:
-        data: 手工部记录创建参数（工人、数量、日期等）。
-        db: 异步数据库会话（读写主库）。
-        user: 当前登录用户，作为记录创建人。
+    该入口写的是旧表 `craft_work`，而生产报表页面（`/production`）只读
+    `daily_production_record` —— 从这里提交的记录任何页面都看不见（审计 #6）。
+    保留路由与入参模型是为了让老前端的请求得到明确答复，而不是 404 或静默写入。
 
-    Returns:
-        CraftWorkActionResponse: 包含成功标志和提示消息的响应。
+    Raises:
+        HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。
     """
-    async with db_transaction(db):
-        await production_summary_service.create_craft_work(
-            db, worker_name=data.worker_name, quantity=data.quantity,
-            work_date_str=data.work_date, remark=data.remark or '',
-            created_by=user.username if hasattr(user, 'username') else '',
-        )
-    return CraftWorkActionResponse(success=True, message='手工部记录创建成功！')
+    raise HTTPException(
+        status_code=410,
+        detail=LEGACY_WRITE_GONE_DETAIL,
+    )
 
 
 @router.put('/craft/edit/{record_id}', response_model=CraftWorkActionResponse)
@@ -179,6 +182,10 @@ async def export_craft_works(
             media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={'Content-Disposition': 'attachment; filename=craft_work_export.xlsx'},
         )
+    except ValueError as e:
+        # 行数上界（审计 #5）：服务层超限抛 ValueError，映射 413 引导缩小范围，
+        # 而不是像从前那样静默截断后照常 200 出一份缺行的文件。
+        raise HTTPException(status_code=413, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e
 
@@ -225,23 +232,19 @@ async def create_packaging_record(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission('production_summary_manage')),
 ) -> PackagingRecordActionResponse:
-    """创建包装部记录。
+    """【已停用，恒返回 410】创建包装部记录。
 
-    Args:
-        data: 包装部记录创建参数（客户、产品、条码、数量、日期等）。
-        db: 异步数据库会话（读写主库）。
-        user: 当前登录用户，作为记录创建人。
+    与手工部 create 同一处置（审计 #6）：旧表 `packaging_record` 已无页面读取，
+    写入等于让数据消失。批量导入 `/packaging/upload` 走的是同一张旧表，故一并保留
+    现状但在服务层 docstring 标注了遗留原因。
 
-    Returns:
-        PackagingRecordActionResponse: 包含成功标志和提示消息的响应。
+    Raises:
+        HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。
     """
-    async with db_transaction(db):
-        await production_summary_service.create_packaging_record(
-            db, customer=data.customer, product_name=data.product_name, barcode=data.barcode,
-            quantity=data.quantity, pack_date_str=data.pack_date, remark=data.remark or '',
-            created_by=user.username if hasattr(user, 'username') else '',
-        )
-    return PackagingRecordActionResponse(success=True, message='包装部记录创建成功！')
+    raise HTTPException(
+        status_code=410,
+        detail=LEGACY_WRITE_GONE_DETAIL,
+    )
 
 
 @router.put('/packaging/edit/{record_id}', response_model=PackagingRecordActionResponse)
@@ -365,6 +368,9 @@ async def export_packaging_records(
             media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={'Content-Disposition': 'attachment; filename=packaging_export.xlsx'},
         )
+    except ValueError as e:
+        # 行数上界（审计 #5）：同手工部导出，超限 413 而不是静默截断出文件
+        raise HTTPException(status_code=413, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e
 

@@ -181,11 +181,11 @@ onMounted(() => { void loadDaily() })
 .m-page-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--m-gap-md); padding-bottom: calc(var(--m-gap-lg) + var(--m-tabbar-safe)); -webkit-overflow-scrolling: touch; }
 .m-center { display: flex; justify-content: center; padding: 48px 0; }
 .m-date-nav { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; }
-.m-date-btn { width: 32px; height: 32px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; background: var(--m-bg-surface); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: inherit; }
+.m-date-btn { width: 32px; height: 32px; border: 1px solid rgba(0,0,0,0.08); border-radius: 8px; background: var(--m-bg-surface); font-size: var(--fs-body); cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: inherit; }
 .m-date-text { font-size: 15px; font-weight: 600; color: var(--m-text-primary); min-width: 120px; text-align: center; }
 .m-kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
 .m-dept-grid { display: flex; flex-direction: column; gap: 10px; }
-.m-dept-name { font-size: 14px; font-weight: 600; color: var(--m-text-primary); margin-bottom: 4px; }
-.m-dept-val { font-size: 20px; font-weight: 700; color: var(--m-text-primary); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
-.m-retry-btn { margin-top: 12px; height: 36px; padding: 0 20px; border: none; border-radius: 10px; background: var(--m-accent); color: white; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.m-dept-name { font-size: var(--fs-body-sm); font-weight: 600; color: var(--m-text-primary); margin-bottom: 4px; }
+.m-dept-val { font-size: var(--fs-heading-3); font-weight: 700; color: var(--m-text-primary); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.m-retry-btn { margin-top: 12px; height: 36px; padding: 0 20px; border: none; border-radius: 10px; background: var(--m-accent); color: white; font-size: var(--fs-body-sm); font-weight: 600; cursor: pointer; font-family: inherit; }
 </style>

@@ -12,7 +12,12 @@ from collections import namedtuple
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
 from fastapi_app.services.daily_production_service import get_monthly_summary
+from fastapi_app.shared_models import Base, DailyProductionRecord
+from fastapi_app.shared_models.product import Product as ProductModel
 
 # 服务层按列名取数（`row.production_date` / `row.total_qty` ...），真实
 # SQLAlchemy `.all()` 返回的 Row 正是这种「可按属性访问的类元组」。测试里的
@@ -56,3 +61,60 @@ class TestMonthlySummaryFieldConsistency:
         for day in out['daily_data']:
             for key in ('filling', 'handcraft', 'packaging', 'total'):
                 assert key in day
+
+
+class TestMonthlySkuDedup:
+    """审计 #7：SKU 数一律「先去重再计数」，不得把按日按部门的 distinct 数相加。
+
+    这是两套口径被混淆的经典形态：`count(distinct product_name)` 对一个 (日, 部门)
+    单元格是对的，但把它跨天、跨部门**求和**就等于把「集合大小」当「可加量」，
+    同一产品跨 2 天 × 2 部门会被数成 4 个 SKU。
+
+    用内存 SQLite 跑真实 SQL：口径错误只有真 SQL 才暴露（mock 回来的行是测试自己
+    造的，求和与去重都由被测代码决定，镜像断言会一起变绿）。
+    """
+
+    async def test_same_product_across_days_and_departments_counts_once(self):
+        engine = create_async_engine(
+            'sqlite+aiosqlite:///:memory:',
+            poolclass=StaticPool,
+            connect_args={'check_same_thread': False},
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(
+                lambda c: Base.metadata.create_all(
+                    c, tables=[DailyProductionRecord.__table__, ProductModel.__table__],
+                )
+            )
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as db:
+            # 白兔公仔：09-01 / 09-02 两天，充棉部与包装部都做过
+            for rid, (dept, day, name) in enumerate([
+                ('filling', 1, '白兔公仔'),
+                ('filling', 2, '白兔公仔'),
+                ('packaging', 1, '白兔公仔'),
+                ('packaging', 2, '白兔公仔'),
+                # 黑猫公仔只为证明去重没有「一律算 1」
+                ('packaging', 2, '黑猫公仔'),
+            ], start=1):
+                db.add(DailyProductionRecord(
+                    id=rid, department=dept, product_name=name, barcode='',
+                    unit_price=5, quantity=10, production_date=date(2026, 9, day),
+                ))
+            await db.flush()
+
+            out = await get_monthly_summary(db, 2026, 9)
+
+        await engine.dispose()
+
+        by_dept = {d['department']: d['sku_count'] for d in out['monthly_departments']}
+        # 拦的错：旧写法 sum(每日 distinct) → 充棉部 2、包装部 2（合计 4）
+        assert by_dept['filling'] == 1
+        assert by_dept['packaging'] == 2  # 白兔 + 黑猫
+        by_day = {d['date']: d['total']['sku_count'] for d in out['daily_data']}
+        # 拦的错：日合计曾把三个部门的 distinct 数相加，同一天跨部门就重复计数
+        assert by_day['2026-09-01'] == 1
+        assert by_day['2026-09-02'] == 2
+        # 空日期仍是 0（缺省条目不得被去重逻辑漏成 None）
+        assert by_day['2026-09-03'] == 0
+

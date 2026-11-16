@@ -1,7 +1,21 @@
 """
-生产计划模块业务逻辑服务
+生产计划模块业务逻辑服务（遗留双数据源模块，见下）
 
 包含手工部录入、包装部录入、汇总动态报表、数据导出等功能。
+
+**两套生产数据源的关系（2026-11-16 上线前审计 #6）**
+
+本模块读写的是**旧表** `craft_work` / `packaging_record`；2026 年起现网生产报表
+（前端 `/production` 页面）改走 `daily_production_service.py` 的 `daily_production_record`。
+旧表不再被任何页面读取，而本模块的 craft/packaging create 端点此前仍在往旧表静默写数据
+—— 录入成功、页面上却永远看不到，用户会以为「录了没生效」重复录入。
+
+处置（最小一步，不动数据模型）：create 端点改为返回 410 Gone，指向 `/production`；
+读端点（列表/导出/汇总）保持原样，因为历史旧表数据仍需可查。两条写入链路的遗留原因：
+旧表字段（工人姓名、包装客户）与新表的部门+SKU 口径不同，迁移映射需要单独评审，
+不在审计修复范围内。**不要在这里补写新表的双写逻辑** —— 那会造出第二真相源。
+
+清理条件：确认旧表数据已归档或迁移完成，再删除本模块的 write 分支与对应表。
 """
 import calendar
 import io
@@ -23,6 +37,7 @@ from fastapi_app.core.cache_invalidation import (
     schedule_post_commit_invalidation,
 )
 from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.services.export_limits import ensure_within_export_limit
 from fastapi_app.shared_models import Case, CaseMovement, CraftWork, PackagingRecord, Product
 from fastapi_app.utils import parse_date_with_fallback
 
@@ -32,9 +47,6 @@ from fastapi_app.utils import parse_date_with_fallback
 from utils.report_exporter import _sanitize_excel_value
 
 logger = logging.getLogger(__name__)
-
-# 导出最大行数（仿 report_data_service），防止 openpyxl 全量内存构建导致 OOM
-_MAX_EXPORT_ROWS = 10000
 
 def _last_day_of_month(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
@@ -121,12 +133,14 @@ async def export_craft_works(db: AsyncSession, start_date: str='', end_date: str
     query = select(CraftWork).order_by(CraftWork.work_date, CraftWork.id)
     if conditions:
         query = query.where(*conditions)
-    # 导出上界：无日期条件时为全表导出，超限截断并告警（与包装部导出同模式）
-    query = query.limit(_MAX_EXPORT_ROWS + 1)
+    # 行数上界（2026-11-16 审计 #5）：此前是 limit(MAX+1) 后只 logger.warning 再
+    # records[:10000] 静默截断，端点照常 200 出文件 —— 用户拿着一份「少了行」的表去对账，
+    # 没有任何提示。改为超限直接抛 ValueError，由端点映射 413 引导缩小范围
+    # （与 daily_production_service 导出同一范式，不另立标准）。
+    # 上界改由 export_limits.EXPORT_MAX_ROWS 统一给出，本模块不再自带一份阈值 ——
+    # 两处各写一个数字必然漂移，且「哪张表能导多少行」本来就不该按模块分。
+    await ensure_within_export_limit(db, select(func.count()).select_from(query.subquery()))
     records = list((await db.scalars(query)).all())
-    if len(records) > _MAX_EXPORT_ROWS:
-        logger.warning('手工部数据导出超过最大行数 %d，已截断', _MAX_EXPORT_ROWS)
-        records = records[:_MAX_EXPORT_ROWS]
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '手工部生产数据'
@@ -316,13 +330,10 @@ async def export_packaging_records(db: AsyncSession, start_date: str='', end_dat
     query = select(PackagingRecord).order_by(PackagingRecord.pack_date, PackagingRecord.id)
     if conditions:
         query = query.where(*conditions)
-    # 多取 1 条用于判断是否截断，避免全量加载后内存切片
-    query = query.limit(_MAX_EXPORT_ROWS + 1)  # sql-safe: escape_like/绑定参数/常量片段
+    # 行数上界同手工部导出：超限抛 ValueError → 端点 413，绝不静默截断出文件
+    await ensure_within_export_limit(db, select(func.count()).select_from(query.subquery()))
     result = await db.execute(query)
     records = list(result.scalars().all())
-    if len(records) > _MAX_EXPORT_ROWS:
-        logger.warning('包装部数据导出超过最大行数 %d，已截断', _MAX_EXPORT_ROWS)
-        records = records[:_MAX_EXPORT_ROWS]
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '包装部生产数据'
