@@ -1,11 +1,14 @@
-"""批次 4 的三处「静默失败」修复回归（2026-11-17 上线前审计 P1-6 / P1-9 / P1-13）。
+"""批次 4 的四处「静默失败」修复回归（2026-11-17 上线前审计 P1-6 / P1-9 / P1-13 / P1-12）。
 
-三个缺陷同一族：**出错或不匹配时，系统不吭声**。
+四个缺陷同一族：**出错、不匹配或本属设计时，系统给出的是「不吭声」或「喊错」**。
 
 - P1-6 导入找不到目标 Sheet 时静默回落第一个 Sheet → 传错模板也当真实单据写库；
 - P1-9 来料登记日期用 UTC 日界 → 北京 00:00–08:00 登记的单落到「昨天」，台账错位；
 - P1-13 ARQ cron 的超时判定用全局 `job_timeout` → cron 自带更小 timeout 时被判「retrying」，
   死信/失败指标/`backup_schedule.last_status` 全都不更新（调度永久停在 running）。
+
+- P1-12 表级备份固定走 JSON 产物，却被按「pg_dump 降级」判 partial 并写进 remark
+  → 每次表级备份都恒 partial，真缺口（failed_tables/覆盖度）被这层噪声掩掉。
 
 本文件逐个锁住「不吭声」变「按预期吭声」。
 """
@@ -209,3 +212,78 @@ async def test_cron_jobs_pass_their_own_timeout_into_wrapper(monkeypatch):
 
     src = inspect.getsource(arq_app)
     assert '_tracked_job(s[\'func\'], MAX_TRIES, timeout=s.get(\'timeout\'))' in src
+
+
+# -------------------------------------------- P1-12 表级备份的 JSON 是设计而非降级
+
+
+def test_table_scoped_json_backup_is_success():
+    """表级备份固定走 JSON（还原按表 upsert），dump_format=json 属设计行为 → success。
+
+    修复前：`degraded_json` 只看 dump_format，于是表级备份每次都记 partial，
+    remark 还被写成「pg_dump 不可用，本次为 JSON 降级备份」——运维按 remark 排查
+    会去查一个根本没发生的降级，真正缺的表反而不显眼（审计 P1-12）。
+    """
+    from fastapi_app.services.backup.records import evaluate_backup_completeness
+
+    status, detail = evaluate_backup_completeness({
+        'type': 'partial', 'dump_format': 'json',
+        'failed_tables': [], 'coverage': {'complete': True},
+    })
+    assert status == 'success', f'表级备份的 JSON 是设计行为，不得判 partial：{detail}'
+    assert detail == ''
+
+
+def test_table_scoped_detected_from_format_key_of_list_files():
+    """`list_backup_files` 的明文 zip 条目把 manifest.type 放在 format（历史契约）。
+
+    重新同步补录时喂进来的是这种条目；只认 `type` 会让补录记录退回「恒 partial」。
+    """
+    from fastapi_app.services.backup.records import evaluate_backup_completeness
+
+    entry = {
+        'filename': 'erp_backup_20261117_101010.zip',
+        'format': 'partial', 'dump_format': 'json',
+        'failed_tables': [], 'coverage': {'complete': True},
+    }
+    assert evaluate_backup_completeness(entry)[0] == 'success'
+
+
+def test_full_json_degraded_backup_still_partial():
+    """全量备份降级为 JSON（pg_dump 不可用）仍必须判 partial（AUD-03 不得回归）。"""
+    from fastapi_app.services.backup.records import evaluate_backup_completeness
+
+    status, detail = evaluate_backup_completeness({
+        'type': 'full', 'dump_format': 'json', 'coverage': {'complete': True},
+    })
+    assert status == 'partial'
+    assert 'pg_dump' in detail and 'schema' in detail
+
+
+def test_table_scoped_json_with_real_holes_still_partial():
+    """表级备份真的缺表/覆盖不足 → partial，但说明里不得再写「pg_dump 不可用」。"""
+    from fastapi_app.services.backup.records import evaluate_backup_completeness
+
+    status, detail = evaluate_backup_completeness({
+        'type': 'partial', 'dump_format': 'json',
+        'failed_tables': ['order'], 'coverage': {'complete': False},
+    })
+    assert status == 'partial'
+    assert 'order' in detail
+    assert 'pg_dump' not in detail
+
+
+def test_table_scoped_json_rows_fallback_still_partial():
+    """行数回退（产物读不出来）与备份范围无关，表级备份也要判 partial。"""
+    from fastapi_app.services.backup.records import (
+        ROWS_SOURCE_EXACT_COUNT_FALLBACK,
+        evaluate_backup_completeness,
+    )
+
+    status, detail = evaluate_backup_completeness({
+        'type': 'partial', 'dump_format': 'json',
+        'rows_source': ROWS_SOURCE_EXACT_COUNT_FALLBACK,
+        'coverage': {'complete': True},
+    })
+    assert status == 'partial'
+    assert 'COUNT' in detail

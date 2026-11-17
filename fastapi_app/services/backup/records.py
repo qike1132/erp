@@ -168,14 +168,30 @@ def _collect_problem_tables(info: dict | None) -> list[str]:
     return problems
 
 
+def _is_table_scoped_backup(info: dict) -> bool:
+    """判断产物是不是「表级备份」（用户显式指定 tables / exclude_tables）。
+
+    两个自述键都要认，否则重新同步补齐的记录会退回「表级备份恒 partial」：
+
+    - manifest 与 .meta sidecar：``type``（'partial' if partial else 'full'，
+      见 orchestration/core.py::_build_manifest）；
+    - ``list_backup_files`` 的明文 zip 条目：manifest.type 被放在 ``format``
+      （历史契约，见该函数），加密包与 sidecar 则走 ``type``。
+    """
+    return info.get('type') == 'partial' or info.get('format') == 'partial'
+
+
 def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
     """由备份产物描述推导 (status, 问题说明) 二元组。
 
     - 产物自述有缺失/失败表，或 coverage.complete 为 False → ('partial', 说明)
-    - dump_format 为 json（pg_dump 不可用的降级产物）→ ('partial', 说明)。
-      AUD-03（2026-10-24 审计）：JSON 降级包不含 schema、无法在空库/新机恢复，
-      若仍判 success，灾难恢复能力会静默失效且 7 天保留期后可用的 pg_dump 包
-      被清理光。旧产物无 dump_format 字段不回溯改判（保持其历史状态）。
+    - dump_format 为 json 且**不是**表级备份（pg_dump 不可用的降级产物）
+      → ('partial', 说明)。AUD-03（2026-10-24 审计）：JSON 降级包不含 schema、
+      无法在空库/新机恢复，若仍判 success，灾难恢复能力会静默失效且 7 天保留期
+      后可用的 pg_dump 包被清理光。旧产物无 dump_format 字段不回溯改判（保持其
+      历史状态）。表级备份恰好相反：它固定走 JSON 产物（见 _export_database），
+      dump_format=json 是设计行为而非降级，按降级判则每次表级备份恒 partial 并
+      误写「pg_dump 不可用」，真缺口被噪声掩掉（审计 P1-12）。
     - rows_source 为 exact_count_fallback（产物不可解析、行数回退实时 COUNT）
       → ('partial', 说明)。回退只发生在读产物失败时，等同于「这份产物没被成功
       读过」，不能记成功，否则坏产物会占住保留位、挤掉可用的旧备份。
@@ -199,7 +215,12 @@ def evaluate_backup_completeness(info: dict | None) -> tuple[str, str]:
             '完整性自述缺失：产物未提供覆盖度/失败表/降级格式，不能视为已验证完整',
         )
     problems = _collect_problem_tables(info)
-    degraded_json = info.get('dump_format') == 'json'
+    # 表级备份固定走 JSON 产物：还原按表 upsert，psql 的整库重建与表级语义冲突
+    # （见 orchestration/core.py::_export_database），故 dump_format 恒为 json。
+    # 这是设计行为、不是 pg_dump 降级；按降级判会让每一次表级备份恒 partial 且
+    # remark 误写「pg_dump 不可用」，把真正的 failed_tables/覆盖度缺口淹掉（P1-12）。
+    table_scoped = _is_table_scoped_backup(info)
+    degraded_json = info.get('dump_format') == 'json' and not table_scoped
     # 行数回退 = 读产物失败（_collect_table_row_counts 只在解析异常时回退），
     # 说明这份产物没被成功读过，不能算「已验证完整」。
     rows_fallback = info.get('rows_source') == ROWS_SOURCE_EXACT_COUNT_FALLBACK
