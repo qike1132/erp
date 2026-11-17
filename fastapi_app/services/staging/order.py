@@ -27,7 +27,7 @@ from fastapi_app.services.staging._generic import (
     _generic_update_staging_entity,
     _parse_deduct_flag,
 )
-from fastapi_app.shared_models import InventoryLog, Order, StagingOrder
+from fastapi_app.shared_models import InventoryLog, Order, OrderItem, StagingOrder
 from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,24 @@ async def _purge_rejected_rows(db: AsyncSession, session_id: str) -> None:
     await db.flush()
 
 
+def _confirmed_order_item(order: Order, staging: StagingOrder, product) -> OrderItem:
+    """暂存行 → 订单明细（P1-8）：字段口径与 order_batch_create._create_order_items 一致。
+
+    抵扣字段也按暂存行写入：暂存确认确实会扣库存（process_order_deduction），
+    明细里记 0 会让订单详情/对账读到的抵扣与库存流水自相矛盾。
+    """
+    return OrderItem(
+        order_id=order.id,
+        product_id=staging.product_id,
+        product_name=product.name,
+        product_barcode=getattr(product, 'barcode', None),
+        quantity=staging.quantity,
+        deduct_stock=bool(staging.deduct_stock),
+        deduct_quantity=int(staging.deduct_quantity or 0),
+        note=staging.note,
+    )
+
+
 async def _write_confirmed_order(
     db: AsyncSession, staging: StagingOrder, *, scoped_factory: str | None,
 ) -> None:
@@ -179,6 +197,12 @@ async def _write_confirmed_order(
     # 工厂闸门（H1，2026-11-16 审计 High）：厂绑定用户不得确认他厂产品的暂存行
     if _row_factory_rejected(scoped_factory, product.factory):
         raise ValueError('产品不在你的工厂范围，已拒绝该订单')
+
+    # 明细（P1-8，2026-11-17 审计）：create_order（order/commands.py:157-167）与
+    # 批量创建（order_batch_create._create_order_items）两条路径都写 OrderItem，
+    # 只有暂存确认这条漏了 —— 这些订单在按 order.items 读取的链路上表现为
+    # 「没有明细」，退回订单级摊平的单行口径，SKU 级信息（含抵扣）全部丢失。
+    db.add(_confirmed_order_item(order, staging, product))
     # 订单不改物理库存（2026-10-24 修复 P0）：原先此处
     # apply_stock_delta_locked(+quantity) 与 create_order 等三条路径口径相反。
     log = InventoryLog(
