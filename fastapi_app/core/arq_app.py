@@ -405,12 +405,18 @@ if is_enabled():
 MAX_TRIES = 3
 
 
-def _tracked_job(func, max_tries: int = MAX_TRIES):
+def _tracked_job(func, max_tries: int = MAX_TRIES, timeout: float | None = None):
     """把任务成败写进 ctx，供 on_job_end 分流（ARQ 0.28 无失败钩子）。"""
     @wraps(func)
     async def tracked(ctx, *args, **kwargs):
         ctx['_job_function'] = func.__name__
         ctx['_max_tries'] = max_tries
+        # 该 cron 自己的超时预算（None = 用 WorkerSettings.job_timeout）。
+        # 2026-11-17 上线前审计 P1-13：超时判定必须用**这条 cron 的** timeout ——
+        # 原先一律与全局 job_timeout 比，cron 自带更小 timeout 时（如 300s vs 1800s）
+        # 被取消那一刻 elapsed≈300 远小于 1798，于是判成「retrying」，
+        # 死信/失败指标/schedule.last_status 全不更新（静默失败）。
+        ctx['_job_timeout'] = timeout
         ctx['_job_args'] = args
         ctx['_job_kwargs'] = kwargs
         ctx['_start_monotonic'] = time.monotonic()
@@ -430,7 +436,7 @@ def _tracked_job(func, max_tries: int = MAX_TRIES):
             # 原先一律记 retrying；随后 worker 判 failed 时 on_job_end 走 retrying 分支，
             # 于是死信/失败指标/backup_schedule.last_status 全部不更新，调度永久停在 running。
             elapsed = time.monotonic() - float(ctx.get('_start_monotonic') or time.monotonic())
-            timeout_s = float(getattr(WorkerSettings, 'job_timeout', 1800) or 1800)
+            timeout_s = float(ctx.get('_job_timeout') or getattr(WorkerSettings, 'job_timeout', 1800) or 1800)
             if elapsed >= timeout_s - 2:
                 ctx['_job_outcome'] = 'failed'
                 ctx['_job_exception'] = TimeoutError(
@@ -459,7 +465,10 @@ def _tracked_job(func, max_tries: int = MAX_TRIES):
 
 
 cron_jobs = [
-    cron(_tracked_job(s['func'], MAX_TRIES), max_tries=MAX_TRIES, timeout=s.get('timeout'), **s['cron'])  # type: ignore[arg-type]
+    cron(
+        _tracked_job(s['func'], MAX_TRIES, timeout=s.get('timeout')),
+        max_tries=MAX_TRIES, timeout=s.get('timeout'), **s['cron'],  # type: ignore[arg-type]
+    )
     for s in cron_schedules
 ]
 

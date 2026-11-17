@@ -3,12 +3,12 @@
 从 material_registration_service.py 按职责拆出,行为与原实现完全一致。
 """
 import logging
-from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.business_time import business_today
 from fastapi_app.shared_models import (
     MaterialRegistration,
     MaterialRegistrationItem,
@@ -78,7 +78,7 @@ async def create_registration(db, purchase_order_id: int, user_id: int | None = 
         purchase_order_no=po.order_no,
         supplier_id=po.supplier_id,
         supplier_name=po.supplier_name,
-        registration_date=datetime.now(UTC).replace(tzinfo=None).date(),
+        registration_date=business_today(),
         status='pending',
         remark=remark,
         created_by=user_id,

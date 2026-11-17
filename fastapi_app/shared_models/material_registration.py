@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, desc
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from fastapi_app.core.business_time import fmt_business
+from fastapi_app.core.business_time import business_today, fmt_business
 from fastapi_app.core.float_utils import float_compare, round_qty
 from fastapi_app.shared_models import Base
 
@@ -24,7 +24,7 @@ class MaterialRegistration(Base):
     purchase_order_no: Mapped[str] = mapped_column(String(30), nullable=False)
     supplier_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('supplier.id'))
     supplier_name: Mapped[str | None] = mapped_column(String(100))
-    registration_date: Mapped[date | None] = mapped_column(Date, nullable=False, default=lambda: datetime.now(UTC).date())
+    registration_date: Mapped[date | None] = mapped_column(Date, nullable=False, default=business_today)
     remark: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default='pending')
     create_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

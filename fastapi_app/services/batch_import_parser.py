@@ -198,12 +198,22 @@ def _find_target_sheet(sheets: list, keywords: list[str]) -> str | None:
         keywords: 关键词列表，按优先级排序。
 
     Returns:
-        str | None: 匹配到的 sheet 名称；未匹配到则返回首个 sheet（可能为 None）。
+        str | None: 匹配到的 sheet 名称；**多个 sheet 都没匹配**时返回 None，
+        由调用方报「没有找到 X Sheet」。
+
+    「只回退**唯一**那个 sheet」的理由（2026-11-17 上线前审计 P1-6）：
+    原实现无条件 `return sheets[0]`，用户传错模板时**静默**拿第一个 sheet 当目标
+    Sheet 解析，错模板照样被当成真实单据写库（数据污染，事后极难发现）。
+    但单 sheet 文件的实际命名五花八门（WPS 另存、用户改名、模板被另存为
+    「Sheet1」），这类文件的唯一 sheet 就是用户要导的那张 —— 回退它是既定行为
+    （`tests/test_product_import_preview.py` 明确锁着「预览与导入同口径」）。
+    故收窄成：**仅当工作簿只有一个 sheet 时**才回退；多 sheet 且都不匹配即报错，
+    与 `staging/_generic.py:114-116` 的口径一致。
     """
     for sheet in sheets:
         if any(keyword in sheet for keyword in keywords):
             return sheet
-    return sheets[0] if sheets else None
+    return sheets[0] if len(sheets) == 1 else None
 
 
 def _identify_sheet_type(sheet_name: str, sheet_mapping: dict) -> str | None:

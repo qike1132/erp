@@ -4,12 +4,13 @@
 """
 import json
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.orm import joinedload, selectinload
 
+from fastapi_app.core.business_time import business_today
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.float_utils import float_compare, round_qty
@@ -413,7 +414,7 @@ async def get_stats_overview(db) -> dict:
     total_ordered = totals_row[0] or 0
     total_received = totals_row[1] or 0
 
-    today = datetime.now(UTC).replace(tzinfo=None).date()
+    today = business_today()
     week_ago = today - timedelta(days=7)
 
     recent = (await db.execute(
@@ -447,7 +448,7 @@ async def get_stats_distribution(db) -> dict:
     partial = status_counts.get('partial', 0)
     completed = status_counts.get('completed', 0)
 
-    month_ago = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=30)
+    month_ago = business_today() - timedelta(days=30)
     overdue_items = (await db.execute(
         select(func.count(MaterialRegistrationItem.id)).where(
             MaterialRegistrationItem.ordered_quantity > MaterialRegistrationItem.received_quantity,
@@ -469,9 +470,10 @@ async def get_stats_distribution(db) -> dict:
              key_builder=lambda **kwargs: str(kwargs.get('days', 30)))
 async def get_stats_trend(db, days: int = 30) -> dict:
     """趋势数据（SQL GROUP BY 替代全量 ORM 加载，L1 15s + L2 60s 缓存）"""
-    # 2026-10-18 OCR 评审：registered 按 registration_date（写入时用 UTC 日期）
-    # 分桶，received 必须用同一个 UTC 日边界，否则两条曲线差一天。
-    end_date = datetime.now(UTC).replace(tzinfo=None).date()
+    # registered 按 registration_date 分桶，received 必须用**同一个日界**，否则两条
+    # 曲线差一天。写入端 2026-11-17 起改用业务时区（business_today，Asia/Shanghai；
+    # 审计 P1-9 修掉 UTC 日界导致的台账错位），故这里也按 Asia/Shanghai 取日期。
+    end_date = business_today()
     start_date = end_date - timedelta(days=days)
 
     # 生成完整日期骨架
@@ -499,22 +501,22 @@ async def get_stats_trend(db, days: int = 30) -> dict:
     # 2026-10-17 审计 P2-09：received 此前从未赋值（恒为 0 骨架值）。
     # 口径：当天完成的来料登记数（status=completed，按 update_time 的日期归档——
     # 完成时间没有独立列，update_time 是唯一可用近似）。
-    # 2026-10-18 OCR 评审：必须显式 `AT TIME ZONE 'UTC'` 再取 date。
+    # 必须显式 `AT TIME ZONE 'Asia/Shanghai'` 再取 date。
     # update_time 是 timestamptz，裸 `func.date(update_time)` 由 PostgreSQL 按
     # **会话时区**（本库为 Asia/Shanghai）取日界，而 registered 侧的
-    # registration_date 是 Date 列、写入端用 `datetime.now(UTC).date()`
-    # （services/material_registration/_commands.py 与模型 default）→ 裸 date() 会让
-    # received 比 registered 整体晚一天（UTC 00:00–08:00 完成的登记落到次日），
-    # 两条曲线错位一天。转成 UTC 日期后与 registered 同边界。
+    # registration_date 是 Date 列、写入端用 `business_today()`（Asia/Shanghai，见
+    # services/material_registration/_commands.py 与模型 default）→ 裸 date() 会按
+    # **会话时区**取日界（本库即 Asia/Shanghai，与写入端虽同源但依赖会话设置），
+    # 显式写出来才与 registered 严格同边界、且不受会话时区漂移影响。
     # （副作用：该表达式无法走索引，只扫 30 天窗口，可接受。）
     recv_counts = (await db.execute(
-        select(func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')), func.count())
+        select(func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('Asia/Shanghai')), func.count())
         .where(
             MaterialRegistration.status == 'completed',
-            func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')) >= start_date,
-            func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')) <= end_date,
+            func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('Asia/Shanghai')) >= start_date,
+            func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('Asia/Shanghai')) <= end_date,
         )
-        .group_by(func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('UTC')))
+        .group_by(func.date(MaterialRegistration.update_time.op('AT TIME ZONE')('Asia/Shanghai')))
     )).all()
 
     for recv_date, cnt in recv_counts:
