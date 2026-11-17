@@ -66,7 +66,9 @@ _IGNORED_DB_ONLY_TABLES: set[str] = set()
 _IGNORED_DB_ONLY_INDEXES = {
     'idx_csfv_created_at',             # 054 建；生产同名旧索引先存在 → 新定义被跳过
     'idx_csfv_status',                 # 历史迁移所建
-    'idx_csp_role_part_version',       # 054 建 unique；生产同名旧索引为 non-unique
+    # idx_csp_role_part_version 已移出白名单（2026-11-17 上线前审计 P1-15）：
+    # 该索引曾是「模型声明 unique、库里 non-unique」，被整条豁免后漂移门禁看不见。
+    # pg_standalone_122 已去重并建成真正的 UNIQUE，两边口径一致，无需再豁免。
     'idx_material_reg_date',           # 历史迁移所建（生产定义与模型分叉）
     'idx_material_reg_supplier',       # 历史迁移所建（生产在 supplier_name，模型在 supplier_id）
 }
