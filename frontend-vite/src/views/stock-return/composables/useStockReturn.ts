@@ -125,8 +125,13 @@ export function useStockReturn() {
         start_date: startDate.value || undefined,
         end_date: endDate.value || undefined,
       }),
-    // 本 composable 也在库存出货列表实例化——无退货查看权限的访客不应发请求（403 审计噪音）
-    enabled: computed(() => auth.hasPermission('stock_return_view')),
+    // 本 composable 也在库存出货列表实例化——无退货查看权限的访客不应发请求（403 审计噪音）。
+    // 2026-11-16 上线前审计 H-5：这里原先只认 stock_return_view，但「退货管理(全部)」
+    // `stock_return_manage` 是独立的顶层码（seed_nav 里与 view 并列两个勾选框），
+    // 后端 User.has_permission 对 *_manage 会自动放行同名 *_view、导航侧
+    // nav_context 也把两个码一起展开 —— 唯独前端列表查询用严格 hasPermission，
+    // 于是只授 manage 的账号：侧栏有入口、能建单，列表却永远「暂无退货记录」。
+    enabled: computed(() => auth.hasAnyPermission(['stock_return_view', 'stock_return_manage'])),
     staleTime: 30_000,
     gcTime: 60_000,
     placeholderData: keepPreviousData,

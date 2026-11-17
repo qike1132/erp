@@ -286,6 +286,11 @@ async function handleDrawerExport() {
     await dailyProductionApi.export({
       ...buildExportRange(recordsFilters.value, selectedDate.value),
       department: recordsFilters.value.department || undefined,
+      // 2026-11-16 上线前审计 H-3：后端 export 早已支持 created_by / keyword
+      // （daily_production.py::export_records），但前端两个调用点都没传 →
+      // 抽屉里按录单人/关键词筛过的列表，导出得到的是**全集**。
+      created_by: recordsFilters.value.createdBy.trim() || undefined,
+      keyword: recordsFilters.value.keyword.trim() || undefined,
     })
     exportStatus.type = 'success'
     exportStatus.message = '导出成功'
