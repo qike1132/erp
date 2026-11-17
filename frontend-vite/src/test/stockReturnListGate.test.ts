@@ -73,7 +73,7 @@ const STRICT_SINGLE_CALL = /\bhasPermission\s*\(/
 
 /** 解析 `[...]` 实参里的权限码。 */
 function codesOf(arrayBody: string): string[] {
-  return Array.from(arrayBody.matchAll(/['"]([A-Za-z0-9_]+)['"]/g), (m) => m[1])
+  return Array.from(arrayBody.matchAll(/['"]([A-Za-z0-9_]+)['"]/g), (m): string => m[1] ?? '')
 }
 
 /**
@@ -89,7 +89,7 @@ function isDualCodeGate(expression: string): boolean {
   const code = stripComments(expression)
   const call = ANY_OF_CALL.exec(code)
   if (call === null) return false
-  const actual = codesOf(call[1]).sort()
+  const actual = codesOf(call[1] ?? '').sort()
   const expected = [VIEW_CODE, MANAGE_CODE].sort()
   const sameSet = actual.length === expected.length && actual.every((c, i) => c === expected[i])
   return sameSet && !STRICT_SINGLE_CALL.test(code)
@@ -109,7 +109,7 @@ describe('退货列表门控与后端同源（H-5）', () => {
     const expr = enabledExpression()
     const call = ANY_OF_CALL.exec(stripComments(expr))
     expect(call, `enabled 里没有 hasAnyPermission([...]) 调用：${expr}`).not.toBeNull()
-    expect(codesOf((call as RegExpExecArray)[1]).sort()).toEqual([MANAGE_CODE, VIEW_CODE].sort())
+    expect(codesOf((call as RegExpExecArray)[1] ?? '').sort()).toEqual([MANAGE_CODE, VIEW_CODE].sort())
     expect(isDualCodeGate(expr), `enabled 门控不是双码容错形态：${expr}`).toBe(true)
   })
 
