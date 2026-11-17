@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from sqlalchemy import create_engine, text
 
 from fastapi_app.core.config import settings
+from tests._prod_guard import require_non_production_database
 
 # 一次性运维脚本守卫（2026-11-17 上线前审计 SUP-1）：
 # 下面的模块级代码会 create_engine(settings.DATABASE_URL).connect() —— 在本机就是生产库。
@@ -16,6 +17,12 @@ if __name__ != "__main__":
         "tests/qa/perf_final.py 是一次性运维脚本：只允许 `python tests/qa/perf_final.py` 直接运行，"
         "禁止 import（模块级会连生产库；见 2026-11-17 审计 SUP-1）"
     )
+
+# 2026-11-17 OCR 复审：上面的守卫只管「被 import」，**直接运行**时下面这行照样连生产库
+# （本机 .env 的 DATABASE_URL 即生产库）。与 tests/qa/_bench.py:12、
+# performance_benchmark.py:17 同款：在 create_engine **之前**过库名守卫——
+# 目标库不是 *_test 且未显式设 PERF_TEST_ALLOW_PROD_DB=1 就 SystemExit（fail-closed）。
+require_non_production_database(settings.DATABASE_URL)
 
 e = create_engine(settings.DATABASE_URL, pool_size=5, max_overflow=10)
 c = e.connect()

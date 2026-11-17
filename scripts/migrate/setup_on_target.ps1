@@ -40,6 +40,26 @@ function Write-Ok([string]$m)   { Write-Host "  [OK] $m" -ForegroundColor Green 
 function Write-Warn([string]$m) { Write-Host "  [WARN] $m" -ForegroundColor Yellow }
 function Write-Fail([string]$m) { Write-Host "  [FAIL] $m" -ForegroundColor Red }
 
+# 2026-11-17 OCR 复审：NSSM 非提权调用会静默失败且退出码仍 0（AGENTS §6.1-7），
+# 「停完服务」不能凭 nssm/Stop-Service 的退出码或回显下结论，必须用 Get-Service 的
+# Status 终态断言。与 deploy/install_package.ps1:373-397 同款断言（2026-11-17 OCR 复审）。
+# 失败即 exit 1：删库是终态操作，宁可停下让人看，也不要在服务还活着时 DROP。
+$ErpLocalServices = @("erp-prod", "erp-arq")
+function Assert-ServicesStopped([string[]]$Names) {
+    $stillRunning = @($Names | Where-Object {
+        $sv = Get-Service -Name $_ -ErrorAction SilentlyContinue
+        $sv -and $sv.Status -ne "Stopped"
+    })
+    if ($stillRunning.Count -gt 0) {
+        $detail = ($stillRunning | ForEach-Object {
+            "$_=$((Get-Service -Name $_ -ErrorAction SilentlyContinue).Status)"
+        }) -join ", "
+        Write-Fail ("以下服务未能停止，拒绝继续：" + $detail)
+        exit 1
+    }
+    Write-Ok ("服务已停止：" + ($Names -join ", "))
+}
+
 # ---- helpers ----
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -147,14 +167,15 @@ if ($failFlag) { Write-Fail "Missing prerequisites. Fix above then rerun."; exit
 # ============================================================
 Write-Step "Step 2/8 - Stop old ERP services"
 if (-not $SkipStart) {
-    foreach ($svc in @("erp-prod", "erp-arq")) {
+    foreach ($svc in $ErpLocalServices) {
         $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
         if ($s -and $s.Status -ne "Stopped") {
             if ($NssmExe -and (Test-Path $NssmExe)) { & $NssmExe stop $svc | Out-Null }
             else { Stop-Service $svc -Force -ErrorAction SilentlyContinue }
-            Write-Ok "Stopped $svc"
         }
     }
+    # 停完验终态：不在循环里无条件写 "Stopped $svc"（NSSM 静默失败时那句话是假的）
+    Assert-ServicesStopped $ErpLocalServices
     # stop leftover python/uvicorn on port 5002
     $portOwners = Get-NetTCPConnection -LocalPort 5002 -State Listen -ErrorAction SilentlyContinue
     foreach ($conn in $portOwners) {
@@ -309,6 +330,10 @@ if ($SkipDbRestore) {
             Write-Warn "Database $dbName already exists and -AllowDropDatabase is set - this will DESTROY all data in it."
             $confirm = Read-Host "Type DROP to continue (anything else aborts)"
             if ($confirm -ne 'DROP') { Write-Fail 'Aborted by operator (no DROP confirmation)'; exit 1 }
+            # 与 install_package.ps1 同款断言（2026-11-17 OCR 复审）：Step 2 停机到这里隔着
+            # 解包 / 建角色等步骤，且 -SkipStart 时 Step 2 整段不执行 —— DROP 之前必须
+            # 再验一次服务终态，否则 pg_terminate_backend 会强断正在跑的业务连接。
+            Assert-ServicesStopped $ErpLocalServices
             & $psql -h $dbHost -p $dbPort -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$dbName' AND pid <> pg_backend_pid()" 2>&1 | Out-Null
             & $psql -h $dbHost -p $dbPort -U postgres -d postgres -c "DROP DATABASE $dbName" 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { Write-Fail "DROP DATABASE failed (exit=$LASTEXITCODE)"; exit 1 }

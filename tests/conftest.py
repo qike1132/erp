@@ -145,25 +145,31 @@ from fastapi_app.tests.evidence_isolation import (  # noqa: F401
 # 测试数据库 URL（可通过环境变量覆盖）
 # ============================================================
 def _build_test_db_url() -> str:
-    """使用 TEST_DATABASE_URL 或基于主库配置构建测试库 URL
+    """派生测试库 URL —— 唯一实现在 `fastapi_app/tests/_test_db_guard.py`。
 
-    优先使用 TEST_DATABASE_URL 环境变量；
-    否则基于主库 URL 替换数据库名为 {db_name}_test。
+    为什么改成委托（2026-11-17 OCR 复审）：
+    提交 ``db90ad5d``（2026-11-16 审计 H-6）已把「测试库 URL 派生」收敛到
+    `_test_db_guard.derive_test_db_url / resolve_test_db_url`，但根树 conftest 这份
+    仍是**被否定的写法**：
+
+        parsed.path.replace(f"/{db_name}", f"/{db_name}_test", 1)
+
+    `DB_NAME` 与 URL 里实际库名不一致时它找不到子串 → **静默 no-op**，原样返回生产库 URL。
+    失败形态没变（只是碰巧被下面的硬闸拦下，而拦法是把整场会话 pytest.exit(2)，
+    一个模块拿不到 URL 就让几万条用例一条都跑不了）。
+
+    `derive_test_db_url` 改为按 URL 里**实际的库名**追加 `_test`：不依赖 DB_NAME、
+    不可能 no-op、query 参数原样保留（`?database=` 这类覆盖参数仍由硬闸拒绝）。
+    `resolve_test_db_url` 先取 `TEST_DATABASE_URL`，缺失才派生——与本函数原来的分支顺序一致。
+
+    两棵测试树（`tests/` 与 `fastapi_app/tests/`）是不同目录，但 conftest 早已把
+    `_project_root` 插进 sys.path，且已 import `fastapi_app.tests.evidence_isolation`，
+    故 `from fastapi_app.tests._test_db_guard import ...` 可行（同包，无循环依赖：
+    该模块只在函数体内延迟 import pytest/sqlalchemy）。
     """
-    test_url = os.getenv("TEST_DATABASE_URL")
-    if test_url:
-        return test_url
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
 
-    # 安全替换：仅替换 URL 路径最后的数据库名（/dbname 之后的内容）
-    from urllib.parse import urlparse, urlunparse
-
-    db_name = os.getenv("DB_NAME", "erp_system")
-    main_url = settings.ASYNC_DATABASE_URL
-    parsed = urlparse(main_url)
-    # path 格式为 /dbname，替换为 /dbname_test
-    new_path = parsed.path.replace(f"/{db_name}", f"/{db_name}_test", 1)
-    test_url = urlunparse(parsed._replace(path=new_path))
-    return test_url
+    return resolve_test_db_url()
 
 
 TEST_DATABASE_URL = _build_test_db_url()
@@ -173,44 +179,21 @@ def _assert_is_test_database(url: str) -> None:
     """硬闸（2026-10-17 审计 F-TEST-BE-TOP-03）：测试会话会 DROP SCHEMA public CASCADE，
     目标 URL 必须显式指向 *_test 库。
 
-    派生逻辑 parsed.path.replace(f"/{db_name}", ...) 在 DB_NAME 与实际库名不一致时
-    静默 no-op，返回的就是生产库 URL；TEST_DATABASE_URL 环境变量分支则完全无校验。
-    两个来路都在这里收口——不满足直接终止整个会话，不跑任何用例。
+    2026-11-17 OCR 复审：判定逻辑收敛到 `_test_db_guard.assert_is_test_database`
+    （提交 db90ad5d 的单一实现）。此前两棵树各有一份复制件，改一处漏一处就会让
+    某一路来路裸奔——现在只留一份实现 + 一份回归锁
+    （`fastapi_app/tests/test_test_db_guard_helper.py`，含 `?database=`/`?host=`/`?port=`
+    这类**覆盖型 query 参数**的拒绝用例：PG 方言的 ``create_connect_args`` 会
+    ``opts.update(url.query)``，只按 path 判定会让
+    ``…/erp_system_test?database=erp_system`` 通过校验而实际连生产库）。
 
-    ⚠️ 必须按 **SQLAlchemy 的解析口径**判定，而不是 urlparse：PG 方言的
-    ``create_connect_args`` 会 ``opts.update(url.query)``，URL 里的
-    ``?database=erp_system`` / ``?host=…`` 会**覆盖**路径上的库名与主机。
-    只看 path 会让
-    ``postgresql+asyncpg://u:p@h:5432/erp_system_test?database=erp_system``
-    通过校验，实际连的却是生产库 ⇒ DROP SCHEMA 打生产。故：这类覆盖参数一律拒绝。
+    本函数保留原名与「不满足即 pytest.exit(2)」的语义（`tests/test_test_db_url_guard.py`
+    import 它）：`assert_is_test_database` 的 `exit_fn` 默认就是 ``pytest.exit``，
+    ``returncode=2``，行为与改造前逐条一致。
     """
-    from sqlalchemy.engine import make_url
+    from fastapi_app.tests._test_db_guard import assert_is_test_database
 
-    try:
-        parsed = make_url(url)
-    except Exception as exc:
-        pytest.exit(
-            f"拒绝运行：无法解析测试库 URL（{type(exc).__name__}: {exc}）：{url!r}",
-            returncode=2,
-        )
-
-    forbidden = {'database', 'host', 'port'} & set(parsed.query.keys())
-    if forbidden:
-        pytest.exit(
-            f"拒绝运行：测试库 URL 带了会覆盖连接目标的 query 参数 "
-            f"{sorted(forbidden)}（SQLAlchemy 的 PG 方言会让它们覆盖 URL 路径上的"
-            f"库名/主机）。请把它们写进 URL 路径本身，不要用 query 参数。",
-            returncode=2,
-        )
-
-    if not (parsed.database or '').rstrip('/').endswith('_test'):
-        pytest.exit(
-            f"拒绝运行：测试库 URL 指向非测试库 {(parsed.database or '')!r}"
-            f"（本会话会对它执行 DROP SCHEMA public CASCADE）。"
-            f"请检查 DB_NAME 与 ASYNC_DATABASE_URL 的库名是否一致，"
-            f"或显式设置指向 *_test 库的 TEST_DATABASE_URL。",
-            returncode=2,
-        )
+    assert_is_test_database(url)
 
 
 _assert_is_test_database(TEST_DATABASE_URL)

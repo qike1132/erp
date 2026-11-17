@@ -8,7 +8,7 @@ TEST_DATABASE_URL 误指生产或 str.replace no-op 会把 create_all/DELETE 打
 """
 import pytest
 
-from fastapi_app.tests._test_db_guard import assert_is_test_database
+from fastapi_app.tests._test_db_guard import assert_is_test_database, derive_test_db_url
 
 
 class _ExitCalledError(Exception):
@@ -71,3 +71,45 @@ def test_replace_noop_production_url_would_be_caught():
     with pytest.raises(_ExitCalledError):
         assert_is_test_database(noop_result, exit_fn=exit_fn)
     assert calls and '非测试库' in calls[0][0]
+
+
+# ---------------------------------------------------------------------------
+# derive_test_db_url：派生必须幂等、保留驱动、保留 query
+# （2026-11-17 OCR 复审：根树 tests/conftest.py::_build_test_db_url 已改为调这一份实现）
+# ---------------------------------------------------------------------------
+def test_derive_is_idempotent_for_test_db():
+    """已是 *_test 的 URL 必须原样返回。
+
+    为什么：派生链会被串联调用（resolve 里 derive、夹具再 derive 一次）。
+    若对 _test 库再追加一次（erp_system_test_test），就会连到不存在的库。
+    """
+    url = "postgresql+asyncpg://u:p@127.0.0.1:5432/erp_system_test"
+    assert derive_test_db_url(url) == url
+
+
+def test_derive_keeps_asyncpg_driver_and_appends_suffix():
+    """按 URL 里实际的库名追加 _test，驱动（+asyncpg）原样保留。
+
+    为什么：旧写法 path.replace(f"/{DB_NAME}", ...) 依赖 DB_NAME 与 URL 库名一致，
+    不一致时静默 no-op 返回生产库 URL。这里断言派生结果只认 URL 里的库名，
+    且驱动不能丢（丢成 postgresql:// 会退化成同步驱动，异步引擎建不起来）。
+    """
+    derived = derive_test_db_url("postgresql+asyncpg://u:p@127.0.0.1:5432/erp_system")
+    assert derived == "postgresql+asyncpg://u:p@127.0.0.1:5432/erp_system_test"
+
+
+def test_derive_preserves_query_parameters():
+    """query 参数（如 ?sslmode=...）原样保留，只改路径上的库名。
+
+    为什么：生产 DSN 常带 sslmode=require / application_name=...；派生时丢 query
+    会让测试连接因缺 SSL 参数被拒或被静默降级。覆盖型参数（?database=/?host=/?port=）
+    不在此列：它们由 assert_is_test_database 直接拒绝（见 test_query_override_rejected）。
+    """
+    derived = derive_test_db_url(
+        "postgresql+asyncpg://u:p@127.0.0.1:5432/erp_system"
+        "?sslmode=require&application_name=erp_probe"
+    )
+    assert derived == (
+        "postgresql+asyncpg://u:p@127.0.0.1:5432/erp_system_test"
+        "?sslmode=require&application_name=erp_probe"
+    )
