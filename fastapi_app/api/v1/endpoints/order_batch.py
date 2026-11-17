@@ -96,6 +96,7 @@ async def list_batch_orders(
     """
     result = await order_batch_service.get_batch_orders(
         db, page=page, per_page=per_page, batch_no=batch_no, status=status, customer=customer, keyword=keyword,
+        user=_current_user,
     )
     return OrderBatchListResponse(data=result['items'], total=result['total'], page=page, per_page=per_page)
 
@@ -229,6 +230,7 @@ async def list_batch_history(
     """
     result = await order_batch_service.get_batch_history(
         db, page=page, per_page=per_page, batch_no=batch_no, customer=customer, date_from=date_from, date_to=date_to,
+        user=_current_user,
     )
     return OrderBatchListResponse(data=result['items'], total=result['total'], page=page, per_page=per_page)
 

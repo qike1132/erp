@@ -164,6 +164,37 @@ async def is_whitelisted(db: AsyncSession, customer: str) -> bool:
 
 
 
+def _order_factory_scope_clause(factory_scope: str):
+    """订单「任一条 SKU 属他厂即不可见」的读侧收窄条件。
+
+    按 order_item → product **全量**判定，与写侧
+    ``factory_scope.assert_orders_factory_scoped`` 同源：任一条 SKU 属他厂即不可见。
+    只看 ``Order.product_id``（首个 SKU 的兼容字段）会让混厂订单「列表看得见、
+    改批次号 404」。
+
+    2026-11-17 上线前审计 P1-2：这段条件原先内联在 ``_build_batch_order_branch`` 里，
+    只有 ``/batch-query`` 一个入口用；``/orders`` 与 ``/history`` 完全没有工厂收窄
+    —— 厂绑定账号直接读到别厂批次单。抽成函数供三个入口共用，避免再漏一个。
+
+    口径细节：``NULL`` 与空串都视为「未分厂」放行（沿用 /batch-query 既有读侧口径，
+    否则未分厂的历史单谁都看不见）。写侧 ``assert_orders_factory_scoped`` 只忽略
+    ``NULL``、对空串更严；实际数据里未分厂一律为 ``NULL``，两边判定一致。
+    """
+    foreign_sku = (
+        select(literal(1))
+        .select_from(OrderItem)
+        .join(Product, Product.id == OrderItem.product_id)
+        .where(
+            OrderItem.order_id == Order.id,
+            Product.factory.isnot(None),
+            Product.factory != '',
+            Product.factory != factory_scope,
+        )
+        .exists()
+    )
+    return ~foreign_sku
+
+
 def _build_batch_order_branch(whitelist, batch_no, status, customer, keyword, factory_scope=''):
     order_branch = select(
         Order.order_date.label('sort_date'),
@@ -184,23 +215,8 @@ def _build_batch_order_branch(whitelist, batch_no, status, customer, keyword, fa
     if keyword:
         order_branch = order_branch.join(Product, Order.product_id == Product.id, isouter=True)
     if factory_scope:
-        # 工厂条件按 order_item → product **全量**判定，与写侧
-        # factory_scope.assert_orders_factory_scoped 同源：任一条 SKU 属他厂即不可见。
-        # 只看 Order.product_id（首个 SKU 的兼容字段）会让混厂订单「列表看得见、
-        # 改批次号 404」——正是本条审计要消除的症状（评审 F4）。
-        foreign_sku = (
-            select(literal(1))
-            .select_from(OrderItem)
-            .join(Product, Product.id == OrderItem.product_id)
-            .where(
-                OrderItem.order_id == Order.id,
-                Product.factory.isnot(None),
-                Product.factory != '',
-                Product.factory != factory_scope,
-            )
-            .exists()
-        )
-        order_branch = order_branch.where(~foreign_sku)
+        # 工厂收窄（P1-2）：三入口共用同一份条件，避免只收窄一半
+        order_branch = order_branch.where(_order_factory_scope_clause(factory_scope))
     if keyword:
         kw = f"%{escape_like(keyword)}%"
         order_branch = order_branch.where(
@@ -334,6 +350,12 @@ async def get_batch_query_list(
     无用户上下文）时不做收窄，与超管同口径。
     """
     whitelist = await get_whitelist(db)
+    if not whitelist:
+        # P1-4（2026-11-17 上线前审计）：空白名单必须 fail-closed。两个分支原先只在
+        # `if whitelist` 时才加客户条件 → 白名单为空 = 不加条件 = 返回**全部**订单与
+        # 备货行（fail-open）；而兄弟入口 get_batch_orders / get_batch_history 空白名单
+        # 直接返回空。白名单是批次模块的「客户可见范围」，空 = 谁都不该看见。
+        return {'items': [], 'total': 0}
     factory_scope = factory_scope_of(user) if user is not None else ''
 
     # ---- SQL 层 UNION ALL 分页 ----
@@ -405,11 +427,19 @@ async def get_batch_orders(
     status: str | None = None,
     customer: str | None = None,
     keyword: str | None = None,
+    user: User | None = None,
 ) -> dict:
+    """未完成批次订单列表（GET /order-batch/orders）。
+
+    Args:
+        user: 当前用户（读侧工厂收窄，2026-11-17 上线前审计 P1-2）。厂绑定账号只能
+            看到「全部 SKU 都属本厂或未分厂」的订单；None = 不收窄（超管/诊断脚本）。
+    """
     whitelist = await get_whitelist(db)
     if not whitelist:
         return {'items': [], 'total': 0}
 
+    factory_scope = factory_scope_of(user) if user is not None else ''
     stmt = select(Order).options(joinedload(Order.product)).where(
         Order.customer.in_(whitelist),
         Order.status != ORDER_STATUS_BATCH_COMPLETED,
@@ -427,6 +457,9 @@ async def get_batch_orders(
         stmt = stmt.join(Product, Order.product_id == Product.id).where(
             or_(Order.order_no.ilike(kw), Product.name.ilike(kw), Product.barcode.ilike(kw))
         )
+
+    if factory_scope:
+        stmt = stmt.where(_order_factory_scope_clause(factory_scope))
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = (await db.execute(count_stmt)).scalar() or 0
@@ -447,11 +480,19 @@ async def get_batch_history(
     customer: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    user: User | None = None,
 ) -> dict:
+    """已归档批次历史列表（GET /order-batch/history）。
+
+    Args:
+        user: 当前用户（读侧工厂收窄，2026-11-17 上线前审计 P1-2）。与
+            :func:`get_batch_orders` 同一份判定，避免「历史看得见、当前看不见」。
+    """
     whitelist = await get_whitelist(db)
     if not whitelist:
         return {'items': [], 'total': 0}
 
+    factory_scope = factory_scope_of(user) if user is not None else ''
     stmt = select(Order).options(joinedload(Order.product), joinedload(Order.batch_completed_by)).where(
         Order.customer.in_(whitelist),
         Order.status == ORDER_STATUS_BATCH_COMPLETED,
@@ -466,6 +507,9 @@ async def get_batch_history(
         stmt = stmt.where(Order.batch_completed_at >= date_from)
     if date_to:
         stmt = stmt.where(Order.batch_completed_at <= date_to)
+
+    if factory_scope:
+        stmt = stmt.where(_order_factory_scope_clause(factory_scope))
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
     total = (await db.execute(count_stmt)).scalar() or 0
