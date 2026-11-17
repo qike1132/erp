@@ -23,6 +23,7 @@ from fastapi_app.api.v1.endpoints.import_guard import (
 )
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.deps import require_any_permission, require_permission
+from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.batch import (
     BatchImportResult,
     ComprehensiveImportResult,
@@ -95,10 +96,14 @@ async def batch_import_orders(
     # （单条接口 order.py 有 assert_product_factory_scoped，批量这边漏网）。
     # 用 factory_scope_of 现算（超管/未绑定厂得空串→None = 不限）。
     scoped_factory = factory_scope_of(current_user) or None
-    return await run_guarded_import(
-        db, file, TYPE_ORDERS, current_user,
-        lambda f: import_orders_service(db, f, scoped_factory=scoped_factory),
-    )
+    # 提交边界（2026-11-17 上线前审计 V-A）：**在 handler 内显式提交** —— 依赖收尾的
+    # commit 在响应发出之后才跑，失败时客户端已拿到 200（logs 实测 15 次「响应已发送
+    # 但数据未落库」）。指纹登记行与导入行同处这一事务，提交失败即 5xx。
+    async with db_transaction(db):
+        return await run_guarded_import(
+            db, file, TYPE_ORDERS, current_user,
+            lambda f: import_orders_service(db, f, scoped_factory=scoped_factory),
+        )
 
 
 @router.post('/import-case-stockouts', response_model=BatchImportResult, summary='批量导入皮套出库')
@@ -117,10 +122,14 @@ async def batch_import_case_stockouts(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await run_guarded_import(
-        db, file, TYPE_CASE_STOCKOUTS, current_user,
-        lambda f: import_case_stockouts_service(db, f),
-    )
+    # 提交边界（2026-11-17 上线前审计 V-A）：**在 handler 内显式提交** —— 依赖收尾的
+    # commit 在响应发出之后才跑，失败时客户端已拿到 200（logs 实测 15 次「响应已发送
+    # 但数据未落库」）。指纹登记行与导入行同处这一事务，提交失败即 5xx。
+    async with db_transaction(db):
+        return await run_guarded_import(
+            db, file, TYPE_CASE_STOCKOUTS, current_user,
+            lambda f: import_case_stockouts_service(db, f),
+        )
 
 
 @router.post('/import-case-stockins', response_model=BatchImportResult, summary='批量导入皮套入库')
@@ -139,10 +148,14 @@ async def batch_import_case_stockins(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await run_guarded_import(
-        db, file, TYPE_CASE_STOCKINS, current_user,
-        lambda f: import_case_stockins_service(db, f),
-    )
+    # 提交边界（2026-11-17 上线前审计 V-A）：**在 handler 内显式提交** —— 依赖收尾的
+    # commit 在响应发出之后才跑，失败时客户端已拿到 200（logs 实测 15 次「响应已发送
+    # 但数据未落库」）。指纹登记行与导入行同处这一事务，提交失败即 5xx。
+    async with db_transaction(db):
+        return await run_guarded_import(
+            db, file, TYPE_CASE_STOCKINS, current_user,
+            lambda f: import_case_stockins_service(db, f),
+        )
 
 
 @router.post('/import-stockins', response_model=BatchImportResult, summary='批量导入备货')
@@ -165,10 +178,14 @@ async def batch_import_stockins(
     # 的库存此前零校验（单行/aux 批量端点均已闸，导入链漏网）。scoped 为
     # 空表示超管/未绑定厂，服务层全部放行。
     scoped_factory = current_user.factory if (current_user.factory and not current_user.is_super) else None
-    return await run_guarded_import(
-        db, file, TYPE_STOCKINS, current_user,
-        lambda f: import_stockins_service(db, f, scoped_factory=scoped_factory),
-    )
+    # 提交边界（2026-11-17 上线前审计 V-A）：**在 handler 内显式提交** —— 依赖收尾的
+    # commit 在响应发出之后才跑，失败时客户端已拿到 200（logs 实测 15 次「响应已发送
+    # 但数据未落库」）。指纹登记行与导入行同处这一事务，提交失败即 5xx。
+    async with db_transaction(db):
+        return await run_guarded_import(
+            db, file, TYPE_STOCKINS, current_user,
+            lambda f: import_stockins_service(db, f, scoped_factory=scoped_factory),
+        )
 
 
 @router.post('/import-stockouts', response_model=BatchImportResult, summary='批量导入出库')
@@ -189,10 +206,14 @@ async def batch_import_stockouts(
     """
     # 工厂闸门（审查 H1）：与 /import-stockins 同口径
     scoped_factory = current_user.factory if (current_user.factory and not current_user.is_super) else None
-    return await run_guarded_import(
-        db, file, TYPE_STOCKOUTS, current_user,
-        lambda f: import_stockouts_service(db, f, scoped_factory=scoped_factory),
-    )
+    # 提交边界（2026-11-17 上线前审计 V-A）：**在 handler 内显式提交** —— 依赖收尾的
+    # commit 在响应发出之后才跑，失败时客户端已拿到 200（logs 实测 15 次「响应已发送
+    # 但数据未落库」）。指纹登记行与导入行同处这一事务，提交失败即 5xx。
+    async with db_transaction(db):
+        return await run_guarded_import(
+            db, file, TYPE_STOCKOUTS, current_user,
+            lambda f: import_stockouts_service(db, f, scoped_factory=scoped_factory),
+        )
 
 
 @router.post('/batch-import/preview', response_model=ProductImportPreviewResult,
@@ -240,10 +261,14 @@ async def batch_import_products(
     Returns:
         BatchImportResult: 包含导入结果、消息和条数的响应。
     """
-    return await run_guarded_import(
-        db, file, TYPE_PRODUCTS, current_user,
-        lambda f: import_products_service(db, f, uploader_id=current_user.id),
-    )
+    # 提交边界（2026-11-17 上线前审计 V-A）：**在 handler 内显式提交** —— 依赖收尾的
+    # commit 在响应发出之后才跑，失败时客户端已拿到 200（logs 实测 15 次「响应已发送
+    # 但数据未落库」）。指纹登记行与导入行同处这一事务，提交失败即 5xx。
+    async with db_transaction(db):
+        return await run_guarded_import(
+            db, file, TYPE_PRODUCTS, current_user,
+            lambda f: import_products_service(db, f, uploader_id=current_user.id),
+        )
 
 
 @router.post('/import-comprehensive', response_model=ComprehensiveImportResult, summary='综合批量导入')
@@ -268,9 +293,13 @@ async def batch_import_comprehensive(
     # 工厂闸门（审查 H1）：透传给订单/备货/出货三个 Sheet（产品 Sheet 自身带「工厂」列，
     # 不属跨厂写单据，语义待业务确认）
     scoped_factory = current_user.factory if (current_user.factory and not current_user.is_super) else None
-    return await run_guarded_import(
-        db, file, TYPE_COMPREHENSIVE, current_user,
-        lambda f: import_comprehensive_service(
-            db, f, uploader_id=current_user.id, scoped_factory=scoped_factory,
-        ),
-    )
+    # 提交边界（2026-11-17 上线前审计 V-A）：**在 handler 内显式提交** —— 依赖收尾的
+    # commit 在响应发出之后才跑，失败时客户端已拿到 200（logs 实测 15 次「响应已发送
+    # 但数据未落库」）。指纹登记行与导入行同处这一事务，提交失败即 5xx。
+    async with db_transaction(db):
+        return await run_guarded_import(
+            db, file, TYPE_COMPREHENSIVE, current_user,
+            lambda f: import_comprehensive_service(
+                db, f, uploader_id=current_user.id, scoped_factory=scoped_factory,
+            ),
+        )
