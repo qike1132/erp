@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.services.outsource import _shipments as shipments_mod
+from fastapi_app.services.outsource._order_processes import receive_order_process
 from fastapi_app.services.outsource._shipments import (
     create_merged_shipment,
     create_shipment,
@@ -25,6 +26,7 @@ from fastapi_app.services.outsource._shipments import (
     receive_shipment,
 )
 from fastapi_app.shared_models import (
+    SHIPMENT_STATUS_RECEIVED,
     Base,
     Notification,
     Order,
@@ -157,6 +159,57 @@ async def test_receive_shipment_split_same_process(db):
     await receive_shipment(db, s2['id'], username='beile')
     p = await db.get(OrderOutsourceProcess, process.id)
     assert p.received_quantity == 100
+
+
+async def test_receive_shipment_succeeds_after_process_already_fully_received(db):
+    """回归（2026-11-16 上线前审计 H-1）：工序已被「一键收货」收满后，确认发货单必须成功且不重复计数。
+
+    事故形态：贝乐先在工序面板点「一键收货」（数量缺省 = 整道剩余）→ 工序 received == shipped；
+    随后到发货单页点「确认收货」→ 旧实现里 receive_order_process 命中 _is_fully_received 抛
+    「该工序已收货，无需重复操作」→ 整事务回滚 → 发货单永久停在 shipped，且没有任何闭环出口。
+    """
+    order, process = await _seed(db)
+    s = await create_shipment(db, order.id, [(process.id, 5)], username='shipper')
+
+    # 先经工序面板把这道工序收满（数量缺省 = 整道剩余）
+    await receive_order_process(db, process.id, username='beile')
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert (p.received_quantity or 0) == 5, f'前置：工序应已收满 5，实际 {p.received_quantity}'
+
+    # 再确认发货单：必须成功（旧实现此处抛 ValueError）
+    result = await receive_shipment(db, s['id'], username='beile')
+    assert result['success'] is True
+    assert result['already_received'] is False
+
+    ship = await db.get(OutsourceShipment, s['id'])
+    assert ship.status == SHIPMENT_STATUS_RECEIVED
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert (p.received_quantity or 0) == 5, '发货单确认收货不得把工序收货量重复累加'
+
+
+async def test_receive_shipment_clamps_to_process_remaining(db):
+    """回归（H-1 第二种形态）：工序剩余量小于本单发货量时，确认发货单按剩余量收，不得报错。
+
+    旧实现把 item.shipped_quantity 原样传下去，qty > remaining 直接抛
+    「收货数量需在 1-N 之间」→ 同样卡死发货单。
+    """
+    order, process = await _seed(db)
+    s1 = await create_shipment(db, order.id, [(process.id, 3)], username='shipper')
+    s2 = await create_shipment(db, order.id, [(process.id, 4)], username='shipper')  # 累计已发 7
+
+    # 工序面板先收 5（剩余从 7 变 2），此时 s2 的 4 已超过剩余
+    await receive_order_process(db, process.id, username='beile', received_quantity=5)
+
+    await receive_shipment(db, s2['id'], username='beile')
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert (p.received_quantity or 0) == 7, f'应按工序剩余量收到 7，实际 {p.received_quantity}'
+    ship2 = await db.get(OutsourceShipment, s2['id'])
+    assert ship2.status == SHIPMENT_STATUS_RECEIVED
+
+    # s1 早已被前面那次「一键收货」覆盖，确认它同样能闭环（不重复计数）
+    await receive_shipment(db, s1['id'], username='beile')
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert (p.received_quantity or 0) == 7
 
 
 async def test_list_shipments_filters_and_counts(db):

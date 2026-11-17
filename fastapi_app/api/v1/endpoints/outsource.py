@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.core.exceptions import NotFoundError, db_transaction
+from fastapi_app.core.exceptions import ConflictError, NotFoundError, db_transaction
 from fastapi_app.schemas.order import OrderListResponse
 from fastapi_app.schemas.outsource import (
     GenerateProcessResponse,
@@ -301,6 +301,10 @@ async def receive_order_process(
             db, process_id, username=user.username,
             received_quantity=data.received_quantity if data else None,
         )
+    # 人工入口不传 clamp_to_remaining，服务层只在「机器调用可跳过」时才返回 None；
+    # 这里保留显式判空（类型收窄 + 万一将来有人误传该参数也不至于 500 无提示）。
+    if item is None:
+        raise ConflictError('该工序已无可收数量，请刷新后重试')
     return OrderProcessListResponse(data=[item], total=1)
 
 

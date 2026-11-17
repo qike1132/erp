@@ -657,6 +657,12 @@ async def complete_batch(
         raise ValueError(f"批次 {batch_no} 没有可完成的记录")
 
     await assert_orders_factory_scoped(db, [o.id for o in orders], user)
+    # 2026-11-16 上线前审计 H-2：备货集合此前**完全没有工厂闸门**。batch_no 是自由文本、
+    # 供应商批次常跨厂共用，而读侧（_build_batch_stockin_branch）已按 _factory_match 收窄
+    # → 厂绑定用户「列表看不见、直调却改得动」：他厂备货会被打上 batch_completed_at、
+    # 操作人还写成别厂的人。与同域 update_stockin_batch_no 同口径（404）补这一道闸。
+    for s in stockins:
+        await assert_product_factory_scoped(db, s.product_id, user, what='备货记录')
 
     now = datetime.now(UTC).replace(tzinfo=None)
     completed = []

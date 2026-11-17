@@ -312,8 +312,16 @@ async def receive_shipment(db: AsyncSession, shipment_id: int, username: str | N
         # 复用既有收货逻辑（行锁 + 数量校验 + 流水）；按**本发货单明细**的发货数量收货。
         # 第八轮审计：原传 received_quantity=None → receive_order_process 取「整道工序剩余量」
         # → 分批发货时收发货单 A 会把整道工序一次收满，随后收 B 命中 _is_fully_received 报"已收货"。
+        # 2026-11-16 上线前审计 H-1：另一条反向路径同样会卡死——工序面板「一键收货」（数量缺省
+        # =整道剩余）先把工序收满，再来确认发货单，receive_order_process 会因「已收货」抛错，
+        # 整事务回滚 ⇒ 发货单永久停在 shipped、无任何闭环出口。故本入口传 clamp_to_remaining：
+        # 按「本单发货量」与「工序剩余量」取小，剩余为 0 时跳过该明细（发货单仍照常转 received）。
         if item.process_id is not None:
-            await receive_order_process(db, item.process_id, username, received_quantity=item.shipped_quantity)
+            await receive_order_process(
+                db, item.process_id, username,
+                received_quantity=item.shipped_quantity,
+                clamp_to_remaining=True,
+            )
         item.received_quantity = item.shipped_quantity
 
     shipment.status = SHIPMENT_STATUS_RECEIVED

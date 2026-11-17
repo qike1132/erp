@@ -307,22 +307,47 @@ async def ship_order_process(db: AsyncSession, process_id: int, shipped_quantity
     await db.refresh(p)
     return _serialize_order_process(p)
 
-async def receive_order_process(db: AsyncSession, process_id: int, username: str | None = None, received_quantity: int | None = None) -> dict:
-    """确认收货（分批）：每次收货追加流水并累加数量，缺省=剩余待收，不超过已发货数量。"""
+async def receive_order_process(
+    db: AsyncSession,
+    process_id: int,
+    username: str | None = None,
+    received_quantity: int | None = None,
+    clamp_to_remaining: bool = False,
+) -> dict | None:
+    """确认收货（分批）：每次收货追加流水并累加数量，缺省=剩余待收，不超过已发货数量。
+
+    ``clamp_to_remaining``（2026-11-16 上线前审计 H-1）：给「发货单确认收货」这条**机器调用**用。
+    工序可能已被别的入口收过（工序面板「一键收货」在数量缺省时会把整道工序一次收满），
+    此时按「本单发货量」与「工序剩余量」取小；剩余为 0 则整条跳过并返回 None，
+    不再抛错——否则发货单永久停在「待收货」且没有任何闭环出口。
+
+    人工入口（工序面板 / 接口 / 批量收货）**不传**该参数，语义保持不变：超量即报错。
+    """
     # with_for_update：同发货，收货数量同样是「读-改-写」，需锁行避免并发覆盖
     p = await db.get(OrderOutsourceProcess, process_id, with_for_update=True)
     if not p:
         raise ValueError('外发工序不存在')
-    if _is_fully_received(p):
-        raise ValueError('该工序已收货，无需重复操作')
     shipped = p.shipped_quantity or 0
-    if shipped <= 0:
-        raise ValueError('该工序尚未发货，请先发货')
-
     received_now = p.received_quantity or 0
     remaining = shipped - received_now
+    if _is_fully_received(p) or shipped <= 0 or remaining <= 0:
+        if clamp_to_remaining:
+            # 数据可能已被其它入口收满/收掉；发货单侧只记「本单已确认」，不再重复回写工序
+            logger.warning(
+                '发货单确认收货：工序 %s 无可收剩余（shipped=%s received=%s），跳过明细回写',
+                process_id, shipped, received_now,
+            )
+            return None
+        if _is_fully_received(p):
+            raise ValueError('该工序已收货，无需重复操作')
+        raise ValueError('该工序尚未发货，请先发货')
+
     qty = received_quantity if received_quantity is not None else remaining
+    if clamp_to_remaining:
+        qty = min(qty, remaining)
     if qty <= 0 or qty > remaining:
+        if clamp_to_remaining:
+            return None
         raise ValueError(f'收货数量需在 1-{remaining} 之间')
 
     p.received_quantity = received_now + qty
@@ -387,6 +412,8 @@ async def receive_order_processes_batch(
             item = await receive_order_process(db, process_id, username, received_quantity=quantity)
         except ValueError as e:
             raise ValueError(f'外发工序 {process_id}：{e}') from e
+        if item is None:  # 只有 clamp 模式会返回 None；本入口不传该参数，保留分支供类型收窄
+            continue
         if item['order_id'] != order_id:
             raise ValueError(f'外发工序 {process_id} 不属于订单 {order_id}')
         results.append(item)

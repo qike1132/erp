@@ -108,6 +108,99 @@ class TestUpdateStockinBatchNoFactoryGate:
         assert db.execute.await_count == 1, '超管分支不应再查一次产品工厂'
 
 
+def _scalars_all(rows):
+    """模拟 `db.execute(...).scalars().all()`。"""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = rows
+    return result
+
+
+class TestCompleteBatchStockinFactoryGate:
+    """`complete_batch` 的备货集合必须过工厂闸门（上线前审计 2026-11-16 High 2）。
+
+    事故形态：batch_no 是自由文本、供应商批次常跨厂共用；订单集合有闸门，备货集合没有
+    → 厂绑定非超管点「完成批次」时，同批次号下他厂的备货行被一并打上
+    batch_completed_at（并记成他的操作人），从此退出未完成台账。
+    读侧（_build_batch_stockin_branch）却按 `_factory_match` 收窄——「列表看不见、直调改得动」。
+    """
+
+    @pytest.mark.asyncio
+    async def test_rejects_other_factory_stockin(self):
+        """他厂备货行 → 404，且不得留下已归档状态（闸门在写值之前）。"""
+        stockin = MagicMock()
+        stockin.id = 41
+        stockin.product_id = 2      # 他厂产品
+        stockin.batch_no = 'B1'
+        stockin.batch_completed_at = None
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[
+            _scalars_all([]),           # 订单集合：空（他厂订单已归档/软删的常见形态）
+            _scalars_all([stockin]),    # 备货集合：他厂 1 行
+            _scalar_result('二分厂'),   # 闸门查产品工厂
+        ])
+
+        with pytest.raises(HTTPException) as exc:
+            await order_batch_service.complete_batch(
+                db, batch_no='B1', user=_user(factory='一分厂', is_super=False),
+            )
+
+        assert exc.value.status_code == 404, '他厂备货对厂绑定用户必须是 404（不暴露记录存在）'
+        assert stockin.batch_completed_at is None, '被拒时不得留下已归档状态'
+        assert db.flush.await_count == 0, '闸门必须在任何写库动作之前'
+
+    @pytest.mark.asyncio
+    async def test_allows_same_factory_stockin(self):
+        """本厂备货照常归档（闸门不能把正常完成批次也拦掉）。"""
+        stockin = MagicMock()
+        stockin.id = 42
+        stockin.product_id = 1
+        stockin.batch_no = 'B1'
+        stockin.batch_completed_at = None
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[
+            _scalars_all([]),
+            _scalars_all([stockin]),
+            _scalar_result('一分厂'),
+        ])
+
+        with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock), \
+             patch.object(order_batch_service, '_write_audit_log'), \
+             patch.object(order_batch_service, '_invalidate_batch_caches', new_callable=AsyncMock), \
+             patch.object(order_batch_service, 'schedule_post_commit_invalidation'):
+            out = await order_batch_service.complete_batch(
+                db, batch_no='B1', user=_user(factory='一分厂', is_super=False),
+            )
+
+        assert out['completed_stockins'] == 1
+        assert stockin.batch_completed_at is not None
+        assert stockin.batch_completed_by_id == 1
+
+    @pytest.mark.asyncio
+    async def test_superuser_is_not_scoped(self):
+        """超管不受工厂限制，且不额外查产品表（只有 2 次 execute）。"""
+        stockin = MagicMock()
+        stockin.id = 43
+        stockin.product_id = 2
+        stockin.batch_no = 'B1'
+        stockin.batch_completed_at = None
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[
+            _scalars_all([]),
+            _scalars_all([stockin]),
+        ])
+
+        with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock), \
+             patch.object(order_batch_service, '_write_audit_log'), \
+             patch.object(order_batch_service, '_invalidate_batch_caches', new_callable=AsyncMock), \
+             patch.object(order_batch_service, 'schedule_post_commit_invalidation'):
+            out = await order_batch_service.complete_batch(
+                db, batch_no='B1', user=_user(factory=None, is_super=True),
+            )
+
+        assert out['completed_stockins'] == 1
+        assert db.execute.await_count == 2, '超管分支不应再查产品工厂'
+
+
 @pytest_asyncio.fixture
 async def sqlite_session():
     """真实异步内存 SQLite：只建 product / order / order_item / stock_in，绝不碰生产库。
