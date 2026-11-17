@@ -470,6 +470,22 @@ class DrillValidator:
                         raw_expected = len(rows_val) if isinstance(rows_val, list) else rows_val
                     expected_rows = int(raw_expected or 0)
 
+                    # V-C（2026-11-17 上线前审计）：manifest 里 `rows = -1` 表示该表的行数
+                    # **未知**（导出时计数失败/结构漂移），不是「期望 -1 行」。原先直接
+                    # `row_count == expected_rows` 对 -1 恒 False → 这类表永远判失败 →
+                    # 整轮演练恒 `overall_success=False`（实测 m5_drill_raw_20260823.json 的
+                    # backup_schedule / backup_settings 就是 -1 形态，三份 recovery_test_*
+                    # 全部 False）。归为 skipped：不进通过率分子分母、也不算失败。
+                    # **真实缺表（期望 N>0、实际 0）仍照常判 False**，不放宽任何实证口径。
+                    if expected_rows < 0:
+                        validation_results[table_name] = {
+                            'expected': None,
+                            'actual': row_count,
+                            'skipped': True,
+                            'skip_reason': f'manifest 未提供行数（rows={expected_rows}）',
+                        }
+                        continue
+
                     validation_results[table_name] = {
                         'expected': expected_rows,
                         'actual': row_count,
@@ -490,8 +506,14 @@ class DrillValidator:
                     }
 
             # 计算总体结果
-            total_tables = len(validation_results)
-            passed_tables = sum(1 for result in validation_results.values() if result.get('passed', False))
+            # V-C：skipped 表（manifest rows=-1）既不算通过也不算失败，从分母里剔除。
+            # 全部表都 skipped 时 total_tables == 0 → 仍判失败：没有可比数据不算「灾备就绪」。
+            skipped_tables = sum(1 for r in validation_results.values() if r.get('skipped'))
+            total_tables = len(validation_results) - skipped_tables
+            passed_tables = sum(
+                1 for result in validation_results.values()
+                if not result.get('skipped') and result.get('passed', False)
+            )
             pass_percentage = (passed_tables / total_tables * 100) if total_tables > 0 else 0
 
             return {
@@ -502,6 +524,7 @@ class DrillValidator:
                 'total_tables': total_tables,
                 'passed_tables': passed_tables,
                 'failed_tables': total_tables - passed_tables,
+                'skipped_tables': skipped_tables,
                 'details': validation_results
             }
 
