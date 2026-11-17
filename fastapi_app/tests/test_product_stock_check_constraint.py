@@ -253,12 +253,37 @@ def test_downgrade_skips_when_table_absent(monkeypatch, captured_ddl):
 # ---------------------------------------------------------------------------
 # 4) 真实 PostgreSQL 单事务证明（零持久变更）
 # ---------------------------------------------------------------------------
-def _real_pg_engine():
-    from fastapi_app.core.database import get_sync_engine
+def _sync_test_db_url() -> str:
+    """测试库 URL 转同步驱动（psycopg）。``resolve_test_db_url()`` 给的是 asyncpg URL。"""
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
 
-    engine = get_sync_engine()
-    with engine.connect() as conn:
-        conn.execute(text("SELECT 1"))
+    url = resolve_test_db_url()
+    return url.replace("+asyncpg", "+psycopg") if "+asyncpg" in url else url
+
+
+def _real_pg_engine():
+    """连**测试库**（`*_test`），绝不连 `.env` 里那个库。
+
+    2026-11-17 上线前审计 P0-2：旧实现直接 `get_sync_engine()`
+    （= `settings.DATABASE_URL`）。`fastapi_app/tests/` 这棵树没有根树
+    `tests/conftest.py::app_on_test_db` 那层重定向，所以在生产机上**聚焦跑**本文件
+    会对**生产** `product` 表执行 `ALTER TABLE ... ADD CONSTRAINT`
+    （ACCESS EXCLUSIVE 锁）+ 负值写探针 + 全表快照；一旦事务在 `rollback()`
+    之前被进程级中断，就留下未回滚事务与挂起锁。
+
+    现改为走 `_test_db_guard` 硬闸（库名不以 `_test` 结尾即 `pytest.exit(2)`），
+    再用 NullPool 自建引擎 —— 与同树 `test_import_idempotency_constraints.py`
+    的口径一致。
+    """
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(_sync_test_db_url(), poolclass=NullPool)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:  # pragma: no cover - 无测试库环境跳过
+        engine.dispose()
+        pytest.skip(f"测试库不可用，跳过单事务证明: {exc!r}")
     return engine
 
 

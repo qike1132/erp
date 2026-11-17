@@ -213,7 +213,7 @@ try {
   $psqlGuard = Get-PgTool 'psql.exe'
   if($psqlGuard){
     try{
-      $env:PGPASSWORD = $PgSuperPassword
+      $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用（值来自参数/包内 .env），非字面量口令
       $q = (& $psqlGuard -h localhost -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$dbNameGuard'" | Out-String).Trim()
       if($q -eq '1'){ $dbExistsGuard = $true }
     } catch { } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
@@ -336,7 +336,7 @@ try {
   $dbPw = $envMap['DB_PASSWORD']; if(-not $dbPw){ Write-Fail '包内 .env 缺 DB_PASSWORD'; exit 1 }
   $dbUser = if($envMap['DB_USER']) { $envMap['DB_USER'] } else { 'erp_app' }
   $dbName = if($envMap['DB_NAME']) { $envMap['DB_NAME'] } else { 'erp_system' }
-  $env:PGPASSWORD = $PgSuperPassword
+  $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用，非字面量口令
   try {
     $esc = $dbPw.Replace("'","''")
     $roleExists = (& $psql -h localhost -U postgres -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$dbUser'" | Out-String).Trim()
@@ -361,7 +361,7 @@ try {
       if($pgDump){
         $preDump = Join-Path $TargetDir ("backups\preinstall-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-db.sql")
         New-Item -ItemType Directory -Force -Path (Split-Path $preDump -Parent) | Out-Null
-        $env:PGPASSWORD = $PgSuperPassword
+        $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用，非字面量口令
         & $pgDump -h localhost -U postgres -d $dbName -f $preDump | Out-Null
         $dumpOk = ($LASTEXITCODE -eq 0 -and (Test-Path $preDump) -and ((Get-Item $preDump).Length -gt 0))
         Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
@@ -370,6 +370,25 @@ try {
       } else {
         Write-Fail '未定位到 pg_dump，无法做删库前基线备份 —— 拒绝删除数据库'; exit 1
       }
+      # 2026-11-17 上线前审计 P1-25：删库前必须先停生产服务 ——
+      # 五服务 RUNNING 时 DROP 会强断连接（pg_terminate_backend），且若随后的
+      # CREATE DATABASE 失败，服务就会对着一个不存在的库继续运行。
+      foreach($svc in $stopOrder){
+        $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
+        if($s -and $s.Status -ne 'Stopped'){
+          Write-Warn "删库前停止服务 $svc（当前 $($s.Status)）"
+          Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+        }
+      }
+      $stillRunning = @($stopOrder | Where-Object {
+        $sv = Get-Service -Name $_ -ErrorAction SilentlyContinue
+        $sv -and $sv.Status -ne 'Stopped'
+      })
+      if($stillRunning.Count -gt 0){
+        Write-Fail ("以下服务未能停止，拒绝删库：" + ($stillRunning -join ', '))
+        exit 1
+      }
+      Write-Ok '五服务已停止（可以安全删库）'
       & $psql -h localhost -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$dbName' AND pid<>pg_backend_pid()" | Out-Null
       & $psql -h localhost -U postgres -d postgres -c "DROP DATABASE $dbName" | Out-Null
       if($LASTEXITCODE -ne 0){ Write-Fail 'DROP DATABASE 失败'; exit 1 }
@@ -502,7 +521,7 @@ try {
 
   # ==========================================================
   Write-Step '6 uploads-signing.conf'
-  $secret = (Read-EnvMap $envPath)['UPLOAD_URL_SIGNING_SECRET']
+  $secret = (Read-EnvMap $envPath)['UPLOAD_URL_SIGNING_SECRET']  # secret-scan:allow 变量名，非字面量
   if(-not $secret){ Write-Fail '.env 缺 UPLOAD_URL_SIGNING_SECRET，无法生成 uploads-signing.conf'; exit 1 }
   # 与 config/uploads-signing.conf(.example) 逐字对齐：secret 前有一个字面空格
   [IO.File]::WriteAllText((Join-Path $TargetDir 'config\uploads-signing.conf'), "secure_link_md5 `"`$arg_st`$uri $secret`";", [Text.UTF8Encoding]::new($false))

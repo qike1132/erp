@@ -27,6 +27,7 @@ param(
     [string]$DbDumpPath = "",          # optional path to erp_system.dump
     [switch]$InstallDeps,              # pip install -r requirements/base.txt into runtime python
     [switch]$SkipDbRestore,
+    [switch]$AllowDropDatabase,        # 重建**已存在**的库必须显式声明（默认拒绝，删库前先人工 pg_dump）
     [switch]$SkipRedis,
     [switch]$SkipNginx,
     [switch]$SkipNssm,
@@ -243,7 +244,7 @@ if (-not $SkipDbRestore) {
         Start-Sleep -Seconds 2
 
         $escapedPw = $dbPassword.Replace("'", "''")
-        $env:PGPASSWORD = $PgSuperPassword
+        $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用（值来自参数），非字面量口令
         try {
             $roleExists = (& $psql -h $dbHost -p $dbPort -U postgres -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$dbUser'" 2>$null | Out-String).Trim()
             if ($roleExists -ne "1") {
@@ -260,7 +261,17 @@ if (-not $SkipDbRestore) {
                 if ($LASTEXITCODE -ne 0) { Write-Fail "CREATE DATABASE failed"; exit 1 }
                 Write-Ok "Database $dbName created"
             } else {
-                Write-Warn "Database $dbName exists - dropping & recreating."
+                # 2026-11-17 上线前审计 P1-26：原实现「库已存在即无条件 DROP DATABASE」——
+                # 无 pg_dump、无开关、无确认。现在默认拒绝；确需重建必须 -AllowDropDatabase + 手工确认。
+                if (-not $AllowDropDatabase) {
+                    Write-Fail ("Database $dbName already exists - refusing to DROP it. " +
+                        "重建须显式加 -AllowDropDatabase；执行前请先备份：" +
+                        "pg_dump -h $dbHost -p $dbPort -U postgres -Fc -f <备份文件> $dbName")
+                    exit 1
+                }
+                Write-Warn "Database $dbName exists and -AllowDropDatabase is set - this will DESTROY all data in it."
+                $confirm = Read-Host "Type DROP to continue (anything else aborts)"
+                if ($confirm -ne 'DROP') { Write-Fail 'Aborted by operator (no DROP confirmation)'; exit 1 }
                 & $psql -h $dbHost -p $dbPort -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$dbName' AND pid <> pg_backend_pid()" 2>&1 | Out-Null
                 & $psql -h $dbHost -p $dbPort -U postgres -d postgres -c "DROP DATABASE $dbName" 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) { Write-Fail "DROP DATABASE failed"; exit 1 }

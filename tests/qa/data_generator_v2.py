@@ -32,6 +32,15 @@ fake = Faker("zh_CN")
 
 PER_MODULE = 20000
 OUTPUT_DIR = Path(__file__).parent / "test_data"
+
+# 一次性运维脚本守卫（2026-11-17 上线前审计 SUP-1）：
+# 下一行 OUTPUT_DIR.mkdir() 在 import 期就会在仓内建目录。
+# 只允许直接运行，禁止被 import。
+if __name__ != "__main__":
+    raise RuntimeError(
+        "tests/qa/data_generator_v2.py 是一次性运维脚本：只允许直接运行，"
+        "禁止 import（模块级会写盘；见 2026-11-17 审计 SUP-1）"
+    )
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 

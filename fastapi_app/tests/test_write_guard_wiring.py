@@ -474,6 +474,10 @@ def test_prod_write_guard_ratchet_covers_all_db_scripts():
         'scripts/perf_optimization/db_query_analyzer.py',
         'scripts/_prod_write_guard.py',
         'scripts/_selftest_hook.py',
+        # 2026-11-17 上线前审计 P0-2：纯 AST 静态检查器，零 DB 连接。
+        # 它**必须**在源码里写出 SyncSessionLocal / get_sync_engine 这些禁用名
+        # （那是规则定义本身），因此必然命中上面的关键词启发式 → 登记为只读。
+        'scripts/check_test_db_isolation.py',
     }
     offenders = []
     for py in sorted(scripts_dir.rglob('*.py')):

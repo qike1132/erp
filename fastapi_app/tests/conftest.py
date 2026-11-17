@@ -271,3 +271,42 @@ async def client():
             ac.headers["X-CSRF-Token"] = csrf_cookie
         ac.headers["Authorization"] = "Bearer test-token"
         yield ac
+
+
+# ---------------------------------------------------------------------------
+# 测试库重定向（2026-11-17 上线前审计 P0-2）
+# ---------------------------------------------------------------------------
+# 背景：**根树** `tests/conftest.py::app_on_test_db` 会做这件事，但它只对 `tests/`
+# 子树生效。`fastapi_app/tests/` 这棵树此前没有等价 fixture，于是本树里任何走
+# `settings.DATABASE_URL` / `get_sync_engine()` 的代码连的都是 `.env` 里那个库
+# （生产机上就是生产库）—— `test_product_stock_check_constraint.py` 曾因此对
+# **生产** `product` 表执行 `ALTER TABLE ... ADD CONSTRAINT`（ACCESS EXCLUSIVE
+# 锁）+ 负值写探针 + 全表快照。
+#
+# 现在两棵树口径统一：会话开始把 `settings` 的三个库 URL 全部指向 `*_test`，
+# 会话结束还原。硬闸由 `_test_db_guard.resolve_test_db_url()` 提供 ——
+# 库名不以 `_test` 结尾会直接 `pytest.exit(2)`，绝不静默落到生产库。
+#
+# 配套门禁：`scripts/check_test_db_isolation.py`（quality_gate 的
+# `test_db_isolation` 项）禁止本树再出现 `get_sync_engine`/`SyncSession`。
+@pytest.fixture(scope="session", autouse=True)
+def app_on_test_db():
+    """把 `settings` 的三个库 URL 重定向到测试库（会话级、自动生效、用完还原）。"""
+    from fastapi_app.core.config import settings
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    saved = {
+        "ASYNC_DATABASE_URL": settings.ASYNC_DATABASE_URL,
+        "DATABASE_URL": settings.DATABASE_URL,
+        "ASYNC_DATABASE_REPLICA_URL": getattr(settings, "ASYNC_DATABASE_REPLICA_URL", ""),
+    }
+    # 过硬闸：非 `*_test` 库当场终止会话，而不是让测试连生产库。
+    async_url = resolve_test_db_url()
+    settings.ASYNC_DATABASE_URL = async_url
+    settings.DATABASE_URL = async_url.replace("+asyncpg", "+psycopg")
+    settings.ASYNC_DATABASE_REPLICA_URL = async_url
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            setattr(settings, key, value)

@@ -8,6 +8,15 @@ from sqlalchemy import create_engine, text
 
 from fastapi_app.core.config import settings
 
+# 一次性运维脚本守卫（2026-11-17 上线前审计 SUP-1）：
+# 下面的模块级代码会 create_engine(settings.DATABASE_URL).connect() —— 在本机就是生产库。
+# 只允许直接运行，禁止被 import。
+if __name__ != "__main__":
+    raise RuntimeError(
+        "tests/qa/perf_final.py 是一次性运维脚本：只允许 `python tests/qa/perf_final.py` 直接运行，"
+        "禁止 import（模块级会连生产库；见 2026-11-17 审计 SUP-1）"
+    )
+
 e = create_engine(settings.DATABASE_URL, pool_size=5, max_overflow=10)
 c = e.connect()
 

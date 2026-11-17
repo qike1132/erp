@@ -25,6 +25,7 @@ param(
     [string]$PythonExe = "",                 # e.g. C:\Python312\python.exe
     [switch]$InstallDeps,                    # auto pip install requirements/base.txt if imports fail
     [switch]$SkipDbRestore,
+    [switch]$AllowDropDatabase,              # 重建**已存在**的库必须显式声明（默认拒绝，删库前先人工 pg_dump）
     [switch]$SkipRedis,
     [switch]$SkipNginx,
     [switch]$SkipNssm,
@@ -276,7 +277,7 @@ if ($SkipDbRestore) {
     Start-Sleep -Seconds 2
 
     # 4b. create role & database as postgres superuser
-    $env:PGPASSWORD = $PgSuperPassword
+    $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用（值来自参数），非字面量口令
     try {
         $roleExists = (& $psql -h $dbHost -p $dbPort -U postgres -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$dbUser'" 2>$null)
         $roleExists = (($roleExists | Out-String).Trim())
@@ -296,7 +297,18 @@ if ($SkipDbRestore) {
             if ($LASTEXITCODE -ne 0) { Write-Fail "CREATE DATABASE failed (exit=$LASTEXITCODE)"; exit 1 }
             Write-Ok "Database $dbName created"
         } else {
-            Write-Warn "Database $dbName already exists - will drop & recreate to restore cleanly."
+            # 2026-11-17 上线前审计 P1-26：原实现「库已存在即无条件 DROP DATABASE」——
+            # 无 pg_dump、无开关、无确认，而 -TargetDir 默认就是生产路径。
+            # 现在：默认拒绝；确需重建必须显式 -AllowDropDatabase + 手工确认。
+            if (-not $AllowDropDatabase) {
+                Write-Fail ("Database $dbName already exists - refusing to DROP it. " +
+                    "重建须显式加 -AllowDropDatabase；执行前请先备份：" +
+                    "pg_dump -h $dbHost -p $dbPort -U postgres -Fc -f <备份文件> $dbName")
+                exit 1
+            }
+            Write-Warn "Database $dbName already exists and -AllowDropDatabase is set - this will DESTROY all data in it."
+            $confirm = Read-Host "Type DROP to continue (anything else aborts)"
+            if ($confirm -ne 'DROP') { Write-Fail 'Aborted by operator (no DROP confirmation)'; exit 1 }
             & $psql -h $dbHost -p $dbPort -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$dbName' AND pid <> pg_backend_pid()" 2>&1 | Out-Null
             & $psql -h $dbHost -p $dbPort -U postgres -d postgres -c "DROP DATABASE $dbName" 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { Write-Fail "DROP DATABASE failed (exit=$LASTEXITCODE)"; exit 1 }
@@ -371,7 +383,7 @@ foreach ($line in $envLines) {
         $changed = $true
     }
     elseif ($RedisPassword -and $line -match '^REDIS_PASSWORD=') {
-        $newLine = "REDIS_PASSWORD=$RedisPassword"
+        $newLine = "REDIS_PASSWORD=$RedisPassword"  # secret-scan:allow 由变量拼 .env 行，非字面量口令
         $changed = $true
     }
     # sync any URL that embeds the old redis password (REDIS_URL / _CACHE_ / _BROKER_ / _RESULT_ / LIMITER)
@@ -566,7 +578,7 @@ if (-not $SkipVerify) {
     # redis ping
     if ($RedisBinDir -and (Test-Path (Join-Path $RedisBinDir "redis-cli.exe"))) {
         $redisCli = Join-Path $RedisBinDir "redis-cli.exe"
-        if (-not $RedisPassword) { $RedisPassword = (Read-EnvFile $envFile)["REDIS_PASSWORD"] }
+        if (-not $RedisPassword) { $RedisPassword = (Read-EnvFile $envFile)["REDIS_PASSWORD"] }  # secret-scan:allow 变量引用，非字面量
         $authArg = if ($RedisPassword) { @("-a", $RedisPassword) } else { @() }
         foreach ($port in @(6379, 6380)) {
             $pong = & $redisCli @authArg -p $port ping 2>$null

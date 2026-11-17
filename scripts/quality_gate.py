@@ -152,6 +152,16 @@ GATES: tuple[Gate, ...] = (
         accepts_paths=True,
     ),
     Gate(
+        key="test_db_isolation",
+        title="测试树不得使用应用自身库引擎（会连生产库）",
+        mode=MODE_JSON,
+        script="scripts/check_test_db_isolation.py",
+        extra_args=("--json",),
+        fix_hint="改用 fastapi_app.tests._test_db_guard.resolve_test_db_url() 拿测试库 URL，"
+                 "再用 NullPool 自建引擎；不要用 get_sync_engine()/SyncSession",
+        accepts_paths=True,
+    ),
+    Gate(
         key="function_length",
         title="后端超长函数",
         mode=MODE_JSON,
@@ -1078,6 +1088,12 @@ _COMPLEX_CLEAN = b"def f(x):\n    return x\n"
 
 # key -> ((违规文件名, 内容), (干净文件名, 内容))
 SELFTEST_FIXTURES: dict[str, tuple[tuple[str, bytes], tuple[str, bytes]]] = {
+    "test_db_isolation": (
+        ("probe.py", b"from fastapi_app.core.database import get_sync_engine\n"
+                     b"engine = get_sync_engine()\n"),
+        ("probe.py", b"from fastapi_app.tests._test_db_guard import resolve_test_db_url\n"
+                     b"url = resolve_test_db_url()\n"),
+    ),
     "bare_except": (
         ("probe.py", b"try:\n    pass\nexcept:\n    pass\n"),
         ("probe.py", b"try:\n    pass\nexcept ValueError:\n    pass\n"),
