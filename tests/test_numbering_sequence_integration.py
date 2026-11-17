@@ -11,8 +11,6 @@ test_engine（与本机 pytest-asyncio 1.x 存在 ScopeMismatch）。
 会话——测试用 monkeypatch 将其指向测试库引擎，全程不触碰生产库。
 """
 import asyncio
-import os
-from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -27,18 +25,13 @@ pytestmark = pytest.mark.integration
 
 
 def _test_db_url() -> str:
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        return override
-    from fastapi_app.core.config import settings
-    db_name = os.getenv('DB_NAME', 'erp_system')
-    parsed = urlparse(settings.ASYNC_DATABASE_URL)
-    # 幂等：conftest 的 session 级 app_on_test_db 已把 settings.ASYNC_DATABASE_URL
-    # 重定向到 erp_system_test，此处再替换会生成不存在的 erp_system_test_test
-    if parsed.path.rstrip('/').endswith('_test'):
-        return settings.ASYNC_DATABASE_URL
-    new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
-    return urlunparse(parsed._replace(path=new_path))
+    """测试库 URL（单点收敛，2026-11-16 上线前审计 H-6）。
+
+    原实现自建派生链且没有 `*_test` 硬闸 → `DB_NAME` 不一致时静默返回生产库 URL。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 @pytest_asyncio.fixture

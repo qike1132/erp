@@ -15,12 +15,11 @@ _decrease_deduction 结尾不校验未消化的 reduce_amount；update_deduct_qu
 3) 事务边界：函数内不 commit / rollback（失败回滚由端点 db_transaction 提供）；
    真实测试库用例证明失败路径不留下部分抵扣（StockOut / InventoryLog / 库存零残留）。
 """
-import os
 import re
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
@@ -509,30 +508,15 @@ def _is_test_db_url(raw_url: str) -> bool:
 
 
 def _test_db_url() -> str:
-    """测试库 URL；幂等：已是测试库时原样复用，绝不二次追加 _test。"""
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        url = override
-    else:
-        from fastapi_app.core.config import settings
+    """测试库 URL（单点收敛，2026-11-16 上线前审计 H-6）；已是 `_test` 时原样复用。
 
-        current = settings.ASYNC_DATABASE_URL
-        if _is_test_db_url(current):
-            # tests/conftest.py 的会话级 autouse fixture 会把全局单例
-            # settings.ASYNC_DATABASE_URL 改写成测试库（进程级副作用，不随 fixture 作用域
-            # 隔离）。此时必须原样复用：再做一次库名替换会拼出不存在的 erp_system_test_test，
-            # 连接失败又逃过原 except 分支，最终被记成 setup ERROR。
-            url = current
-        else:
-            db_name = os.getenv('DB_NAME', 'erp_system')
-            parsed = urlparse(current)
-            new_path = parsed.path.replace('/' + db_name, '/' + db_name + '_test', 1)
-            url = urlunparse(parsed._replace(path=new_path))
-    # AUD-14（2026-10-24 审计）：聚焦跑不经根树硬闸，环境变量/派生两路在此收口
-    # （本夹具对 5 张表 create + 多表 DELETE）。
-    from fastapi_app.tests._test_db_guard import assert_is_test_database
-    assert_is_test_database(url)
-    return url
+    原实现自带一份派生链（`os.getenv(...) or settings.ASYNC_DATABASE_URL` + DB_NAME 替换）：
+    环境变量缺失时落到生产库 URL → 硬闸把**整场会话** exit 2；DB_NAME 与实际库名不一致时
+    str.replace 静默 no-op，同样返回生产库 URL。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 def _connection_error_types() -> tuple:

@@ -49,8 +49,19 @@ async def test_pool_recycle_below_server_idle_timeout(test_engine):
 #: 部署侧改这个值时同步改这里，否则下面这条静态守卫就失去意义。
 SERVER_IDLE_TIMEOUT_SECONDS = 1800
 
-#: 会被复制成运行时 `.env` 的模板/灾备副本（`.env.production` 不入库，缺失时跳过）
-POOL_RECYCLE_ENV_FILES = (".env.example", ".env.production", "config/.env.production")
+#: **入库**模板：必须存在，缺一个就说明守卫漏了面（不能「不存在就跳过」）。
+#: 2026-11-16 上线前审计 H-4：A-31 那次只修了盘上两份不入库的灾备副本，
+#: 于是 `.env.production.example` 仍写着 1800（= 阈值，「小于」不成立），
+#: 而灾难恢复/新机恰恰是照**这份入库模板**生成 .env 的。
+POOL_RECYCLE_REQUIRED_ENV_FILES = (".env.example", ".env.production.example")
+
+#: 被 gitignore 的本地副本/灾备副本：存在才校验（全新克隆下不存在）。
+POOL_RECYCLE_OPTIONAL_ENV_FILES = (
+    ".env.production", "config/.env.production", ".env.development",
+)
+
+#: 兼容旧引用：全量清单（必查 + 可选）。
+POOL_RECYCLE_ENV_FILES = POOL_RECYCLE_REQUIRED_ENV_FILES + POOL_RECYCLE_OPTIONAL_ENV_FILES
 
 
 def _read_pool_recycle(path) -> int | None:
@@ -68,6 +79,11 @@ def test_env_templates_pool_recycle_below_idle_timeout():
     活库的 idle_session_timeout，扫不到 `.env.production` 这两份灾备副本——它们在 P0-10
     那次修复里被漏掉，仍写着 1800（= 服务器阈值，不是「小于」）。灾备真按它还原，
     2026-10-07 的连接态错乱会原样回归，而 CI 永远不会红。
+
+    2026-11-16 上线前审计 H-4 补的两处：
+    1) **入库模板** `.env.production.example` 当时仍写 1800，而它正是灾难恢复/新机生成
+       .env 的来源 —— 现已改 1500 并纳入必查清单；
+    2) 必查文件**不允许「不存在就跳过」**：模板缺失本身就是回归（旧逻辑会让守卫静默失效）。
     """
     from pathlib import Path
 
@@ -77,11 +93,16 @@ def test_env_templates_pool_recycle_below_idle_timeout():
     code_default = _pool_config["pool_recycle"]
     assert code_default == 1500, f"代码默认 pool_recycle 应为 1500s，实际 {code_default}"
 
+    missing = [rel for rel in POOL_RECYCLE_REQUIRED_ENV_FILES if not (root / rel).exists()]
+    assert not missing, (
+        f"入库模板缺失：{missing}。这些文件受版本控制，缺了说明守卫的覆盖面又被缩小了"
+    )
+
     checked = []
     for rel in POOL_RECYCLE_ENV_FILES:
         path = root / rel
         if not path.exists():
-            continue  # .env.production 不入库，全新克隆下不存在
+            continue  # 被 gitignore 的本地/灾备副本，全新克隆下不存在
         value = _read_pool_recycle(path)
         assert value is not None, f"{rel} 缺少 DB_POOL_RECYCLE 声明"
         assert value == code_default, (

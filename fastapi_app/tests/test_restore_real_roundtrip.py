@@ -64,7 +64,11 @@ def restore_env(monkeypatch, tmp_path):
     monkeypatch.setattr(restore_guard, '_last_state_warn_at', 0.0, raising=False)
 
     env_test_url = os.environ.get('TEST_DATABASE_URL', '').strip()
-    base_url = env_test_url or settings.ASYNC_DATABASE_URL
+    # 2026-11-16 上线前审计 H-6：原实现环境变量缺失时直接取 settings.ASYNC_DATABASE_URL（生产库），
+    # scratch 库会变成 erp_system_restore_test（不存在）→ 整个恢复演练被静默 skip（假绿）。
+    from fastapi_app.tests._test_db_guard import derive_test_db_url
+
+    base_url = env_test_url or derive_test_db_url(str(settings.ASYNC_DATABASE_URL))
     parsed = urlparse(base_url)
     base_db = parsed.path.rsplit('/', 1)[-1]
     assert base_db, "安全闸：无法解析测试库名"

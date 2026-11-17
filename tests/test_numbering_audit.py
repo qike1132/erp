@@ -13,9 +13,7 @@ date-scoped 扫描（data_max / counter）只命中本文件自己插入的行�
 会话共享，其他用例可能留下不合规编号行。故所有涉及 violations 的断言都不假设
 "库内零违规"，而是核对**报告与独立直查结果双向一致**（逐实体复核，多报/漏报都抓）。
 """
-import os
 from datetime import UTC, datetime
-from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -36,18 +34,13 @@ _NUMBER_PATTERN = r'^[A-Z]+-(?:[0-9]{4}|[0-9]{8})-[0-9]+$'
 
 
 def _test_db_url() -> str:
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        return override
-    from fastapi_app.core.config import settings
-    db_name = os.getenv('DB_NAME', 'erp_system')
-    parsed = urlparse(settings.ASYNC_DATABASE_URL)
-    # 幂等：conftest 的 session 级 app_on_test_db 已把 settings.ASYNC_DATABASE_URL
-    # 重定向到 erp_system_test，此处再替换会生成不存在的 erp_system_test_test
-    if parsed.path.rstrip('/').endswith('_test'):
-        return settings.ASYNC_DATABASE_URL
-    new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
-    return urlunparse(parsed._replace(path=new_path))
+    """测试库 URL（单点收敛，2026-11-16 上线前审计 H-6）。
+
+    原实现自建派生链且没有 `*_test` 硬闸 → `DB_NAME` 不一致时静默返回生产库 URL。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 @pytest.fixture(autouse=True)

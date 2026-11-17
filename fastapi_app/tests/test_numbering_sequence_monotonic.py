@@ -15,8 +15,6 @@ numbering_sequence 的 UPSERT 冲突分支原为 last_seq + 1。当计数水位�
 独立短事务会话因此落在测试库，全程不触碰生产库。用例只用 MONO* 前缀，
 前后各清理一次。
 """
-import os
-from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -38,25 +36,14 @@ DATE = '20991231'
 
 
 def _test_db_url() -> str:
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        url = override
-    else:
-        from fastapi_app.core.config import settings
-        db_name = os.getenv('DB_NAME', 'erp_system')
-        parsed = urlparse(settings.ASYNC_DATABASE_URL)
-        # 幂等：conftest 的 session 级 app_on_test_db 可能已把 URL 指向 *_test
-        if parsed.path.rstrip('/').endswith('_test'):
-            url = settings.ASYNC_DATABASE_URL
-        else:
-            new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
-            url = urlunparse(parsed._replace(path=new_path))
-    # AUD-14（2026-10-24 审计）：聚焦跑 pytest fastapi_app/tests/... 不加载根树
-    # tests/conftest 的硬闸——环境变量误指生产或 str.replace no-op 失败模式会让
-    # 本夹具对生产库 create_all + DELETE。两个来路在此统一收口。
-    from fastapi_app.tests._test_db_guard import assert_is_test_database
-    assert_is_test_database(url)
-    return url
+    """测试库 URL：`TEST_DATABASE_URL` 优先，否则按 URL **实际库名**追加 `_test`。
+
+    AUD-14（2026-10-24）：聚焦跑不经根树硬闸，故本夹具自己收口。
+    2026-11-16 上线前审计 H-6：派生链收敛到 `resolve_test_db_url()`。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 @pytest_asyncio.fixture

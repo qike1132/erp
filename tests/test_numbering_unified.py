@@ -9,9 +9,7 @@ seed（当日已落库最大序号）必须按**编号自身的日期段 + 数�
 ``tests/test_numbering_sequence_integration.py`` 同一模式——不复用 root
 conftest 的 session 级引擎（pytest-asyncio 1.x 下有 ScopeMismatch）。
 """
-import os
 from datetime import UTC, datetime
-from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -24,18 +22,16 @@ pytestmark = pytest.mark.integration
 
 
 def _test_db_url() -> str:
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        return override
-    from fastapi_app.core.config import settings
-    db_name = os.getenv('DB_NAME', 'erp_system')
-    parsed = urlparse(settings.ASYNC_DATABASE_URL)
-    # 幂等：conftest 的 session 级 app_on_test_db 已把 settings.ASYNC_DATABASE_URL
-    # 重定向到 erp_system_test，此处再替换会生成不存在的 erp_system_test_test
-    if parsed.path.rstrip('/').endswith('_test'):
-        return settings.ASYNC_DATABASE_URL
-    new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
-    return urlunparse(parsed._replace(path=new_path))
+    """测试库 URL（单点收敛，2026-11-16 上线前审计 H-6）。
+
+    原实现自建一份派生链且**没有硬闸**：`DB_NAME` 与 URL 实际库名不一致时
+    `str.replace` 静默 no-op，直接返回生产库 URL——而本文件的夹具会对它
+    `create_all` + `DELETE`。现在走 `fastapi_app.tests._test_db_guard` 的同一入口
+    （派生按 URL 实际库名 + `*_test` 硬闸）。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 @pytest_asyncio.fixture

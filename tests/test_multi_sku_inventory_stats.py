@@ -8,9 +8,7 @@
 复用根 conftest 的会话级 test_engine（loop_scope="session" 已修复
 ScopeMismatch），事务回滚隔离，只写测试库 erp_system_test。
 """
-import os
 from datetime import UTC, datetime
-from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -28,14 +26,15 @@ CUSTOMER = '多SKU测试客户'
 
 
 def _test_db_url() -> str:
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        return override
-    from fastapi_app.core.config import settings
-    db_name = os.getenv('DB_NAME', 'erp_system')
-    parsed = urlparse(settings.ASYNC_DATABASE_URL)
-    new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
-    return urlunparse(parsed._replace(path=new_path))
+    """测试库 URL（单点收敛，2026-11-16 上线前审计 H-6）。
+
+    原实现既没有 `*_test` 硬闸、也没有「已是测试库就原样复用」的幂等判断：
+    `settings.ASYNC_DATABASE_URL` 被会话级 fixture 重定向到 `erp_system_test` 后，
+    再替换一次会拼出不存在的 `erp_system_test_test`。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 @pytest_asyncio.fixture

@@ -23,10 +23,8 @@ from __future__ import annotations
 import gzip
 import inspect
 import json
-import os
 import re
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
 
 import pytest
 from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
@@ -612,22 +610,10 @@ def test_recovery_data_validation_keeps_exact_equality():
 # ④ 真库验证（测试库不可达时 skip，逻辑可复核）
 # ---------------------------------------------------------------------------
 def _test_db_url() -> str:
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        url = override
-    else:
-        from fastapi_app.core.config import settings
-        db_name = os.getenv('DB_NAME', 'erp_system')
-        parsed = urlparse(settings.ASYNC_DATABASE_URL)
-        if parsed.path.rstrip('/').endswith('_test'):
-            url = settings.ASYNC_DATABASE_URL
-        else:
-            url = urlunparse(
-                parsed._replace(path=parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1))
-            )
-    from fastapi_app.tests._test_db_guard import assert_is_test_database
-    assert_is_test_database(url)
-    return url
+    """测试库 URL（单点收敛，2026-11-16 上线前审计 H-6）。"""
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 def _create_engine_or_skip():

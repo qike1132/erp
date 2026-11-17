@@ -29,7 +29,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from fastapi_app.core.config import settings
 from fastapi_app.tasks import audit_retention_task as art
 
 pytestmark = [pytest.mark.integration, pytest.mark.db]
@@ -44,13 +43,15 @@ _NOW = datetime(2020, 6, 15, 12, 0, tzinfo=UTC)
 
 
 def _test_db_url() -> str:
-    import os
+    """测试库 URL（单点收敛，2026-11-16 上线前审计 H-6）。
 
-    url = os.getenv('TEST_DATABASE_URL') or settings.ASYNC_DATABASE_URL
-    from fastapi_app.tests._test_db_guard import assert_is_test_database
+    原实现是 `os.getenv('TEST_DATABASE_URL') or settings.ASYNC_DATABASE_URL`：
+    `.env` 里没有该键时直接拿到**生产库 URL**，被硬闸 `pytest.exit(2)` 打断整场会话
+    （实测全量测试在 8% 处中断，6080 条一条都跑不完）。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
 
-    assert_is_test_database(url)
-    return url
+    return resolve_test_db_url()
 
 
 def _redact(url: str) -> str:

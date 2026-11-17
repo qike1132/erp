@@ -24,10 +24,8 @@ ORDER BY：IN 列表按传入顺序渲染，多行行锁的实际获取顺序取
 前提），用真实 asyncpg 下发的 SQL 与行级锁行为做反证，只使用 JANITOR-LOCK-* 数据
 并在前后清理。
 """
-import os
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -281,25 +279,16 @@ class TestGlobalLockOrder:
 
 
 def _test_db_url() -> str:
-    """测试库 URL：TEST_DATABASE_URL 优先，否则把主库名替换为 *_test（幂等）。"""
-    override = os.getenv('TEST_DATABASE_URL')
-    if override:
-        url = override
-    else:
-        from fastapi_app.core.config import settings
+    """测试库 URL：`TEST_DATABASE_URL` 优先，否则按 URL **实际库名**追加 `_test`。
 
-        db_name = os.getenv('DB_NAME', 'erp_system')
-        parsed = urlparse(settings.ASYNC_DATABASE_URL)
-        if parsed.path.rstrip('/').endswith('_test'):
-            url = settings.ASYNC_DATABASE_URL
-        else:
-            new_path = parsed.path.replace(f'/{db_name}', f'/{db_name}_test', 1)
-            url = urlunparse(parsed._replace(path=new_path))
-    # AUD-14（2026-10-24 审计）：聚焦跑不经根树硬闸，环境变量/派生两路在此收口
-    # （本夹具会对目标库建表并 INSERT/DELETE JANITOR-LOCK-% 数据）。
-    from fastapi_app.tests._test_db_guard import assert_is_test_database
-    assert_is_test_database(url)
-    return url
+    AUD-14（2026-10-24）：聚焦跑不经根树硬闸，故本夹具自己收口（会对目标库建表并
+    INSERT/DELETE JANITOR-LOCK-% 数据）。
+    2026-11-16 上线前审计 H-6：派生链收敛到 `resolve_test_db_url()` —— 原实现
+    在 `TEST_DATABASE_URL` 缺失时落到生产库 URL，硬闸会把**整场会话** exit 2。
+    """
+    from fastapi_app.tests._test_db_guard import resolve_test_db_url
+
+    return resolve_test_db_url()
 
 
 async def _clear_lock_rows(engine) -> None:

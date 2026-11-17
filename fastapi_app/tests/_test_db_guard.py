@@ -51,3 +51,49 @@ def assert_is_test_database(url: str, *, exit_fn=None) -> None:
             f" TEST_DATABASE_URL。",
             returncode=2,
         )
+
+
+def derive_test_db_url(main_url: str) -> str:
+    """把主库 URL 派生为 `*_test` 库 URL（幂等：已是 `_test` 就原样返回）。
+
+    2026-11-16 上线前审计 H-6：两棵测试树里共有 13 处自建的派生链，两种失败形态——
+
+    - `os.getenv('TEST_DATABASE_URL') or settings.ASYNC_DATABASE_URL`：环境变量缺失时
+      **直接落到生产库 URL**（`.env` 里没有这个键时就是这种情形）；
+    - `path.replace(f'/{DB_NAME}', f'/{DB_NAME}_test')`：`DB_NAME` 与 URL 实际库名不一致时
+      是**静默 no-op**，同样返回生产库 URL。
+
+    两者都会被上面的硬闸拦下（这点是对的），但拦法是把**整场会话** `pytest.exit(2)`——
+    一个模块拿不到 URL 就让全量 6080 条一条都跑不了（实测 8% 处中断）。
+
+    本函数改为按 **URL 里实际的库名** 追加 `_test`：不依赖 `DB_NAME` 是否正确，
+    也不可能 no-op。query 参数原样保留，`?database=` 这类覆盖参数仍由
+    `assert_is_test_database` 拒绝。
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(main_url)
+    current = (parsed.path or '').lstrip('/').rstrip('/')
+    if current.endswith('_test'):
+        return main_url
+    if not current:
+        raise RuntimeError(f'无法从 URL 解析库名，拒绝派生测试库：{main_url!r}')
+    return urlunparse(parsed._replace(path=f'/{current}_test'))
+
+
+def resolve_test_db_url() -> str:
+    """`TEST_DATABASE_URL` 优先；缺失时由 `settings.ASYNC_DATABASE_URL` 派生，返回前过硬闸。
+
+    单点收敛：两棵测试树的 13 处 `_test_db_url()` 都改调这里（2026-11-16 审计 H-6），
+    新增测试直接用它，别再复制派生链（历史上复制出 13 份、其中 5 份连闸门都没有）。
+    """
+    import os
+
+    url = (os.getenv('TEST_DATABASE_URL') or '').strip()
+    if not url:
+        from fastapi_app.core.config import settings
+
+        url = derive_test_db_url(str(settings.ASYNC_DATABASE_URL))
+    assert_is_test_database(url)
+    return url
+
