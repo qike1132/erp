@@ -373,14 +373,35 @@ async def get_stockout_records(db: AsyncSession, kind: str = 'stockout', nos: st
     return data
 
 
-async def get_stockreturn_records(db: AsyncSession, nos: str = '') -> list[dict]:
-    """按退货单号还原退货明细行（报表聚合行 → 具体记录）。仅 active。"""
+async def get_stockreturn_records(
+    db: AsyncSession, nos: str = '', *, factory: str | None = None,
+) -> list[dict]:
+    """按退货单号还原退货明细行（报表聚合行 → 具体记录）。仅 active。
+
+    Args:
+        nos: 逗号分隔的退货单号。
+        factory: 厂绑定用户的工厂收窄（2026-11-17 上线前审计 P1-3）。列表端点
+            ``get_stockreturns`` 早已按 factory 收窄，**本入口漏了**——厂绑定用户
+            拿他厂退货单号就能还原出明细（产品名/客户/数量）。判据用子查询而非
+            join，避免与 ``joinedload(StockReturn.product)`` 形成二次 join（与
+            :func:`get_stockout_records` 同款）；未分配工厂的历史行照常可见，
+            与写侧 ``factory_scope`` 放行口径一致。
+        None/'' = 不限（超管/未绑定厂）。
+    """
     codes = _parse_nos(nos)
     if not codes:
         return []
+    conditions: list[ColumnElement[bool]] = [
+        StockReturn.status == 'active',
+        StockReturn.return_no.in_(codes),
+    ]
+    if factory:
+        conditions.append(
+            StockReturn.product_id.in_(select(Product.id).where(_factory_match(factory)))
+        )
     result = await db.execute(
         select(StockReturn)
-        .where(StockReturn.status == 'active', StockReturn.return_no.in_(codes))
+        .where(*conditions)
         .options(joinedload(StockReturn.product), joinedload(StockReturn.stockout))
         .order_by(StockReturn.return_date.desc(), StockReturn.id.desc())
     )
