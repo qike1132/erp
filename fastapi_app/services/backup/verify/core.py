@@ -132,6 +132,43 @@ async def _in_savepoint(db: AsyncSession, fn):
         return False, None
 
 
+async def _relation_exists(db: AsyncSession, tname: str) -> bool | None:
+    """恢复后的库里有没有这张表（不按权限过滤）。查询本身失败时返回 None。
+
+    用 pg_class 而不是 information_schema.tables：后者按当前用户权限过滤，
+    「权限不够」会被误判成「表不存在」，正好把真失败洗成不确定。
+    """
+    async def _probe() -> bool:
+        result = await db.execute(
+            text('SELECT c.oid FROM pg_class c '
+                 'JOIN pg_namespace n ON n.oid = c.relnamespace '
+                 "WHERE n.nspname = 'public' AND c.relname = :tname"),
+            {'tname': tname},
+        )
+        return result.first() is not None
+
+    ok, present = await _in_savepoint(db, _probe)
+    return present if ok else None
+
+
+def _missing_table_l1_entry(tname: str, expected_rows: int) -> dict:
+    """恢复后库里没有这张表时的 L1 判定：按「这份备份是否本应包含它」分流。
+
+    - manifest 里没有该表（expected_rows < 0：备份早于该表创建，或本次是表级备份）
+      → L1 无从比对，记「不确定」而不是 fail。判 fail 的后果是：灾难现场把一份
+      合法可用的旧备份恢复回来，验证却永远报「未通过」，真正的缺口被这句误报
+      掩盖（审计 P1-10）。
+    - 该表本应 0 行 → 同样无从比对（缺表与 0 行在 L1 不可区分），记「不确定」。
+    - 备份里有数据、恢复后却没这张表 → 恢复确实失败，判 fail。
+    """
+    note = '恢复后库中不存在该表'
+    return {
+        'table': tname, 'expected': expected_rows, 'actual': -1,
+        'pass': False if expected_rows > 0 else None,
+        'missing_table': True, 'note': note,
+    }
+
+
 async def _verify_table_row_count(db: AsyncSession, table, qtname: str,
                                     expected_rows: int) -> tuple[dict, bool]:
     """L1 行数比对。返回 (l1_entry, 表是否存在)。"""
@@ -142,23 +179,22 @@ async def _verify_table_row_count(db: AsyncSession, table, qtname: str,
         return int(result.scalar() or 0)
 
     ok, actual = await _in_savepoint(db, _count)
-    table_exists = ok
-    actual_rows = actual if ok else -1
     if not ok:
+        if await _relation_exists(db, tname) is False:
+            logger.warning('验证: 恢复后库中不存在表 %s（manifest 记录 %s 行）',
+                           tname, expected_rows)
+            return _missing_table_l1_entry(tname, expected_rows), False
+        # 2026-10-18 OCR 评审（High）：查询失败不能记为「不确定」——汇总层只统计
+        # pass is True/False，None 会被当成通过；显式判 False 并标记 indeterminate。
+        # 注意这里到不了「表不存在」那条分支（已在上面分流），是真·数不出来。
         logger.warning(f'验证: 统计表 {tname} 行数失败')
-    # 2026-10-18 OCR 评审（High）：查询失败不能记为「不确定」——汇总层只统计
-    # pass is True/False，None 会被当成通过；显式判 False 并标记 indeterminate。
-    if not ok:
-        return {'table': tname, 'expected': expected_rows, 'actual': actual_rows,
+        return {'table': tname, 'expected': expected_rows, 'actual': -1,
                 'pass': False, 'indeterminate': True}, False
 
-    if not table_exists and expected_rows == 0:
-        l1_pass = True
-    elif expected_rows < 0:
-        l1_pass = None
-    else:
-        l1_pass = actual_rows == expected_rows
-    return {'table': tname, 'expected': expected_rows, 'actual': actual_rows, 'pass': l1_pass}, table_exists
+    # expected_rows < 0 = manifest 里没有这张表 → 不确定，不计 mismatch
+    l1_pass = None if expected_rows < 0 else actual == expected_rows
+    return {'table': tname, 'expected': expected_rows, 'actual': actual,
+            'pass': l1_pass}, True
 
 
 async def _verify_table_l0_checksum(db: AsyncSession, table, qtname: str) -> str | None:
