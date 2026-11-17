@@ -273,9 +273,13 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
     if sd is not None:
         conditions.append(StockReturn.return_date >= sd)
     if ed is not None:
-        # 左闭右开：end_date 当天整天都计入（含 23:59:59.x 的微秒记录，
-        # 退货时间由 business_now() 填充含微秒，23:59:59 口径会漏掉最后一秒内的单）
-        conditions.append(StockReturn.return_date < ed + timedelta(days=1))
+        # 左闭右开 [当天 00:00, 次日 00:00)：当天整天都计入（含 23:59:59.x 的微秒记录，
+        # 退货时间由 business_now() 填充含微秒，`<= 23:59:59` 口径会漏掉最后一秒内的单），
+        # 且不含次日。`ed` 本身已是**当天 23:59:59**（`_day_range_utc(..., end=True)`），
+        # 故右开边界 = ed + 1 秒；2026-11-17 上线前审计 P1-5：原写 `ed + timedelta(days=1)`
+        # → 边界成了**次日 23:59:59**，选「截至 10-17」会把 10-18 整天的退货一起算进
+        # 台账与导出（`total` 同错），且区间越长多算的越多。
+        conditions.append(StockReturn.return_date < ed + timedelta(seconds=1))
     total = (await db.execute(select(func.count(StockReturn.id)).where(*conditions))).scalar() or 0
     result = await db.execute(
         select(StockReturn)
