@@ -25,8 +25,41 @@ from fastapi_app.services.purchase_utils import parse_source_order_ids
 logger = logging.getLogger(__name__)
 
 
+class PartialRevocationError(RuntimeError):
+    """部分 pending 采购单撤销失败（``failed_po_ids`` 非空）。
+
+    2026-11-17 上线前审计 V-27：``_revoke_targets`` 早就把失败单单独放在
+    ``failed_po_ids`` 里返回，但**唯一调用方把它直接丢弃**（只 logger.info 一行），
+    于是「撤销失败」在链路上表现成「撤销成功」，事件 handler 正常返回、
+    死信文件里永远没有痕迹（AGENTS §6.1-9 要求 handler 失败落 deadletter）。
+    单独一个类型便于上层区分「部分失败（可重试/可告警）」与真正的编程错误；
+    消息里带 po_ids，落死信后可直接按 id 重试。
+    """
+
+
+def raise_if_partial_failure(result: dict) -> None:
+    """``failed_po_ids`` 非空即抛 —— 撤销失败不得被当成正常返回值吞掉。
+
+    必须在**事务提交之后**调用（调用方 ``async with db_transaction(db)`` 之外）：
+    在事务内抛会让已成功的撤销一起回滚，把「部分失败」变成「全失败」。
+    """
+    failed = result.get('failed_po_ids') or []
+    if failed:
+        raise PartialRevocationError(
+            f'撤销 pending 采购单部分失败：{len(failed)} 张未删成功（po_ids={failed}）；'
+            '其余单已撤销，请按 id 排查后重试'
+        )
+
+
 async def _revoke_targets(db: AsyncSession, targets: list) -> dict:
-    """撤销给定的 pending 采购单，并把其来源订单状态重算回真实值。调用方负责事务。"""
+    """撤销给定的 pending 采购单，并把其来源订单状态重算回真实值。调用方负责事务。
+
+    Returns:
+        dict：``{'revoked', 'orders_reset'}``；部分单删不掉时额外带 ``failed_po_ids``。
+        **``failed_po_ids`` 非空 = 本次撤销部分失败**，调用方必须在提交后用
+        :func:`raise_if_partial_failure` 处置（事件路径抛给 dispatcher 落死信），
+        不得像 2026-11-17 审计 V-27 前那样只记一行 INFO 就丢掉。
+    """
     if not targets:
         return {'revoked': 0, 'orders_reset': 0}
 
@@ -74,6 +107,7 @@ async def _revoke_targets(db: AsyncSession, targets: list) -> dict:
 
     if failed_po_ids:
         # 失败单必须与「无变化」分开表达：混进 revoked 里，上游就只看得到成功数。
+        # 调用方**必须**用 raise_if_partial_failure 处置（V-27），否则等于静默丢失败。
         return {'revoked': len(targets) - len(failed_po_ids), 'orders_reset': orders_reset,
                 'failed_po_ids': failed_po_ids}
     return {'revoked': len(targets), 'orders_reset': orders_reset}
@@ -309,8 +343,14 @@ async def _run_stockin_deleted(stockin_id: int) -> None:
         session_factory = require_async_session_local()
         async with session_factory() as db:
             async with db_transaction(db):
-                await revoke_pending_purchase_orders_for_stockin(db, stockin_id)
+                result = await revoke_pending_purchase_orders_for_stockin(db, stockin_id)
+        # 提交之后再判部分失败（V-27）：事务内抛会把已撤掉的单一起回滚。
+        # 这里没有 handler/死信可落（本路径是提交后回调），故由下面的 broad-except
+        # 记 WARNING + 堆栈；关键是**不再把失败静默丢在一行 INFO 里**。
+        raise_if_partial_failure(result)
         await invalidate_purchase_caches()
+    except PartialRevocationError:
+        logger.error('删除备货记录后撤销采购单部分失败（其余单已撤销）', exc_info=True)
     except Exception:  # broad-except: 清理失败不得影响备货删除主流程
         logger.warning('删除备货记录后撤销采购单失败（不影响本次删除）', exc_info=True)
 

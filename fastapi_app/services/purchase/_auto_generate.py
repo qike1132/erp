@@ -97,13 +97,19 @@ async def _run_bom_saved(product_id: int) -> None:
         from fastapi_app.core.database import require_async_session_local
         from fastapi_app.core.exceptions import db_transaction
         from fastapi_app.services.purchase_order_revoke import (
+            PartialRevocationError,
+            raise_if_partial_failure,
             revoke_pending_purchase_orders_for_product,
         )
 
         session_factory = require_async_session_local()
         async with session_factory() as db:
             async with db_transaction(db):
-                await revoke_pending_purchase_orders_for_product(db, product_id)
+                result = await revoke_pending_purchase_orders_for_product(db, product_id)
+        # 提交之后再判部分失败（V-27）：事务内抛会把已撤掉的单一起回滚。
+        raise_if_partial_failure(result)
+    except PartialRevocationError:
+        logger.error('删空 BOM 后撤销采购单部分失败（其余单已撤销）', exc_info=True)
     except Exception:  # broad-except: 撤销失败不得影响 BOM 保存本身
         logger.warning('删空 BOM 后撤销采购单失败（不影响本次保存）', exc_info=True)
 

@@ -310,7 +310,9 @@ async def test_revoke_deletes_pending_pos_and_resets_source_orders():
 
 async def test_stockin_deleted_revokes_and_invalidates(mock_db):
     """备货删除提交后：撤销引用它的 pending 采购单 + 失效采购缓存（与 ORDER_DELETED 同款）。"""
-    revoke = AsyncMock()
+    # 返回值形状按真实实现给（V-27 起调用方要读 failed_po_ids，裸 AsyncMock 会返回
+    # MagicMock → 被误判成「部分失败」）
+    revoke = AsyncMock(return_value={'revoked': 1, 'orders_reset': 0})
     inval = AsyncMock()
 
     with _patch_session(), \
@@ -394,7 +396,9 @@ async def test_order_deleted_event_revokes_and_cleans_up(monkeypatch):
     import fastapi_app.services.purchase_center_service  # noqa: F401  确保订阅已注册
     from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish
 
-    revoke = AsyncMock()
+    # 返回值按真实形状给：V-27 起 handler 会读 failed_po_ids（裸 AsyncMock 返回 MagicMock
+    # → 会被误判成「部分失败」并抛 PartialRevocationError）
+    revoke = AsyncMock(return_value={'revoked': 1, 'orders_reset': 0})
     cleanup = AsyncMock()
     invalidate = AsyncMock()
     cm = AsyncMock()

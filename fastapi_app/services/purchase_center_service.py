@@ -99,39 +99,49 @@ def _register_order_event_subscriptions():
         from fastapi_app.core.database import get_async_db_context
 
         async def _on_order_deleted(event):
-            """订单删除 → 清理关联的 pending 采购订单"""
+            """订单删除 → 清理关联的 pending 采购订单。
+
+            撤销失败（含「部分撤销失败」）**必须冒泡给 dispatcher** —— 由
+            ``domain_events._dispatch_in_process`` 记 ``stage=handler`` 死信，才符合
+            AGENTS §6.1-9「handler 失败落 deadletter」。2026-11-17 上线前审计 V-27：
+            此前外层 try/except 把所有异常吞成一行 ERROR，``_revoke_targets`` 返回的
+            ``failed_po_ids`` 又被直接丢弃 —— 死信文件里永远没有撤销失败的痕迹，
+            「可告警/可重试」形同不存在。
+            兜底清理与缓存失效仍各自兜住：它们失败不得回滚已提交的主清理
+            （2026-10-30 审计 A-M18 的口径不变）。
+            """
             payload = event.payload or {}
             order_id = payload.get('order_id')
             if not order_id:
                 return
+            from fastapi_app.services.purchase._auto_generate import invalidate_purchase_caches
+            from fastapi_app.services.purchase_order_revoke import (
+                raise_if_partial_failure,
+                revoke_pending_purchase_orders_for_order,
+            )
+            async with get_async_db_context() as db:
+                # 撤销引用它的 pending 采购单，并把同张单里其余来源订单的状态重算回真实值
+                # （否则同客户其余订单会永久卡在「已备货」）
+                result = await revoke_pending_purchase_orders_for_order(db, order_id)
+            # 提交之后再判部分失败：事务内抛会把已撤掉的单一起回滚（V-27）
+            raise_if_partial_failure(result)
+            # 兜底清理独立事务：与主清理同事务时，兜底抛错会把主清理一起回滚，
+            # 只剩日志、采购单仍在（2026-10-30 审计 A-M18）。
             try:
-                from fastapi_app.services.purchase._auto_generate import invalidate_purchase_caches
-                from fastapi_app.services.purchase_order_revoke import (
-                    revoke_pending_purchase_orders_for_order,
-                )
                 async with get_async_db_context() as db:
-                    # 撤销引用它的 pending 采购单，并把同张单里其余来源订单的状态重算回真实值
-                    # （否则同客户其余订单会永久卡在「已备货」）
-                    await revoke_pending_purchase_orders_for_order(db, order_id)
-                # 兜底清理独立事务：与主清理同事务时，兜底抛错会把主清理一起回滚，
-                # 只剩日志、采购单仍在（2026-10-30 审计 A-M18）。
-                try:
-                    async with get_async_db_context() as db:
-                        # 没有 SKU 快照的存量单仍按旧的 JSON 口径清理
-                        await cleanup_orphan_pending_purchase_orders(db, [order_id])
-                except Exception:  # defensive: 兜底清理失败只记日志，不能回滚已提交的主清理
-                    logger.warning(
-                        'ORDER_DELETED 兜底清理失败（主清理已提交）: order_id=%s',
-                        order_id, exc_info=True,
-                    )
-                # 撤销发生在删除端点的采购缓存失效**之后**（独立事务、提交后）；这里必须再失效
-                # 一次，否则两动作之间被回填的旧列表会把已删的采购单继续展示到 TTL 到期。
-                await invalidate_purchase_caches()
-            except Exception as e:  # defensive: 单个事件处理失败不影响其他事件
-                logger.error(
-                    'ORDER_DELETED 处理失败: order_id=%s error=%s',
-                    order_id, e, exc_info=True,
+                    # 没有 SKU 快照的存量单仍按旧的 JSON 口径清理
+                    await cleanup_orphan_pending_purchase_orders(db, [order_id])
+            except Exception:  # defensive: 兜底清理失败只记日志，不能回滚已提交的主清理
+                logger.warning(
+                    'ORDER_DELETED 兜底清理失败（主清理已提交）: order_id=%s',
+                    order_id, exc_info=True,
                 )
+            # 撤销发生在删除端点的采购缓存失效**之后**（独立事务、提交后）；这里必须再失效
+            # 一次，否则两动作之间被回填的旧列表会把已删的采购单继续展示到 TTL 到期。
+            try:
+                await invalidate_purchase_caches()
+            except Exception:  # defensive: 缓存失效失败不能盖掉已撤销的事实
+                logger.warning('ORDER_DELETED 后采购缓存失效失败（主清理已提交）', exc_info=True)
 
         subscribe(DomainEventType.ORDER_DELETED, _on_order_deleted)
         logger.info('采购订单领域事件订阅已注册: ORDER_DELETED')

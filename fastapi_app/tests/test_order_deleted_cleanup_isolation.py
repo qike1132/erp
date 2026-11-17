@@ -8,8 +8,11 @@ pending 采购单仍在，且没有任何痕迹。
 本文件锁定这三点：
 1. 兜底与主清理使用不同会话；
 2. 兜底失败不抛出、也不影响缓存失效；
-3. 主清理失败仍被外层兜住（不冒泡到订单删除主流程）。
+3. 主清理失败**必须冒泡**（2026-11-17 上线前审计 V-27 改）：事件 handler 的失败由
+   ``domain_events._dispatch_in_process`` 记 ``stage=handler`` 死信；handler 自己吞掉
+   就等于「撤销失败不留证据」。handler 之间的隔离仍由 dispatcher 保证。
 """
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -65,8 +68,10 @@ async def test_fallback_cleanup_uses_separate_session_and_swallow_failure():
     event = MagicMock()
     event.payload = {'order_id': 42}
 
+    # 返回值按真实形状给：V-27 起 handler 会读 failed_po_ids（裸 AsyncMock 返回 MagicMock
+    # → 会被误判成「部分失败」）
     with patch('fastapi_app.services.purchase_order_revoke.revoke_pending_purchase_orders_for_order',
-               new=AsyncMock()) as m_revoke, \
+               new=AsyncMock(return_value={'revoked': 1, 'orders_reset': 0})) as m_revoke, \
          patch.object(svc, 'cleanup_orphan_pending_purchase_orders',
                       new=AsyncMock(side_effect=RuntimeError('boom'))) as m_cleanup, \
          patch('fastapi_app.services.purchase._auto_generate.invalidate_purchase_caches',
@@ -83,7 +88,15 @@ async def test_fallback_cleanup_uses_separate_session_and_swallow_failure():
 
 
 @pytest.mark.asyncio
-async def test_main_cleanup_failure_does_not_propagate():
+async def test_main_cleanup_failure_propagates_to_dispatcher():
+    """主清理失败必须冒泡（2026-11-17 上线前审计 V-27）。
+
+    与本文件 A-M18 的口径不冲突：**兜底清理**失败仍只告警（上面那条用例），但
+    **主清理**（撤销引用订单的 pending 采购单）失败是这次事件的全部意义，必须让
+    dispatcher 记 ``stage=handler`` 死信 —— 否则「撤销失败」在证据上等于成功
+    （AGENTS §6.1-9）。handler 之间的隔离由 ``_dispatch_in_process`` 的逐 handler
+    try/except 保证，不需要 handler 自己把异常吞掉。
+    """
     sessions: list[str] = []
     cap = _capture_handler(sessions)
     handler = cap['handler']
@@ -94,7 +107,8 @@ async def test_main_cleanup_failure_does_not_propagate():
     with patch('fastapi_app.services.purchase_order_revoke.revoke_pending_purchase_orders_for_order',
                new=AsyncMock(side_effect=RuntimeError('db down'))), \
          patch.object(svc, 'cleanup_orphan_pending_purchase_orders', new=AsyncMock()) as m_cleanup:
-        await handler(event)  # 不抛
+        with pytest.raises(RuntimeError):
+            await handler(event)
 
     # 主清理失败后不再执行兜底
     assert cap['ctx'].call_count == 1
@@ -113,3 +127,39 @@ async def test_handler_ignores_event_without_order_id():
     await handler(event)
 
     assert cap['ctx'].call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_partial_revocation_failure_lands_in_handler_deadletter(tmp_path, monkeypatch):
+    """部分撤销失败（``failed_po_ids`` 非空）必须进死信，且带 stage=handler（V-27）。
+
+    ``_revoke_targets`` 早就把删不掉的单单独放在 ``failed_po_ids`` 返回，但此前
+    handler 直接丢弃 —— 死信文件里永远没有痕迹。本用例走真实 dispatcher
+    （``_dispatch_in_process``），断言死信记录里能看到 po_ids，可供人工/脚本按 id 重试。
+    """
+    from fastapi_app.core import domain_events as de
+
+    monkeypatch.setenv('ERP_DEADLETTER_DIR', str(tmp_path))
+    monkeypatch.setattr(de, '_subscribers', {})
+
+    cap = _capture_handler([])
+    de.subscribe(de.DomainEventType.ORDER_DELETED, cap['handler'])
+
+    event = de.DomainEvent(
+        event_type=de.DomainEventType.ORDER_DELETED, domain='order',
+        payload={'order_id': 42},
+    )
+    partial = {'revoked': 1, 'orders_reset': 0, 'failed_po_ids': [11, 12]}
+    with patch('fastapi_app.services.purchase_order_revoke.revoke_pending_purchase_orders_for_order',
+               new=AsyncMock(return_value=partial)), \
+         patch.object(svc, 'cleanup_orphan_pending_purchase_orders', new=AsyncMock()):
+        await de._dispatch_in_process(event)
+
+    deadletter = tmp_path / 'domain_events_deadletter.jsonl'
+    assert deadletter.exists(), '部分撤销失败没有落死信 —— 失败仍被静默吞掉'
+    records = [json.loads(line) for line in deadletter.read_text(encoding='utf-8').splitlines() if line.strip()]
+    assert len(records) == 1, records
+    assert records[0]['stage'] == 'handler', records[0]
+    assert records[0]['event_type'] == de.DomainEventType.ORDER_DELETED.value
+    assert 'po_ids=[11, 12]' in records[0]['error'], records[0]['error']
+    assert records[0]['error_type'] == 'PartialRevocationError', records[0]
