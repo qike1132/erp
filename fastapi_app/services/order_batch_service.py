@@ -32,6 +32,7 @@ from fastapi_app.services.serializers.order_serializer import OrderSerializer
 from fastapi_app.shared.factory_scope import (
     assert_orders_factory_scoped,
     assert_product_factory_scoped,
+    assert_products_factory_scoped,
     factory_scope_of,
 )
 from fastapi_app.shared.time_format import format_local_time
@@ -177,8 +178,9 @@ def _order_factory_scope_clause(factory_scope: str):
     —— 厂绑定账号直接读到别厂批次单。抽成函数供三个入口共用，避免再漏一个。
 
     口径细节：``NULL`` 与空串都视为「未分厂」放行（沿用 /batch-query 既有读侧口径，
-    否则未分厂的历史单谁都看不见）。写侧 ``assert_orders_factory_scoped`` 只忽略
-    ``NULL``、对空串更严；实际数据里未分厂一律为 ``NULL``，两边判定一致。
+    否则未分厂的历史单谁都看不见）。写侧 ``assert_orders_factory_scoped`` 已与之对齐
+    （2026-11-17 OCR 复审 M1：原先它只忽略 ``NULL``，而 ``create_product`` 落库写的是
+    ``factory or ''`` —— 未分厂是空串是常态，遂出现「列表看得见、点进去 404」）。
     """
     foreign_sku = (
         select(literal(1))
@@ -554,17 +556,23 @@ async def update_batch_no(
     old_batch_no = snapshot.batch_no
 
     should_sync = bool(sync_same_batch and old_batch_no and old_batch_no != batch_no)
+    factory_scope = factory_scope_of(user)
     lock_stmt = select(Order).where(Order.id == order_id)
     if should_sync:
-        lock_stmt = select(Order).where(or_(
-            Order.id == order_id,
-            and_(
-                Order.batch_no == old_batch_no,
-                Order.id != order_id,
-                Order.status != ORDER_STATUS_BATCH_COMPLETED,
-                Order.is_deleted.isnot(True),
-            ),
-        ))
+        # 同批候选必须限定在**本厂可见范围**内（2026-11-17 OCR 复审 M4）：
+        # batch_no 是自由文本、供应商批次常跨厂共用，若把同批的他厂单一并纳入锁定集合，
+        # 下面「闸门覆盖整个被写集合」（P0-3）就会因他厂单而整体 404 —— 用户连**自己**那单
+        # 的批次号都改不了，而读侧（_build_batch_order_branch）恰恰把那些行隐藏了，界面上
+        # 看不到冲突源、也无从规避。收窄后：锁定集合 = 将被写入的集合 = 用户能看见的集合。
+        sync_candidates = and_(
+            Order.batch_no == old_batch_no,
+            Order.id != order_id,
+            Order.status != ORDER_STATUS_BATCH_COMPLETED,
+            Order.is_deleted.isnot(True),
+        )
+        if factory_scope:
+            sync_candidates = and_(sync_candidates, _order_factory_scope_clause(factory_scope))
+        lock_stmt = select(Order).where(or_(Order.id == order_id, sync_candidates))
     lock_stmt = lock_stmt.order_by(Order.id).with_for_update(of=Order)
     locked = (await db.execute(lock_stmt)).scalars().all()
     order = next((o for o in locked if o.id == order_id), None)
@@ -685,19 +693,32 @@ async def complete_batch(
 ) -> dict:
     # F-BE-SVC-STOCK-07：两把多行锁都按 id 升序取（Order 集、StockIn 集各自排序），
     # 消除并发完成同一批次的死锁环。
-    stmt = select(Order).where(
+    factory_scope = factory_scope_of(user)
+    order_stmt = select(Order).where(
         Order.batch_no == batch_no,
         Order.status != ORDER_STATUS_BATCH_COMPLETED,
         Order.is_deleted.isnot(True),
-    ).order_by(Order.id).with_for_update()
+    )
+    stockin_stmt = select(StockIn).where(
+        StockIn.batch_no == batch_no,
+        StockIn.batch_completed_at.is_(None),
+    )
+    if factory_scope:
+        # 集合按**本厂可见范围**收窄（2026-11-17 OCR 复审 M5）：batch_no 跨厂共用时，
+        # 读侧（_build_batch_order_branch / _build_batch_stockin_branch）已经把别厂的行隐藏，
+        # 若这里仍按整批取、再由闸门整体 404，厂绑定用户会陷入死结：列表只看到自己的行，
+        # 点「完成批次」却报「不存在」。收窄后闸门退化为对「用户看不见的行」的防御性兜底。
+        order_stmt = order_stmt.where(_order_factory_scope_clause(factory_scope))
+        stockin_stmt = stockin_stmt.join(
+            Product, StockIn.product_id == Product.id,
+        ).where(_factory_match(factory_scope))
+    stmt = order_stmt.order_by(Order.id).with_for_update(of=Order)
     result = await db.execute(stmt)
     orders = result.scalars().all()
 
+    # with_for_update(of=StockIn)：带 join 时只锁备货行，不去锁 product
     stockin_result = await db.execute(
-        select(StockIn).where(
-            StockIn.batch_no == batch_no,
-            StockIn.batch_completed_at.is_(None),
-        ).order_by(StockIn.id).with_for_update()
+        stockin_stmt.order_by(StockIn.id).with_for_update(of=StockIn)
     )
     stockins = stockin_result.scalars().all()
 
@@ -709,8 +730,11 @@ async def complete_batch(
     # 供应商批次常跨厂共用，而读侧（_build_batch_stockin_branch）已按 _factory_match 收窄
     # → 厂绑定用户「列表看不见、直调却改得动」：他厂备货会被打上 batch_completed_at、
     # 操作人还写成别厂的人。与同域 update_stockin_batch_no 同口径（404）补这一道闸。
-    for s in stockins:
-        await assert_product_factory_scoped(db, s.product_id, user, what='备货记录')
+    # 2026-11-17 OCR 复审 M3：改批量版（一条 IN 查询）—— 原实现在 lock 内逐行查 product，
+    # 锁持有时间随备货行数线性放大；集合已按工厂收窄，此处是防御性二次校验。
+    await assert_products_factory_scoped(
+        db, [s.product_id for s in stockins], user, what='备货记录',
+    )
 
     now = datetime.now(UTC).replace(tzinfo=None)
     completed = []

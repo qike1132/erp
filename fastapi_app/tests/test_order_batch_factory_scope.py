@@ -48,6 +48,13 @@ def _scalar_result(value):
     return result
 
 
+def _factory_rows(values):
+    """模拟 `select(Product.factory).where(...).scalars().all()`（批量闸门用）。"""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = list(values)
+    return result
+
+
 class TestUpdateStockinBatchNoFactoryGate:
     @pytest.mark.asyncio
     async def test_rejects_other_factory_stockin(self):
@@ -136,7 +143,9 @@ class TestCompleteBatchStockinFactoryGate:
         db.execute = AsyncMock(side_effect=[
             _scalars_all([]),           # 订单集合：空（他厂订单已归档/软删的常见形态）
             _scalars_all([stockin]),    # 备货集合：他厂 1 行
-            _scalar_result('二分厂'),   # 闸门查产品工厂
+            # 防御性二次校验：集合虽已按工厂收窄（见 test_stockin_query_is_narrowed），
+            # 若 DB 仍返回他厂行，批量闸门必须拦下
+            _factory_rows(['二分厂']),
         ])
 
         with pytest.raises(HTTPException) as exc:
@@ -160,7 +169,7 @@ class TestCompleteBatchStockinFactoryGate:
         db.execute = AsyncMock(side_effect=[
             _scalars_all([]),
             _scalars_all([stockin]),
-            _scalar_result('一分厂'),
+            _factory_rows(['一分厂']),
         ])
 
         with patch.object(order_batch_service, '_safe_publish_event', new_callable=AsyncMock), \

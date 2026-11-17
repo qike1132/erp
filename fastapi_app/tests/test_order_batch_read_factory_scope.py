@@ -35,6 +35,7 @@ from sqlalchemy.pool import NullPool
 
 from fastapi_app.api.v1.endpoints import order_batch as ep
 from fastapi_app.services import order_batch_service as svc
+from fastapi_app.shared.factory_scope import assert_orders_factory_scoped
 from fastapi_app.shared_models import Base, Order, OrderItem, Product
 
 _AP = "甲厂"
@@ -80,7 +81,8 @@ async def _make_order(db, tag: str, factory: str | None, *, status: str, custome
 
 
 def _user(factory: str) -> SimpleNamespace:
-    return SimpleNamespace(id=1, factory=factory, is_super=False)
+    # username 是 _write_audit_log 需要的字段（update_batch_no 会写批次审计）
+    return SimpleNamespace(id=1, username='tester', factory=factory, is_super=False)
 
 
 @pytest.mark.asyncio
@@ -175,3 +177,49 @@ def _async_value(value):
     async def _inner(*_a, **_kw):
         return value
     return _inner()
+
+
+async def _noop_async(*_a, **_kw):
+    return None
+
+
+@pytest.mark.asyncio
+async def test_update_batch_no_syncs_only_own_factory_rows(db_session, monkeypatch):
+    """跨厂共用批次号时：改自己那单必须成功，且不去改写他厂同批单（OCR 复审 M4）。
+
+    修复前：锁定集合含同批他厂单 → 「闸门覆盖整个被写集合」整体 404「订单不存在」，
+    而读侧恰好把这些行隐藏了 —— 用户既改不了自己的单，也看不到冲突源。
+    """
+    db = db_session
+    # 审计行有 operator_id → user 外键；测试库没有 id=1 的用户，故打桩（同仓其它用例同款）
+    monkeypatch.setattr(svc, '_write_audit_log', lambda *_a, **_kw: None)
+    monkeypatch.setattr(svc, '_safe_publish_event', _noop_async)
+
+    mine = await _make_order(db, 'syncA', _AP, status='待备货', customer='客户S')
+    theirs = await _make_order(db, 'syncB', _B, status='待备货', customer='客户S')
+    mine.batch_no = 'BATCH-S1'
+    theirs.batch_no = 'BATCH-S1'
+    await db.flush()
+
+    result = await svc.update_batch_no(
+        db, order_id=mine.id, batch_no='BATCH-S2', sync_same_batch=True, user=_user(_AP),
+    )
+
+    assert result['updated_count'] == 1, result
+    await db.refresh(mine)
+    await db.refresh(theirs)
+    assert mine.batch_no == 'BATCH-S2'
+    assert theirs.batch_no == 'BATCH-S1', '他厂同批单被一起改写了 —— 越权写'
+
+
+@pytest.mark.asyncio
+async def test_unassigned_factory_sku_passes_order_write_gate(db_session):
+    """未分厂产品（库里是空串 —— create_product 写 `factory or ''`）必须放行写侧闸门。
+
+    修复前：`assert_orders_factory_scoped` 只忽略 NULL，空串被当「他厂」→ 404，
+    而读侧放行空串 → 「列表看得见、点进去 404」。这正是 P1-2 要消灭的症状（OCR 复审 M1）。
+    """
+    db = db_session
+    order = await _make_order(db, 'emptyfac', '', status='待备货', customer='客户E')
+
+    await assert_orders_factory_scoped(db, [order.id], _user(_AP))  # 不抛即通过

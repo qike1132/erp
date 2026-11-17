@@ -57,8 +57,15 @@ async def assert_orders_factory_scoped(
     """订单集合的工厂隔离闸门（批次端点用）。
 
     与 order.py::_assert_order_factory_scoped 同口径（全部 SKU 必须属本厂，
-    NULL 工厂的历史 SKU 忽略），只是把 N 次单条查询合并成一次
-    `OrderItem -> Product` 查询，避免批量分配/整批归档按订单数放大查询。
+    未分厂的 SKU 忽略），只是把 N 次单条查询合并成一次 `OrderItem -> Product` 查询，
+    避免批量分配/整批归档按订单数放大查询。
+
+    空串口径（2026-11-17 OCR 复审 M1）：`product_service.create_product` 落库写
+    ``factory=factory or ''`` —— **未分厂是空串而非 NULL 是常态**。原先判
+    ``factory is not None``（只放过 NULL）会把「含未分厂 SKU 的订单」对厂绑定用户 404，
+    而读侧 ``_order_factory_scope_clause`` 恰恰放行空串 → 列表看得见、点进去 404，
+    正是本轮 P1-2 要消灭的症状。现与 :func:`assert_product_factory_scoped` 同口径：
+    空串 = 未分厂 = 放行。
     """
     scoped_factory = factory_scope_of(user)
     if not scoped_factory or not order_ids:
@@ -66,7 +73,30 @@ async def assert_orders_factory_scoped(
     rows = (await db.execute(
         select(OrderItem.order_id, Product.factory)
         .join(Product, Product.id == OrderItem.product_id)
-        .where(OrderItem.order_id.in_(order_ids), Product.factory.isnot(None))
+        .where(OrderItem.order_id.in_(order_ids))
     )).all()
-    if any(factory is not None and factory != scoped_factory for _, factory in rows):
+    if any(factory and factory != scoped_factory for _, factory in rows):
+        raise HTTPException(status_code=404, detail=f'{what}不存在')
+
+
+async def assert_products_factory_scoped(
+    db: AsyncSession, product_ids: list[int | None], user: User, *, what: str = '记录',
+) -> None:
+    """产品集合的工厂隔离闸门（批量版）。
+
+    与 :func:`assert_product_factory_scoped` 同口径（本厂 或 未分厂的 NULL/空串放行），
+    但只发**一条** IN 查询。
+
+    2026-11-17 OCR 复审 M3：订单侧早就是「一次 IN 查询」
+    （:func:`assert_orders_factory_scoped`），备货侧却在 ``for s in stockins`` 循环里逐条
+    查 product —— 而那段代码位于 ``with_for_update()`` 锁内，锁持有时间随行数线性放大。
+    """
+    scoped_factory = factory_scope_of(user)
+    ids = [pid for pid in product_ids if pid is not None]
+    if not scoped_factory or not ids:
+        return
+    factories = (await db.execute(
+        select(Product.factory).where(Product.id.in_(ids))
+    )).scalars().all()
+    if any(factory and factory != scoped_factory for factory in factories):
         raise HTTPException(status_code=404, detail=f'{what}不存在')

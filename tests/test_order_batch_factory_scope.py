@@ -80,15 +80,27 @@ async def test_batch_assign_rejects_other_factory(async_db_session, test_custome
 
 
 async def test_complete_batch_rejects_other_factory(async_db_session, test_customer):
+    """厂绑定用户「完成批次」不得碰他厂订单。
+
+    2026-11-17 OCR 复审 M5：集合先按**本厂可见范围**收窄（与读侧同源），所以他厂单根本
+    不进入完成集合 —— 结果是「没有可完成的记录」，而不是原先的 404「订单不存在」。
+    保护更强也更诚实：读侧把这些行隐藏了，用户本就不该看到它们；这里断言**一行都没被改写**。
+    """
     order = await _order_in_factory(async_db_session, test_customer.name, '湖北')
     order.batch_no = f'B-XF-{uuid4().hex[:8]}'
     await async_db_session.flush()
+    status_before = order.status
     user = await _make_user(async_db_session, '东莞')
-    with pytest.raises(HTTPException) as ei:
+
+    with pytest.raises(ValueError) as ei:
         await order_batch_service.complete_batch(
             async_db_session, batch_no=order.batch_no, user=user,
         )
-    assert ei.value.status_code == 404
+    assert '没有可完成的记录' in str(ei.value)
+
+    await async_db_session.refresh(order)
+    assert order.batch_completed_at is None, '他厂订单被打上了完成时间 —— 越权写'
+    assert order.status == status_before, '他厂订单状态被改写了'
 
 
 async def test_same_factory_still_allowed(async_db_session, test_customer):
