@@ -144,13 +144,39 @@ class TestBackupSignalComposition:
         assert set(self._signal()) == {"ok", "age_hours", "arq_ok"}
 
 
-def test_health_route_wires_backup_block() -> None:
-    """结构断言:backup 块必须在建缓存之前算好并进入缓存的 internal_data。"""
-    from pathlib import Path
+async def test_health_route_wires_backup_block(monkeypatch) -> None:
+    """backup 块必须在建缓存之前算好并进入缓存的 internal_data。
 
-    src = (Path(__file__).resolve().parent.parent / "fastapi_app" / "core" / "health.py").read_text(encoding="utf-8")
-    assert 'backup_signal = await _backup_signal()' in src
-    assert '"backup": backup_signal,' in src
-    assert src.index('backup_signal = await _backup_signal()') < src.index(
-        "internal_data = {"
-    )
+    P1-14 起走带预算的包装（``_backup_signal_bounded``），故此前的源码文本断言
+    改为行为断言：只要 backup 块真的进了响应与缓存，中间经过哪个函数都成立。
+    """
+    from fastapi_app.core import health
+
+    async def _backup():
+        return {"ok": True, "age_hours": 0.5, "arq_ok": True}
+
+    async def _db() -> bool:
+        return True
+
+    async def _redis() -> bool:
+        return True
+
+    monkeypatch.setattr(health, "_db_healthy", _db)
+    monkeypatch.setattr(health, "_redis_healthy", _redis)
+    monkeypatch.setattr(health, "_backup_signal", _backup)
+    monkeypatch.setattr(health, "_audit_retention_signal", lambda: {"ok": True})
+    monkeypatch.setattr(
+        health, "_numbering_audit_retention_signal", lambda: {"ok": True})
+
+    saved = dict(health._health_cache)
+    try:
+        payload = await health._build_fresh_health(None, [], include_internal=True)
+        cached = dict(health._health_cache["internal_data"] or {})
+    finally:
+        health._health_cache.clear()
+        health._health_cache.update(saved)
+
+    assert payload["backup"]["ok"] is True
+    assert cached["backup"]["ok"] is True, "backup 块没进缓存 → 后续请求看不到备份链状态"
+    # P1-14：各段耗时随缓存一起暴露，慢在哪一段可直接读
+    assert {"db", "redis", "backup"} <= set(payload["checks"]["probe_ms"])

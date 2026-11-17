@@ -587,7 +587,12 @@ def _setup_prometheus(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def prometheus_middleware(request: Request, call_next):
-        skip_paths = {"/api/health", "/api/health/db", "/metrics", "/", "/nginx-health"}
+        # P1-14②（2026-11-17 审计）：/api/health 与 /api/health/db 不再整体跳过 ——
+        # 两个都是**字面量路径**（label 基数固定），跳过它们换来的只有「端点慢了
+        # 看不见」：实测生产 20 条慢请求里没有一条 /api/health，而 erp-prod.log 里
+        # 已有 373 次探针 TimeoutError，端到端无法归因。保留 /metrics、/、/nginx-health
+        # 的跳过（前三者由各自的抓取/探活机制覆盖，且 / 会随任意路径建 label）。
+        skip_paths = {"/metrics", "/", "/nginx-health"}
         if request.url.path in skip_paths:
             return await call_next(request)
 

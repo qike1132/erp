@@ -529,6 +529,54 @@ def _should_force_restart_degraded(consecutive_failures: int, fail_window_s: flo
     )
 
 
+# 强制重启前独立复检库可达性的连接/语句超时（秒）：远小于 600s 降级窗口，
+# 又足以跨过一次瞬时拥塞 —— 复检本身不能变成新的阻塞点。
+_DB_RECHECK_TIMEOUT_S = 3
+
+
+def _db_reachable_from_supervisor(url: str | None = None) -> bool | None:
+    """在监督器进程内独立探一次库（P1-14④，2026-11-17 上线前审计）。
+
+    为什么需要：``_should_force_restart_degraded`` 的唯一证据是「探针连续失败
+    10 分钟」，而探针超时既可能是 API 进程坏了，也可能是库/主机整体不可用
+    （连接池按 pool_timeout=30s 排队、库无响应）。后者杀进程树毫无用处，只会在
+    事故现场再少一个还能报警的进程。
+
+    用一次性 NullPool + connect_timeout/statement_timeout：不复用 API 的连接池
+    （那正是可能被堵住的东西），也不会把监督器主循环卡住。
+
+    返回 True（可达）/ False（不可达）/ None（探测跑不起来，不据此决策）。
+    ``url`` 只为测试注入；生产走 settings.DATABASE_URL。
+    """
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.pool import NullPool
+
+        from fastapi_app.core.config import settings
+    except ImportError:
+        return None
+    engine = None
+    try:
+        engine = create_engine(
+            url or settings.DATABASE_URL,
+            poolclass=NullPool,
+            connect_args={
+                'connect_timeout': _DB_RECHECK_TIMEOUT_S,
+                'options': f'-c statement_timeout={_DB_RECHECK_TIMEOUT_S * 1000}',
+            },
+        )
+        with engine.connect() as conn:
+            conn.execute(text('SELECT 1'))
+        return True
+    except Exception as e:  # broad-except: 复检失败按「库不可达」处理，绝不打断主循环
+        print(f'[prod_runner] 强制重启前的独立库探测失败（按库不可达处理）: {type(e).__name__}')
+        return False
+    finally:
+        if engine is not None:
+            with contextlib.suppress(Exception):
+                engine.dispose()
+
+
 def _cmd_uvicorn(api_port: int, workers: int) -> list[str]:
     return [
         _PY, "-m", "uvicorn", "fastapi_app.main:app",
@@ -905,6 +953,16 @@ class _Managed:
         # 闸门永差一个 proc_alive。窗口超 10 分钟时强制重启整棵树（探针抖动是
         # 秒级，不会误杀）。
         if _should_force_restart_degraded(self.consecutive_health_fail, window):
+            # P1-14④（2026-11-17 审计）：探针单点不决定杀树。先在本进程独立探一次
+            # 库：库从这里也连不上 ⇒ 根因在数据库/主机侧，重启后端只会让事故现场
+            # 再少一个还能报警的进程（且 600s 窗口后还杀，等于反复自残）。
+            if _db_reachable_from_supervisor() is False:
+                print(f"[prod_runner] {self.name} 健康检查持续失败，但监督器独立探库同样失败"
+                      f"（连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s）"
+                      f"，判定为数据库/主机侧故障，不强制重启进程树")
+                self.delay = _next_backoff(self.delay, self.backoff_step)
+                self.backoff_step += 1
+                return
             print(f"[prod_runner] {self.name} 进程存活但健康检查持续失败超过 "
                   f"{int(_DEGRADED_RESTART_MIN_WINDOW_S)}s"
                   f"(连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s)，"

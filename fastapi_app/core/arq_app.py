@@ -662,20 +662,28 @@ async def check_worker_health() -> tuple[bool, str]:
         return False, f'ARQ Worker 健康检测失败: {type(e).__name__}'
 
 
-async def probe_worker_health_isolated(timeout: float = 1.0) -> bool:
-    """健康端点专用：用**短命连接池**判定 ARQ worker 是否在线，绝不触碰全局池。
+# P1-14③（2026-11-17 上线前审计）：探测结果短 TTL 缓存。原先每次冷计算都要
+# create_pool + aclose（一次完整握手），/api/health 的 10s 缓存一过期就重来，
+# 8 个 worker ⇒ ≈0.8 次握手/秒，全打在同一个 broker 上。缓存后降到 ≤0.1 次/秒。
+# 失败结论同样有 TTL：broker 恢复后最多晚 _PROBE_CACHE_TTL_S 才重新探到，
+# 与 /api/health 自身的 10s 缓存同量级。
+_PROBE_CACHE_TTL_S = 10.0
+_probe_cache: dict[str, float | bool] = {'at': 0.0, 'ok': False}
 
-    为什么必须隔离：``get_arq_pool()`` 的池在首次调用时创建，并**绑定当时的事件循环**
-    后被长期缓存。``/api/health`` 被高频调用、也可能在不同事件循环下被调用（测试、
-    多 loop 场景），复用绑定在已关闭 loop 上的连接会抛
-    ``Event loop is closed`` / ``'NoneType' object has no attribute 'send'``，
-    污染整条健康探测链路。探测只是一次 GET，短命连接的代价由 /api/health 的
-    10s 缓存兜住。
+
+async def _probe_arq_once(timeout: float) -> bool:
+    """一次真实的隔离探测：建池与读哨兵键共用同一个 deadline。
+
+    原先只有 ``pool.get()`` 受 wait_for 约束，``create_pool`` 在 wait_for 之外 ——
+    broker 不可达时按 arq 默认 conn_timeout=1 / conn_retries=5 / retry_delay=1
+    可拖到 ~10s，「1s 预算」实际不成立（P1-14 根因之二）。
     """
+    deadline = time.monotonic() + timeout
     pool = None
     try:
-        pool = await create_pool(redis_settings)
-        value = await asyncio.wait_for(pool.get(_health_check_key(pool)), timeout=timeout)
+        pool = await asyncio.wait_for(create_pool(redis_settings), timeout=max(timeout, 0.05))
+        remaining = max(deadline - time.monotonic(), 0.05)
+        value = await asyncio.wait_for(pool.get(_health_check_key(pool)), timeout=remaining)
         return bool(value)
     except Exception as e:  # broad-except: 探测自身不得抛出，任何异常一律按"不在线"处理
         logger.debug('ARQ 隔离探针失败(按不在线处理): %s', e)
@@ -684,3 +692,24 @@ async def probe_worker_health_isolated(timeout: float = 1.0) -> bool:
         if pool is not None:
             with contextlib.suppress(Exception):
                 await pool.aclose()
+
+
+async def probe_worker_health_isolated(timeout: float = 1.0) -> bool:
+    """健康端点专用：用**短命连接池**判定 ARQ worker 是否在线，绝不触碰全局池。
+
+    为什么必须隔离：``get_arq_pool()`` 的池在首次调用时创建，并**绑定当时的事件循环**
+    后被长期缓存。``/api/health`` 被高频调用、也可能在不同事件循环下被调用（测试、
+    多 loop 场景），复用绑定在已关闭 loop 上的连接会抛
+    ``Event loop is closed`` / ``'NoneType' object has no attribute 'send'``，
+    污染整条健康探测链路。
+
+    P1-14③：结果按 ``_PROBE_CACHE_TTL_S`` 缓存，且建池纳入同一 timeout（见
+    :func:`_probe_arq_once`）。调用方仍拿到一只布尔值，语义不变。
+    """
+    now = time.monotonic()
+    if now - float(_probe_cache['at']) < _PROBE_CACHE_TTL_S:
+        return bool(_probe_cache['ok'])
+    ok = await _probe_arq_once(timeout)
+    _probe_cache['at'] = time.monotonic()
+    _probe_cache['ok'] = ok
+    return ok
