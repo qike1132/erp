@@ -92,7 +92,11 @@ async def _run_bom_saved(product_id: int) -> None:
     重建」；同步把仍挂着的 pending 单按新 BOM 整体重建明细；最后自动生成补上缺的
     采购单（BOM 若已补回就会重新生成，删空则停在「待生成（未配置BOM）」）。
     撤销/同步各自开独立会话，失败只记日志，不影响 BOM 保存本身。
+
+    「部分撤销失败」（PartialRevocationError）是例外：它要在**三步都跑完**之后才抛，
+    否则会把「同步明细 + 自动生成」一起掐掉（2026-11-17 OCR 复审 M3）。
     """
+    partial_error: BaseException | None = None
     try:
         from fastapi_app.core.database import require_async_session_local
         from fastapi_app.core.exceptions import db_transaction
@@ -107,9 +111,13 @@ async def _run_bom_saved(product_id: int) -> None:
             async with db_transaction(db):
                 result = await revoke_pending_purchase_orders_for_product(db, product_id)
         # 提交之后再判部分失败（V-27）：事务内抛会把已撤掉的单一起回滚。
-        raise_if_partial_failure(result)
-    except PartialRevocationError:
-        logger.error('删空 BOM 后撤销采购单部分失败（其余单已撤销）', exc_info=True)
+        # 但**先不抛**：后面的「同步 pending 明细 + 自动生成」是同一保存动作的其余部分，
+        # 撤销部分失败不该把它们一起掐掉（2026-11-17 OCR 复审 M3）。记下来，函数末尾再抛。
+        try:
+            raise_if_partial_failure(result)
+        except PartialRevocationError as exc:
+            partial_error = exc
+            logger.error('删空 BOM 后撤销采购单部分失败（其余单已撤销）', exc_info=True)
     except Exception:  # broad-except: 撤销失败不得影响 BOM 保存本身
         logger.warning('删空 BOM 后撤销采购单失败（不影响本次保存）', exc_info=True)
 
@@ -147,6 +155,10 @@ async def _run_bom_saved(product_id: int) -> None:
         logger.warning('BOM 变更同步采购明细失败（不影响本次保存）', exc_info=True)
 
     await _run_auto_generate()
+
+    # 三步都跑完了，再把「部分撤销失败」抛出去（提交后回调的调用方会记 WARNING/ERROR）。
+    if partial_error is not None:
+        raise partial_error
 
 
 def schedule_bom_saved_side_effects(session, product_id: int) -> None:

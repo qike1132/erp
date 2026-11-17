@@ -123,8 +123,11 @@ def _register_order_event_subscriptions():
                 # 撤销引用它的 pending 采购单，并把同张单里其余来源订单的状态重算回真实值
                 # （否则同客户其余订单会永久卡在「已备货」）
                 result = await revoke_pending_purchase_orders_for_order(db, order_id)
-            # 提交之后再判部分失败：事务内抛会把已撤掉的单一起回滚（V-27）
-            raise_if_partial_failure(result)
+            # 注意：**不能**在这里就抛「部分撤销失败」（2026-11-17 OCR 复审 M3）。
+            # 兜底清理与采购缓存失效必须照常跑完，最后再抛给 dispatcher —— 否则命中部
+            # 分失败时：① 没有 SKU 快照的存量单得不到兜底清理；② 采购列表缓存不失效，
+            # 已撤销的单会继续展示到 TTL 到期，而日志里只说「部分失败」。
+            # 主清理事务已提交（async with 退出即 commit），所以放到最后抛不会回滚它。
             # 兜底清理独立事务：与主清理同事务时，兜底抛错会把主清理一起回滚，
             # 只剩日志、采购单仍在（2026-10-30 审计 A-M18）。
             try:
@@ -142,6 +145,10 @@ def _register_order_event_subscriptions():
                 await invalidate_purchase_caches()
             except Exception:  # defensive: 缓存失效失败不能盖掉已撤销的事实
                 logger.warning('ORDER_DELETED 后采购缓存失效失败（主清理已提交）', exc_info=True)
+            # 最后一步才把「部分撤销失败」抛给 dispatcher（落 stage=handler 死信）——
+            # 此时主清理已提交、兜底清理与缓存失效都已尝试过（见上方 M3 说明）。
+            raise_if_partial_failure(result)
+
 
         subscribe(DomainEventType.ORDER_DELETED, _on_order_deleted)
         logger.info('采购订单领域事件订阅已注册: ORDER_DELETED')

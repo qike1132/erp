@@ -345,10 +345,11 @@ async def _run_stockin_deleted(stockin_id: int) -> None:
             async with db_transaction(db):
                 result = await revoke_pending_purchase_orders_for_stockin(db, stockin_id)
         # 提交之后再判部分失败（V-27）：事务内抛会把已撤掉的单一起回滚。
-        # 这里没有 handler/死信可落（本路径是提交后回调），故由下面的 broad-except
-        # 记 WARNING + 堆栈；关键是**不再把失败静默丢在一行 INFO 里**。
-        raise_if_partial_failure(result)
+        # 缓存失效要先跑：命中部分失败时若直接抛，采购列表会继续展示已撤销的单直到 TTL
+        # 到期（2026-11-17 OCR 复审 M3）。这里没有 handler/死信可落（本路径是提交后回调），
+        # 故由下面的 broad-except 记 WARNING + 堆栈；关键是**不再把失败静默丢在一行 INFO 里**。
         await invalidate_purchase_caches()
+        raise_if_partial_failure(result)
     except PartialRevocationError:
         logger.error('删除备货记录后撤销采购单部分失败（其余单已撤销）', exc_info=True)
     except Exception:  # broad-except: 清理失败不得影响备货删除主流程

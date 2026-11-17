@@ -1031,8 +1031,10 @@ async def import_comprehensive_service(
                     scoped_factory=scoped_factory,
                 )
             results.message = '导入完成！'
-        # 提交交给请求级事务（get_async_db）：全部 Sheet 在同一事务内原子落库，
-        # 单 Sheet 失败已被 savepoint 隔离，无需在此手动 commit
+        # 本函数只 flush，不 commit：**提交由端点在 handler 内用 `db_transaction(db)` 完成**
+        # （2026-11-17 上线前审计 V-A）。不要依赖 `get_async_db` 的收尾提交 —— 它在响应发出
+        # **之后**才跑，失败时客户端已拿到 200。全部 Sheet 仍在同一事务内原子落库，
+        # 单 Sheet 失败已被 savepoint 隔离。
         return results
     except (OSError, ValueError, BadZipFile) as exc:
         await db.rollback()  # manual-tx: try/except 内显式事务控制

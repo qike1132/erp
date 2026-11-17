@@ -393,3 +393,90 @@ async def test_create_merged_shipment_across_orders(db):
     assert 'customer' not in content
     assert content['shipment_no'] == rows[0].shipment_no
 
+
+
+async def test_receive_shipment_item_records_applied_quantity_when_clamped(db):
+    """回归（推送前 OCR 复审）：工序剩余量 < 本单发货量时，明细「收货数量」= 实际回写量。
+
+    形态：工序累计已发 40（本发货单即为全部 40），人工入口先在工序面板收了 30（剩余 10），
+    再确认本发货单 → 工序侧只回写 10。旧实现明细恒写 shipped_quantity=40 ⇒ 明细虚高 30，
+    按发货单做的收货台账与工序台账对不上（工序侧数据是对的，只有明细侧错）。
+    """
+    product = Product(id=1, name='电绣品', barcode='B1', factory='湖北')
+    order = Order(id=1, order_no='PO-20260919-0003', customer='贝乐客户',
+                  order_date=datetime(2026, 9, 19, 10, 0), product_id=1, quantity=100)
+    order_item = OrderItem(id=1, order_id=1, product_id=1, product_name='电绣品',
+                           product_barcode='B1', quantity=100)
+    process = OrderOutsourceProcess(id=1, order_id=1, order_item_id=1, product_id=1,
+                                    product_name='电绣品', process_type='电绣', sort_order=0, status='pending')
+    db.add_all([product, order, order_item, process])
+    await db.commit()
+
+    s = await create_shipment(db, order.id, [(process.id, 40)], username='shipper')
+
+    # 人工入口先收 30 → 工序剩余 10（本单发货量 40 大于剩余）
+    await receive_order_process(db, process.id, username='beile', received_quantity=30)
+
+    await receive_shipment(db, s['id'], username='beile')
+
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert (p.received_quantity or 0) == 40, f'工序侧应为 30+10=40，实际 {p.received_quantity}'
+
+    detail = await get_shipment(db, s['id'])
+    assert detail['items'][0]['shipped_quantity'] == 40
+    assert detail['items'][0]['received_quantity'] == 10, (
+        f'明细应记本单实际回写量 10（不是发货量 40），实际 {detail["items"][0]["received_quantity"]}'
+    )
+
+
+async def test_receive_shipment_item_zero_when_process_has_no_remaining(db):
+    """回归（推送前 OCR 复审）：工序已无剩余（receive_order_process 返回 None）时，
+    明细「收货数量」记 0（本次未回写工序），且发货单仍照常转 received。"""
+    order, process = await _seed(db)
+    s = await create_shipment(db, order.id, [(process.id, 5)], username='shipper')
+
+    # 工序面板「一键收货」先把整道工序收满 → 本单确认收货时剩余为 0
+    await receive_order_process(db, process.id, username='beile')
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert (p.received_quantity or 0) == 5, f'前置：工序应已收满 5，实际 {p.received_quantity}'
+
+    result = await receive_shipment(db, s['id'], username='beile')
+    assert result['success'] is True
+    assert result['already_received'] is False
+
+    ship = await db.get(OutsourceShipment, s['id'])
+    assert ship.status == SHIPMENT_STATUS_RECEIVED, '发货单仍须闭环为 received'
+
+    p = await db.get(OrderOutsourceProcess, process.id)
+    assert (p.received_quantity or 0) == 5, '工序不得被重复累加'
+
+    item = (await db.execute(
+        select(OutsourceShipmentItem).where(OutsourceShipmentItem.shipment_id == s['id'])
+    )).scalars().one()
+    assert item.shipped_quantity == 5
+    assert (item.received_quantity or 0) == 0, (
+        f'本次未回写工序，明细应记 0（不是发货量 5），实际 {item.received_quantity}'
+    )
+
+
+async def test_receive_shipment_item_without_process_records_shipped_quantity(db):
+    """无工序可回写的明细（工序已删除 → process_id 置空）保持原语义：收货数量 = 发货数量。"""
+    order, process = await _seed(db)
+    s = await create_shipment(db, order.id, [(process.id, 5)], username='shipper')
+
+    # 模拟工序删除后外键置空（ON DELETE SET NULL）
+    item = (await db.execute(select(OutsourceShipmentItem))).scalars().one()
+    item.process_id = None
+    await db.commit()
+
+    await receive_shipment(db, s['id'], username='beile')
+
+    ship = await db.get(OutsourceShipment, s['id'])
+    assert ship.status == SHIPMENT_STATUS_RECEIVED
+
+    detail = await get_shipment(db, s['id'])
+    assert detail['items'][0]['process_id'] is None
+    assert detail['items'][0]['shipped_quantity'] == 5
+    assert detail['items'][0]['received_quantity'] == 5, (
+        '无工序可回写时明细按本单发货量记账（原语义）'
+    )

@@ -316,13 +316,22 @@ async def receive_shipment(db: AsyncSession, shipment_id: int, username: str | N
         # =整道剩余）先把工序收满，再来确认发货单，receive_order_process 会因「已收货」抛错，
         # 整事务回滚 ⇒ 发货单永久停在 shipped、无任何闭环出口。故本入口传 clamp_to_remaining：
         # 按「本单发货量」与「工序剩余量」取小，剩余为 0 时跳过该明细（发货单仍照常转 received）。
+        #
+        # 明细列语义 = **本单实际回写量**，不是发货量（推送前 OCR 复审发现项）：人工入口
+        # 先在工序面板收过一部分时，clamp 后的回写量小于 shipped_quantity；剩余为 0 时
+        # receive_order_process 直接返回 None（未回写工序），实际回写量为 0。
+        # 旧实现一律写 shipped_quantity ⇒ 明细「收货数量」系统性虚高，与工序台账对不上。
         if item.process_id is not None:
-            await receive_order_process(
+            res = await receive_order_process(
                 db, item.process_id, username,
                 received_quantity=item.shipped_quantity,
                 clamp_to_remaining=True,
             )
-        item.received_quantity = item.shipped_quantity
+            item.received_quantity = 0 if res is None else int(res.get('applied_quantity') or 0)
+        else:
+            # 无工序可回写（工序已被删除，process_id 置空）：没有可对账的工序台账，
+            # 保持原语义——明细按本单发货量记账，即「本单已全额确认」。
+            item.received_quantity = item.shipped_quantity
 
     shipment.status = SHIPMENT_STATUS_RECEIVED
     shipment.received_at = datetime.now(UTC)  # aware UTC：received_at 列为 timestamptz

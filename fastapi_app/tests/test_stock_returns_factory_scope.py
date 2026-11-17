@@ -37,7 +37,10 @@ async def test_factory_condition_is_pushed_into_count_and_page_sql():
     for stmt in (count_stmt, page_stmt):
         sql = _sql(stmt)
         assert 'product.factory' in sql
-        assert 'EXISTS' in sql.upper()
+        # 2026-11-17 OCR 复审 M2：与 get_stockreturn_records / get_stockout_records 统一成
+        # `product_id IN (SELECT id FROM product WHERE _factory_match)`。要点是**条件下推到
+        # SQL**（count 与分页同口径），不是具体用 EXISTS 还是 IN。
+        assert 'IN (SELECT' in sql.upper()
         assert '东莞' in sql
 
 

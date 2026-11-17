@@ -322,6 +322,13 @@ async def receive_order_process(
     不再抛错——否则发货单永久停在「待收货」且没有任何闭环出口。
 
     人工入口（工序面板 / 接口 / 批量收货）**不传**该参数，语义保持不变：超量即报错。
+
+    返回值附加 ``applied_quantity`` = **本次实际回写的数量**（推送前 OCR 复审发现项）：
+    在 ``_serialize_order_process`` 结果上**加键、不改既有键**，其余键语义不变，
+    既有调用方（接口层 / 批量收货 / 前端）只读旧键，故行为不受影响；多出的键是纯附加字段
+    （``data: list[dict]`` 的响应模型不会过滤它，但也没有任何消费方读它）。
+    clamp 后它与传入的 ``received_quantity`` 可能不等；剩余为 0 的分支返回 None、
+    未回写工序，故不附加该键——调用方按 0 处理。
     """
     # with_for_update：同发货，收货数量同样是「读-改-写」，需锁行避免并发覆盖
     p = await db.get(OrderOutsourceProcess, process_id, with_for_update=True)
@@ -360,7 +367,11 @@ async def receive_order_process(
     ))
     await db.flush()
     await db.refresh(p)
-    return _serialize_order_process(p)
+    result = _serialize_order_process(p)
+    # 本次实际回写量：clamp_to_remaining 下 qty 可能被夹到工序剩余量（< 调用方传入值）。
+    # 调用方（发货单明细）必须按这个值记账，不能用本单发货量。
+    result['applied_quantity'] = qty
+    return result
 
 async def ship_order_processes_batch(
     db: AsyncSession, order_id: int, items: list[tuple[int, int]], username: str | None = None,

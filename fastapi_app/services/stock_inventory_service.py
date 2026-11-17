@@ -109,6 +109,19 @@ def _factory_match(factory: str):
     return or_(Product.factory == factory, Product.factory.is_(None), Product.factory == '')
 
 
+def _exclusive_day_end(end_bound: datetime) -> datetime:
+    """把「当天 23:59:59（含）」的右端推进成「次日 00:00:00（不含）」。
+
+    ``_day_range_utc(..., end=True)`` 给的是**当天 23:59:59**（北京）折算的 UTC，
+    左闭右开区间要的是**次日 00:00 整** —— 直接 +1 秒即可。用 `+timedelta(days=1)`
+    会多算一整天（2026-11-17 上线前审计 P1-5 的原始缺陷）。
+
+    日期右边界统一走这里（2026-11-17 OCR 复审 M2）：原先只有退货列表用它，
+    ``get_stockins`` / ``get_stockouts`` 还写着 ``<= ed``（即 ``<= 23:59:59.000000``），
+    会把 ``23:59:59.000001–.999999`` 的记录漏掉 —— 这些列都可带微秒（默认值就是
+    ``datetime.now(UTC)``），同文件两套右边界口径会让后来人以为已经统一。
+    """
+    return end_bound + timedelta(seconds=1)
 @cache_result(
     key_prefix='stockins:list',
     ttl=30,
@@ -127,7 +140,8 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
     if sd is not None:
         conditions.append(StockIn.stockin_date >= sd)
     if ed is not None:
-        conditions.append(StockIn.stockin_date <= ed)
+        # 左闭右开：当天整天都计入（含 23:59:59.x 微秒记录，见 _exclusive_day_end）
+        conditions.append(StockIn.stockin_date < _exclusive_day_end(ed))
 
     base_where = select(StockIn.id)
     if factory:
@@ -201,7 +215,8 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
     if sd is not None:
         conditions.append(StockOut.stockout_date >= sd)
     if ed is not None:
-        conditions.append(StockOut.stockout_date <= ed)
+        # 左闭右开：当天整天都计入（含 23:59:59.x 微秒记录，见 _exclusive_day_end）
+        conditions.append(StockOut.stockout_date < _exclusive_day_end(ed))
 
     # 先用子查询过滤 + 分页取 ID，再按 ID 批量加载关联数据，避免 joinedload 与过滤 JOIN 冲突
     id_query = select(StockOut.id).where(*conditions)
@@ -263,8 +278,15 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
     # （此前 `== stockout_id if stockout_id else True` 在无筛选时退化为 `== True` 恒假，导致 total 恒为 0）
     conditions = [StockReturn.status == 'active']
     if factory:
-        # 厂绑定用户只能看本厂产品的退货；用 EXISTS 子查询保持 count/分页同口径。
-        conditions.append(StockReturn.product.has(Product.factory == factory))
+        # 厂绑定用户只能看本厂（及未分厂）产品的退货；用 IN 子查询而非 join，
+        # 保证 count/分页与 _factory_match 同口径。
+        # 与 get_stockreturn_records / get_stockout_records 统一用 _factory_match：
+        # 本厂 + 未分厂（NULL/空串）。原先这里是严格相等 `product.has(factory == ...)`，
+        # 厂绑定用户在列表看不到未分厂的退货、却能按单号还原出来并编辑（口径分叉，
+        # 2026-11-17 OCR 复审 M2）。
+        conditions.append(
+            StockReturn.product_id.in_(select(Product.id).where(_factory_match(factory)))
+        )
     if stockout_id:
         conditions.append(StockReturn.stockout_id == stockout_id)
     if customer:
@@ -279,7 +301,7 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
         # 故右开边界 = ed + 1 秒；2026-11-17 上线前审计 P1-5：原写 `ed + timedelta(days=1)`
         # → 边界成了**次日 23:59:59**，选「截至 10-17」会把 10-18 整天的退货一起算进
         # 台账与导出（`total` 同错），且区间越长多算的越多。
-        conditions.append(StockReturn.return_date < ed + timedelta(seconds=1))
+        conditions.append(StockReturn.return_date < _exclusive_day_end(ed))
     total = (await db.execute(select(func.count(StockReturn.id)).where(*conditions))).scalar() or 0
     result = await db.execute(
         select(StockReturn)
