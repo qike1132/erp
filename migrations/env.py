@@ -69,6 +69,11 @@ _IGNORED_DB_ONLY_INDEXES = {
     # idx_csp_role_part_version 已移出白名单（2026-11-17 上线前审计 P1-15）：
     # 该索引曾是「模型声明 unique、库里 non-unique」，被整条豁免后漂移门禁看不见。
     # pg_standalone_122 已去重并建成真正的 UNIQUE，两边口径一致，无需再豁免。
+    # ⚠️ 待确认（2026-11-17 OCR 复审 M6）：alembic 对**同名索引**是否比较 `unique` 标志
+    # 随版本而异。若它不比，摘掉白名单也只是恢复「按名字比对」——真正确保一致的是 122
+    # 本身；若它比，则在「代码已更新、122 未跑」的窗口里跑 autogenerate 会产出
+    # drop+create(unique) 的破坏性 DDL（这正是本白名单当初想遮掉的东西）。
+    # 复核办法：临时空库上建一个同名 non-unique 索引，跑一次 `alembic check` 看是否报差异。
     'idx_material_reg_date',           # 历史迁移所建（生产定义与模型分叉）
     'idx_material_reg_supplier',       # 历史迁移所建（生产在 supplier_name，模型在 supplier_id）
 }

@@ -247,6 +247,26 @@ async def _check_unique_violations(conn, unique_groups: dict[str, dict[str, Any]
     return unique_violations
 
 
+def _summarize_validation(validation_results: dict[str, Any]) -> tuple[bool, bool]:
+    """把四族结果汇总成 ``(all_passed, evidence_incomplete)``。
+
+    抽成函数只为满足函数长度门禁；语义两句话：
+    - ``all_passed``：所有 ``*_validation`` 族都 passed；
+    - ``evidence_incomplete``：任一族的 ``evidence_incomplete`` 为真（data 族在有表
+      ``rows=-1`` 时置位）→ **否决整体成功**，不让「19 张没数 + 1 张对上」报灾备就绪。
+    """
+    evidence_incomplete = any(
+        bool(result.get('evidence_incomplete'))
+        for result in validation_results.values()
+    )
+    all_passed = all(
+        result['passed']
+        for key, result in validation_results.items()
+        if key.endswith('_validation')
+    )
+    return all_passed and not evidence_incomplete, evidence_incomplete
+
+
 class DrillValidator:
     """恢复结果验证器：连接测试库，按 schema/数据完整性/约束/性能四族验证并汇总。
 
@@ -356,11 +376,10 @@ class DrillValidator:
                 await test_engine.dispose()
 
             # 计算总体验证结果
-            all_passed = all(
-                result['passed']
-                for key, result in validation_results.items()
-                if key.endswith('_validation')
-            )
+            # V-C 补充（2026-11-17 OCR 复审 M1）：data 族的 evidence_incomplete（有表行数
+            # 未知 = 备份没数全）必须否决整体成功 —— 否则「19 张没数 + 1 张对上」也会报
+            # 灾备就绪。它不影响单族 passed 的语义（那只表达「已比对的表全一致」）。
+            all_passed, evidence_incomplete = _summarize_validation(validation_results)
 
             validation_duration = (datetime.now() - validation_start_time).total_seconds()
 
@@ -368,6 +387,7 @@ class DrillValidator:
                 'success': all_passed,
                 'test_id': test_id,
                 'all_passed': all_passed,
+                'evidence_incomplete': evidence_incomplete,
                 'validation_duration_seconds': round(validation_duration, 2),
                 'results': validation_results,
                 'start_time': validation_start_time.isoformat(),
@@ -499,7 +519,9 @@ class DrillValidator:
 
                 except SQLAlchemyError as e:
                     validation_results[table_name] = {
-                        'expected': table_data.get('count', 0),
+                        # 与 skip 分支口径一致：行数未知就写 None，别落成 0 造出
+                        # 「expected 0 / actual 0 / passed False」的自相矛盾行（OCR 复审 Low）
+                        'expected': None,
                         'actual': 0,
                         'passed': False,
                         'error': str(e)
@@ -525,6 +547,14 @@ class DrillValidator:
                 'passed_tables': passed_tables,
                 'failed_tables': total_tables - passed_tables,
                 'skipped_tables': skipped_tables,
+                # V-C 补充（2026-11-17 OCR 复审 M1）：有表 rows=-1（行数未知）意味着
+                # **这份备份没数全**（orchestration/core.py 对 -1 的定义即「覆盖度不完整」）。
+                # 把它们从分母剔除能消灭「恒失败」，但若就此判通过，等于把「没数过」记成
+                # 「通过」（20 张里 19 张 -1 + 1 张对齐也会算出 passed=True）。
+                # 故单独暴露 evidence_incomplete，由 validate_recovery 否决整体成功：
+                # 报告仍逐表列出 skipped 与原因 —— 运维一眼看得出是 manifest 缺行数，
+                # 不是恢复丢了数据。
+                'evidence_incomplete': skipped_tables > 0,
                 'details': validation_results
             }
 
