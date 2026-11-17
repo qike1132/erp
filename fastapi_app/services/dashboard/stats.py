@@ -13,7 +13,6 @@ from sqlalchemy.exc import (
     DataError,
     DisconnectionError,
     OperationalError,
-    ProgrammingError,
     StatementError,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,33 +33,6 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
-
-async def _get_mv_daily_quantity(db: AsyncSession, mv_name: str, stat_date: date) -> int | None:
-    """从物化视图读取某日聚合数量，不存在或无数据时返回 None（自动降级到基表）。"""
-    try:
-        # 先检查表是否存在，避免直接查询不存在的物化视图导致事务失败
-        exists_result = await db.execute(
-            text("SELECT to_regclass(:name)"), {"name": mv_name}
-        )
-        if exists_result.scalar() is None:
-            return None
-
-        result = await db.execute(
-            text(f"SELECT total_quantity FROM {mv_name} WHERE stat_date = :stat_date"),  # nosec B608
-            {"stat_date": stat_date},
-        )
-        row = result.scalar_one_or_none()
-        return int(row) if row is not None else None
-    except ProgrammingError:
-        # 物化视图尚未创建时自动降级；回滚失败事务以保证同一 session 后续查询可用
-        with contextlib.suppress(OperationalError, StatementError):
-            await db.rollback()  # manual-tx: try/except 内显式事务控制
-        return None
-    except (OperationalError, DataError, DatabaseError):
-        logger.warning(f"读取物化视图 {mv_name} 失败，降级到基表查询", exc_info=True)
-        with contextlib.suppress(OperationalError, StatementError):
-            await db.rollback()  # manual-tx: try/except 内显式事务控制
-        return None
 
 async def _query_today_yesterday_base(db: AsyncSession, today_start: datetime, today_end: datetime, yesterday_start: datetime, factory: str = '') -> tuple:
     """今日/昨日基表聚合。

@@ -365,8 +365,9 @@ UNIFIED_ENTRY = STOCK_CONCURRENCY
 # 属统计阈值语义，与 t31 的 ALLOWED_RESIDUAL_ORDERING 逐字一致；在本任务写域之外，未改。
 # 2026-10-17 审计 AUD-23 改动 stats.py 后行号 208→209；
 # 2026-10-30 审计 A-M22 把该子查询抽成 low_stock_stmt（按工厂收窄）后 209→226。
+# 2026-11-17 上线前审计 V-9 删掉文件顶部 27 行死代码（_get_mv_daily_quantity）后 226→198。
 DASHBOARD_STATS = REPO / "fastapi_app/services/dashboard/stats.py"
-DASHBOARD_STATS_HITS = ["stats.py:226: Product.current_stock <= 10"]
+DASHBOARD_STATS_HITS = ["stats.py:198: Product.current_stock <= 10"]
 # 2026-10-06 出货校准：可出货量 = min(订单余量, 产品净存量)，此比较为只读阈值（不写库存）
 INVENTORY_SERVICE = REPO / "fastapi_app/services/inventory_service.py"
 

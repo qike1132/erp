@@ -3,6 +3,7 @@
   "counts": {
     "n_plus_one": 0,
     "bare_except": 0,
+    "test_db_isolation": 0,
     "function_length": 30,
     "vue_component_length": 4,
     "ts_module_length": 4,
@@ -14,9 +15,8 @@
     "complexity": 4,
     "loop_shadow": 12,
     "pip_audit": 0,
-    "nosec_budget": 80,
+    "nosec_budget": 79,
     "bandit": 21,
-    "semantic_guards": 49,
-    "test_db_isolation": 0
+    "semantic_guards": 49
   }
 }

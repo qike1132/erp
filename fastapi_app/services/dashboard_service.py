@@ -48,7 +48,6 @@ from fastapi_app.services.dashboard.nav import (  # noqa: F401
 )
 from fastapi_app.services.dashboard.stats import (  # noqa: F401
     _fetch_independent_stats,
-    _get_mv_daily_quantity,
     _mv_or_base,
     _query_production_stats,
     _query_today_yesterday_base,
