@@ -164,10 +164,84 @@ def test_check_ratchet_allows_tighten(monkeypatch):
     assert q.check_baseline_ratchet(_args(), {'ruff': 10}) == 0
 
 
-def test_check_ratchet_skips_when_no_reference(monkeypatch, capsys):
+def test_check_ratchet_fails_closed_when_no_reference(monkeypatch, capsys):
+    """参考不可用 → **失败**（2026-11-17 上线前审计 P1-23 改）。
+
+    原行为是「跳过检查、退出 0」，等于把 14 项棘轮的总开关交给「让参考取不到」
+    这件事本身：浅克隆、缺 origin/main、基线文件缺失/形状损坏都会静默命中。
+    """
     monkeypatch.setattr(q, 'resolve_baseline_refs', lambda: [])
+    monkeypatch.delenv(q.ALLOW_BASELINE_RAISE_ENV, raising=False)
+
+    assert q.check_baseline_ratchet(_args(), {'ruff': 999}) == 1
+    out = capsys.readouterr().out
+    assert '[FAIL]' in out
+    assert '参考基线不可用' in out
+
+
+def test_check_ratchet_no_reference_still_honours_explicit_escape(monkeypatch, capsys):
+    """逃生口与「上调」同款：显式放行才能在没有参考时继续（首次提交等场景）。"""
+    monkeypatch.setattr(q, 'resolve_baseline_refs', lambda: [])
+    monkeypatch.setenv(q.ALLOW_BASELINE_RAISE_ENV, '1')
+
     assert q.check_baseline_ratchet(_args(), {'ruff': 999}) == 0
-    assert '参考基线不可用' in capsys.readouterr().out
+    assert '显式放行' in capsys.readouterr().out
+
+
+def test_check_ratchet_no_reference_report_mode_does_not_fail(monkeypatch):
+    monkeypatch.setattr(q, 'resolve_baseline_refs', lambda: [])
+    assert q.check_baseline_ratchet(_args(report=True), {'ruff': 999}) == 0
+
+
+# ---------------------------------------------------------------------------
+# P1-23 前半段：直推 main 时参考基线必须取 `github.event.before`，
+# 不能取「分叉点/上次提交 HEAD」——那两者都等于被推的提交本身（自比自恒绿）
+# ---------------------------------------------------------------------------
+
+
+def test_push_before_ref_reads_env(monkeypatch):
+    monkeypatch.setenv(q.PUSH_BEFORE_ENV, ' a1b2c3d4e5f6 ')
+    assert q._push_before_ref() == 'a1b2c3d4e5f6'
+
+
+def test_push_before_ref_ignores_all_zero_and_empty(monkeypatch):
+    """删除分支/新建分支时 GitHub 给全零 before —— 不能当成 ref 去 git show。"""
+    monkeypatch.setenv(q.PUSH_BEFORE_ENV, '0' * 40)
+    assert q._push_before_ref() is None
+    monkeypatch.setenv(q.PUSH_BEFORE_ENV, '   ')
+    assert q._push_before_ref() is None
+    monkeypatch.delenv(q.PUSH_BEFORE_ENV, raising=False)
+    assert q._push_before_ref() is None
+
+
+def test_resolve_uses_push_before_only(monkeypatch):
+    """有 before 时**只**用它：分叉点/HEAD 会把上限抬到被推提交的新值。"""
+    monkeypatch.delenv(q.BASELINE_REF_ENV, raising=False)
+    monkeypatch.setenv(q.PUSH_BEFORE_ENV, 'before1234567')
+    seen: list[str] = []
+
+    def _load(ref: str):
+        seen.append(ref)
+        return {'ruff': 4} if ref == 'before1234567' else {'ruff': 99}
+
+    monkeypatch.setattr(q, 'load_baseline_at_ref', _load)
+    monkeypatch.setattr(q, '_fork_point', lambda: 'forkpoint123')
+
+    refs = q.resolve_baseline_refs()
+
+    assert refs == [('push 前提交 before12', {'ruff': 4})], refs
+    assert 'HEAD' not in seen, 'HEAD 等于被推提交本身，不能当参考'
+
+
+def test_resolve_fails_closed_when_before_unreadable(monkeypatch, capsys):
+    """before 存在但取不到（浅克隆）→ 返回空 → 上层判失败，**不得**退回自比自。"""
+    monkeypatch.delenv(q.BASELINE_REF_ENV, raising=False)
+    monkeypatch.setenv(q.PUSH_BEFORE_ENV, 'missing123456')
+    monkeypatch.setattr(q, 'load_baseline_at_ref', lambda _ref: None)
+    monkeypatch.setattr(q, '_fork_point', lambda: 'forkpoint123')
+
+    assert q.resolve_baseline_refs() == []
+    assert 'fetch-depth' in capsys.readouterr().out
 
 
 def test_check_ratchet_allows_explicit_flag(monkeypatch):
@@ -286,6 +360,23 @@ def test_hook_triggers_on_baseline_file():
         'hook 未把基线文件纳入触发条件（需精确匹配 scripts/gate_baseline.json）'
     assert 'GATE_BASELINE_REF=HEAD' in text, 'hook 未以 HEAD 为参考基线'
     assert '--baseline-check' in text, 'hook 未调用基线检查'
+
+
+# ---------------------------------------------------------------------------
+# P1-23 端到端：CI 注入的 before SHA 取不到基线时，脚本必须失败（不是静默跳过）
+# ---------------------------------------------------------------------------
+
+
+def test_gate_fails_closed_when_event_before_unresolvable():
+    """真实脚本 + 一个本地不存在的 before SHA → 退出码 1，且提示 fetch-depth。
+
+    修复前：参考取不到 → 「跳过只降不升检查」→ 退出 0，14 项棘轮静默失效。
+    """
+    proc = _run_gate('--baseline-check', env_extra={q.PUSH_BEFORE_ENV: 'f' * 40})
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert '[FAIL]' in proc.stdout
+    assert '参考基线不可用' in proc.stdout
+    assert 'fetch-depth' in proc.stdout
 
 
 

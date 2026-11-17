@@ -428,6 +428,12 @@ jobs:
     # 统一代码质量门禁（基线棘轮）：存量违规不阻断，新增即拦截。
     # 置于 ruff 之前，确保即使 ruff 步骤因存量告警失败，本步骤的结果仍然可见。
     - name: Run code quality gate (baseline ratchet)
+      env:
+        # P1-23（2026-11-17 上线前审计）：直推 main 时 origin/main 与 HEAD 都等于本次
+        # 推送的提交，棘轮会自比自恒绿；只有事件里的 before SHA 是真正的上一提交。
+        # 取不到该 SHA 的基线时门禁**失败**而非跳过（浅克隆 = 没证据），故上面的
+        # checkout 必须 fetch-depth: 0。
+        GITHUB_EVENT_BEFORE: ${{ github.event.before }}
       run: python scripts/quality_gate.py --verbose
 
     # P0-11⑦ 恒失败自检：在临时目录里人为制造真实违规，断言门禁退出码非 0；

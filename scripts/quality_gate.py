@@ -870,6 +870,7 @@ def load_baseline() -> dict[str, int] | None:
 # 被「洗」进基线，CI 恒绿；且纯基线提交不含 .py/.vue，连本地降级门禁都不触发。
 #
 # 守卫语义：**基线只允许下调**。每个键的上限取各参考基线中**最严**的那个：
+#   · push 之前的提交（CI 的 `github.event.before`）—— 直推 main 时唯一有效的参考；
 #   · 分叉点 —— base 分支与本分支头的 merge-base：判定「本分支是否放松了门禁」；
 #   · 上次提交（HEAD）—— 判定「本次提交/工作区是否上调」。
 # 只与「参考侧也存在」的键比较：分叉之后新增的门禁键没有可比基线，不据此判违规。
@@ -880,6 +881,9 @@ def load_baseline() -> dict[str, int] | None:
 
 BASELINE_REF_ENV = "GATE_BASELINE_REF"
 ALLOW_BASELINE_RAISE_ENV = "GATE_ALLOW_BASELINE_RAISE"
+#: CI 注入的「本次推送之前的提交」SHA（`${{ github.event.before }}`）。
+#: 直推 main 时只有它是真正的上一提交，见 `_push_before_ref`（2026-11-17 审计 P1-23）。
+PUSH_BEFORE_ENV = "GITHUB_EVENT_BEFORE"
 
 
 def _git(*args: str) -> str | None:
@@ -959,19 +963,50 @@ def _fork_point() -> str | None:
     return None
 
 
+def _push_before_ref() -> str | None:
+    """CI push 事件的「本次推送之前的那个提交」（`github.event.before`）。
+
+    为什么需要它（2026-11-17 上线前审计 P1-23）：**直推 main** 时 `origin/main` 与
+    `HEAD` 都指向本次推送的提交，于是 merge-base(origin/main, HEAD) == HEAD ——
+    「分叉点」和「上次提交」两条参考都等于被推的这份基线，14 项棘轮全部自比自、
+    恒绿。只有事件里的 `before` SHA 是真正的上一提交。
+    删除分支 / 新建分支时该值是全零串，视为不可用。
+    """
+    raw = (os.environ.get(PUSH_BEFORE_ENV) or "").strip()
+    if not raw or set(raw) == {"0"}:
+        return None
+    return raw
+
+
 def resolve_baseline_refs() -> list[tuple[str, dict[str, int]]]:
     """列出参考基线：(说明, 计数)。
 
     - `GATE_BASELINE_REF` 显式指定时**只**用它（可为 git ref 或基线文件路径）；
       本地 pre-commit 用 HEAD = 本次提交的父提交 → 逐次提交把关；
+    - CI push 事件（有 `github.event.before`）时**只**用该 SHA：直推 main 时其余两条
+      参考都等于被推提交本身（见 :func:`_push_before_ref`），留着反而把上限抬到新值；
     - 否则用「分叉点」+「上次提交 HEAD」。
 
-    取不到的参考一律略过（不因缺信息误杀），但调用方必须把「参考不可用」显式打印。
+    取不到的参考一律略过，但调用方必须把「参考不可用」当**失败**（P1-23）：放行等于
+    给了「让参考取不到即可关掉全部棘轮」的开关。
     """
     override = os.environ.get(BASELINE_REF_ENV)
     if override:
         counts = load_baseline_at_ref(override)
         return [(override, counts)] if counts is not None else []
+
+    before = _push_before_ref()
+    if before:
+        counts = load_baseline_at_ref(before)
+        if counts is None:
+            # 取不到 = 浅克隆（fetch-depth<2）或 SHA 不在本地：**不能**退回自比自的
+            # 分叉点/HEAD，否则又回到 P1-23 描述的那种"恒绿"。
+            print(
+                f"[BASELINE] 取不到 push 前提交 {before[:12]} 的基线"
+                "（浅克隆？CI 需 actions/checkout fetch-depth: 0）。"
+            )
+            return []
+        return [(f"push 前提交 {before[:8]}", counts)]
 
     refs: list[tuple[str, dict[str, int]]] = []
     fork = _fork_point()
@@ -1016,8 +1051,26 @@ def check_baseline_ratchet(args, working: dict[str, int]) -> int:
     """基线「只降不升」守卫。返回 0 = 放行；1 = 基线被上调（应拒绝提交）。"""
     refs = resolve_baseline_refs()
     if not refs:
-        print("[BASELINE] 参考基线不可用，跳过只降不升检查。")
-        return 0
+        # 2026-11-17 上线前审计 P1-23：参考不可用从「放行」改「失败」。
+        # 放行等于把棘轮的总开关交给「让参考取不到」这件事本身 —— 浅克隆、缺
+        # origin/main、基线文件缺失/形状损坏都会静默命中，14 项棘轮一起失效。
+        # 逃生口与「上调」同款（显式、需在提交信息写明理由）。
+        if (
+            getattr(args, "allow_baseline_raise", False)
+            or os.environ.get(ALLOW_BASELINE_RAISE_ENV) == "1"
+            or (getattr(args, "update_baseline", False) and getattr(args, "force", False))
+        ):
+            print("[BASELINE] 参考基线不可用，已按显式放行继续。")
+            return 0
+        if getattr(args, "report", False):
+            print("[BASELINE] 参考基线不可用（REPORT 模式不判定失败）。")
+            return 0
+        print("[FAIL] 参考基线不可用：无法证明基线没有被上调。")
+        print("       2026-11-17 起「取不到参考」即失败（放行等于关掉全部棘轮）。")
+        print("       CI：actions/checkout 需 fetch-depth: 0 并注入 GITHUB_EVENT_BEFORE；")
+        print("       本地：GATE_BASELINE_REF=HEAD；确无参考的场景（如首次提交）用")
+        print("             GATE_ALLOW_BASELINE_RAISE=1 显式放行并在提交信息写明理由。")
+        return 1
     violations = detect_baseline_raises(working, refs)
     if not violations:
         return 0
