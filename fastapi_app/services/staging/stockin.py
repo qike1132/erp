@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
-from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
+from fastapi_app.services.batch_import_core import (
+    _import_idem_key,
+    _row_factory_rejected,
+    _row_failure_message,
+)
 from fastapi_app.services.numbering import generate_stockin_number
 from fastapi_app.services.staging._generic import (
     _generic_import_staging_from_excel,
@@ -99,10 +103,70 @@ async def update_staging_stockin(db: AsyncSession, stockin_id: int, data: dict,
         session_scope=session_scope,
     )
 
-async def confirm_staging_stockins(
-    db: AsyncSession, session_id: str
-) -> tuple[int, list[str]]:
+async def _write_confirmed_stockin(
+    db: AsyncSession, staging: StagingStockIn, *, scoped_factory: str | None,
+) -> None:
+    """把一条暂存备货写成正式 stock_in（含库存与流水）；失败抛 ValueError。
+
+    从 :func:`confirm_staging_stockins` 抽出的单行写入体（只为满足函数长度门禁，
+    语句顺序与原内联版逐字一致）。工厂闸门（2026-11-17 上线前审计 P0-1）放在产品
+    解析之后、apply_stock_delta_locked 之前：他厂行抛 ValueError，由调用方的行级
+    except 兜成「该行错误 + 状态 REJECT」，其余行照常确认（与导入路径同语义）。
+    """
     from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, get_product_for_update
+
+    stockin_no = await generate_stockin_number(db)
+
+    stockin = StockIn(
+        stockin_no=stockin_no,
+        stockin_date=staging.stockin_date or datetime.now(UTC),  # aware UTC：stockin_date 列为 timestamptz
+        customer=staging.customer,
+        product_id=staging.product_id,
+        quantity=staging.quantity,
+        note=staging.note,
+    )
+    db.add(stockin)
+
+    product_id = staging.product_id
+    if product_id is None:
+        raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{product_id})')
+    product = await get_product_for_update(db, product_id)
+    if not product:
+        raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
+    # 工厂闸门（2026-11-17 上线前审计 P0-1）：厂绑定用户不得确认他厂产品的暂存备
+    # 货行 —— 否则 apply_stock_delta_locked 会直接改他厂 current_stock。
+    if _row_factory_rejected(scoped_factory, product.factory):
+        raise ValueError(f'备货{staging.customer}-{staging.product_name}的产品不在你的工厂范围，已拒绝')
+    # 统一写入口：持锁路径也要带 version 守卫并递增 version，
+    # 否则与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。
+    await apply_stock_delta_locked(db, product, staging.quantity)
+
+    log = InventoryLog(
+        product_id=staging.product_id,
+        change_type='备货',
+        change_quantity=staging.quantity,
+        related_id=stockin_no,
+        idem_key=_import_idem_key(
+            'stockin', staging.customer, product_id, staging.quantity,
+            staging.stockin_date or datetime.now(UTC),
+        ),
+        note=f'批量导入备货：{stockin_no}',
+    )
+    db.add(log)
+
+
+async def confirm_staging_stockins(
+    db: AsyncSession, session_id: str, *, scoped_factory: str | None = None,
+) -> tuple[int, list[str]]:
+    """把暂存备货确认为正式 stock_in，返回 ``(确认条数, 错误消息)``。
+
+    Args:
+        scoped_factory: 厂绑定用户的工厂闸门（2026-11-17 上线前审计 P0-1）。本函数
+            写 stock_in + inventory_log + product.current_stock，此前**全程无工厂校验**，
+            而暂存行的 product_id 来自按名字的**全表**映射 —— 厂绑定用户可给他厂产品
+            建库存、改库存数，单据看起来完全合法。非空时他厂行按行拒绝（与导入路径
+            同语义，不整批失败），其余行照常确认；None = 超管/未绑定厂，行为不变。
+    """
 
     result = await db.execute(
         select(StagingStockIn).where(
@@ -127,40 +191,7 @@ async def confirm_staging_stockins(
                     staging.status = staging_machine.transition(staging.status, StagingAction.REJECT)
                     continue
 
-                stockin_no = await generate_stockin_number(db)
-
-                stockin = StockIn(
-                    stockin_no=stockin_no,
-                    stockin_date=staging.stockin_date or datetime.now(UTC),  # aware UTC：stockin_date 列为 timestamptz
-                    customer=staging.customer,
-                    product_id=staging.product_id,
-                    quantity=staging.quantity,
-                    note=staging.note,
-                )
-                db.add(stockin)
-
-                product_id = staging.product_id
-                if product_id is None:
-                    raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{product_id})')
-                product = await get_product_for_update(db, product_id)
-                if not product:
-                    raise ValueError(f'备货{staging.customer}-{staging.product_name}产品不存在(ID:{staging.product_id})')
-                # 统一写入口：持锁路径也要带 version 守卫并递增 version，
-                # 否则与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。
-                await apply_stock_delta_locked(db, product, staging.quantity)
-
-                log = InventoryLog(
-                    product_id=staging.product_id,
-                    change_type='备货',
-                    change_quantity=staging.quantity,
-                    related_id=stockin_no,
-                    idem_key=_import_idem_key(
-                        'stockin', staging.customer, product_id, staging.quantity,
-                        staging.stockin_date or datetime.now(UTC),
-                    ),
-                    note=f'批量导入备货：{stockin_no}',
-                )
-                db.add(log)
+                await _write_confirmed_stockin(db, staging, scoped_factory=scoped_factory)
 
                 staging.status = staging_machine.transition(staging.status, StagingAction.APPROVE)
                 confirmed += 1

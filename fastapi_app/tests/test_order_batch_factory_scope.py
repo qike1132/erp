@@ -399,3 +399,74 @@ class TestOrderBranchFactoryFilter:
         assert 'EXISTS' in sql, '工厂条件应走关联 EXISTS（order_item → product 全量判定）'
         assert 'ORDER_ITEM' in sql
         assert 'PRODUCT.NAME' in sql
+
+
+class TestUpdateBatchNoSyncScopeGate:
+    """P0-3（2026-11-17 上线前审计）：改批次号「同步同批」的闸门必须覆盖**被写集合**。
+
+    缺陷形态：函数对目标单调 `assert_orders_factory_scoped(db, [order_id], user)`，
+    随后用一条 Core UPDATE 把「同批其他单」的 batch_no 一起改掉 —— 闸门检查的集合
+    ≠ 实际写入的集合。同批若含他厂订单，它**从未被检查过**就被改写。
+
+    变异检查：把 `[o.id for o in locked]` 改回 `[order_id]`，
+    `test_gate_covers_sync_set` 必须变红（断言会看到 `[[1]]` 而不是 `[[1, 2]]`）。
+    """
+
+    @staticmethod
+    def _order(order_id: int, batch_no: str = 'T1'):
+        order = MagicMock()
+        order.id = order_id
+        order.batch_no = batch_no
+        return order
+
+    def _db(self, *, order_id: int, old_batch_no: str, locked: list):
+        db = AsyncMock()
+        snapshot = MagicMock()
+        snap_row = MagicMock()
+        snap_row.batch_no = old_batch_no
+        snapshot.first.return_value = snap_row
+        locked_result = MagicMock()
+        locked_result.scalars.return_value.all.return_value = locked
+        update_result = MagicMock()
+        update_result.rowcount = max(len(locked) - 1, 0)
+        db.execute = AsyncMock(side_effect=[snapshot, locked_result, update_result])
+        db.flush = AsyncMock()
+        return db
+
+    async def _run(self, monkeypatch, *, sync_same_batch: bool):
+        seen: list = []
+
+        async def _recorder(_db, ids, _user_obj, **_kw):
+            seen.append(list(ids))
+
+        monkeypatch.setattr(order_batch_service, 'assert_orders_factory_scoped', _recorder)
+        monkeypatch.setattr(order_batch_service, '_write_audit_log', lambda *a, **k: None)
+
+        async def _noop_event(*_a, **_kw):
+            return None
+
+        monkeypatch.setattr(order_batch_service, '_safe_publish_event', _noop_event)
+
+        me = self._order(1, 'T1')
+        other = self._order(2, 'T1')  # 同批的另一张单（可能是别厂）
+        target_locked = [me, other] if sync_same_batch else [me]
+        db = self._db(order_id=1, old_batch_no='T1', locked=target_locked)
+        result = await order_batch_service.update_batch_no(
+            db, order_id=1, batch_no='T2', sync_same_batch=sync_same_batch,
+            user=_user(factory='一分厂', is_super=False),
+        )
+        return seen, result
+
+    @pytest.mark.asyncio
+    async def test_gate_covers_sync_set(self, monkeypatch):
+        """同步同批时，闸门必须检查「目标单 + 同批其他单」整个被写集合。"""
+        seen, result = await self._run(monkeypatch, sync_same_batch=True)
+        assert seen == [[1, 2]], f'闸门只检查了 {seen}，而同批被写集合是 [1, 2]'
+        assert result['updated_count'] == 2
+
+    @pytest.mark.asyncio
+    async def test_gate_stays_narrow_when_not_syncing(self, monkeypatch):
+        """不同步同批时不应把别的单纳入闸门（避免把不相干的单也判成越权）。"""
+        seen, result = await self._run(monkeypatch, sync_same_batch=False)
+        assert seen == [[1]], f'不同步同批却检查了额外的单：{seen}'
+        assert result['updated_count'] == 1

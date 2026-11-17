@@ -529,7 +529,11 @@ async def update_batch_no(
     if should_sync and order.batch_no != old_batch_no:
         raise ConflictError('订单批次信息已被并发修改，请刷新后重试')
 
-    await assert_orders_factory_scoped(db, [order_id], user)
+    # 工厂闸门覆盖**整个被写集合**（2026-11-17 上线前审计 P0-3）：本函数除了目标单，
+    # 还会用 Core UPDATE 改写「同批其他单」的 batch_no，而此前只校验 [order_id] ——
+    # 闸门检查的集合 ≠ 实际写入的集合，同批若含他厂订单会被一起改写。
+    # 现按 locked（= 目标单 + 同批候选，:515-525 已按 id 升序锁定）整体校验。
+    await assert_orders_factory_scoped(db, [o.id for o in locked], user)
 
     updated_ids = [order_id]
     order.batch_no = batch_no

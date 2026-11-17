@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exceptions import NotFoundError
 from fastapi_app.core.state_machine import StagingAction, StagingStatus, staging_machine
-from fastapi_app.services.batch_import_core import _import_idem_key, _row_failure_message
+from fastapi_app.services.batch_import_core import (
+    _import_idem_key,
+    _row_factory_rejected,
+    _row_failure_message,
+)
 from fastapi_app.services.batch_service import calculate_available_shipment_quantity
 from fastapi_app.services.numbering import generate_stockout_number
 from fastapi_app.services.staging._generic import (
@@ -183,18 +187,20 @@ async def _allocate_ship_fifo(db: AsyncSession, staging, product_id,
     return affected_order_ids, created
 
 
-async def _confirm_one_staging_stockout(db: AsyncSession, staging,
-                                        completed_orders: list[dict]) -> None:
-    """确认单条暂存出货（在 savepoint 内运行，异常由调用方捕获）。
+async def _preflight_staging_stockout(
+    db: AsyncSession, staging, *, scoped_factory: str | None,
+):
+    """数量/客户/产品/工厂四道前置校验，返回 ``(product_id, product)``。
 
-    校验链：数量为正 → 客户必填 → 产品存在 → 库存充足 → 订单可出 → 按订单分摊出库。
+    语句与文案从 :func:`_confirm_one_staging_stockout` 逐字搬出（仅为满足函数长度
+    门禁，行为不变）。异常语义：数量非正抛 ``_NegativeQuantityError``（调用方单独
+    兜成「数量无效」文案），其余抛 ValueError。
+
+    工厂闸门（2026-11-17 上线前审计 P0-1）放在产品解析之后、任何库存校验/扣减之前：
+    出货写的是**别人的** stock_out + inventory_log + current_stock，越权成本与备货
+    同档。抛 ValueError 交由行级 except 转「该行错误 + REJECT」，其余行照常确认。
     """
-    from fastapi_app.services.order_utils import compute_order_status_from_db
-    from fastapi_app.shared.stock_concurrency import (
-        apply_stock_delta_locked,
-        assert_stock_available,
-        get_product_for_update,
-    )
+    from fastapi_app.shared.stock_concurrency import get_product_for_update
 
     # 数量必须为正。缺这道校验时负数量会被一路放行：
     #   `assert_stock_available(stock, -quantity)` 传的是 -(-N)=+N，恒通过；
@@ -216,6 +222,27 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
     if not product:
         raise ValueError(f'出货{staging.customer}-{staging.product_name}确认失败: 产品不存在')
 
+    if _row_factory_rejected(scoped_factory, product.factory):
+        raise ValueError(
+            f'出货{staging.customer}-{staging.product_name}的产品不在你的工厂范围，已拒绝'
+        )
+    return product_id, product
+
+
+async def _confirm_one_staging_stockout(
+    db: AsyncSession, staging, completed_orders: list[dict],
+    *, scoped_factory: str | None = None,
+) -> None:
+    """确认单条暂存出货（在 savepoint 内运行，异常由调用方捕获）。
+
+    校验链：数量为正 → 客户必填 → 产品存在 → 库存充足 → 订单可出 → 按订单分摊出库。
+    """
+    from fastapi_app.services.order_utils import compute_order_status_from_db
+    from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, assert_stock_available
+
+    product_id, product = await _preflight_staging_stockout(
+        db, staging, scoped_factory=scoped_factory,
+    )
     # 负库存判定统一走统一入口（P1-2b），文案与改动前逐字一致
     assert_stock_available(
         product.current_stock, -staging.quantity,
@@ -304,9 +331,15 @@ async def _confirm_one_staging_stockout(db: AsyncSession, staging,
 
 
 async def confirm_staging_stockouts(
-    db: AsyncSession, session_id: str
+    db: AsyncSession, session_id: str, *, scoped_factory: str | None = None,
 ) -> tuple[int, list[str]]:
-    """批量确认暂存出货（2026-10-11 复核 P2-14⑥ 拆分：单行确认见 _confirm_one_staging_stockout）。"""
+    """批量确认暂存出货（单行确认见 :func:`_confirm_one_staging_stockout`）。
+
+    Args:
+        scoped_factory: 厂绑定用户的工厂闸门（2026-11-17 上线前审计 P0-1）。此前本函数
+            与其单行实现**全程无工厂校验**，而暂存行 product_id 来自按名字的全表映射 ——
+            厂绑定用户可确认他厂产品的出货行、扣他厂库存。None = 超管/未绑定厂，行为不变。
+    """
     result = await db.execute(
         select(StagingStockOut).where(
             StagingStockOut.session_id == session_id,
@@ -328,7 +361,9 @@ async def confirm_staging_stockouts(
     for staging in staging_stockouts:
         try:
             async with db.begin_nested():
-                await _confirm_one_staging_stockout(db, staging, completed_orders)
+                await _confirm_one_staging_stockout(
+                    db, staging, completed_orders, scoped_factory=scoped_factory,
+                )
                 staging.status = staging_machine.transition(staging.status, StagingAction.APPROVE)
                 confirmed += 1
         except _NegativeQuantityError as e:

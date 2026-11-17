@@ -23,6 +23,7 @@ from fastapi_app.schemas.staging import (
     StagingStockOutUpdate,
 )
 from fastapi_app.services import staging_service as svc
+from fastapi_app.shared.factory_scope import factory_scope_of
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -202,7 +203,10 @@ async def confirm_staging_stockouts(
     """
     scoped_session = _build_scoped_session(current_user.id, session_id)
     async with db_transaction(db):
-        confirmed, errors = await svc.confirm_staging_stockouts(db, scoped_session)
+        # 工厂闸门（2026-11-17 上线前审计 P0-1）：厂绑定用户只能确认本厂产品的暂存出货行。
+        confirmed, errors = await svc.confirm_staging_stockouts(
+            db, scoped_session, scoped_factory=factory_scope_of(current_user),
+        )
     if confirmed > 0:
         from fastapi_app.services.notification_service import StockEvent, publish_stock_event
         await publish_stock_event(

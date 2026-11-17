@@ -18,6 +18,7 @@ from fastapi_app.schemas.staging import (
     StagingStockInUpdate,
 )
 from fastapi_app.services import staging_service as svc
+from fastapi_app.shared.factory_scope import factory_scope_of
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,11 @@ async def confirm_staging_stockins(session_id: str=Query('default', max_length=5
     """确认暂存备货 - 转移到正式备货表"""
     scoped_session = f'u{current_user.id}:{session_id}'
     async with db_transaction(db):
-        confirmed, errors = await svc.confirm_staging_stockins(db, scoped_session)
+        # 工厂闸门（2026-11-17 上线前审计 P0-1）：厂绑定用户只能确认本厂产品的暂存备货行。
+        # 服务层按行拒绝他厂行（不整批失败）；超管/未绑定厂 → factory_scope_of 返回空串 = 不限。
+        confirmed, errors = await svc.confirm_staging_stockins(
+            db, scoped_session, scoped_factory=factory_scope_of(current_user),
+        )
     if confirmed == 0 and errors:
         return StagingStockInConfirmResult(success=False, message=errors[0], confirmed=0, errors=errors)
     return StagingStockInConfirmResult(success=True, message=f'成功确认 {confirmed} 个备货', confirmed=confirmed, errors=errors)
