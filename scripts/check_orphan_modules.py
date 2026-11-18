@@ -72,6 +72,12 @@ SCAN_PACKAGES: tuple[str, ...] = ('fastapi_app', 'utils')
 #: 只登记确实以字符串表声明导出的文件；新增条目必须在评审里说明理由。
 STRING_EDGE_FILES: frozenset[str] = frozenset({'utils/__init__.py'})
 
+#: 上述文件里**哪张表**才算边来源（2026-11-18 评审 M1）。
+#: 此前 `STRING_EDGE_FILES` 是**整文件**放行：往 `utils/__init__.py` 加任意一行
+#: `_X = "fastapi_app.services.dead"` 就能给死模块伪造入边 —— P1-24 要堵的
+#: 伪造向量在该文件内原样保留。现在只认赋值给这些名字的 dict 字面量的 value。
+TABLE_ASSIGN_NAMES: frozenset[str] = frozenset({'_EXPORTS'})
+
 #: 已确认「生产未接线但保留」的模块（2026-10-17 审计 P1-24）。
 #: 这张表是**人的判断的账本**，不是豁免通道：模块被接线或删除后，门禁会要求删掉条目。
 KNOWN_UNWIRED: dict[str, str] = {
@@ -79,6 +85,11 @@ KNOWN_UNWIRED: dict[str, str] = {
         '249 行备件换算；2026-10-27 全栈审计判定「非缺陷、待接线」，接线到采购中心后必须删除本条目'
     ),
 }
+
+#: 账本条目数上限（棘轮：只降不升，2026-11-18 评审 M2）。
+#: 没有这条时，任何人为了让红变绿只需追加一条 + 一句任意理由，CI 立刻全绿；
+#: 一个长期躺死、没人动的模块就此成为永久豁免。上限只能随条目**减少**而下调。
+KNOWN_UNWIRED_LIMIT: int = 1
 
 #: 提供边但本身不参与判定的目录（相对仓库根）。
 SKIP_DIR_NAMES: frozenset[str] = frozenset({
@@ -167,6 +178,33 @@ def _dynamic_import_constants(tree: ast.AST) -> set[int]:
     return ids
 
 
+def _lazy_table_constant_ids(tree: ast.AST) -> set[int]:
+    """`TABLE_ASSIGN_NAMES` 为名的 dict 字面量里，**value** 常量的 id 集合。
+
+    2026-11-18 评审 M1：`STRING_EDGE_FILES` 原先是整文件放行，任何一行
+    `_X = "fastapi_app.services.dead"` 都能伪造入边。这里把它收窄到
+    「确实赋值给 `_EXPORTS` 这类惰性导出表的 dict 的 value」。
+    """
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        names = {t.id for t in targets if isinstance(t, ast.Name)}
+        if not names & TABLE_ASSIGN_NAMES:
+            continue
+        value = node.value
+        if not isinstance(value, ast.Dict):
+            continue
+        for item in value.values:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                ids.add(id(item))
+    return ids
+
+
 def _collect_edges(path: Path, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
     """返回 module 指向的模块集合（保守图：静态 import + 可解析的字符串字面量）。"""
     try:
@@ -186,7 +224,9 @@ def _collect_edges(path: Path, module: str, is_package: bool, known: frozenset[s
 
     # 字符串字面量成为「边」的唯一入口（2026-10-17 审计 P1-24，见下方分支注释）
     rel_posix = path.relative_to(ROOT).as_posix()
-    allow_table = rel_posix in STRING_EDGE_FILES
+    # 2026-11-18 评审 M1：原先这里是 allow_table（整文件放行）—— 改成只认
+    # 「赋值给 TABLE_ASSIGN_NAMES 那张表的 dict value」，文件内其它裸字符串不算边。
+    table_ids = _lazy_table_constant_ids(tree) if rel_posix in STRING_EDGE_FILES else set()
     dynamic_ids = _dynamic_import_constants(tree)
     docstring_ids = {
         id(n.value) for n in ast.walk(tree)
@@ -214,8 +254,9 @@ def _collect_edges(path: Path, module: str, is_package: bool, known: frozenset[s
             # 原先任意一行 `_X = "fastapi_app.services.dead"` 就能给死模块伪造入边。
             # 现在只认两类，且都要求「落在真正会执行导入的位置」：
             #   ① importlib.import_module("x") / __import__("x") 的实参；
-            #   ② STRING_EDGE_FILES 里的 PEP 562 惰性导出表（utils/__init__.py 的 _EXPORTS）。
-            if not allow_table and id(node) not in dynamic_ids:
+            #   ② STRING_EDGE_FILES 里、且确实赋值给 TABLE_ASSIGN_NAMES 那张
+            #      惰性导出表的 dict value（utils/__init__.py 的 _EXPORTS）。
+            if id(node) not in dynamic_ids and id(node) not in table_ids:
                 continue
             if id(node) in docstring_ids:   # 裸 docstring 不是导入
                 continue
@@ -407,6 +448,43 @@ def _collect_universe(graph: _Graph) -> list[str]:
     return universe
 
 
+def _assert_lazy_table_resolves(known: frozenset[str]) -> list[str]:
+    """`STRING_EDGE_FILES` 里惰性导出表的每个 value 都必须解析到真实子模块。
+
+    2026-11-18 评审 M1 后半：门禁专门特判这张表，却从不校验表的内容。
+    写错一个名字既不会产生边、也不会报错 —— 只在运行期 `__getattr__` 抛
+    ModuleNotFoundError。这里把它变成静态失败。
+    """
+    failures: list[str] = []
+    for rel in sorted(STRING_EDGE_FILES):
+        path = ROOT / rel
+        if not path.is_file():
+            failures.append(f'[B] STRING_EDGE_FILES 登记的文件不存在：{rel}')
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding='utf-8'))
+        except SyntaxError as exc:
+            failures.append(f'[B] {rel} 无法解析：{exc}')
+            continue
+        pkg_parts = list(path.parent.relative_to(ROOT).parts)
+        # `utils/__init__.py` → 包名就是 utils；`x/y.py` → x.y
+        parts = pkg_parts if path.name == '__init__.py' else [*pkg_parts, path.stem]
+        pkg_name = '.'.join(parts)
+        for node in ast.walk(tree):
+            if id(node) not in _lazy_table_constant_ids(tree):
+                continue
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            leaf = node.value.strip()
+            full = f'{pkg_name}.{leaf}' if pkg_name else leaf
+            if full not in known:
+                failures.append(
+                    f'[B] {rel} 的惰性导出表指向不存在的模块：{full}'
+                    '（表写错既不会产生边也不会报错，只会在运行期 AttributeError）'
+                )
+    return failures
+
+
 def _assert_no_orphans(graph: _Graph, universe: list[str]) -> list[str]:
     """断言 B：扫描范围内每个模块都必须从真实入口**可达**（2026-10-17 审计 P1-24）。
 
@@ -443,6 +521,13 @@ def _assert_no_orphans(graph: _Graph, universe: list[str]) -> list[str]:
             stale.append(f'{mod} —— 已被生产图接入，请删除该登记（原登记理由：{why}）')
     if stale:
         failures.append('[B] KNOWN_UNWIRED 登记失效：\n    ' + '\n    '.join(stale))
+    # 2026-11-18 评审 M2：账本必须是「只降不升」的棘轮，否则它就是永久豁免通道。
+    if len(KNOWN_UNWIRED) > KNOWN_UNWIRED_LIMIT:
+        failures.append(
+            f'[B] KNOWN_UNWIRED 条目数 {len(KNOWN_UNWIRED)} 超过上限 {KNOWN_UNWIRED_LIMIT}'
+            '（棘轮只降不升：新增条目要同时下调 KNOWN_UNWIRED_LIMIT 并在评审里说明）\n    '
+            + '\n    '.join(sorted(KNOWN_UNWIRED))
+        )
     return failures
 
 def _report(graph: _Graph, files: list[Path], universe: list[str], whitelist: list[str],
@@ -461,6 +546,11 @@ def _report(graph: _Graph, files: list[Path], universe: list[str], whitelist: li
     if test_only:
         print('[提示] 仅被测试引用（无生产入边）的模块 ' + str(len(test_only)) + ' 个：'
               + ', '.join(test_only[:20]) + (' …' if len(test_only) > 20 else ''))
+    if KNOWN_UNWIRED:
+        # 2026-11-18 评审 M2：豁免必须在输出里可见 —— 否则 PASS 行会让
+        # 「有 N 个模块被账本豁免」这件事彻底消失。
+        print('[提示] KNOWN_UNWIRED 豁免 ' + str(len(KNOWN_UNWIRED))
+              + '/' + str(KNOWN_UNWIRED_LIMIT) + ' 项：' + ', '.join(sorted(KNOWN_UNWIRED)))
     if verbose:
         print('--- 每个孤儿候选的入边数（0 = 孤儿）---')
         for mod in universe:
@@ -478,6 +568,10 @@ def main(argv: list[str] | None = None) -> int:
     universe = _collect_universe(graph)
     failures, prod_gap, dangling, no_edge, whitelist = _whitelist_check(graph)
     failures.extend(_assert_no_orphans(graph, universe))
+    # 2026-11-18 评审 M1：惰性导出表写错名字要静态失败，不能只在运行期炸。
+    # 放在 main() 而不是 _assert_no_orphans()：后者是纯函数，测试用合成图驱动；
+    # 这条校验要读真实文件（STRING_EDGE_FILES），耦合进来会让夹具图假红。
+    failures.extend(_assert_lazy_table_resolves(graph.known))
     test_only = [m for m in universe
                  if m not in graph.prod_reachable and m in graph.all_reachable]
     _report(graph, files, universe, whitelist, dangling, no_edge, prod_gap, test_only, args.verbose)
@@ -488,7 +582,8 @@ def main(argv: list[str] | None = None) -> int:
             print('\n' + item)
         return 1
     print('\n结果：PASS —— mypy 白名单全部在导入图内；扫描范围内所有模块都从真实入口可达'
-          + ('（' + str(len(prod_gap)) + ' 项 WARN 需人工判定）' if prod_gap else ''))
+          + ('（' + str(len(prod_gap)) + ' 项 WARN 需人工判定）' if prod_gap else '')
+          + ('（' + str(len(KNOWN_UNWIRED)) + ' 项 KNOWN_UNWIRED 豁免）' if KNOWN_UNWIRED else ''))
     return 0
 
 

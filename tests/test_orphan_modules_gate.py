@@ -223,3 +223,124 @@ def test_known_unwired_registry_silences_stock_module(monkeypatch) -> None:
     )
     failures = com._assert_no_orphans(gone, [])
     assert any("模块已不存在" in item for item in failures), failures
+
+
+# --- 2026-11-18 推送前评审：M1/M2/M3 的回归守卫 ------------------------------
+
+def test_lazy_table_values_only_not_whole_file(tmp_path, monkeypatch) -> None:
+    """M1：`STRING_EDGE_FILES` 只认 `_EXPORTS` 表的 value，文件内裸字符串不算边。
+
+    评审原文：「`STRING_EDGE_FILES` 是**整文件**放行，不是「只认 `_EXPORTS` 表」，
+    P1-24 的伪造向量在该文件内原样保留」。
+    """
+    import ast as _ast
+
+    monkeypatch.setattr(com, "ROOT", tmp_path)
+    (tmp_path / "utils").mkdir()
+    init = tmp_path / "utils" / "__init__.py"
+    init.write_text(
+        'from __future__ import annotations\n'
+        '_X = "utils.dead"\n'                      # 裸字符串：不得算边
+        '_EXPORTS = {"lr": "log_rotation"}\n'      # 表 value：算边
+        'def __getattr__(n):\n    raise AttributeError(n)\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "utils" / "dead.py").write_text("", encoding="utf-8")
+    (tmp_path / "utils" / "log_rotation.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(com, "STRING_EDGE_FILES", frozenset({"utils/__init__.py"}))
+
+    known = frozenset({"utils", "utils.dead", "utils.log_rotation"})
+    edges = com._collect_edges(init, "utils", True, known)
+    assert "utils.log_rotation" in edges, f"导出表的 value 没被算作边：{edges}"
+    assert "utils.dead" not in edges, f"裸字符串仍能伪造入边（评审 M1 未修）：{edges}"
+
+    # 辅助函数本身也必须只认表的 value
+    tree = _ast.parse(init.read_text(encoding="utf-8"))
+    captured = {
+        n.value for n in _ast.walk(tree)
+        if isinstance(n, _ast.Constant) and id(n) in com._lazy_table_constant_ids(tree)
+    }
+    assert captured == {"log_rotation"}, captured
+
+
+def test_lazy_table_pointing_to_missing_module_fails(tmp_path, monkeypatch) -> None:
+    """M1 后半：`_EXPORTS` 写错名字必须静态失败，不能只在运行期 AttributeError。"""
+    monkeypatch.setattr(com, "ROOT", tmp_path)
+    (tmp_path / "utils").mkdir()
+    (tmp_path / "utils" / "__init__.py").write_text(
+        '_EXPORTS = {"x": "nosuch"}\n', encoding="utf-8",
+    )
+    monkeypatch.setattr(com, "STRING_EDGE_FILES", frozenset({"utils/__init__.py"}))
+    failures = com._assert_lazy_table_resolves(frozenset({"utils"}))
+    assert failures, "指向不存在模块的导出表没被拦下"
+    assert "utils.nosuch" in failures[0], failures
+
+
+def test_known_unwired_registry_has_ratchet(monkeypatch) -> None:
+    """M2：账本条目数超过上限必须报红，否则它就是永久豁免通道。"""
+    graph = _graph_with(
+        known={"probe.a", "probe.b"},
+        prod_reachable=set(),
+        indegree={"probe.a": 1, "probe.b": 1},
+    )
+    monkeypatch.setattr(com, "KNOWN_UNWIRED_LIMIT", 1)
+
+    monkeypatch.setattr(com, "KNOWN_UNWIRED", {"probe.a": "待接线（测试）"})
+    assert not any("超过上限" in f for f in com._assert_no_orphans(graph, [])), \
+        "未超限时不该因棘轮报红"
+
+    monkeypatch.setattr(com, "KNOWN_UNWIRED", {"probe.a": "x", "probe.b": "y"})
+    failures = com._assert_no_orphans(graph, [])
+    assert any("超过上限" in f for f in failures), failures
+
+
+def test_main_fails_when_lazy_table_points_to_missing_module(tmp_path, monkeypatch, capsys) -> None:
+    """M1 接线：坏掉的 `_EXPORTS` 必须让 `main()` 退出 1（不只是在单函数里报）。
+
+    上面 test_lazy_table_pointing_to_missing_module_fails 只调了函数本身；
+    删掉 main() 里那行 extend 它仍绿（变异检查实测）。这条测的是接线。
+    """
+    (tmp_path / "utils").mkdir()
+    (tmp_path / "utils" / "__init__.py").write_text(
+        '_EXPORTS = {"x": "nosuch"}\n', encoding="utf-8",
+    )
+    (tmp_path / "mypy.ini").write_text("[mypy]\n", encoding="utf-8")
+
+    monkeypatch.setattr(com, "ROOT", tmp_path)
+    monkeypatch.setattr(com, "ROOTS", ("utils",))
+    monkeypatch.setattr(com, "SCAN_PACKAGES", ("utils",))
+    monkeypatch.setattr(com, "MYPY_INI", tmp_path / "mypy.ini")
+    monkeypatch.setattr(com, "STRING_EDGE_FILES", frozenset({"utils/__init__.py"}))
+    monkeypatch.setattr(com, "KNOWN_UNWIRED", {})
+
+    code = com.main([])
+    out = capsys.readouterr().out
+    assert code == 1, f"坏掉的导出表没让 main() 失败（接线断了）：\n{out}"
+    assert "utils.nosuch" in out, out
+
+
+def test_main_exits_one_when_assertion_b_fires(tmp_path, monkeypatch, capsys) -> None:
+    """M3：断言 B 必须真的被 main() 执行 —— 删掉那行 extend 本用例必红。
+
+    评审原文：「没有任何用例驱动 `main()` 退出 1，删掉断言 B 的接线行后全套
+    测试仍然全绿」。此前所有用例都直接调 `_assert_no_orphans` / `_whitelist_check`。
+    """
+    pkg = tmp_path / "probe"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "main.py").write_text("import probe.live\n", encoding="utf-8")
+    (pkg / "live.py").write_text("", encoding="utf-8")
+    (pkg / "dead.py").write_text("", encoding="utf-8")   # 无人 import → 必须被抓
+    (tmp_path / "mypy.ini").write_text("[mypy]\n", encoding="utf-8")
+
+    monkeypatch.setattr(com, "ROOT", tmp_path)
+    monkeypatch.setattr(com, "ROOTS", ("probe.main",))
+    monkeypatch.setattr(com, "SCAN_PACKAGES", ("probe",))
+    monkeypatch.setattr(com, "MYPY_INI", tmp_path / "mypy.ini")
+    monkeypatch.setattr(com, "STRING_EDGE_FILES", frozenset())
+    monkeypatch.setattr(com, "KNOWN_UNWIRED", {})
+
+    code = com.main([])
+    out = capsys.readouterr().out
+    assert code == 1, f"不可达模块未让 main() 失败（断言 B 可能没接线）：\n{out}"
+    assert "[B]" in out and "probe.dead" in out, out
