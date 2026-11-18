@@ -221,41 +221,117 @@ def test_both_encrypting_endpoints_call_the_gate() -> None:
     调用删掉，函数级用例仍然全绿（这正是上一批踩过的坑：测函数不测接线）。
     """
     expected = {
-        'export.py': 'get_backup_info',          # GET /export-info
-        'actions.py': 'trigger_full_backup',     # POST /full
+        'export.py': 'get_backup_info',              # GET  /export-info（现场生成整库包）
+        'actions.py': 'trigger_full_backup',         # POST /full（任务化全量备份）
+        'records.py': 'trigger_backup_schedule',     # POST /schedule/trigger（备份类定时任务）
     }
-    missing: list[str] = []
-    for filename, handler in expected.items():
-        tree = ast.parse((BACKUP_DIR / filename).read_text(encoding='utf-8'))
-        handler_node = next(
+    #: 这些调用一旦发生，含凭据的包就已经（或将要）落盘/入队
+    _SIDE_EFFECTS = (
+        'create_full_backup_to_file', 'create_full_backup', '_enqueue_task', 'enqueue_job',
+    )
+    #: 允许用「本地 helper」间接接线（records.py 里按任务类型条件拦，抽了 _gate_if_backup）
+    _LOCAL_HELPERS = ('_gate_if_backup',)
+    #: 凭据闸门的函数名（`_deps.require_superuser_for_encrypted_backup`）
+    _GATE = 'require_superuser_for_encrypted_backup'
+
+    def _calls(node: ast.AST, name: str) -> list[ast.Call]:
+        """找调用 `name(...)` 或 `obj.name(...)` 的节点。
+
+        两种都要收：`create_full_backup_to_file` 走的是 `backup_service.xxx(...)`
+        （Attribute），`enqueue_job` 走的是 `pool.enqueue_job(...)`；只认裸 Name
+        会让「副作用位置」判不出来，守卫直接空转（第一版就是这么错的）。
+        """
+        out: list[ast.Call] = []
+        for n in ast.walk(node):
+            if not isinstance(n, ast.Call):
+                continue
+            func = n.func
+            if (isinstance(func, ast.Name) and func.id == name) or (isinstance(func, ast.Attribute) and func.attr == name):
+                out.append(n)
+        return out
+
+    def _module_def(tree: ast.AST, name: str) -> ast.AST | None:
+        return next(
             (n for n in ast.walk(tree)
-             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == handler),
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name),
             None,
         )
+
+    problems: list[str] = []
+    for filename, handler in expected.items():
+        tree = ast.parse((BACKUP_DIR / filename).read_text(encoding='utf-8'))
+        handler_node = _module_def(tree, handler)
         assert handler_node is not None, f'{filename} 里找不到端点函数 {handler}'
-        calls_gate = any(
-            isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-            and n.func.id == 'require_superuser_for_encrypted_backup'
-            for n in ast.walk(handler_node)
-        )
-        if not calls_gate:
-            missing.append(f'{filename}::{handler}')
-    assert not missing, (
-        '这些端点会产出加密包（含现役私钥与运行时 .env），但没有调用凭据闸门：'
-        f'{missing}\n  非超管传 encrypt=true 即可生成含凭据的备份包。'
+
+        gate_calls = _calls(handler_node, _GATE)
+        if not gate_calls:
+            # 间接接线：handler 调本地 helper，helper 里调闸门
+            helper_calls = [h for name in _LOCAL_HELPERS for h in _calls(handler_node, name)]
+            helper_def = next(
+                (d for name in _LOCAL_HELPERS if (d := _module_def(tree, name)) is not None),
+                None,
+            )
+            if helper_calls and helper_def is not None:
+                gate_calls = _calls(helper_def, _GATE)
+                gate_line = min(h.lineno for h in helper_calls)
+            else:
+                problems.append(f'{filename}::{handler} 没有调用凭据闸门（直接或经本地 helper）')
+                continue
+        else:
+            gate_line = min(g.lineno for g in gate_calls)
+
+        if not gate_calls:
+            problems.append(f'{filename}::{handler} 的本地 helper 里也没有闸门调用')
+            continue
+
+        # ① 必须真的传 effective_encrypt（评审 Med3：改成字面量 False 就成 no-op）
+        for g in gate_calls:
+            kw = {k.arg for k in g.keywords if k.arg}
+            if 'effective_encrypt' not in kw:
+                problems.append(
+                    f'{filename}::{handler} 的闸门调用没有 effective_encrypt= 关键字 '
+                    '（闸门不知道本次是否加密，等于没拦）'
+                )
+            for k in g.keywords:
+                if k.arg == 'effective_encrypt' and isinstance(k.value, ast.Constant) \
+                        and k.value.value is False:
+                    problems.append(
+                        f'{filename}::{handler} 把 effective_encrypt 写死成 False —— 闸门恒放行'
+                    )
+
+        # ② 必须在副作用之前（评审 Med3：位置不查则「挪到调用之后」也绿）
+        side_lines = [
+            n.lineno for name in _SIDE_EFFECTS for n in _calls(handler_node, name)
+        ]
+        if not side_lines:
+            problems.append(f'{filename}::{handler} 里找不到副作用调用（结构已变，守卫可能空转）')
+        elif gate_line > min(side_lines):
+            problems.append(
+                f'{filename}::{handler} 的闸门(L{gate_line}) 晚于副作用(L{min(side_lines)}) —— '
+                '包已经在生成/入队之后才拦，拦不住'
+            )
+
+    assert not problems, (
+        '加密备份的凭据闸门接线有问题（非超管可生成含现役私钥与 .env 的包）：\n  '
+        + '\n  '.join(problems)
     )
 
 
 def test_plaintext_backup_still_excludes_sensitive_config() -> None:
     """前提断言：明文包确实排除敏感配置 —— 否则「只拦加密」这个设计不成立。
 
-    如果哪天 `_write_config_files` 不再按 `include_sensitive_config` 排除，
-    「明文包不含凭据」这个前提就塌了，而本文件的放行分支会静默变成漏洞。
+    2026-11-18 评审 Med4：原版只 grep 两处源码字符串，`include_sensitive_config`
+    被改成恒 True 时它照样绿。现在直接盯**那行赋值**本身：敏感配置是否进包
+    完全由「本次是否加密」决定（`bool(effective_encryption_password)`）。
     """
     core = (PROJECT_ROOT / 'fastapi_app' / 'services' / 'backup'
             / 'orchestration' / 'core.py').read_text(encoding='utf-8')
+    assert 'include_sensitive_config = bool(effective_encryption_password)' in core, (
+        '`include_sensitive_config` 不再由「本次是否加密」决定 —— '
+        '「明文包不含凭据」这个前提失效，`require_superuser_for_encrypted_backup` '
+        '的放行分支就变成漏洞（必须改成对明文也拦，或恢复该推导）'
+    )
     assert 'should_exclude_file(file_path, archive_path, include_sensitive_config)' in core, (
-        '明文/加密的敏感配置分流不见了（core.py::_write_config_files）—— '
-        '「明文包不含凭据」这个前提失效，请同步收紧 require_superuser_for_encrypted_backup'
+        '明文/加密的敏感配置分流不见了（core.py::_write_config_files）'
     )
     assert 'excluded.append(archive_path)' in core, '被排除清单不再记录，无法审计排除结果'

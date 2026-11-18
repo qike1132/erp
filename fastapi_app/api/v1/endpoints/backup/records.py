@@ -19,7 +19,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
+from fastapi_app.api.v1.endpoints.backup._deps import (
+    _resolve_encryption,
+    require_backup_permission,
+    require_superuser_for_encrypted_backup,
+)
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.backup import (
@@ -315,6 +319,22 @@ async def trigger_backup_schedule(
     """
     from fastapi_app.core.arq_app import cron_schedules, get_arq_pool
 
+    #: 会产出整库备份包的任务函数。其余三类（integrity_check / cleanup /
+    #: disaster_recovery_test）不产出含凭据的包，不必拦。
+    _BACKUP_FUNCS = frozenset({'auto_daily_backup_task', 'manual_full_backup_task'})
+
+    def _gate_if_backup(func_name: str) -> None:
+        """2026-11-18 评审 High2：备份类定时任务也要过凭据闸门。
+
+        它用**环境变量里的**加密口令产出整库加密包（含现役 JWT 私钥与运行时
+        `.env`）。手动触发它等于绕过 `POST /full` 上的那道闸 —— 同一个产物，
+        两条入口只堵一条等于没堵。
+        """
+        if func_name not in _BACKUP_FUNCS:
+            return
+        effective, _ = _resolve_encryption(False, None, None)   # 任务侧继承 env 口令
+        require_superuser_for_encrypted_backup(user, effective_encrypt=effective)
+
     # 1) 内置 cron_schedules（sync-shipment/级联等）
     schedule = next((s for s in cron_schedules if s['name'] == task_name), None)
     if schedule is not None:
@@ -322,6 +342,7 @@ async def trigger_backup_schedule(
         if not isinstance(func, FunctionType):
             raise HTTPException(status_code=500, detail='定时任务配置无效')
         func_name = func.__name__
+        _gate_if_backup(func_name)
         try:
             pool = await get_arq_pool()
             await pool.enqueue_job(func_name)
@@ -340,6 +361,9 @@ async def trigger_backup_schedule(
         func_name = schedule_service.TASK_TYPE_TO_FUNC.get(row.task_type, '')
     if not func_name:
         raise HTTPException(status_code=400, detail=f'任务类型 {row.task_type} 无对应任务函数')
+    # 备份类任务会用 env 口令产出加密包，必须过同一道凭据闸门。
+    # 放在 400 校验之后：不存在的任务类型该报 400，不该先撞 403。
+    _gate_if_backup(func_name)
     try:
         pool = await get_arq_pool()
         await pool.enqueue_job(func_name)

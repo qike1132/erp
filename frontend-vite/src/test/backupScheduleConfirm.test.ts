@@ -60,6 +60,13 @@ vi.mock('@/components/backup/composables/useBackupTask', () => ({
   useBackupTask: () => ({ state: ref(null) }),
 }))
 
+// 2026-11-18：BackupView 现在按登录用户的超管身份决定 triggerFull 的 encrypt
+// 参数（加密包含现役私钥与 .env，服务端对非超管 403）。本测试只关心二次确认，
+// 不装 Pinia —— 直接给出一个超管桩，保持它原有的可挂载性。
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ user: { is_super: true } }),
+}))
+
 import BackupView from '@/views/backup/BackupView.vue'
 import ScheduleConfig from '@/components/backup/ScheduleConfig.vue'
 
