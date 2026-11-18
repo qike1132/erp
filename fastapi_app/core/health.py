@@ -309,26 +309,37 @@ def _health_from_cache(cached_public: dict, user_id: int | None, reasons: list[s
 # ---------------------------------------------------------------------------
 _HEALTH_DB_TIMEOUT_S = 2.0
 _HEALTH_REDIS_TIMEOUT_S = 1.0
-_HEALTH_BACKUP_SIGNAL_TIMEOUT_S = 1.5
+_HEALTH_BACKUP_SIGNAL_TIMEOUT_S = 1.0
+# ``degraded_reasons_all()`` 走 utils.redis_cache（socket 超时 5s，与 core.redis_client
+# 不是同一个客户端）。不纳入预算时，Redis 黑洞会让端点整体 ≈9.5s —— 仍超探针 5s，
+# P1-14① 想消灭的「业务正常但健康红」会在 Redis 侧原样保留（2026-11-17 推送前评审）。
+# 它只是**展示用标签**：读不到就留空，绝不因此拖慢或改变健康结论。
+_HEALTH_DEGRADED_REASONS_TIMEOUT_S = 0.8
 # 慢健康检查日志阈值：低于探针预算，留出日志与响应序列化的余量
 _HEALTH_SLOW_LOG_S = 3.0
 
-# 最近一次构建健康快照时各段实际耗时（毫秒）：让「慢在哪一段」可读
-_last_probe_ms: dict[str, float] = {}
-
 
 def _probe_budget_s() -> float:
-    """端点内三段探测的总预算（秒）。必须小于探针侧的单次超时。"""
-    return _HEALTH_DB_TIMEOUT_S + _HEALTH_REDIS_TIMEOUT_S + _HEALTH_BACKUP_SIGNAL_TIMEOUT_S
+    """端点内四段探测的总预算（秒）。必须小于探针侧的单次超时（5.0s）。"""
+    return (
+        _HEALTH_DB_TIMEOUT_S
+        + _HEALTH_REDIS_TIMEOUT_S
+        + _HEALTH_BACKUP_SIGNAL_TIMEOUT_S
+        + _HEALTH_DEGRADED_REASONS_TIMEOUT_S
+    )
 
 
-def _probe_ms_snapshot() -> dict:
-    """当前快照的各段耗时（毫秒）+ 总预算，供 checks/巡检读。"""
-    return {**_last_probe_ms, 'budget_ms': round(_probe_budget_s() * 1000, 1)}
+def _probe_ms_snapshot(timings: dict[str, float]) -> dict:
+    """把**本轮**各段耗时（毫秒）与总预算打包给 checks/巡检。
+
+    刻意用调用方传入的局部 dict，而不是模块级全局：健康端点与 readiness/startup
+    探针共用一个 dict 时，并发请求会把彼此的段耗时覆盖掉，归因时读到假数据。
+    """
+    return {**timings, 'budget_ms': round(_probe_budget_s() * 1000, 1)}
 
 
-async def _db_healthy() -> bool:
-    """DB 连通性探测，带硬上界（P1-14①）。超时按「不健康」处理。
+async def _db_healthy() -> tuple[bool, float]:
+    """DB 连通性探测（带硬上界），返回 (是否健康, 耗时毫秒)。
 
     探测拿不到结论时不能报健康：verify_db_connectivity() 本就是 fail-closed
     （连不上即 False），超时只是「连不上」的另一种形态。
@@ -340,53 +351,62 @@ async def _db_healthy() -> bool:
         logger.warning('健康检查: DB 探测超过 %.1fs 未返回（连接池排队/库无响应），按不健康处理',
                        _HEALTH_DB_TIMEOUT_S)
         ok = False
-    finally:
-        _last_probe_ms['db'] = round((time.monotonic() - started) * 1000, 1)
-    return ok
+    return ok, round((time.monotonic() - started) * 1000, 1)
 
 
-async def _redis_healthy() -> bool:
-    """Redis ping，带硬上界（P1-14①）：broker/网络黑洞时 ping 可以一直挂着。"""
+async def _redis_healthy() -> tuple[bool, float]:
+    """Redis ping（带硬上界）：broker/网络黑洞时 ping 可以一直挂着。"""
     started = time.monotonic()
+    ok = False
     try:
         from fastapi_app.core.redis_client import get_async_redis_client
 
         client = await asyncio.wait_for(
             get_async_redis_client(), timeout=_HEALTH_REDIS_TIMEOUT_S)
-        if not client:
-            return False
-        await asyncio.wait_for(client.ping(), timeout=_HEALTH_REDIS_TIMEOUT_S)
-        return True
+        if client:
+            await asyncio.wait_for(client.ping(), timeout=_HEALTH_REDIS_TIMEOUT_S)
+            ok = True
     except (OSError, ConnectionError, ImportError, TimeoutError,
             redis.exceptions.RedisError):
-        return False
-    finally:
-        _last_probe_ms['redis'] = round((time.monotonic() - started) * 1000, 1)
+        ok = False
+    return ok, round((time.monotonic() - started) * 1000, 1)
 
 
-async def _backup_signal_bounded() -> dict:
-    """备份信号（产物新鲜度 + ARQ 在线），整体带硬上界（P1-14①）。
+async def _backup_signal_bounded() -> tuple[dict, float]:
+    """备份信号（产物新鲜度 + ARQ 在线），整体带硬上界。返回 (信号, 耗时毫秒)。
 
     ``_backup_signal`` 内部的 ARQ 探测只给 ``pool.get()`` 1s，而建池在 wait_for
-    之外（arq 默认 conn_timeout=1 / conn_retries=5 / retry_delay=1 ⇒ 最坏 ~10s），
-    所以端点必须自己兜一个总上界。
+    之外，所以端点必须自己兜一个总上界。
 
     超时按「数据保护链状态未知」上报（ok=False）→ 只降级（degraded），不摘流量：
-    ARQ/broker 挂了不等于数据库不可用，把它判成 unhealthy 会把运维引向重启后端。
+    ARQ/broker 挂了不等于数据库不可用，判成 unhealthy 会把运维引向重启后端。
     """
     started = time.monotonic()
+    signal: dict = {}
     try:
-        return await asyncio.wait_for(
+        signal = await asyncio.wait_for(
             _backup_signal(), timeout=_HEALTH_BACKUP_SIGNAL_TIMEOUT_S)
     except TimeoutError:
         logger.warning('健康检查: 备份/ARQ 信号超过 %.1fs 未返回，按不可用上报',
                        _HEALTH_BACKUP_SIGNAL_TIMEOUT_S)
-        return {'ok': False, 'age_hours': None, 'arq_ok': False, 'note': 'probe_timeout'}
-    finally:
-        _last_probe_ms['backup'] = round((time.monotonic() - started) * 1000, 1)
+        signal = {'ok': False, 'age_hours': None, 'arq_ok': False, 'note': 'probe_timeout'}
+    return signal, round((time.monotonic() - started) * 1000, 1)
 
 
-def _log_if_slow_health(started_at: float) -> None:
+async def _degraded_reasons_bounded() -> tuple[list[str], float]:
+    """降级原因（本地 ∪ Redis），纳入同一预算。返回 (原因列表, 耗时毫秒)。"""
+    started = time.monotonic()
+    reasons: list[str] = []
+    try:
+        reasons = await asyncio.wait_for(
+            degraded_reasons_all(), timeout=_HEALTH_DEGRADED_REASONS_TIMEOUT_S)
+    except TimeoutError:
+        logger.warning('健康检查: 降级原因读取超过 %.1fs 未返回，本轮按空处理',
+                       _HEALTH_DEGRADED_REASONS_TIMEOUT_S)
+    return list(reasons or []), round((time.monotonic() - started) * 1000, 1)
+
+
+def _log_if_slow_health(started_at: float, timings: dict[str, float]) -> None:
     """健康端点自身的慢请求日志（P1-14②）。
 
     /api/health 原先在 prometheus / 慢请求日志的 skip_paths 里，实测生产 20 条慢
@@ -396,26 +416,34 @@ def _log_if_slow_health(started_at: float) -> None:
     elapsed = time.monotonic() - started_at
     if elapsed > _HEALTH_SLOW_LOG_S:
         logger.warning('慢健康检查: /api/health 构建耗时 %.2fs（%s）',
-                       elapsed, _probe_ms_snapshot())
-    _last_probe_ms['total'] = round(elapsed * 1000, 1)
+                       elapsed, _probe_ms_snapshot(timings))
 
 
 async def _build_fresh_health(user_id: int | None, reasons: list[str],
-                              include_internal: bool | None = None):
-    """无缓存时实时探测 DB/Redis 并构建健康响应。"""
+                              include_internal: bool | None = None,
+                              *, reasons_ms: float | None = None,
+                              started_at: float | None = None):
+    """无缓存时实时探测 DB/Redis 并构建健康响应。
+
+    ``reasons_ms`` / ``started_at`` 由调用方传入：降级原因在 ``health_check`` 里就已经
+    读过（也受预算约束），慢日志的总耗时应从那一刻算起，否则会把它的耗时漏掉。
+    """
     internal_visible = (user_id is not None) if include_internal is None else include_internal
-    started_at = time.monotonic()
-    overall_healthy = await _db_healthy()
+    started_at = time.monotonic() if started_at is None else started_at
+    timings: dict[str, float] = {}
+    if reasons_ms is not None:
+        timings['reasons'] = reasons_ms
+    overall_healthy, timings['db'] = await _db_healthy()
 
     # P1-14：Redis 段同样带上界 —— broker/网络黑洞时 ping 可以一直挂着
-    redis_ok = await _redis_healthy()
+    redis_ok, timings['redis'] = await _redis_healthy()
 
     internal_checks = {
         "database": {"status": "ok"} if overall_healthy else {"status": "error"},
         "redis": {"status": "ok"} if redis_ok else {"status": "warning"},
     }
     # 匿名侧只保留「服务是否活着」；备份/审计/连接池属内部运维信号，登录后才可见。
-    backup_signal = await _backup_signal_bounded()
+    backup_signal, timings['backup'] = await _backup_signal_bounded()
     audit_signal = _audit_retention_signal()
     numbering_retention_signal = _numbering_audit_retention_signal()
     public_data = {
@@ -432,11 +460,11 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str],
         "audit_retention": audit_signal,
         "numbering_audit_retention": numbering_retention_signal,
         # P1-14：把各段耗时一起缓存，接口与巡检能直接看「慢在哪一段」
-        "checks": {**internal_checks, "probe_ms": _probe_ms_snapshot()},
+        "checks": {**internal_checks, "probe_ms": _probe_ms_snapshot(timings)},
     }
     _set_cached_health(public_data=public_data, internal_data=internal_data)
 
-    _log_if_slow_health(started_at)
+    _log_if_slow_health(started_at, timings)
 
     # P0-10：降级标记只加在响应上（缓存里存的是 DB/Redis 健康快照）
     health_data = _with_security_degraded(dict(public_data), reasons)
@@ -447,7 +475,7 @@ async def _build_fresh_health(user_id: int | None, reasons: list[str],
         health_data["numbering_audit_retention"] = numbering_retention_signal
         health_data["version"] = settings.APP_VERSION
         # P1-14：各段探测耗时随响应一起给（慢在哪一段不用猜）
-        health_data["checks"] = {**internal_checks, "probe_ms": _probe_ms_snapshot()}
+        health_data["checks"] = {**internal_checks, "probe_ms": _probe_ms_snapshot(timings)}
         try:
             pool_status = db_health_checker.get_pool_status()
             health_stats = db_health_checker.get_stats()
@@ -471,7 +499,8 @@ async def health_check(
     request: Request,
     user_id: int | None = Depends(_get_optional_user),
 ):
-    reasons = await degraded_reasons_all()
+    reasons_started = time.monotonic()
+    reasons, reasons_ms = await _degraded_reasons_bounded()
     # 本机直连（服务器管理器 / watchdog）视为内部调用：备份徽章依赖
     # /api/health 的 backup 块；2026-11-02 匿名隐藏后 GUI 永远显示「备份 未上报」。
     include_internal = user_id is not None or _is_direct_loopback(request)
@@ -480,8 +509,10 @@ async def health_check(
         payload = _health_from_cache(cached_public, user_id, reasons,
                                      include_internal=include_internal)
     else:
-        payload = await _build_fresh_health(user_id, reasons,
-                                            include_internal=include_internal)
+        payload = await _build_fresh_health(
+            user_id, reasons, include_internal=include_internal,
+            reasons_ms=reasons_ms, started_at=reasons_started,
+        )
     return _attach_runtime(payload, request)
 
 
@@ -553,7 +584,7 @@ async def readiness_probe(request: Request):
     注意 ``request`` 是**必填**的 Request：FastAPI 不支持把 ``Request | None`` 当
     参数注入（会拿它当 Pydantic 字段，注册路由时直接 FastAPIError）。
     """
-    db_ok = await _db_healthy()
+    db_ok, _db_ms = await _db_healthy()
     redis_ok = True
     try:
         from fastapi_app.core.redis_client import get_async_redis_client
@@ -607,7 +638,7 @@ async def startup_probe():
     用于慢启动应用，startup成功前liveness/readiness不生效。
     """
     try:
-        db_ok = await _db_healthy()
+        db_ok, _db_ms = await _db_healthy()
         if db_ok:
             return {"status": "started"}
     except (OperationalError, DisconnectionError):

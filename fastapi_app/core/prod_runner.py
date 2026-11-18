@@ -532,6 +532,13 @@ def _should_force_restart_degraded(consecutive_failures: int, fail_window_s: flo
 # 强制重启前独立复检库可达性的连接/语句超时（秒）：远小于 600s 降级窗口，
 # 又足以跨过一次瞬时拥塞 —— 复检本身不能变成新的阻塞点。
 _DB_RECHECK_TIMEOUT_S = 3
+# 复检节流（秒）：降级期间主循环每 tick（3s）都新建 engine 去敲一个已经在困难的库，
+# 会把单轮从 3s 拉到 ~6s，并连带推迟另一个服务的 poll/write_status。30s 一次足够
+# 判断「根因在库还是在进程」（2026-11-17 推送前评审）。
+_DB_RECHECK_MIN_INTERVAL_S = 30.0
+# 否决重启的次数上限：否决**不能是永久的** —— 后端自己耗尽 PG 连接时，「库不可达」
+# 恰恰是它造成的，永久不重启等于让唯一能释放连接的进程卡死。超过该次数即回到原逻辑。
+_DB_VETO_MAX_CONSECUTIVE = 3
 
 
 def _db_reachable_from_supervisor(url: str | None = None) -> bool | None:
@@ -691,6 +698,50 @@ class _Managed:
         self.backoff_step = 0
         # H2：杀树未确认成功后的重试时刻。窗口内不得再发杀树、更不得起新进程。
         self._kill_retry_at = 0.0
+        # P1-14④：强制重启前的独立库复检（节流时刻 + 已连续否决次数）
+        self._last_db_recheck_at = 0.0
+        self._db_veto_count = 0
+    def _db_recheck_throttled(self) -> bool | None:
+        """按 ``_DB_RECHECK_MIN_INTERVAL_S`` 节流的独立库复检。
+
+        节流窗口内直接返回 None（= 本轮不否决重启）：降级期间每个 tick 都新建
+        engine 去敲一个已经在困难的库，会把主循环单轮从 3s 拉到 ~6s。
+        """
+        now = time.monotonic()
+        if now - self._last_db_recheck_at < _DB_RECHECK_MIN_INTERVAL_S:
+            return None
+        self._last_db_recheck_at = now
+        return _db_reachable_from_supervisor()
+
+    def _maybe_veto_force_restart(self, window: float) -> bool:
+        """强制重启前的独立库复检：返回 True 表示本轮否决重启。
+
+        库从这里也连不上 ⇒ 根因更像在数据库/主机侧，杀树只会让事故现场再少一个能
+        报警的进程。但否决**不能是永久的**：连接数耗尽时「库不可达」恰恰可能是被
+        监督的这个进程自己造成的，永久不重启等于让唯一能释放连接的进程卡死。因此
+        至多连续否决 ``_DB_VETO_MAX_CONSECUTIVE`` 次，之后回到原逻辑重启。
+        """
+        db_reachable = self._db_recheck_throttled()
+        if db_reachable is False and self._db_veto_count < _DB_VETO_MAX_CONSECUTIVE:
+            self._db_veto_count += 1
+            # ready:false 必须如实上报 —— 否则状态文件仍写 ready:true，这轮否决在
+            # GUI/巡检里完全不可见。
+            if self.status in ("ready", "running"):
+                self.status = "degraded"
+            print(f"[prod_runner] {self.name} 健康检查持续失败，但监督器独立探库同样失败"
+                  f"（连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s）"
+                  f"，第 {self._db_veto_count}/{_DB_VETO_MAX_CONSECUTIVE} 次否决重启"
+                  f"（判定为数据库/主机侧故障）")
+            self.delay = _next_backoff(self.delay, self.backoff_step)
+            self.backoff_step += 1
+            return True
+        if db_reachable is False:
+            print(f"[prod_runner] {self.name} 独立探库仍失败，但已否决 "
+                  f"{self._db_veto_count} 次 —— 回到原逻辑强制重启"
+                  f"（可能是本进程自己占满连接导致的不可达）")
+        self._db_veto_count = 0
+        return False
+
 
     def start(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -953,15 +1004,8 @@ class _Managed:
         # 闸门永差一个 proc_alive。窗口超 10 分钟时强制重启整棵树（探针抖动是
         # 秒级，不会误杀）。
         if _should_force_restart_degraded(self.consecutive_health_fail, window):
-            # P1-14④（2026-11-17 审计）：探针单点不决定杀树。先在本进程独立探一次
-            # 库：库从这里也连不上 ⇒ 根因在数据库/主机侧，重启后端只会让事故现场
-            # 再少一个还能报警的进程（且 600s 窗口后还杀，等于反复自残）。
-            if _db_reachable_from_supervisor() is False:
-                print(f"[prod_runner] {self.name} 健康检查持续失败，但监督器独立探库同样失败"
-                      f"（连续 {self.consecutive_health_fail} 次 / 窗口 {int(window)}s）"
-                      f"，判定为数据库/主机侧故障，不强制重启进程树")
-                self.delay = _next_backoff(self.delay, self.backoff_step)
-                self.backoff_step += 1
+            # P1-14④：强制重启前先做独立库复检（30s 节流 + 有限次否决），见该方法。
+            if self._maybe_veto_force_restart(window):
                 return
             print(f"[prod_runner] {self.name} 进程存活但健康检查持续失败超过 "
                   f"{int(_DEGRADED_RESTART_MIN_WINDOW_S)}s"

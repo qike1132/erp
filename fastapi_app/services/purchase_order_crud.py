@@ -15,6 +15,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import business_today
 from fastapi_app.core.exceptions import ConflictError, ItemsVersionConflict
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
@@ -61,7 +62,10 @@ async def _create_material_registration(
         purchase_order_no=order.order_no,
         supplier_id=order.supplier_id,
         supplier_name=order.supplier_name or '',
-        registration_date=datetime.now(UTC).replace(tzinfo=None).date(),
+        # P1-9（2026-11-17 审计；推送前评审补漏）：这是 MaterialRegistration 的**主**
+        # 生产路径（采购单创建 / BOM 同步时自动建来料登记）。原先用 UTC 日界，北京
+        # 00:00–08:00 建的单会落到「昨天」，与 _commands / 模型默认值口径相反。
+        registration_date=business_today(),
         remark='',
         status='pending',
     )

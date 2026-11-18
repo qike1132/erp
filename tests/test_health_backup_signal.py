@@ -155,11 +155,13 @@ async def test_health_route_wires_backup_block(monkeypatch) -> None:
     async def _backup():
         return {"ok": True, "age_hours": 0.5, "arq_ok": True}
 
-    async def _db() -> bool:
-        return True
+    # 探测函数返回 (值, 耗时毫秒)：段耗时收在**调用方局部** dict 里，不再用模块级
+    # 全局（否则并发请求/其它探针端点会互相覆盖，也会让断言靠跨测试残留才变绿）。
+    async def _db():
+        return True, 1.0
 
-    async def _redis() -> bool:
-        return True
+    async def _redis():
+        return True, 1.0
 
     monkeypatch.setattr(health, "_db_healthy", _db)
     monkeypatch.setattr(health, "_redis_healthy", _redis)
@@ -178,5 +180,7 @@ async def test_health_route_wires_backup_block(monkeypatch) -> None:
 
     assert payload["backup"]["ok"] is True
     assert cached["backup"]["ok"] is True, "backup 块没进缓存 → 后续请求看不到备份链状态"
-    # P1-14：各段耗时随缓存一起暴露，慢在哪一段可直接读
-    assert {"db", "redis", "backup"} <= set(payload["checks"]["probe_ms"])
+    # P1-14：各段耗时随响应一起暴露，慢在哪一段可直接读（且不依赖全局残留）
+    probe_ms = payload["checks"]["probe_ms"]
+    assert {"db", "redis", "backup"} <= set(probe_ms), probe_ms
+    assert "budget_ms" in probe_ms

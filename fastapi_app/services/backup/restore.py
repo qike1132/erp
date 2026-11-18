@@ -64,12 +64,10 @@ async def restore_non_dependent_components(
     if any(n.startswith('config/') for n in zf.namelist()):
         tasks.append(('config', asyncio.to_thread(restore_config, zf, confirm_sensitive)))
 
-    if 'redis/dump.rdb' in zf.namelist():
-        # P1-11（2026-11-17 审计，口径 A）：本仓**不做** Redis 恢复。老包里带了
-        # redis/dump.rdb 也不恢复 —— Redis 里是缓存/ARQ 队列/进度键，回到旧快照反而
-        # 会把陈旧队列任务带回来；原地整替换再 DEBUG RELOAD 的那条老路还会在 reload
-        # 失败时返回 status=ok（假成功）。这里如实登记「已跳过」。
-        results['redis'] = redis_restore_note(legacy_member=True)
+    # P1-11（2026-11-17 审计，口径 A）：本仓**不做** Redis 恢复，且无论新包老包都要
+    # 给出这一句 —— 恢复结果页是灾难现场真正在看的地方，新包什么都不说，会被读成
+    # 「缓存也回滚了」。老包带 redis/dump.rdb 时把「包里有什么」一并如实标出。
+    results['redis'] = redis_restore_note(legacy_member='redis/dump.rdb' in zf.namelist())
 
     if any(n.startswith('meilisearch/') for n in zf.namelist()):
         tasks.append(('meilisearch', restore_meilisearch(zf)))

@@ -546,9 +546,13 @@ def validate_backup_file(content: bytes, filename: str) -> dict:  # log-context:
                 'has_filestore': any(n.startswith('filestore/') for n in names),
                 'has_config': any(n.startswith('config/') for n in names),
                 'has_redis': 'redis/dump.rdb' in names,
-                # P1-11（2026-11-17 审计，口径 A）：本仓不做 Redis 恢复，新包也不再打
-                # RDB。这里显式说明，避免「包里有 RDB」被误读成「缓存能回到备份点」。
-                'redis_restore': REDIS_RESTORE_MESSAGE,
+                # P1-11（2026-11-17 审计，口径 A）：本仓不做 Redis 恢复，新包也不再打 RDB。
+                # 文案按「包里到底有没有 RDB」分流 —— 老包 has_redis=True 时若仍说
+                # 「不再包含 Redis 快照」，两句话会互相打脸（推送前评审）。
+                'redis_restore': (
+                    f'{REDIS_RESTORE_MESSAGE}；本包内仍带 redis/dump.rdb（老格式），已跳过'
+                    if 'redis/dump.rdb' in names else REDIS_RESTORE_MESSAGE
+                ),
                 'has_meilisearch': any(n.startswith('meilisearch/') for n in names),
                 'filestore_count': sum(1 for n in names if n.startswith('filestore/') and not n.endswith('/')),
                 'config_files': [n for n in names if n.startswith('config/') and not n.endswith('/')],

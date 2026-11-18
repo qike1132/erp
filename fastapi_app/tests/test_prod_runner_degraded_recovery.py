@@ -48,6 +48,12 @@ def _managed(status='ready', fail_window_s=None):
     m.health_fail_start = None if fail_window_s is None else time.monotonic() - fail_window_s
     # H2（2026-10-26）：杀树失败后的重试时刻（poll 会读它）
     m._kill_retry_at = 0.0
+    # P1-14④：强制重启前还有一道「独立库复检」闸门。本文件只测**窗口逻辑**，
+    # 让复检返回 None（= 本轮不探、不否决），避免单测里去真连库；复检自身的行为
+    # 由 fastapi_app/tests/test_health_probe_budget.py 专门覆盖。
+    m._last_db_recheck_at = 0.0
+    m._db_veto_count = 0
+    m._db_recheck_throttled = lambda: None
     # 2026-10-26：身份校验只对后端开启；本文件的替身不涉及，置 False 保持原语义
     m.verify_identity = False
     m._identity_checked = True
