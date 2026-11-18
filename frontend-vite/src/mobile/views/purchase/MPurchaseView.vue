@@ -116,6 +116,7 @@ import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
 import MBottomSheet from '@/mobile/components/MBottomSheet.vue'
 import { showToast } from '@/composables/useToast'
+import { isCanceledError } from '@/api/request'
 
 const activeTab = ref('orders')
 const tabChips = [
@@ -174,7 +175,9 @@ async function refetchOrders(page = 1) {
     const res = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value })
     if (seq !== ordersSeq) return
     orders.value = res
-  } catch {
+  } catch (e) {
+    // 同上：路由切换取消的请求不算失败（2026-10-17 审计 P1-21）
+    if (isCanceledError(e)) return
     if (seq !== ordersSeq) return
     ordersPage.value = prev
     showToast('订单加载失败，请重试', 'error')
@@ -194,7 +197,9 @@ async function loadUnprocessed(page = 1) {
     const res = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE })
     if (seq !== unprocessedSeq) return
     unprocessed.value = res
-  } catch {
+  } catch (e) {
+    // 同上：路由切换取消的请求不算失败（2026-10-17 审计 P1-21）
+    if (isCanceledError(e)) return
     if (seq !== unprocessedSeq) return
     unprocessedPage.value = prev
     showToast('待生成订单加载失败，请重试', 'error')
@@ -212,7 +217,11 @@ async function loadCompleted(page = 1) {
     const res = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value })
     if (seq !== completedSeq) return
     completedOrders.value = res
-  } catch {
+  } catch (e) {
+    // 路由切换会 abort 在途 GET（router/guards 的 beforeEach → abortPendingRequests）：
+    // 那是我们主动取消，不是后端失败；弹了还会挂到用户刚跳过去的新页面上
+    // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
+    if (isCanceledError(e)) return
     if (seq !== completedSeq) return
     completedPage.value = prev
     showToast('已完成订单加载失败，请重试', 'error')

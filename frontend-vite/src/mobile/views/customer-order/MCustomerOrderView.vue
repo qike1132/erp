@@ -43,6 +43,7 @@ import MListItem from '@/mobile/components/MListItem.vue'
 import MEmpty from '@/mobile/components/MEmpty.vue'
 import MSpinner from '@/mobile/components/MSpinner.vue'
 import { showToast } from '@/composables/useToast'
+import { isCanceledError } from '@/api/request'
 import { getErrorStatus } from '@/types/errors'
 
 const activeTab = ref('all')
@@ -86,6 +87,10 @@ async function handleSearch() {
     loadedPage = page.value
   } catch (e) {
     if (seq !== loadSeq) return
+    // 路由切换会 abort 在途 GET（router/guards 的 beforeEach → abortPendingRequests）：
+    // 那是我们主动取消，不是后端失败；弹了还会挂到用户刚跳过去的新页面上
+    // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
+    if (isCanceledError(e)) return
     // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知。
     // 2026-10-18 OCR 评审：保留 total（分页器不消失），仅清空列表并提示。
     orders.value = []
