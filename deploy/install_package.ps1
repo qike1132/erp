@@ -455,15 +455,44 @@ try {
     }
     Write-Ok '旧服务已停止并移除（-Force 覆盖）'
   }
+  # 2026-11-18 审计 P1-28：robocopy /E 只覆盖同名文件，**不删**目标里多出来的旧文件。
+  # 升级一次就得到「新旧混合代码树」：旧的 .py 还在，但已被新代码的 import 抛在脑后，
+  # 只在某个分支真的被走到时才炸 —— 半坏状态最难查（AGENTS §6.1-6 记录过同型事故）。
+  #
+  # 为什么不是简单加 /PURGE：$TargetDir 同时是运行期数据目录（logs/、backups/、
+  # temp/、static/uploads/、.env 都在这一层），/PURGE 会连它们一起删。
+  # 所以分两类处理：
+  #   · PurgeWhole  —— 纯产物目录（runtime/、frontend-vite\dist），整目录清空再复制；
+  #   · PurgeCode   —— 代码树（app → 根），只删「包内确实提供的同名子目录」，
+  #                    并显式排除运行期目录名（防御性：万一包内带了空占位 logs/）。
   $copies = @(
-    @{ Src='app';           Dst=$TargetDir },
-    @{ Src='runtime';       Dst=(Join-Path $TargetDir 'runtime') },
-    @{ Src='frontend\dist'; Dst=(Join-Path $TargetDir 'frontend-vite\dist') }
+    @{ Src='app';           Dst=$TargetDir;                              PurgeCode=$true },
+    @{ Src='runtime';       Dst=(Join-Path $TargetDir 'runtime');        PurgeWhole=$true },
+    @{ Src='frontend\dist'; Dst=(Join-Path $TargetDir 'frontend-vite\dist'); PurgeWhole=$true }
   )
+  #: 运行期数据目录名 —— 永远不用包内内容覆盖/删除
+  $runtimeDirNames = @('logs','backups','temp','static','.env','.venv','frontend-vite','_ops')
   foreach($c in $copies){
     $src = Join-Path $pkgRoot.FullName $c.Src
     if(-not (Test-Path $src)){ Write-Fail "包内缺少 $($c.Src)"; exit 1 }
     New-Item -ItemType Directory -Force -Path $c.Dst | Out-Null
+
+    if($c.PurgeWhole -and (Test-Path -LiteralPath $c.Dst)){
+      Get-ChildItem -LiteralPath $c.Dst -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+      Write-Ok "已清空旧产物目录：$($c.Dst)"
+    }
+    if($c.PurgeCode){
+      foreach($item in Get-ChildItem -LiteralPath $src -Force){
+        if(-not $item.PSIsContainer){ continue }
+        if($runtimeDirNames -contains $item.Name.ToLower()){ continue }
+        $dstChild = Join-Path $c.Dst $item.Name
+        if(Test-Path -LiteralPath $dstChild){
+          Remove-Item -LiteralPath $dstChild -Recurse -Force -ErrorAction Stop
+          Write-Ok "已移除旧代码目录：$($item.Name)"
+        }
+      }
+    }
+
     robocopy $src $c.Dst /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
     if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：$($c.Src)"; exit 1 }
   }
