@@ -24,6 +24,7 @@
           :busy="busy"
           :task="taskState"
           :on-full="triggerFull"
+          :encryption="encryption"
           no-task-hint="同一时刻至多执行一个任务"
         />
       </section>
@@ -172,6 +173,20 @@ const recordsPage = ref(1)
 const recordsPageSize = ref(20)
 const recordsLoading = ref(false)
 
+/* ---------- 加密状态（P1-20） ---------- */
+/**
+ * 传给 BackupActions 的加密状态；状态未加载/老后端时为 null（子组件按「可能加密」处理）。
+ * 刻意用**对象**而不是 boolean prop：Vue 在 Boolean prop「没传」时会强制成 false，
+ * 正好把「状态没读到」误判成「加密已关闭」。
+ */
+const encryption = computed<{ enabled: boolean; passwordConfigured: boolean } | null>(() => {
+  const enabled = status.value?.encryption_enabled
+  if (typeof enabled !== 'boolean') return null
+  return {
+    enabled,
+    passwordConfigured: status.value?.encryption_password_configured === true,  // secret-scan:allow 字段名含 password，右值是布尔比较而非字面凭据
+  }
+})
 /* ---------- 还原确认弹窗 ---------- */
 const wizardOpen = ref(false)
 const wizardInitialFilename = ref('')

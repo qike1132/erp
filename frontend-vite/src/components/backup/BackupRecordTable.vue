@@ -13,13 +13,24 @@
       <table class="brt-table">
         <thead>
           <tr>
-            <th>备份名称</th><th>类型</th><th>大小</th><th>时间</th><th>状态</th><th>来源</th><th class="brt-right">操作</th>
+            <th>备份名称</th><th>类型</th><th>加密</th><th>大小</th><th>时间</th><th>状态</th><th>来源</th><th class="brt-right">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="r in filtered" :key="r.id ?? r.filename">
             <td class="mono">{{ r.filename }}</td>
             <td><span class="brt-badge brt-badge-neutral">{{ typeLabel(r.type) }}</span></td>
+            <!-- P1-20（2026-11-17 审计）：加密与否必须逐行可见 —— 只靠文件名后缀判
+                 「是不是 .zip.enc」在列表里读不出来，运维会误以为在留加密包。 -->
+            <td>
+              <span
+                class="brt-badge"
+                :class="r.encrypted ? 'brt-badge-success' : 'brt-badge-warning'"
+                :title="r.encrypted ? '包内容为密文，需密码才能还原' : '明文包（含全部业务数据）'"
+              >
+                {{ r.encrypted ? '已加密' : '明文' }}
+              </span>
+            </td>
             <td class="mono">{{ r.size != null ? fmtSize(r.size) : '—' }}</td>
             <td class="mono">{{ r.created_at?.slice(0, 10) ?? '—' }}</td>
             <td><span class="brt-badge" :class="r.status === 'success' ? 'brt-badge-success' : r.status === 'failed' ? 'brt-badge-danger' : 'brt-badge-processing'">{{ statusLabel(r.status) }}</span></td>
@@ -31,7 +42,7 @@
             </td>
           </tr>
           <tr v-if="loading || rows.length === 0">
-            <td colspan="7" class="brt-empty">{{ loading ? '加载中…' : '暂无备份记录' }}</td>
+            <td colspan="8" class="brt-empty">{{ loading ? '加载中…' : '暂无备份记录' }}</td>
           </tr>
         </tbody>
       </table>

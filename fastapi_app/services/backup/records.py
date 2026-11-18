@@ -23,7 +23,12 @@ from ._constants import (
     ROWS_SOURCE_EXACT_COUNT_FALLBACK,
 )
 from .cache_restore import REDIS_RESTORE_MESSAGE
-from .crypto import sha256_bytes, sha256_file
+from .crypto import (
+    get_backup_encryption_password,
+    is_encryption_enabled,
+    sha256_bytes,
+    sha256_file,
+)
 from .exceptions import BackupFileError
 
 logger = logging.getLogger(__name__)
@@ -492,6 +497,14 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
         'last_full_backup': last_full,
         'disk_usage_percent': disk_usage_percent,
         'checksum_tables': sorted(get_checksum_tables()),
+
+        # P1-20（2026-11-17 审计）：加密状态必须可见。前端手动备份硬编码 encrypt=true，
+        # 总开关关闭时后端会**静默**忽略它、产出明文包；不把开关状态报出来，运维只能
+        # 靠「文件名是不是 .zip.enc」去猜，页面上的密码框还会诱导他配一个无效密码。
+        'encryption_enabled': is_encryption_enabled(),
+        # 仅当「开关开 且 有可用密码」时为 True —— 否则 encrypt=true 的请求会被
+        # fail-closed 拒绝或降级，两种结局都必须让前端先说清楚。
+        'encryption_password_configured': bool(get_backup_encryption_password()),
         # 状态 payload 只供展示/接口消费，用 aware UTC ISO（不参与解析/保留期比较）
         'timestamp': datetime.now(UTC).isoformat(),
     }

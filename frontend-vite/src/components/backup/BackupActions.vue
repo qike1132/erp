@@ -8,13 +8,27 @@
         {{ advancedOpen ? '收起选项' : '高级选项' }}
       </button>
       <span v-if="busy" class="ba-mutex-hint">有任务执行中</span>
+      <!-- P1-20（2026-11-17 审计）：加密状态必须一眼可见 —— 否则总开关关闭时页面照样
+           显示密码框，运维以为在产出加密包，实际是明文。状态未知时不渲染徽标，
+           绝不把「没读到」说成「已开启」。 -->
+      <span
+        v-if="encryptionKnown"
+        class="ba-enc-badge"
+        :class="encryptionEnabled ? 'ba-enc-on' : 'ba-enc-off'"
+        data-testid="ba-enc-state"
+      >
+        {{ encryptionEnabled ? '备份加密已开启' : '加密已关闭 · 备份为明文' }}
+      </span>
     </div>
 
     <div v-if="advancedOpen" class="ba-advanced">
-      <div class="ba-field">
+      <p class="ba-adv-hint" :class="{ 'ba-adv-warn': !encryptionEnabled }">{{ encryptionHint }}</p>
+      <!-- P1-20：总开关关闭时后端会**静默**忽略 encrypt=true，此时密码框只会诱导运维
+           去配一个无效密码 —— 直接不渲染，改由上面的说明文字讲清现状。 -->
+      <div v-if="encryptionEnabled" class="ba-field">
         <label class="ba-field-label" for="ba-enc-pw">加密密码（可选）</label>
         <input id="ba-enc-pw" v-model="password" type="password" class="ba-input" autocomplete="new-password"
-               placeholder="留空则按服务端配置：环境变量密码或明文（绝不随机密钥）"
+               placeholder="留空则用服务端配置的密码；两者都没有时后端会拒绝（绝不生成随机密钥）"
         />
       </div>
       <div class="ba-field">
@@ -69,12 +83,44 @@ const props = defineProps<{
   task: BackupTaskState | null
   onFull: (opts?: FullBackupOptions) => void
   noTaskHint?: string
+  /**
+   * P1-20：后端 /backup/status 的加密状态。**必须用对象**而不是两个 boolean prop ——
+   * Vue 的 Boolean 类型 prop 在「没传」时会强制成 false，正好把「状态没读到」
+   * 误判成「加密已关闭」。null/undefined 表示状态未知。
+   */
+  encryption?: EncryptionState | null
 }>()
 
 const advancedOpen = ref(false)
 const password = ref('')
 const scopeMode = ref<'all' | 'include' | 'exclude'>('all')
 const tablesText = ref('')
+
+export interface EncryptionState {
+  enabled: boolean
+  passwordConfigured: boolean
+}
+
+/**
+ * P1-20（2026-11-17 审计）：加密状态未知时按「可能加密」处理 —— 保留密码框，
+ * 避免把「状态没读到」误当成「加密已关闭」而砍掉能力。只有后端明确说 enabled=false 才隐藏。
+ */
+const encryptionEnabled = computed(() => props.encryption?.enabled !== false)
+/** 后端明确给了状态才渲染徽标；未知（未加载/老后端）不渲染，绝不谎称「已开启」 */
+const encryptionKnown = computed(() => props.encryption != null)
+const encryptionHint = computed(() => {
+  const e = props.encryption
+  if (!e) {
+    return '加密状态未知（未加载或后端未上报）：留空则按服务端配置处理'
+  }
+  if (!e.enabled) {
+    return '加密已关闭（BACKUP_ENCRYPTION_ENABLED=false）：本次备份为明文包，填写的密码会被后端忽略'
+  }
+  if (!e.passwordConfigured) {
+    return '加密已开启但服务端未配置密码：填一个密码，或由运维补 BACKUP_ENCRYPTION_PASSWORD'
+  }
+  return '留空则用服务端配置的密码；两者都没有时后端会拒绝（绝不生成随机密钥）'
+})
 
 function parseTables(text: string): string[] {
   return text
@@ -95,7 +141,7 @@ function handleFull() {
     return
   }
   props.onFull({
-    password: password.value || undefined,
+    password: encryptionEnabled.value ? (password.value || undefined) : undefined,
     tables: scopeMode.value === 'include' && tables.length ? tables : undefined,
     excludeTables: scopeMode.value === 'exclude' && tables.length ? tables : undefined,
   })
@@ -133,6 +179,10 @@ const taskTitle = computed(() => {
 .ba-btn-outline { color: var(--color-primary-600); }
 .ba-btn-outline:hover:not(:disabled) { background: var(--color-primary-50); border-color: var(--color-primary-300); color: var(--color-primary-700); box-shadow: 0 4px 12px rgba(0,0,0,.06); transform: translateY(-1px); }
 .ba-mutex-hint { font-size: var(--fs-caption); color: var(--color-text-muted); }
+.ba-enc-badge { font-size: var(--fs-caption); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+.ba-enc-on { background: rgba(40, 199, 111, .12); color: var(--color-success-600); }
+.ba-enc-off { background: rgba(255, 159, 67, .16); color: #b25e00; }
+.ba-adv-warn { color: #b25e00; }
 .ba-adv-toggle { border: none; background: none; cursor: pointer; font-size: var(--fs-caption); font-weight: 600; color: var(--color-primary-600); transition: color 0.2s ease; }
 .ba-adv-toggle:hover { color: var(--color-primary-700); }
 .ba-advanced { margin-top: 16px; padding: 16px; border: 1px dashed var(--color-border-light); border-radius: var(--radius-sm, 10px); display: flex; flex-direction: column; gap: 12px; }

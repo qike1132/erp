@@ -136,7 +136,9 @@ export const backupApi = {
   // --- M4 六模块新增绑定（任务化 / 调度 / settings / 概览 / 差异预览） ---
   triggerFull: (payload?: { remark?: string; encrypt?: boolean; password?: string; tables?: string[]; exclude_tables?: string[] }) =>
     post<{ success: boolean; task_id: string; task_name: string; message?: string }>('/backup/full', payload ?? {}),
-  getStatus: () => get<ApiResponse & { backup_dir?: string; total_backups?: number; last_full_backup?: unknown; disk_usage_percent?: number | null }>('/backup/status'),
+  // P1-20（2026-11-17 审计）：加密开关与可用密码由后端给出 —— 页面不再靠「输个密码试试」
+  // 判断加密是否生效（总开关关闭时后端会静默忽略 encrypt=true 产出明文包）。
+  getStatus: () => get<ApiResponse & { backup_dir?: string; total_backups?: number; last_full_backup?: unknown; disk_usage_percent?: number | null; encryption_enabled?: boolean; encryption_password_configured?: boolean }>('/backup/status'),
   listSchedules: () => get<{ success: boolean; tasks: BackupScheduleItem[] }>('/backup/schedule'),
   createSchedule: (body: { name: string; task_type: string; cron_expr: string; enabled?: boolean }) =>
     post<{ success: boolean; tasks: BackupScheduleItem[] }>('/backup/schedule', body),

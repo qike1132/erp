@@ -99,6 +99,12 @@ class BackupStatusOut(BaseModel):
     last_full_backup: dict[str, Any] | None = None
     disk_usage_percent: float | None = None
     checksum_tables: list[str] = []
+    # P1-20（2026-11-17 审计）：加密开关与可用密码必须能被前端读到 —— 否则页面只能
+    # 让运维「输个密码试试」，而总开关关闭时后端会静默忽略 encrypt=true 产出明文包。
+    encryption_enabled: bool = False
+    # 仅当「开关开 且 配了可用密码」为 True；False 表示按当前配置 encrypt=true 会被
+    # fail-closed 拒绝或降级为明文。
+    encryption_password_configured: bool = False
     timestamp: str = ""
 
 
