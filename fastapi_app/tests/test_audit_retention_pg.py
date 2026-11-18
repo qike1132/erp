@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from fastapi_app.tasks import audit_retention_task as art
+from fastapi_app.tests._required_env import require_test_db
 
 pytestmark = [pytest.mark.integration, pytest.mark.db]
 
@@ -89,7 +90,7 @@ async def pg_engine():
     """
     url = _test_db_url()
     if not _tcp_reachable(url):
-        pytest.skip(f'测试库端口不可达，跳过真库集成（{_redact(url)}）')
+        require_test_db(f'测试库端口不可达（{_redact(url)}）')
     engine = create_async_engine(url, poolclass=NullPool)
     try:
         async with engine.connect() as conn:
@@ -98,11 +99,11 @@ async def pg_engine():
     except Exception as exc:  # defensive: 探针失败（认证/建连/查询）一律 skip，环境问题不能报成产品缺陷
         with suppress(Exception):
             await engine.dispose()
-        pytest.skip(f'测试库不可用，跳过真库集成（{type(exc).__name__}）')
+        require_test_db(f'测试库不可用（{type(exc).__name__}）')
     if present is None:
         with suppress(Exception):
             await engine.dispose()
-        pytest.skip('测试库缺 audit_log 表（未跑迁移），跳过真库集成')
+        require_test_db('测试库缺 audit_log 表（未跑迁移）')
 
     async with engine.begin() as conn:
         await _purge(conn)

@@ -37,6 +37,7 @@ from fastapi_app.services.backup.orchestration.drill_validator import (
     _load_fk_groups,
     _load_unique_groups,
 )
+from fastapi_app.tests._required_env import require_test_db
 
 
 # ---------------------------------------------------------------------------
@@ -630,7 +631,7 @@ def _create_engine_or_skip():
                 await conn.execute(text('SELECT 1'))
         except Exception as e:  # broad-except: 环境不具备（不可达/无权限/无库）→ skip 而非失败
             await engine.dispose()
-            pytest.skip(f'测试库不可达，跳过真库验证：{type(e).__name__}: {e}')
+            require_test_db(f'测试库不可达（真库验证）：{type(e).__name__}: {e}')
 
     return engine, _probe
 

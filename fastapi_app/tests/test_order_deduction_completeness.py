@@ -32,6 +32,7 @@ from fastapi_app.services.order.deduction import (
     update_deduct_quantity,
 )
 from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, StockOut
+from fastapi_app.tests._required_env import require_test_db
 
 _USER = SimpleNamespace(id=1, username='janitor', role='admin')
 
@@ -591,7 +592,7 @@ async def deduct_engine():
             await conn.execute(text('SELECT 1'))
     except _CONNECTION_ERROR_TYPES as exc:
         await engine.dispose()
-        pytest.skip(f'测试库不可达，跳过 P1-8 真实事务反证：{db_url}（{type(exc).__name__}: {exc}）')
+        require_test_db(f'测试库不可达（P1-8 真实事务反证）：{db_url}（{type(exc).__name__}: {exc}）')
     # 建表在探测之后、且不在上面的 skip 分支内：DDL / schema 错误必须暴露为失败。
     async with engine.begin() as conn:
         for table in (

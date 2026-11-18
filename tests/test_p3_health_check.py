@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from fastapi_app.tests._required_env import require_test_db
+
 # 备份端点包（原单文件 backup.py 已拆分为子模块包）
 _BACKUP_PKG = Path(__file__).resolve().parent.parent / 'fastapi_app' / 'api' / 'v1' / 'endpoints' / 'backup'
 # 备份服务包（原单文件 backup_service.py 已拆分为 services/backup/ 子包）
@@ -62,7 +64,7 @@ async def test_health_check_runner_is_callable():
     except (TimeoutError, OSError) as e:
         # Z09-R1：不得用裸 pass 吞掉——健康检查超时/连接异常正是它应当暴露的失效场景。
         # 本机为生产主机，DB 通常在线；仅在显式无库环境跳过并留下可见记录。
-        pytest.skip(f'数据库不可达，跳过可 await 语义验证: {e}')
+        require_test_db(f'数据库不可达（可 await 语义验证）: {e}')
 
 
 def test_no_deprecated_get_event_loop_in_backup_service():

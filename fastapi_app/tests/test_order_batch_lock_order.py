@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from fastapi_app.services.order_batch_create import _lock_products, batch_create_orders
 from fastapi_app.shared_models import Product
+from fastapi_app.tests._required_env import require_test_db
 
 #: 真实 SQL / 行锁反证使用的固定商品 id 段（JANITOR-LOCK-* 前缀，用例前后清理）
 _LOCK_IDS = (9101, 9102, 9103, 9104)
@@ -329,7 +330,7 @@ async def lock_engine():
             await conn.run_sync(lambda sync_conn: Product.__table__.create(sync_conn, checkfirst=True))
     except (OSError, SQLAlchemyError) as exc:  # pragma: no cover - 环境前提不满足时跳过
         await engine.dispose()
-        pytest.skip(f'测试库不可达，跳过 P1-5 真实 SQL / 行锁反证：{exc}')
+        require_test_db(f'测试库不可达（P1-5 真实 SQL / 行锁反证）：{exc}')
 
     await _clear_lock_rows(engine)
     try:

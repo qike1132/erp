@@ -19,6 +19,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
 import migrations.versions.pg_standalone_067_import_idempotency as mig
+from fastapi_app.tests._required_env import require_test_db
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _VERSIONS_DIR = _REPO_ROOT / "migrations" / "versions"
@@ -307,7 +308,7 @@ def _real_pg_engine():
         parsed = make_url(main)
         db_name = (parsed.database or '').rstrip('/')
         if not db_name:
-            pytest.skip('无法从配置推导测试库名，跳过真实 PG 证明')
+            require_test_db('无法从配置推导测试库名（真实 PG 证明）')
         if db_name.endswith('_test'):
             url = main
         else:
@@ -324,7 +325,7 @@ def _real_pg_engine():
             conn.execute(text("SELECT 1"))
     except Exception as exc:  # pragma: no cover - 无测试库环境跳过
         engine.dispose()
-        pytest.skip(f'测试库不可用，跳过真实 PG 证明: {exc!r}')
+        require_test_db(f'测试库不可用（真实 PG 证明）: {exc!r}')
     return engine
 
 

@@ -19,6 +19,7 @@ from sqlalchemy.schema import CreateTable
 
 import migrations.versions.pg_standalone_061_add_product_stock_check as mig
 from fastapi_app.shared_models import Product
+from fastapi_app.tests._required_env import require_test_db
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _VERSIONS_DIR = _REPO_ROOT / "migrations" / "versions"
@@ -283,7 +284,7 @@ def _real_pg_engine():
             conn.execute(text("SELECT 1"))
     except Exception as exc:  # pragma: no cover - 无测试库环境跳过
         engine.dispose()
-        pytest.skip(f"测试库不可用，跳过单事务证明: {exc!r}")
+        require_test_db(f"测试库不可用（单事务证明）: {exc!r}")
     return engine
 
 
@@ -321,7 +322,7 @@ def test_real_pg_transaction_scoped_proof():
     try:
         engine = _real_pg_engine()
     except Exception as exc:  # pragma: no cover - 无库环境跳过
-        pytest.skip(f"真实 PostgreSQL 不可用，跳过单事务证明: {exc!r}")
+        require_test_db(f"真实 PostgreSQL 不可用（单事务证明）: {exc!r}")
 
     with engine.connect() as conn:
         before_rows = conn.execute(_SNAPSHOT_QUERY).fetchall()
