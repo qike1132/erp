@@ -141,6 +141,7 @@ import UiDialog from '@/components/ui/UiDialog.vue'
 import UiSelect from '@/components/ui/UiSelect.vue'
 import UiCheckbox from '@/components/ui/UiCheckbox.vue'
 import { planSplitsMessage } from '../composables/shipmentPlanRules'
+import { deductLimit } from '../composables/deductRules'
 import type { StagedItem } from '../composables/types'
 import {
   QUANTITY_MAX,
@@ -188,7 +189,7 @@ const customerModel = computed({
 const deductMax = computed(() => {
   if (!editStagedData.value) return undefined
   return props.editStockState === 'ready'
-    ? Math.min(editStagedData.value.quantity, props.editAvailableStock)
+    ? deductLimit(editStagedData.value.quantity, props.editAvailableStock)
     : editStagedData.value.quantity
 })
 

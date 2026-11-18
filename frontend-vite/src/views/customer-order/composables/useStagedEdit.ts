@@ -12,6 +12,7 @@ import { auxApi } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { QUANTITY_RANGE_MESSAGE, isQuantityOutOfRange } from './quantityRange'
 import { planSplitsMessage } from './shipmentPlanRules'
+import { deductOverOrderMessage } from './deductRules'
 import type { StagedItem, AvailableStockinItem } from './types'
 
 export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
@@ -113,6 +114,12 @@ export function useStagedEdit(stagedItems: Ref<StagedItem[]>) {
       }
       if (requested > 0 && editStockState.value === 'ready' && requested > editAvailableStock.value) {
         showToast(`抵扣数量 ${requested} 超过当前可用备货 ${editAvailableStock.value}，请调整后再保存`, 'warning')
+        return
+      }
+      // 抵扣量还必须在订单数量以内（2026-10-17 审计 P1-17）：可用备货够、但订单只有 3 件时
+      // 填 5 件抵扣，后端只按 min(请求, 可用) 收口 → 生成 3 件订单 + 5 件 StockOut，备货被多扣。
+      if (requested > 0 && requested > editStagedData.value.quantity) {
+        showToast(deductOverOrderMessage(requested, editStagedData.value.quantity, '保存'), 'warning')
         return
       }
     }

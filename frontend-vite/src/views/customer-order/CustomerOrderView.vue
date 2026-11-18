@@ -82,6 +82,7 @@ import { ref, nextTick } from 'vue'
 import UiConfirmDialog from '@/components/ui/UiConfirmDialog.vue'
 import { showToast } from '@/composables/useToast'
 import { QUANTITY_RANGE_MESSAGE } from './composables/quantityRange'
+import { deductOverOrderMessage } from './composables/deductRules'
 import { useOrderForm } from './composables/useOrderForm'
 import { useOrderActions } from './composables/useOrderActions'
 import type { StagedItem } from './composables/types'
@@ -178,6 +179,12 @@ async function addStaged() {
     }
     if (form.deductQuantity > availableStock.value) {
       showToast(`抵扣数量 ${form.deductQuantity} 超过当前可用备货 ${availableStock.value}，请调整后再添加`, 'warning')
+      return
+    }
+    // 抵扣量还必须在订单数量以内（2026-10-17 审计 P1-17）：可用备货够、但订单只有 3 件时
+    // 填 5 件抵扣，后端只按 min(请求, 可用) 收口 → 3 件订单扣 5 件备货，多扣的部分无提示。
+    if (form.deductQuantity > form.quantity) {
+      showToast(deductOverOrderMessage(form.deductQuantity, form.quantity, '添加'), 'warning')
       return
     }
   }

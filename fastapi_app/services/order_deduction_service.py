@@ -89,8 +89,12 @@ async def process_order_deduction(
         stockin, available = stockin_available
 
         # 计算要抵扣的数量
+        # 双端收口（2026-10-17 审计 P1-17）：`custom_deduct_quantity` 是用户填的「意愿」，
+        # 既不能突破可用备货（物理上限），也不能突破订单数量（业务上限）。
+        # 只按 available 收口时，「3 件的订单扣 10 件备货」会落成 quantity=10 的 StockOut，
+        # 备货被多扣 7 件且无任何提示（前端已拦，但直连 API / 批量导入 / 旧前端仍会传大值）。
         if custom_deduct_quantity is not None and custom_deduct_quantity > 0:
-            deduct_amount = min(custom_deduct_quantity, available)
+            deduct_amount = min(custom_deduct_quantity, available, order_quantity)
         else:
             deduct_amount = min(order_quantity, available)
 

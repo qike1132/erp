@@ -4,6 +4,7 @@ import type { ProductSearchItem } from '@/api/auxiliary'
 import { useCatalogStore } from '@/stores/catalog'
 import { isQuantityOutOfRange } from './quantityRange'
 import { planSplitsMessage } from './shipmentPlanRules'
+import { deductLimit } from './deductRules'
 import type { FormState, ProductSuggestion, AvailableStockinItem } from './types'
 
 /** 产品搜索防抖由 UiAutocomplete 内部处理 */
@@ -201,10 +202,25 @@ export function useOrderForm() {
     form.deductStock = true
     deductInfoVisible.value = true
     // 先用当前已知值占位，await 完成后用最新值修正
-    form.deductQuantity = Math.min(form.quantity, availableStock.value)
+    form.deductQuantity = deductLimit(form.quantity, availableStock.value)
     await fetchAvailableStock()
-    form.deductQuantity = Math.min(form.quantity, availableStock.value)
+    form.deductQuantity = deductLimit(form.quantity, availableStock.value)
   }
+
+  /**
+   * 订单数量变化时回收抵扣量（2026-10-17 审计 P1-17）。
+   *
+   * `enableDeduct` 只在「开启抵扣那一刻」按 min(数量, 可用) 设一次初值；用户随后把订单
+   * 数量改小（10 → 3），抵扣量会停在 10 上 → 3 件的订单扣 10 件备货，后端只按可用量
+   * 截断，多扣的部分静默生效。这里用同一个上限重新收口。
+   *
+   * 只回收、不放大：改大订单数量时自动抬高抵扣量等于替用户多扣备货。
+   */
+  watch(() => form.quantity, (q) => {
+    if (!form.deductStock) return
+    const limit = deductLimit(q, availableStock.value)
+    if (form.deductQuantity > limit) form.deductQuantity = limit
+  })
 
   function disableDeduct() {
     form.deductStock = false
