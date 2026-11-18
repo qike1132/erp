@@ -521,13 +521,17 @@ jobs:
     # 一直留在生产依赖里（能随 bundle 进浏览器），而「全量 npm audit」又被
     # Vite/Vitest 等**只在开发服务器/构建期**存在的公告长期染红——两个方向都
     # 无法作为发布判据。现按暴露面拆开：
-    #   · 本步骤 `--omit=dev --audit-level=high`：生产树出现 high/critical 即失败；
+    #   · 本步骤走 `scripts/audit-with-ignore.mjs`：生产树出现 high/critical 即失败，
+    #     除非该公告被**逐条具名**豁免（GHSA id + 可达性论证 + 复核日，见该脚本
+    #     IGNORES 表）；豁免到期脚本自己失败，不会变成永久后门；
     #   · 开发树（Vite/Vitest/launch-editor）不阻断发布，其风险面是开发服务器与
     #     CI 构建输入，不随静态产物进浏览器；升级走独立 PR（跨 major 需验证构建）。
-    # 需要临时豁免时，必须在 PR 描述里写明公告 ID、可达性论证与到期日，并同步
-    # 加 `|| true` 的仅为**该条**的显式白名单——不允许整步跳过。
+    # 为什么不用 `npm audit ... --audit-level=high` 裸跑：它**没有 ignore 机制**，
+    # 一条「上游暂无修复版本」的高危公告就会让整个流水线永久红（2026-11-18 的
+    # picomatch GHSA-fc5q-39xc-vjpf 即此情形，npm 的"修复"是降级 vue-router 大版本）。
+    # 为什么不用 `|| true`：那会把这一步变成永远绿的空操作，比不做更糟。
     - name: Audit production dependencies
-      run: npm audit --omit=dev --audit-level=high
+      run: node scripts/audit-with-ignore.mjs
 
     - name: Run frontend lint
       run: npm run lint
