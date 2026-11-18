@@ -14,22 +14,25 @@ r"""孤儿模块机械校验（P0-8）。
        另有 WARN 一档：有入边、但生产图（ROOTS 可达闭包）到不了 —— 例如只被
        scripts/ 下的一次性脚本或测试引用。这类模块是否算死代码是**人的判断**，
        机械校验只负责把它摆到台面上，不阻断。
-    B. 扫描范围内不存在「零入边且非 root」的模块（孤儿模块）。
+    B. 扫描范围内每个模块都必须从真实入口（ROOTS）**可达**；只被测试 / 一次性脚本引用
+       不算活。原判定只问「有没有人提到过你」，一行 import 或一句字符串就能给死模块
+       伪造入边（2026-10-17 审计 P1-24）。存量未接线模块登记在 KNOWN_UNWIRED，
+       该表在模块被接线或删除后会自动要求删条目（不允许腐烂）。
 
 退出码：0 = 两条断言都通过；1 = 有违规。
 
 设计要点
 --------
 * **只用 ast 解析**（AGENTS.md §6 红线）：不拿正则猜 import。
-* **图是保守图**：任何字符串字面量只要能解析成真实存在的模块文件，就记一条
-  边。于是 PEP 562 惰性导出表（utils/__init__.py 的 _EXPORTS）、
-  importlib.import_module('...')、__import__('...') 这类动态导入都被算作真实
-  引用 —— **宁可漏报孤儿，不可误报**：把活模块判死会直接诱导误删。
-* **测试是「边的提供者」，不是「被扫描对象」**：tests/、fastapi_app/tests/ 里的
-  import 也算真实引用（测试就是消费者，P0-8 里 utils/logger.py 正是靠
-  tests/test_logger.py 活着的），但测试模块本身不进孤儿候选集（pytest 按目录
-  收集，天然没有字符串入边）。断言 A 的 FAIL 档只认「全仓零入边」；只被测试
-  引用不算 FAIL，但会在 WARN 里列出来。
+* **图是保守图**（静态 import + 受白名单约束的字符串形态）。字符串字面量**不再**无条件算边
+  （2026-10-17 审计 P1-24：原先任意一行 ``_X = "fastapi_app.services.dead"`` 就能给死模块
+  伪造入边）。现在只认两类：``importlib.import_module("x")`` / ``__import__("x")`` 的实参，
+  以及 ``STRING_EDGE_FILES`` 里声明的 PEP 562 惰性导出表（``utils/__init__.py`` 的 _EXPORTS）。
+  裸 docstring 一律不算。
+* **测试提供边，但不替模块续命**（2026-10-17 审计 P1-24 收窄）：tests/ 与
+  fastapi_app/tests/ 里的 import 仍算「有人引用」（断言 A 的口径不变），但断言 B 判的是
+  **生产可达性** —— 只被测试引用的模块不再自动算活：要么接线，要么删除，要么登记进
+  KNOWN_UNWIRED 并写明理由。测试模块本身不进孤儿候选集（pytest 按目录收集）。
 * **扫描范围（universe）** = fastapi_app/ 与 utils/ 两个包（排除测试目录）。
   仓库根的 scripts/、server_manager/、deliverables/ 等既提供边、又不被判定，
   免得把一次性脚本判成孤儿。
@@ -64,6 +67,18 @@ ROOTS: tuple[str, ...] = (
 
 #: 孤儿候选的扫描范围（包名）。
 SCAN_PACKAGES: tuple[str, ...] = ('fastapi_app', 'utils')
+
+#: 允许用「PEP 562 惰性导出表」提供字符串边的文件（相对仓库根）。
+#: 只登记确实以字符串表声明导出的文件；新增条目必须在评审里说明理由。
+STRING_EDGE_FILES: frozenset[str] = frozenset({'utils/__init__.py'})
+
+#: 已确认「生产未接线但保留」的模块（2026-10-17 审计 P1-24）。
+#: 这张表是**人的判断的账本**，不是豁免通道：模块被接线或删除后，门禁会要求删掉条目。
+KNOWN_UNWIRED: dict[str, str] = {
+    'fastapi_app.services.purchase_order_spare': (
+        '249 行备件换算；2026-10-27 全栈审计判定「非缺陷、待接线」，接线到采购中心后必须删除本条目'
+    ),
+}
 
 #: 提供边但本身不参与判定的目录（相对仓库根）。
 SKIP_DIR_NAMES: frozenset[str] = frozenset({
@@ -133,6 +148,25 @@ def _is_test_path(path: Path) -> bool:
     return rel_parts[-1].startswith('test_') or rel_parts[-1].endswith('_test.py')
 
 
+#: 会真正执行导入的动态调用（实参是字符串字面量时算一条边）。
+_DYNAMIC_IMPORT_CALLS: frozenset[str] = frozenset({'import_module', '__import__'})
+
+
+def _dynamic_import_constants(tree: ast.AST) -> set[int]:
+    """收集 `importlib.import_module("x")` / `__import__("x")` 里字符串常量的 id。"""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, 'attr', '')
+        if name not in _DYNAMIC_IMPORT_CALLS:
+            continue
+        if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+            ids.add(id(node.args[0]))
+    return ids
+
+
 def _collect_edges(path: Path, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
     """返回 module 指向的模块集合（保守图：静态 import + 可解析的字符串字面量）。"""
     try:
@@ -149,6 +183,15 @@ def _collect_edges(path: Path, module: str, is_package: bool, known: frozenset[s
     def _add(candidate: str) -> None:
         if candidate in known:
             targets.add(candidate)
+
+    # 字符串字面量成为「边」的唯一入口（2026-10-17 审计 P1-24，见下方分支注释）
+    rel_posix = path.relative_to(ROOT).as_posix()
+    allow_table = rel_posix in STRING_EDGE_FILES
+    dynamic_ids = _dynamic_import_constants(tree)
+    docstring_ids = {
+        id(n.value) for n in ast.walk(tree)
+        if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+    }
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -167,6 +210,15 @@ def _collect_edges(path: Path, module: str, is_package: bool, known: frozenset[s
                     continue
                 _add(base + '.' + alias.name if base else alias.name)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # 2026-10-17 审计 P1-24：字符串字面量**不再**无条件当边。
+            # 原先任意一行 `_X = "fastapi_app.services.dead"` 就能给死模块伪造入边。
+            # 现在只认两类，且都要求「落在真正会执行导入的位置」：
+            #   ① importlib.import_module("x") / __import__("x") 的实参；
+            #   ② STRING_EDGE_FILES 里的 PEP 562 惰性导出表（utils/__init__.py 的 _EXPORTS）。
+            if not allow_table and id(node) not in dynamic_ids:
+                continue
+            if id(node) in docstring_ids:   # 裸 docstring 不是导入
+                continue
             raw = node.value.strip()
             if not raw or len(raw) > 200 or ' ' in raw or '\n' in raw:
                 continue
@@ -356,13 +408,42 @@ def _collect_universe(graph: _Graph) -> list[str]:
 
 
 def _assert_no_orphans(graph: _Graph, universe: list[str]) -> list[str]:
-    """断言 B：扫描范围内不存在「零入边且非 root」的模块。"""
-    orphans = [m for m in universe if graph.indegree.get(m, 0) == 0 and m not in ROOTS]
-    if not orphans:
-        return []
-    return ['[B] 零入边且非 root 的孤儿模块：\n    '
-            + '\n    '.join(m + '  (' + graph.path_by_module[m].relative_to(ROOT).as_posix() + ')'
-                            for m in orphans)]
+    """断言 B：扫描范围内每个模块都必须从真实入口**可达**（2026-10-17 审计 P1-24）。
+
+    原判定只问「有没有人提到过你」：测试里的一行 `from x import y`、或任意文件里的一句
+    字符串，都能让死模块永久「活着」（本仓实证：`purchase_order_spare.py` 249 行未接线，
+    只因为 `fastapi_app/tests/services/test_po_spare_from_part_rates.py` 有一行 import
+    就只降级成 WARN）。现在改用可达性：从 ROOTS 沿导入图走得到的才算活；只被测试 /
+    一次性脚本引用**不算**。
+
+    存量未接线模块必须登记在 ``KNOWN_UNWIRED``（写明理由与接线去向），否则报红；
+    登记项一旦被接线或删除，本断言会要求删掉该条目 —— 登记表不允许腐烂。
+    """
+    reachable = graph.prod_reachable
+    orphans: list[str] = [
+        m for m in universe
+        if m not in ROOTS and m not in reachable and m not in KNOWN_UNWIRED
+    ]
+
+    failures: list[str] = []
+    if orphans:
+        failures.append(
+            '[B] 生产图不可达的模块（孤儿；接线或删除，确需保留请登记 KNOWN_UNWIRED）：\n    '
+            + '\n    '.join(
+                m + '  (' + graph.path_by_module[m].relative_to(ROOT).as_posix() + ')'
+                for m in orphans
+            )
+        )
+
+    stale: list[str] = []
+    for mod, why in KNOWN_UNWIRED.items():
+        if mod not in graph.known:
+            stale.append(f'{mod} —— 模块已不存在，请删除该登记（原登记理由：{why}）')
+        elif mod in reachable:
+            stale.append(f'{mod} —— 已被生产图接入，请删除该登记（原登记理由：{why}）')
+    if stale:
+        failures.append('[B] KNOWN_UNWIRED 登记失效：\n    ' + '\n    '.join(stale))
+    return failures
 
 def _report(graph: _Graph, files: list[Path], universe: list[str], whitelist: list[str],
             dangling: list[str], no_edge: list[str], prod_gap: list[str],
@@ -406,7 +487,7 @@ def main(argv: list[str] | None = None) -> int:
         for item in failures:
             print('\n' + item)
         return 1
-    print('\n结果：PASS —— mypy 白名单全部在导入图内、无零入边死模块，且无零入边非 root 模块'
+    print('\n结果：PASS —— mypy 白名单全部在导入图内；扫描范围内所有模块都从真实入口可达'
           + ('（' + str(len(prod_gap)) + ' 项 WARN 需人工判定）' if prod_gap else ''))
     return 0
 

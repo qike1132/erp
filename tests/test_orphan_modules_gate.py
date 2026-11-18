@@ -109,3 +109,117 @@ def test_gate_still_catches_a_genuinely_dead_whitelisted_module(tmp_path, monkey
     assert any("probe.dead" in item for item in no_edge), f"真死模块没被抓到：{no_edge}"
     assert any("probe.dead" in item for item in failures), failures
     assert not any("probe.alive" in item for item in failures), failures
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-17 审计 P1-24：断言 B 改「生产可达性」，且字符串字面量不再伪造入边
+# ---------------------------------------------------------------------------
+def _make_pkg(tmp_path: Path) -> Path:
+    """造一个最小包：pkg/{__init__,dead,alive,user}.py。"""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "dead.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (pkg / "alive.py").write_text("VALUE = 2\n", encoding="utf-8")
+    return pkg
+
+
+def test_string_literal_does_not_forge_an_edge(tmp_path, monkeypatch) -> None:
+    """反证（审计复现步骤 B）：`_X = "pkg.dead"` 这种一行赋值**不得**再算作入边。
+
+    修复前任意字符串只要能解析成真实模块名就记一条边，于是「新建死模块 + 在任意
+    文件里写一行它的名字」即可让门禁全绿。
+    """
+    monkeypatch.setattr(com, "ROOT", tmp_path)
+    pkg = _make_pkg(tmp_path)
+    user = pkg / "user.py"
+    user.write_text('_X = "pkg.dead"\n', encoding="utf-8")
+
+    known = frozenset({"pkg", "pkg.dead", "pkg.alive", "pkg.user"})
+    edges = com._collect_edges(user, "pkg.user", False, known)
+    assert "pkg.dead" not in edges, f"字符串字面量仍被当成入边：{edges}"
+
+
+def test_dynamic_import_literal_still_counts(tmp_path, monkeypatch) -> None:
+    """动态导入的实参是**真的**导入，仍必须算边（收窄不能把活模块判死）。"""
+    monkeypatch.setattr(com, "ROOT", tmp_path)
+    pkg = _make_pkg(tmp_path)
+    user = pkg / "user.py"
+    user.write_text(
+        'import importlib\nmod = importlib.import_module("pkg.alive")\n',
+        encoding="utf-8",
+    )
+
+    known = frozenset({"pkg", "pkg.dead", "pkg.alive", "pkg.user"})
+    edges = com._collect_edges(user, "pkg.user", False, known)
+    assert "pkg.alive" in edges, f"动态导入的实参没被算作边：{edges}"
+
+
+def test_pep562_export_table_file_still_counts(tmp_path, monkeypatch) -> None:
+    """白名单文件（utils/__init__.py 那类惰性导出表）仍可用字符串表声明导入。"""
+    monkeypatch.setattr(com, "ROOT", tmp_path)
+    (tmp_path / "utils").mkdir()
+    init = tmp_path / "utils" / "__init__.py"
+    init.write_text('_EXPORTS = {"log_rotation": "utils.log_rotation"}\n', encoding="utf-8")
+    (tmp_path / "utils" / "log_rotation.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(com, "STRING_EDGE_FILES", frozenset({"utils/__init__.py"}))
+
+    known = frozenset({"utils", "utils.log_rotation"})
+    edges = com._collect_edges(init, "utils", True, known)
+    assert "utils.log_rotation" in edges, f"导出表里的字符串没被算作边：{edges}"
+
+
+def _graph_with(known, prod_reachable, indegree) -> com._Graph:
+    return com._Graph(
+        known=set(known),
+        path_by_module={m: ROOT / (m.replace(".", "/") + ".py") for m in known},
+        is_package=dict.fromkeys(known, False),
+        is_test=dict.fromkeys(known, False),
+        indegree=dict(indegree),
+        prod_reachable=set(prod_reachable),
+        all_reachable=set(known),
+        missing_roots=[],
+    )
+
+
+def test_orphan_judged_by_prod_reachability_not_indegree() -> None:
+    """只被测试引用的模块（indegree>0 但生产不可达）必须判孤儿 —— 这正是原门禁的洞。"""
+    graph = _graph_with(
+        known={"probe.live", "probe.test_only"},
+        prod_reachable={"probe.live"},
+        indegree={"probe.live": 1, "probe.test_only": 1},
+    )
+    universe = ["probe.live", "probe.test_only"]
+    failures = com._assert_no_orphans(graph, universe)
+    assert failures, "只被测试引用的模块未被判孤儿"
+    assert "probe.test_only" in failures[0]
+    assert "probe.live" not in failures[0]
+
+
+def test_known_unwired_registry_silences_stock_module(monkeypatch) -> None:
+    """登记表里的未接线模块不报红（存量账本），但登记表不得腐烂。"""
+    monkeypatch.setattr(com, "KNOWN_UNWIRED", {"probe.stock": "待接线（测试）"})
+    graph = _graph_with(
+        known={"probe.stock", "probe.live"},
+        prod_reachable={"probe.live"},
+        indegree={"probe.stock": 1, "probe.live": 1},
+    )
+    assert com._assert_no_orphans(graph, ["probe.stock"]) == []
+
+    # 已接线 → 必须删条目
+    wired = _graph_with(
+        known={"probe.stock", "probe.live"},
+        prod_reachable={"probe.live", "probe.stock"},
+        indegree={"probe.stock": 1, "probe.live": 1},
+    )
+    failures = com._assert_no_orphans(wired, ["probe.stock"])
+    assert any("已被生产图接入" in item for item in failures), failures
+
+    # 模块已删除 → 必须删条目
+    gone = _graph_with(
+        known={"probe.live"},
+        prod_reachable={"probe.live"},
+        indegree={"probe.live": 1},
+    )
+    failures = com._assert_no_orphans(gone, [])
+    assert any("模块已不存在" in item for item in failures), failures
