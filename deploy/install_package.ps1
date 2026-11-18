@@ -470,19 +470,39 @@ try {
     @{ Src='runtime';       Dst=(Join-Path $TargetDir 'runtime');        PurgeWhole=$true },
     @{ Src='frontend\dist'; Dst=(Join-Path $TargetDir 'frontend-vite\dist'); PurgeWhole=$true }
   )
-  #: 运行期数据目录名 —— 永远不用包内内容覆盖/删除
-  $runtimeDirNames = @('logs','backups','temp','static','.env','.venv','frontend-vite','_ops')
+  #: **永不删除/覆盖**的目录名（运行期数据 + 部署机本地凭据）—— 2026-11-18 评审 M3/M4。
+  #:
+  #: `config` 与 `settings` 必须在这里：`build_package.ps1` 打 `app\` 时排除了
+  #: `config\pgbouncer`（userlist.txt 是真凭据、只在部署机），并把 `config\jwt`
+  #: 另存为 `settings\jwt`。若把 `config` 当「包内有的代码目录」删掉，部署机上
+  #: 的 `config\pgbouncer\userlist.txt` 会**被删且不会被包恢复**（pgbouncer 直接挂），
+  #: `config\tls\*.key` 会被源机的 key 覆盖（nginx TLS 与目标机不匹配）。
+  $runtimeDirNames = @(
+    'logs','backups','temp','static','uploads','data',
+    'config','settings','certs',          # 部署机本地凭据/TLS，绝不删
+    '.env','.venv','.git','.github','_ops','frontend-vite'
+  )
+  #: PurgeWhole 留下的旧产物回滚点；全部复制成功后才清理
+  $purgeBaks = @()
   foreach($c in $copies){
     $src = Join-Path $pkgRoot.FullName $c.Src
     if(-not (Test-Path $src)){ Write-Fail "包内缺少 $($c.Src)"; exit 1 }
     New-Item -ItemType Directory -Force -Path $c.Dst | Out-Null
 
     if($c.PurgeWhole -and (Test-Path -LiteralPath $c.Dst)){
-      Get-ChildItem -LiteralPath $c.Dst -Force | Remove-Item -Recurse -Force -ErrorAction Stop
-      Write-Ok "已清空旧产物目录：$($c.Dst)"
+      # 先**改名留档**再复制，而不是直接删：中途失败时还留着一份能跑的旧产物。
+      # 直接删等于「五服务已 remove + 产物半份 + 无回滚点」。
+      $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+      $bak = "$($c.Dst).bak-$stamp"
+      Move-Item -LiteralPath $c.Dst -Destination $bak -Force -ErrorAction Stop
+      New-Item -ItemType Directory -Force -Path $c.Dst | Out-Null
+      $purgeBaks += $bak
+      Write-Ok "旧产物目录已改名留档：$bak"
     }
     if($c.PurgeCode){
       foreach($item in Get-ChildItem -LiteralPath $src -Force){
+        # 只处理**目录**；顶层文件（旧的 run.py 等）交给下面那条 WARN 报告，
+        # 不自动删 —— 删文件的破坏面比删目录更难事后补救。
         if(-not $item.PSIsContainer){ continue }
         if($runtimeDirNames -contains $item.Name.ToLower()){ continue }
         $dstChild = Join-Path $c.Dst $item.Name
@@ -491,10 +511,36 @@ try {
           Write-Ok "已移除旧代码目录：$($item.Name)"
         }
       }
+      # 目标侧有、包内没有的顶层项 —— 只报不删（可能是运维手工放的脚本）。
+      $pkgNames = @(Get-ChildItem -LiteralPath $src -Force | ForEach-Object { $_.Name.ToLower() })
+      $stale = @(
+        Get-ChildItem -LiteralPath $c.Dst -Force |
+        Where-Object {
+          $n = $_.Name.ToLower()
+          ($pkgNames -notcontains $n) -and ($runtimeDirNames -notcontains $n)
+        }
+      )
+      if($stale){
+        # 注意：不要把 `Write-Warn ("..."` 与下一行的 `+ (...)` 拆成两行 ——
+        # PowerShell 会把换行当成语句结束并报「缺少右括号」。先算成变量再输出。
+        $staleNames = (($stale | ForEach-Object { $_.Name }) -join ', ')
+        Write-Warn "目标目录里有包内不存在的顶层项（可能是旧版本遗留，也可能是运维自放；未自动删除）：$staleNames"
+      }
     }
 
     robocopy $src $c.Dst /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
     if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：$($c.Src)"; exit 1 }
+  }
+  # 三个产物目录都复制成功，回滚点可以清了（失败时 exit 1 已经提前退出，不会走到这里）
+  foreach($bak in $purgeBaks){
+    if(Test-Path -LiteralPath $bak){
+      try {
+        Remove-Item -LiteralPath $bak -Recurse -Force -ErrorAction Stop
+        Write-Ok "已清理部署回滚点：$bak"
+      } catch {
+        Write-Warn "回滚点清理失败（不影响本次部署，可手工删）：$bak —— $($_.Exception.Message)"
+      }
+    }
   }
   # 包内 static 位于 data\static（spec §4）
   $staticSrc = Join-Path $pkgRoot.FullName 'data\static'
