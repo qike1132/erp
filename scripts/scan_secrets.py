@@ -50,6 +50,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts._selftest_hook import (
     dsn_rule_hits,
     password_rule_hits,
+    pgpass_rule_hits,
     secret_rule_hits,
     userlist_rule_hits,
 )
@@ -155,12 +156,24 @@ def dangerous_path_reason(path: str) -> str | None:
     return None
 
 
-def content_secret_reason(text: str, *, require_quoted_rhs: bool) -> str | None:
+def content_secret_reason(
+    text: str,
+    *,
+    require_quoted_rhs: bool,
+    dsn_only: bool = False,
+) -> str | None:
     """内容 → 原因；无命中则 None。规则与 hook 第 2 层同一套。
 
     :param require_quoted_rhs: 为真时，赋值右值必须是**带引号的字面量**才判定为凭据
         （`.py`/`.ts`/`.js`/`.vue` 这类解释执行的语言里，不带引号的右值是属性读取、
         变量引用或函数调用，不是硬编码字面量）。
+    :param dsn_only: 只跑「不含关键词」的 DSN 形态规则（`.md` 文档用）。
+
+        **为什么文档也要跑 DSN（2026-11-18 评审 H2）**：`.md` 原先整篇豁免内容层，
+        于是「钩子会拦、CI 恒绿」口径相反；而 `docs/` 正是 2026-09-17 事故的落点，
+        也是 P1-22 要覆盖的「URL 内嵌口令」最可能的藏身处。文档里出现
+        `password` / `secret` 字样极常见（讲口令策略的段落），关键词规则会噪音化，
+        故只把 DSN 这一条高精度规则放进文档。
     """
     suppress_next = False
     for line in text.splitlines():
@@ -170,15 +183,20 @@ def content_secret_reason(text: str, *, require_quoted_rhs: bool) -> str | None:
         suppress_next = NEXT_LINE_SUPPRESSION in line
         if skip_line:
             continue
-        if secret_rule_hits(line):
-            return '命中私钥/云凭据特征'
-        if password_rule_hits(line, require_quoted_rhs):
-            return '疑似明文口令/密钥赋值'
-        # 2026-10-17 审计 P1-22：关键词规则打不中的两种形态
+        if not dsn_only:
+            if secret_rule_hits(line):
+                return '命中私钥/云凭据特征'
+            if password_rule_hits(line, require_quoted_rhs):
+                return '疑似明文口令/密钥赋值'
+        # 2026-10-17 审计 P1-22：关键词规则打不中的三种形态
         if dsn_rule_hits(line):
             return '命中 URL 内嵌口令（DSN）'
-        if userlist_rule_hits(line):
-            return '命中 pgbouncer userlist 形态'
+        if not dsn_only:
+            if userlist_rule_hits(line):
+                return '命中 pgbouncer userlist 形态'
+            # 2026-11-18 评审 M5：.pgpass 此前只有文件名兜底，内容形态零覆盖
+            if pgpass_rule_hits(line):
+                return '命中 .pgpass 五段形态'
     return None
 
 
@@ -199,6 +217,7 @@ _REASON_LABELS: tuple[str, ...] = (
     '数据库凭据文件（含明文口令）',
     '命中 URL 内嵌口令（DSN）',
     '命中 pgbouncer userlist 形态',
+    '命中 .pgpass 五段形态',
 )
 
 
@@ -255,6 +274,20 @@ def content_scan_applies(rel: str) -> bool:
     return not rel.startswith(_CONTENT_EXEMPT_PREFIXES)
 
 
+# 内容层扫描模式（2026-11-18 评审 H2）。
+# `.md` 从「整篇不扫」改为「只扫 DSN」：钩子本来就扫文档，CI 不扫等于
+# 「钩子拦、CI 绿」，既掩盖了 docs/ 里的真凭据，也让 P1-22 的三种形态
+# 在文档目录上不成立。关键词规则仍不进文档（讲口令策略的段落会噪音化）。
+_CONTENT_DSN_ONLY_SUFFIXES = _CONTENT_EXEMPT_SUFFIXES
+
+
+def content_scan_mode(rel: str) -> str:
+    """该文件的内容层扫描模式：`'full'` / `'dsn'` / `'none'`。"""
+    if rel.endswith(_CONTENT_DSN_ONLY_SUFFIXES):
+        return 'dsn'
+    return 'full' if content_scan_applies(rel) else 'none'
+
+
 def scan_tracked(
     root: Path,
     *,
@@ -271,11 +304,9 @@ def scan_tracked(
             continue
 
         reason = dangerous_path_reason(rel)
-        if (
-            reason is None
-            and content_scan_applies(rel)
-            and not rel.endswith(tuple(BINARY_SUFFIXES))
-        ):
+        # 'full' = 全规则；'dsn' = 文档只跑 DSN；'none' = 不进内容层
+        mode = content_scan_mode(rel) if reason is None else 'none'
+        if mode != 'none' and not rel.endswith(tuple(BINARY_SUFFIXES)):
             abs_path = root / rel
             try:
                 if abs_path.stat().st_size <= MAX_FILE_BYTES:
@@ -291,6 +322,7 @@ def scan_tracked(
                         reason = content_secret_reason(
                             text,
                             require_quoted_rhs=rel.endswith(_QUOTED_RHS_REQUIRED_SUFFIXES),
+                            dsn_only=mode == 'dsn',
                         )
             except OSError:
                 # 读不了 → 跳过内容层（路径层已判过）

@@ -976,7 +976,7 @@ Expected: PASS
 ```bash
 command python - <<'PY'
 import asyncio, asyncpg
-DSN = "postgresql://erp_readonly:U2Auv4_2EFoovkSeC0G2hZ2qT6yCmqme@localhost:5433/erp_system"
+DSN = "postgresql://erp_readonly:****@localhost:5433/erp_system"
 TABLES = ['order', 'order_item', 'stock_in', 'staging_order', 'staging_stock_out']
 async def main():
     c = await asyncpg.connect(DSN)

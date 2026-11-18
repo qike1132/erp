@@ -37,7 +37,11 @@ SECRET_PATTERN = re.compile(
     r"|-----BEGIN (RSA|EC|DSA|PGP) "
 )
 PLACEHOLDER = re.compile(
-    r"(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])",
+    r"(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_]"
+    # 2026-11-18 评审 M3 副产：`[REDACTED]` 这类已脱敏标记不该再算凭据。
+    # 新增 pgpass/DSN 规则后，`scheme://user:[REDACTED]@host` 这种模板示例
+    # 会被 DSN 规则命中（口令段长度 ≥6 且不含表达式字符），加进词表两侧同放行。
+    r"|redacted)",
     re.IGNORECASE,
 )
 EXPRESSION = re.compile(
@@ -254,8 +258,24 @@ _PSEUDO_PASSWORDS = frozenset({
     'password', 'passwd', 'pass', 'pwd', 'secret', 'changeme', 'change_me',
     'example', 'test', 'testpass', 'dummy', 'fake', 'yourpassword', 'none', 'null',
 })
-# 插值/表达式而非字面量：{quote_plus(db_password)}、$DB_PW、%PGPASSWORD%、(Get-Pw)
-_DSN_EXPRESSION = re.compile(r"[{}()$%<>`'\"\[\]]")
+# 插值/表达式而非字面量：{quote_plus(db_password)}、$DB_PW、${REDIS_PASSWORD}、
+# %PGPASSWORD%、(Get-Pw)、<从密钥管理服务注入>
+#
+# 2026-11-18 评审 M3：原实现是「口令段**含** $ % { } ( ) ' " 就放行」，于是
+#   · `p%40ssw0rd123`（`@` 的 URL 编码写法，密码含 @ 时唯一正确写法）被整条放过；
+#   · `Abc$123456789xyz`（$ 在中间的真口令）同样被放过。
+# 这与本文件 :52 的既有约定直接冲突（「不能用右值含 $ 就跳过」，只判首字符）。
+# 改为「**整段就是一个表达式**」才放行 —— 越规范越该命中的形态不再漏。
+_DSN_EXPRESSION = re.compile(
+    r'^(?:\$(?:\{[^}]*\}|\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)'
+    r'|%[A-Za-z_][A-Za-z0-9_]*%|\{[^}]*\}|<[^>]*>)$'
+)
+# 4) .pgpass 的五段冒号形态 host:port:db:user:pw（2026-11-18 评审 M5）
+#    此前只按文件名兜底（userlist.txt/.pgpass/pgpass.conf），改名或把同一行写进
+#    脚本/配置就完全不可见。收紧条件：恰好 5 段、末段 ≥6 且无空白与冒号。
+# 段内排除 CSS/代码符号 `{ } ( ) ;`：否则 `.main::-webkit-scrollbar-thumb:hover{...}`
+# 这种样式行会被按冒号切成 5 段、末段 ≥6 位而误报（2026-11-18 实测两处 HTML）。
+PGPASS_PATTERN = re.compile(r'^[ \t]*[^ \t:#{}();]+:[0-9]*:[^ \t:{}();]*:[^ \t:{}();]+:[^ \t:{}();]{6,}[ \t]*$')
 _DSN_PASSWORD_RE = re.compile(r"://[^ \t:/@]*:([^ \t/@]+)@")
 
 
@@ -295,6 +315,28 @@ def userlist_rule_hits(line: str) -> bool:
         return False
     user, pwd = quoted[0].lower(), quoted[1].lower()
     return not (pwd in _PSEUDO_PASSWORDS or pwd == user)
+
+
+def pgpass_rule_hits(line: str) -> bool:
+    """`.pgpass` 五段冒号形态判定（2026-11-18 评审 M5）。
+
+    此前三种形态里这一种只有文件名兜底，内容层零覆盖：把
+    `db.internal:5432:erp:erp_app:Pr0dPassw0rd` 写进 `.sh`/`.ini`/`.txt`
+    或把 `.pgpass` 改名，CI 与钩子都看不见。这里补内容判定。
+
+    收紧到「恰好 5 段 + 末段 ≥6 位 + 段内无空白」以免把端口映射、
+    `a:b:c:d` 这类普通配置判成凭据。
+    """
+    if not PGPASS_PATTERN.match(line):
+        return False
+    if PLACEHOLDER.search(line):
+        return False
+    pwd = line.strip().rsplit(':', 1)[-1].strip()
+    if pwd.lower() in _PSEUDO_PASSWORDS:
+        return False
+    # 末段与用户名相同（`erp_app:...:erp_app`）视为占位写法
+    parts = line.strip().split(':')
+    return not (len(parts) >= 5 and pwd == parts[3])
 
 
 if __name__ == "__main__":
