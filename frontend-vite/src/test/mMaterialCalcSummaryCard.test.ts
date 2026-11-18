@@ -70,14 +70,16 @@ describe('MMaterialCalculatorView —— 「汇总」卡片（方案 A 移动端
     expect(cards.length).toBeGreaterThanOrEqual(3) // 汇总 + 2 个产品
     const summaryCard = cards[0]!
     expect(summaryCard.find('.m-scope-badge').text()).toBe('汇总')
-    expect(summaryCard.find('.m-scope-qty').text()).toContain('800') // 500 + 300
+    // F1-3（2026-10-17 审计）：子串断言下 8000/1800/8,000 都「包含 800」，
+    // 数量错一个数量级仍绿；这里锁死渲染文本（模板为「合计 {n} 件」）。
+    expect(summaryCard.find('.m-scope-qty').text()).toBe('合计 800 件') // 500 + 300
 
     const rows = summaryCard.findAll('.m-result-row')
     expect(rows).toHaveLength(1)
     expect(rows[0]!.find('.m-result-name').text()).toContain('PP棉')
     // SKU 徽标已按 2026-10-07 要求移除（桌面端同步）
     expect(rows[0]!.find('.m-result-name').text()).not.toContain('个SKU')
-    expect(rows[0]!.find('.m-result-qty').text()).toContain('70') // 40 + 30
+    expect(rows[0]!.find('.m-result-qty').text()).toBe('70 kg') // 40 + 30
   })
 
   it('单 SKU 时不渲染汇总卡（无合并价值，避免冗余）', async () => {

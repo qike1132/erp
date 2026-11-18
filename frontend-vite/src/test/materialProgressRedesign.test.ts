@@ -307,8 +307,11 @@ describe('MaterialProgressGrid —— 列与合并单元格', () => {
   it('订单数量 / 已到 / 采购千分位与单位分列展示', () => {
     const w = mountGrid(multiGroupRows())
 
-    expect(w.text()).toContain('10,000')
-    expect(w.text()).toContain('310')
+    // F1-3（2026-10-17 审计）：整页 text() 把相邻单元格直接拼起来
+    // （"310" + "0" + "码" → "3100码"），子串断言连 '3,100' 都放过。
+    // 改为断言单元格自身文本：数量错一个数量级、或串了别的行，都会红。
+    expect(w.find('td.mp-qty').text()).toBe('10,000')
+    expect(w.findAll('td.mp-ordered').map((td) => td.text())).toContain('310')
     expect(w.findAll('td.mp-unit').map((td) => td.text())).toEqual(['码', '码', '码'])
   })
 

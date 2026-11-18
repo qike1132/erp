@@ -207,7 +207,9 @@ describe('S12 移动端数据层统一', () => {
       const text = wrapper.text()
       expect(text).toContain('PP棉')
       expect(text).toContain('M01')
-      expect(text).toContain('120')
+      // F1-3（2026-10-17 审计）：整页 text() 把 "M01" 与数量直接相连（"M01120个"），
+      // 子串断言连 1200 也放过；改为断言数量单元格自身文本。
+      expect(wrapper.findAll('.m-stock-qty-val').map((el) => el.text())).toContain('120')
       expect(text).toContain('拉链')
       // barcode 为空串时回退 product_barcode
       expect(text).toContain('Z09')
@@ -327,7 +329,8 @@ describe('S12 移动端数据层统一', () => {
       await flushPromises()
 
       expect(wrapper.text()).toContain('充棉部')
-      expect(wrapper.text()).toContain('100')
+      // F1-3（同上）：日/月报数量用词边界，避免 1000 之类误通过。
+      expect(wrapper.text()).toMatch(/\b100\b/)
       expect(wrapper.text()).not.toContain('包装部')
 
       const vm = wrapper.vm as unknown as { viewTab: string }
@@ -339,7 +342,7 @@ describe('S12 移动端数据层统一', () => {
         month: expect.any(Number),
       })
       expect(wrapper.text()).toContain('包装部')
-      expect(wrapper.text()).toContain('50')
+      expect(wrapper.text()).toMatch(/\b50\b/)
       expect(wrapper.text()).not.toContain('充棉部')
     })
   })

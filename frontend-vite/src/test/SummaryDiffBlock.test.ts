@@ -27,8 +27,10 @@ describe('SummaryDiffBlock', () => {
 
     // 横幅：物料名 + 两个数值
     expect(w.text()).toContain('共享布')
-    expect(w.text()).toContain('60')
-    expect(w.text()).toContain('65')
+    // F1-3（2026-10-17 审计）：子串断言下 600/6000 也「包含 60」；词边界把
+    // 「多一个数量级」挡在外面（期望值由 diffs 手写：perSku=60, stored=65）。
+    expect(w.text()).toMatch(/\b60\b/)
+    expect(w.text()).toMatch(/\b65\b/)
     expect(w.text()).toContain('实际下单')
 
     const dataRows = w.findAll('tr.sm-diff-row')

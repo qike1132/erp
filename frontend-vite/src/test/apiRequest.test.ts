@@ -4,6 +4,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // request.ts 是最关键的横切层：CSRF 注入、401 刷新单飞、403 限流提示、
 // GET 去重、写操作重试、静态资源 URL 解析。
 // 这里覆盖不依赖真实网络的纯逻辑与拦截器行为。
+//
+// F1-1 / F1-2（2026-10-17 审计）：本文件原先号称覆盖「CSRF 注入、401 刷新单飞」，
+// 实际 clearCsrfCache 只断「不抛异常」（对任何实现都成立），刷新与 CSRF 注入
+// 零断言。下面改为用 axios adapter 注入观测**真实拦截器行为**（不 mock 整个模块）。
 // ---------------------------------------------------------------------------
 
 const mocks = vi.hoisted(() => ({
@@ -12,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/utils/devLog', () => ({ devLog: mocks.devLog }))
 
-import { clearCsrfCache, resolveStaticUrl } from '@/api/request'
+import { resolveStaticUrl } from '@/api/request'
 
 describe('resolveStaticUrl', () => {
   afterEach(() => {
@@ -46,12 +50,123 @@ describe('resolveStaticUrl', () => {
   })
 })
 
-describe('clearCsrfCache', () => {
-  it('可重复调用且不抛异常', () => {
-    expect(() => {
-      clearCsrfCache()
-      clearCsrfCache()
-    }).not.toThrow()
+describe('CSRF：响应头回填与 clearCsrfCache 真实生效', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('响应头 x-csrf-token 被缓存 → 下一个写请求带上它 → clear 后不再带', async () => {
+    const mod = await import('@/api/request')
+    const service = mod.default
+    const seen: Array<Record<string, string | undefined>> = []
+    let firstResponse = true
+
+    // token 只能来自响应头缓存：适配器不写 cookie，也不直接改内部变量
+    service.defaults.adapter = async (config) => {
+      seen.push({ ...(config.headers as unknown as Record<string, string | undefined>) })
+      const headers: Record<string, string> = firstResponse ? { 'x-csrf-token': 'tok-abc' } : {}
+      firstResponse = false
+      return { data: { ok: true }, status: 200, statusText: 'OK', headers, config }
+    }
+
+    await mod.post('/first', {})
+    await mod.post('/second', {})
+    mod.clearCsrfCache()
+    await mod.post('/third', {})
+
+    // 首次：无缓存、cookie 也为空 ⇒ 不得凭空造出 token
+    expect(seen[0]?.['X-CSRF-Token']).toBeUndefined()
+    // 第二次：来自第一次响应头的缓存（删掉响应拦截器里那行赋值即红）
+    expect(seen[1]?.['X-CSRF-Token']).toBe('tok-abc')
+    // 清空后必须真的清空（clearCsrfCache 退化成 no-op 即红）
+    expect(seen[2]?.['X-CSRF-Token']).toBeUndefined()
+  })
+})
+
+describe('401 刷新单飞与限流窗口（F1-2）', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function httpError(config: unknown, status: number) {
+    return Object.assign(new Error(`status ${status}`), {
+      isAxiosError: true,
+      config,
+      response: { status, statusText: '', data: { detail: 'x' }, headers: {}, config },
+    })
+  }
+
+  it('并发两次 401 只发一次 /auth/refresh，且各自重放一次', async () => {
+    const mod = await import('@/api/request')
+    const service = mod.default
+    const attempts = new Map<string, number>()
+    let refreshCalls = 0
+    let releaseRefresh: () => void = () => {}
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+    service.defaults.adapter = async (config) => {
+      const url = String(config.url ?? '')
+      if (url.includes('/auth/refresh')) {
+        // 计数放在等闸门之前：单飞被去掉（if (true)）时这里会变成 2
+        refreshCalls += 1
+        await refreshGate
+        return { data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config }
+      }
+      const n = (attempts.get(url) ?? 0) + 1
+      attempts.set(url, n)
+      if (n === 1) throw httpError(config, 401)
+      return { data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config }
+    }
+
+    const p1 = mod.post('/a', {})
+    const p2 = mod.post('/b', {})
+    await flush()
+
+    expect(refreshCalls).toBe(1) // 单飞：并发 401 共享同一次刷新
+    releaseRefresh()
+    await expect(Promise.all([p1, p2])).resolves.toBeTruthy()
+
+    // 刷新成功后原请求各重放一次（_retried 标记生效，不无限重放）
+    expect(attempts.get('/a')).toBe(2)
+    expect(attempts.get('/b')).toBe(2)
+  })
+
+  it('刷新被限流（429）时不登出，且冷却窗口内不再发起刷新', async () => {
+    const mod = await import('@/api/request')
+    const service = mod.default
+    let refreshCalls = 0
+    const onExpired = vi.fn()
+    window.addEventListener('auth:expired', onExpired)
+
+    service.defaults.adapter = async (config) => {
+      const url = String(config.url ?? '')
+      if (url.includes('/auth/refresh')) {
+        refreshCalls += 1
+        throw httpError(config, 429)
+      }
+      throw httpError(config, 401)
+    }
+
+    try {
+      await expect(mod.post('/a', {})).rejects.toBeTruthy()
+      await expect(mod.post('/b', {})).rejects.toBeTruthy()
+    } finally {
+      window.removeEventListener('auth:expired', onExpired)
+    }
+
+    // 429 是 IP 级限流误伤，不能把在线用户踢下线
+    expect(onExpired).not.toHaveBeenCalled()
+    // 10s 冷却窗口内第二次 401 直接复用结论，不再往同一个桶里加计数
+    expect(refreshCalls).toBe(1)
   })
 })
 
