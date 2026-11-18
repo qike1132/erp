@@ -101,16 +101,25 @@ def test_stress_dir_contributes_no_pytest_cases():
     * 有人删掉 CI 的 `--ignore=tests/stress` → 这些脚本会在收集期被 import，而其中
       若干在没有 `__main__` 守卫的年代会真的发请求（见 test_auth.py docstring 记录的
       2026-10-03 事故：每次跑 pytest 都打 10 次真实登录），本断言同样红。
+
+    口径说明（2026-11-18 评审）：`tests/stress/test_auth.py` 的**文件名**匹配
+    `test_*.py`，所以「0 用例」指的是它内部没有 `def test_`（它是脚本，靠
+    `python tests/stress/test_auth.py` 手工跑），不是「pytest 看不见这个文件」。
     """
     stress = REPO / 'tests' / 'stress'
     offenders = sorted(
-        p.name for p in stress.glob('*.py')
+        p.relative_to(stress).as_posix() for p in stress.rglob('*.py')
         if re.search(r'^\s*(async )?def test_', p.read_text(encoding='utf-8'), re.MULTILINE)
     )
     assert offenders == [], f'tests/stress 只放压测脚本，不得出现 pytest 用例：{offenders}'
 
+    # 读 CI 时先去掉整行注释：本批的注释里正在讨论这条 ignore，若只做整文件子串
+    # 匹配，把 flag 删掉但注释留着也会判定通过（与 test_gate_selftest_wired 同口径）。
     ci = (REPO / '.github' / 'workflows' / 'ci-cd.yml').read_text(encoding='utf-8')
-    assert '--ignore=tests/stress' in ci, (
+    ci_code = '\n'.join(
+        line for line in ci.splitlines() if not line.lstrip().startswith('#')
+    )
+    assert '--ignore=tests/stress' in ci_code, (
         'tests/stress 无用例却仍在 pytest 收集范围内：删掉 ignore 前必须先把这些脚本'
         '改成收集期无副作用，否则收集就会发真实请求'
     )

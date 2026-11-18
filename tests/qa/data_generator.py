@@ -8,7 +8,11 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "fastapi_app"))
+# 2026-11-18 评审：这里原来也是 insert(0)，会把 `D:\erp_system\fastapi_app` 顶到
+# sys.path[0]，于是 `import utils` 命中 `fastapi_app/utils`（没有 redis_cache/logger）
+# 而不是根 `utils`。tests/qa 进入主套件后收集序在全仓靠前，这个遮蔽只在全量跑时才复现。
+# 改为 append：仍可 import fastapi_app 下的裸模块名，但不再抢根目录的优先级。
+sys.path.append(str(Path(__file__).parent.parent.parent / 'fastapi_app'))
 
 from faker import Faker
 
