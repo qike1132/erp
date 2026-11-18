@@ -4,7 +4,11 @@
       <DialogOverlay
         :class="['fixed inset-0 bg-black/50 backdrop-blur-sm data-[state=open]:animate-[fadeIn_0.2s_ease]', overlayZClass]"
       />
+      <!-- reka-ui 的 DialogContent 只给 role="dialog"、不给 aria-modal（它靠 hideOthers +
+           焦点陷阱实现模态语义）。aria-modal 是读屏器判定「背景不可交互」的显式信号，
+           这里补上：`UiDialog` 恒为模态弹窗（未暴露 modal 开关）。 -->
       <DialogContent
+        aria-modal="true"
         :class="[
           'fixed inset-0 m-auto bg-surface-card rounded-2xl shadow-lg w-[95%] h-fit max-h-[90vh] overflow-hidden flex flex-col animate-slide-up',
           contentZClass,

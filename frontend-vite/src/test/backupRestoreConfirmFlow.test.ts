@@ -14,7 +14,7 @@
  * 本仓既有的结构守卫（如 test_batch_import_cache_invalidation.py）也采用同一权衡：
  * 行为证据在别处，这里只锁「调用点先后顺序」这一结构性契约。
  */
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 // 源码原文用 Vite 的 ?raw 导入，而不是 node:fs：
@@ -44,31 +44,53 @@ function mountDialog() {
 }
 
 describe('RestoreConfirmDialog 确认闸门', () => {
+  // 2026-10-17 审计 P1-19 起弹窗改走共享 UiDialog，内容经 DialogPortal 渲染到 body，
+  // 占位在 wrapper 之外（wrapper.find 找不到），断言统一查 document。
+  function q<T extends Element>(selector: string): T | null {
+    return document.querySelector<T>(selector)
+  }
+
+  /** 勾选 checkbox（v-model 监听 change） */
+  async function check(selector: string) {
+    const box = q<HTMLInputElement>(selector)
+    expect(box).not.toBeNull()
+    box!.checked = true
+    box!.dispatchEvent(new Event('change'))
+    await flushPromises()
+  }
+
   it('未勾选「确认覆盖」时执行按钮不可点击，勾选后才可点击', async () => {
     const wrapper = mountDialog()
     await wrapper.setProps({ open: true })
+    await flushPromises()
 
-    const button = wrapper.find('.rw-btn-danger')
-    expect(button.exists()).toBe(true)
-    expect(button.attributes('disabled')).toBeDefined()
+    const button = q<HTMLButtonElement>('.rw-btn-danger')
+    expect(button).not.toBeNull()
+    expect(button!.disabled).toBe(true)
 
     // 敏感配置勾选不能替代覆盖确认（两个 checkbox 语义独立）
-    await wrapper.find('.rw-sensitive-check input').setValue(true)
-    expect(wrapper.find('.rw-btn-danger').attributes('disabled')).toBeDefined()
+    await check('.rw-sensitive-check input')
+    expect(q<HTMLButtonElement>('.rw-btn-danger')!.disabled).toBe(true)
 
-    await wrapper.find('.rw-overwrite-check input').setValue(true)
-    expect(wrapper.find('.rw-btn-danger').attributes('disabled')).toBeUndefined()
+    await check('.rw-overwrite-check input')
+    expect(q<HTMLButtonElement>('.rw-btn-danger')!.disabled).toBe(false)
+
+    wrapper.unmount()
   })
 
   it('打开弹窗时必须重置上一次的勾选状态', async () => {
     const wrapper = mountDialog()
     await wrapper.setProps({ open: true })
-    await wrapper.find('.rw-overwrite-check input').setValue(true)
-    expect(wrapper.find('.rw-btn-danger').attributes('disabled')).toBeUndefined()
+    await flushPromises()
+    await check('.rw-overwrite-check input')
+    expect(q<HTMLButtonElement>('.rw-btn-danger')!.disabled).toBe(false)
 
     await wrapper.setProps({ open: false })
     await wrapper.setProps({ open: true })
-    expect(wrapper.find('.rw-btn-danger').attributes('disabled')).toBeDefined()
+    await flushPromises()
+    expect(q<HTMLButtonElement>('.rw-btn-danger')!.disabled).toBe(true)
+
+    wrapper.unmount()
   })
 })
 
