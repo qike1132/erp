@@ -20,7 +20,7 @@ def test_url_without_password_warns() -> None:
 
 def test_url_with_password_passes() -> None:
     assert validate_redis_auth(
-        {'REDIS_URL': 'redis://:s3cret@127.0.0.1:6379/0'}, require_auth=False,
+        {'REDIS_URL': 'redis://:s3cret@127.0.0.1:6379/0'}, require_auth=False,  # secret-scan:allow 测试夹具（环回示例口令）
     ) == []
 
 

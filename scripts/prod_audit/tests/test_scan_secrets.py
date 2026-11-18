@@ -202,3 +202,53 @@ class TestAllowlist:
         assert 'docs/**' in patterns
         assert 'scripts/fixtures/*' in patterns
         assert all(not p.startswith('#') for p in patterns)
+
+
+class TestCredentialShapes:
+    """2026-10-17 审计 P1-22：关键词规则打不中的三种凭据形态必须命中。
+
+    背景：password/secret/token 这套关键词要求「关键词 = 值」同现，而本仓真实凭据
+    形态是「URL 里嵌口令」与「两段引号字面量」——关键词根本不出现，于是本地钩子与
+    CI 全树扫描同时打不中（AGENTS 5-2 红线此前无机器门禁）。
+    """
+
+    @pytest.mark.parametrize(
+        'line',
+        [
+            'DATABASE_URL=postgresql+asyncpg://erp_app:' + 'Pr0d' + 'Passw0rd@db:5432/erp',
+            # Redis 形态：user 段为空
+            'REDIS_URL=redis://:' + 'Pr0d' + 'RedisPw@127.0.0.1:6379/0',
+        ],
+    )
+    def test_dsn_embedded_password_detected(self, line: str) -> None:
+        assert content_secret_reason(line, require_quoted_rhs=False) == '命中 URL 内嵌口令（DSN）'
+
+    @pytest.mark.parametrize(
+        'line',
+        [
+            'DATABASE_URL=postgresql://u:CHANGE_ME@localhost/db',
+            # 本仓 fastapi_app/core/config.py 的真实写法（插值，非字面量）
+            'f"postgresql+asyncpg://{quote_plus(u)}:{quote_plus(p)}@{host}"',
+            'DATABASE_URL=postgresql://u:password@localhost/db',
+        ],
+    )
+    def test_dsn_placeholders_and_interpolation_not_reported(self, line: str) -> None:
+        assert content_secret_reason(line, require_quoted_rhs=False) is None
+
+    def test_pgbouncer_userlist_detected(self) -> None:
+        line = '"erp_app" "' + 'Pr0d' + 'Passw0rd"'
+        assert content_secret_reason(line, require_quoted_rhs=False) == '命中 pgbouncer userlist 形态'
+
+    @pytest.mark.parametrize(
+        'line',
+        ['"erp_app" "CHANGE_ME"', '"erp_app" "erp_app"', 'label = "hello world"'],
+    )
+    def test_pgbouncer_userlist_template_not_reported(self, line: str) -> None:
+        assert content_secret_reason(line, require_quoted_rhs=False) is None
+
+    @pytest.mark.parametrize(
+        'path',
+        ['config/pgbouncer/userlist.txt', 'home/.pgpass', 'pgpass.conf'],
+    )
+    def test_credential_filenames_blocked(self, path: str) -> None:
+        assert dangerous_path_reason(path) == '数据库凭据文件（含明文口令）'

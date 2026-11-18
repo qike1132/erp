@@ -152,7 +152,7 @@ class TestSanitizePatterns:
     def test_url_with_credentials(self) -> None:
         """URL 内嵌凭证脱敏。"""
         result = EvidenceArchiver.sanitize(
-            "postgres://user:password123@host:5432/db"
+            "postgres://user:password123@host:5432/db"  # secret-scan:allow 脱敏扫描器夹具（非真实凭据）
         )
         assert "password123" not in result
         assert "[REDACTED]" in result

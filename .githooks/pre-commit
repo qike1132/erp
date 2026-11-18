@@ -115,6 +115,14 @@ for f in $staged; do
             hit="真实环境变量文件（含明文凭据）" ;;
     esac
 
+    # 数据库 / 连接池凭据文件（2026-10-17 审计 P1-22）：userlist.txt 是 "用户" "明文口令" 两列，
+    # .pgpass 是 host:port:db:user:pw 五段。AGENTS §5-2 明令不得入库；内容层正则认得这两形态，
+    # 这里再按文件名兜一层（改名/换行/注释写法都不会漏）。
+    case "$base" in
+        "userlist.txt"|".pgpass"|"pgpass.conf")
+            hit="数据库凭据文件（含明文口令）" ;;
+    esac
+
     if [ -n "$hit" ]; then
         blocked_paths="${blocked_paths}  ✗ $f  —— $hit
 "
@@ -138,6 +146,14 @@ fi
 # ---------------------------------------------------------------------------
 # 高精度模式（宁可漏报，避免误报阻塞正常开发）
 secret_patterns='-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9]{32,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN (RSA|EC|DSA|PGP) '
+
+# 2026-10-17 审计 P1-22：关键词规则打不中的三种凭据形态（AGENTS §5-2 此前纯靠人）
+#   dsn_pattern     ：scheme://user:password@host（含 redis://:pw@host 这种空 user 形态）
+#   userlist_pattern：pgbouncer userlist.txt 的 "用户" "口令" 两列
+# 与 scripts/_selftest_hook.py 的 DSN_PATTERN / USERLIST_PATTERN 逐字镜像，
+# 一致性由 scripts/prod_audit/tests/test_scan_secrets_hook_parity.py 断言。
+dsn_pattern='[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]:/@]*:[^[:space:]/@]{6,}@'
+userlist_pattern='^[[:space:]]*"[^"]+"[[:space:]]+"[^"]+"[[:space:]]*$'
 
 # 口令赋值：仅在"看起来是真值"时命中（排除占位符与常见弱口令示例）
 # `[A-Za-z]{0,3}` 允许 Python 字符串前缀（r"" / b"" / rb"" 等）——否则 r"..." 形式会漏报。
@@ -248,6 +264,27 @@ for f in $staged; do
                 secret_hits="${secret_hits}  ✗ $f  —— 疑似明文口令/密钥赋值
 "
             fi
+        fi
+
+        # 2026-10-17 审计 P1-22：关键词规则打不中的两种形态
+        #   ① URL 内嵌口令：scheme://user:password@host —— 整行没有 password/secret/token 字样
+        #   ② pgbouncer userlist.txt 的两段引号字面量："user" "password"
+        # 过滤链与 CI 侧 scripts/_selftest_hook.py 的 dsn_rule_hits / userlist_rule_hits 同口径：
+        # 插值表达式（{...} / $(...) / %VAR%）、占位词、示例口令一律放行。
+        dsn_matches=$(grep -Eo -e "$dsn_pattern" "$tmpf_scan" 2>/dev/null \
+            | grep -Ev -e '[{}()$%<>`'\''"]' \
+            | grep -Eiv -e ':(password|passwd|pass|pwd|secret|changeme|change_me|example|test|testpass|dummy|fake|yourpassword|none|null)@' \
+            | grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])' || true)
+        if [ -n "$dsn_matches" ]; then
+            secret_hits="${secret_hits}  ✗ $f  —— 命中 URL 内嵌口令（DSN）
+"
+        fi
+
+        userlist_matches=$(grep -E -e "$userlist_pattern" "$tmpf_scan" 2>/dev/null \
+            | grep -Eiv -e '(<[^>]+>|YOUR_|CHANGE_?ME|changeme|placeholder|example|xxxx|dummy|fake|testkey|your[-_])' || true)
+        if [ -n "$userlist_matches" ]; then
+            secret_hits="${secret_hits}  ✗ $f  —— 命中 pgbouncer userlist 形态
+"
         fi
     fi
     rm -f "$tmpf" "$tmpf_scan"

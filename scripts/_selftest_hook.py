@@ -140,6 +140,22 @@ SECRET_CASES: list[tuple[str, str, bool]] = [
     ("普通注释", "# 这里只是说明，不含凭据", False),
 ]
 
+# --- 2026-10-17 审计 P1-22：DSN / userlist 两形态的用例 ---
+# 构造时用拼接，避免本文件自身被扫描命中（与 parity 测试同款做法）。
+_DSN_FAKE = 'postgresql://erp_app:' + 'Pr0d' + 'Passw0rd' + '@db.internal:5432/erp'
+CRED_SHAPE_CASES: list[tuple[str, str, bool, bool]] = [
+    # (说明, 行, 期望 DSN 命中, 期望 userlist 命中)
+    ("pg DSN 内嵌真口令", f'DATABASE_URL={_DSN_FAKE}', True, False),
+    ("redis 空 user 的 DSN", 'REDIS_URL=redis://:' + 'Pr0d' + 'RedisPw@127.0.0.1:6379/0', True, False),
+    ("DSN 占位符（模板）", 'DATABASE_URL=postgresql://u:CHANGE_ME@localhost/db', False, False),
+    ("DSN 是插值表达式（本仓 _build_database_uri）",
+     'f"postgresql+asyncpg://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_host}"', False, False),
+    ("DSN 口令是示例词", 'DATABASE_URL=postgresql://u:password@localhost/db', False, False),
+    ("pgbouncer userlist 真口令", '"erp_app" "' + 'Pr0d' + 'Passw0rd"', False, True),
+    ("userlist 同名模板行", '"erp_app" "erp_app"', False, False),
+    ("userlist 占位行", '"erp_app" "CHANGE_ME"', False, False),
+    ("普通引号字符串", 'label = "hello world"', False, False),
+]
 # --- 既有能力缺口：**刻意保留**（hook 自述「高精度，宁可漏报」），此处显式记录 ---
 KNOWN_GAPS: list[tuple[str, str, bool]] = [
     ("f-string 且字面量片段 <12 字符",
@@ -164,6 +180,19 @@ def run_rule_cases() -> int:
             failures.append(f"密钥特征: {desc} 期望={expected} 实际={got}")
         print(f"  [{flag}] 密钥特征 {desc:34s} 期望={expected!s:5s} 实际={got!s:5s}")
 
+    for desc, line, want_dsn, want_userlist in CRED_SHAPE_CASES:
+        got_dsn = dsn_rule_hits(line)
+        got_ul = userlist_rule_hits(line)
+        ok = (got_dsn == want_dsn) and (got_ul == want_userlist)
+        print(
+            f"  [{'OK  ' if ok else 'FAIL'}] DSN/userlist {desc:30s} "
+            f"dsn={got_dsn!s:5s}(期望{want_dsn!s:5s}) userlist={got_ul!s:5s}(期望{want_userlist!s:5s})"
+        )
+        if not ok:
+            failures.append(
+                f"DSN/userlist: {desc} 期望 dsn={want_dsn}/ul={want_userlist} "
+                f"实际 dsn={got_dsn}/ul={got_ul}  行={line!r}"
+            )
     print("\n  --- 既有能力缺口（非本次引入，仅记录，不计失败）---")
     for desc, line, is_py in KNOWN_GAPS:
         got = password_rule_hits(line, is_py)
@@ -174,7 +203,8 @@ def run_rule_cases() -> int:
         for f in failures:
             print("   -", f)
         return 1
-    print(f"\n[PASS] 全部 {len(CASES) + len(SECRET_CASES)} 个规则用例通过")
+    total = len(CASES) + len(SECRET_CASES) + len(CRED_SHAPE_CASES)
+    print(f"\n[PASS] 全部 {total} 个规则用例通过")
     return 0
 
 
@@ -203,6 +233,68 @@ def main() -> int:
     if args.e2e:
         rc = max(rc, run_e2e())
     return rc
+
+
+
+
+# ===========================================================================
+# 2026-10-17 审计 P1-22：三种「不含关键词」的凭据形态
+# ===========================================================================
+# 关键词规则（PWD_PATTERN）要求 password/secret/token 等字样出现在同一行，
+# 而本仓真正放凭据的形态是「值里带 scheme://user:pass@host」或「两段引号字面量」——
+# 关键词根本不出现，于是本地钩子与 CI 全树扫描同时打不中（AGENTS §5-2 红线无机器门禁）。
+#
+# 1) URL 内嵌口令（DSN / 连接串）。user 段允许为空：Redis 的形态就是 redis://:pw@host
+DSN_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^ \t:/@]*:[^ \t/@]{6,}@")
+# 2) pgbouncer userlist.txt 的两段引号字面量："erp_app" "真口令"
+USERLIST_PATTERN = re.compile(r'^[ \t]*"[^"]+"[ \t]+"[^"]+"[ \t]*$')
+# 3) 占位/示例口令词表：两侧必须同口径放行，否则模板文件会让门禁变成噪音。
+#    刻意只收「文档里真实出现过的示意值」。
+_PSEUDO_PASSWORDS = frozenset({
+    'password', 'passwd', 'pass', 'pwd', 'secret', 'changeme', 'change_me',
+    'example', 'test', 'testpass', 'dummy', 'fake', 'yourpassword', 'none', 'null',
+})
+# 插值/表达式而非字面量：{quote_plus(db_password)}、$DB_PW、%PGPASSWORD%、(Get-Pw)
+_DSN_EXPRESSION = re.compile(r"[{}()$%<>`'\"\[\]]")
+_DSN_PASSWORD_RE = re.compile(r"://[^ \t:/@]*:([^ \t/@]+)@")
+
+
+def _dsn_literal_password(segment: str) -> str | None:
+    """匹配片段 → 看起来像字面量的口令；是表达式/占位符则返回 None。"""
+    m = _DSN_PASSWORD_RE.search(segment)
+    if not m:
+        return None
+    pwd = m.group(1)
+    if _DSN_EXPRESSION.search(pwd):
+        return None
+    if pwd.lower() in _PSEUDO_PASSWORDS:
+        return None
+    return pwd
+
+
+def dsn_rule_hits(line: str) -> bool:
+    """URL 内嵌口令（DSN）判定。镜像 hook 第 2 层的 dsn_pattern 规则。"""
+    for m in DSN_PATTERN.finditer(line):
+        seg = m.group(0)
+        if PLACEHOLDER.search(seg):
+            continue
+        if _dsn_literal_password(seg) is None:
+            continue
+        return True
+    return False
+
+
+def userlist_rule_hits(line: str) -> bool:
+    """pgbouncer userlist.txt 形态判定。镜像 hook 第 2 层的 userlist_pattern。"""
+    if not USERLIST_PATTERN.match(line):
+        return False
+    if PLACEHOLDER.search(line):
+        return False
+    quoted = re.findall(r'"([^"]*)"', line)
+    if len(quoted) < 2:
+        return False
+    user, pwd = quoted[0].lower(), quoted[1].lower()
+    return not (pwd in _PSEUDO_PASSWORDS or pwd == user)
 
 
 if __name__ == "__main__":

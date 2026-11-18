@@ -62,7 +62,7 @@ def test_password_masked_in_message(monkeypatch):
     monkeypatch.delenv("PERF_TEST_ALLOW_PROD_DB", raising=False)
     with pytest.raises(SystemExit) as exc:
         require_non_production_database(
-            "postgresql+asyncpg://erp_app:S3cr3tPw@127.0.0.1:5432/erp_system"
+            "postgresql+asyncpg://erp_app:S3cr3tPw@127.0.0.1:5432/erp_system"  # secret-scan:allow 测试夹具（断言脱敏输出）
         )
     assert "S3cr3tPw" not in str(exc.value)
     assert "***" in str(exc.value)

@@ -47,7 +47,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # 复用已镜像的规则，不另写一份正则（见模块 docstring）
-from scripts._selftest_hook import password_rule_hits, secret_rule_hits
+from scripts._selftest_hook import (
+    dsn_rule_hits,
+    password_rule_hits,
+    secret_rule_hits,
+    userlist_rule_hits,
+)
 
 ALLOWLIST_REL = Path('.githooks') / 'allowlist.txt'
 
@@ -102,6 +107,10 @@ _BROWSER_DB_BASENAMES = {
 }
 # 真实环境变量文件（模板不在内）
 _REAL_ENV_BASENAMES = {'.env', '.env.production', '.env.development', '.env.local', '.env.backup'}
+# 数据库/连接池凭据文件（2026-10-17 审计 P1-22）：pgbouncer `userlist.txt` 与 `.pgpass`
+# 里就是「用户名 + 明文口令」，AGENTS §5-2 明令不得入库。内容层正则认得 `"u" "p"` 形态，
+# 这里再按文件名兜一层（改名/换行/注释写法都不会漏）。
+_CRED_BASENAMES = {'userlist.txt', '.pgpass', 'pgpass.conf'}
 # 私钥/证书后缀
 _KEY_SUFFIXES = ('.pem', '.key', '.p12', '.pfx', '.keystore', '.jks')
 _KEY_NAME_FRAGMENTS = ('id_rsa', 'id_ed25519')
@@ -138,6 +147,11 @@ def dangerous_path_reason(path: str) -> str | None:
     if base in _REAL_ENV_BASENAMES:
         return '真实环境变量文件（含明文凭据）'
 
+    # 2026-10-17 审计 P1-22：数据库 / 连接池凭据文件名本身即凭据载体
+    # （pgbouncer userlist.txt 与 .pgpass 里是「用户 + 明文口令」的两列）。
+    # 内容层正则拦不住改名/换行写法的变体，这一层按文件名直接拒绝。
+    if base in _CRED_BASENAMES:
+        return '数据库凭据文件（含明文口令）'
     return None
 
 
@@ -160,6 +174,11 @@ def content_secret_reason(text: str, *, require_quoted_rhs: bool) -> str | None:
             return '命中私钥/云凭据特征'
         if password_rule_hits(line, require_quoted_rhs):
             return '疑似明文口令/密钥赋值'
+        # 2026-10-17 审计 P1-22：关键词规则打不中的两种形态
+        if dsn_rule_hits(line):
+            return '命中 URL 内嵌口令（DSN）'
+        if userlist_rule_hits(line):
+            return '命中 pgbouncer userlist 形态'
     return None
 
 
@@ -177,6 +196,9 @@ _REASON_LABELS: tuple[str, ...] = (
     '真实环境变量文件（含明文凭据）',
     '命中私钥/云凭据特征',
     '疑似明文口令/密钥赋值',
+    '数据库凭据文件（含明文口令）',
+    '命中 URL 内嵌口令（DSN）',
+    '命中 pgbouncer userlist 形态',
 )
 
 
