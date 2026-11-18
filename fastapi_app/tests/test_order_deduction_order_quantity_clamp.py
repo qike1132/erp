@@ -73,11 +73,17 @@ async def _run(db, order, order_quantity: int, custom: int | None):
 
 
 def _added_stockout(db) -> MagicMock:
-    for call in db.add.call_args_list:
-        obj = call.args[0]
-        if obj.__class__.__name__ == 'StockOut' or hasattr(obj, 'stockout_no'):
-            return obj
-    raise AssertionError('未创建 StockOut')
+    """db.add 里**唯一**的那条 StockOut。
+
+    不用 `hasattr(obj, 'stockout_no')` 兜底：MagicMock 对任意属性都返回真，
+    兜底会让「db.add 里塞了别的对象」也静默通过，断言就失去意义。
+    """
+    stockouts = [
+        call.args[0] for call in db.add.call_args_list
+        if call.args[0].__class__.__name__ == 'StockOut'
+    ]
+    assert len(stockouts) == 1, f'应恰好创建 1 条 StockOut，实际 {len(stockouts)}'
+    return stockouts[0]
 
 
 @pytest.mark.asyncio

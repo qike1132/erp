@@ -344,6 +344,32 @@ async def test_increase_shortfall_accounts_for_deduction_of_other_orders():
 
     assert stub.numbers == [] and db.rows == [other] and product.current_stock == 100
 
+async def test_increase_beyond_order_quantity_raises_and_writes_nothing():
+    """抵扣量不得超过订单数量（2026-10-17 审计 P1-17 的第二条写路径）。
+
+    `PUT /orders/deduct/{id}` 只按可用备货收口时，3 件的订单能扣 10 件备货：
+    stock_out=10 而 order_item.quantity=3，正是 P1-17 要消灭的形态。
+    """
+    product = _make_product(stock=100)
+    db = _LedgerSession(
+        product=product,
+        order=_make_order(quantity=3),
+        stockins=[_make_stockin(quantity=30)],
+    )
+
+    with (
+        _stubbed_side_effects() as stub,
+        pytest.raises(ValueError, match='超过订单数量 3'),
+    ):
+        await update_deduct_quantity(db, 1, 10, _USER)
+
+    assert stub.numbers == []          # 一个备货号都没生成
+    assert db.rows == []               # 无 StockOut
+    assert db.logs == []               # 无 InventoryLog
+    assert product.current_stock == 100 and product.version == 0
+
+
+
 
 async def test_decrease_beyond_existing_deduction_raises():
     """请求减少 50 件但现有抵扣只有 20 件 → 报错（还差 30），不删行、不改库存。"""

@@ -29,7 +29,10 @@ from fastapi_app.services.notification_service import (
     dispatch_factory_notifications,
 )
 from fastapi_app.services.numbering_sequence import _BUSINESS_TZ
-from fastapi_app.services.order_deduction_service import process_order_deduction
+from fastapi_app.services.order_deduction_service import (
+    clamp_deduct_to_quantity,
+    process_order_deduction,
+)
 from fastapi_app.shared_models import (
     InventoryLog,
     Order,
@@ -235,7 +238,10 @@ async def _create_order_items(
             product_barcode=getattr(product, 'barcode', None),
             quantity=it['quantity'],
             deduct_stock=it['deduct_stock'],
-            deduct_quantity=it['deduct_quantity'],
+            deduct_quantity=(
+                clamp_deduct_to_quantity(it['deduct_quantity'], it['quantity'])
+                if it['deduct_stock'] else 0
+            ),
             note=it['note'],
         )
         db.add(order_item)
@@ -278,13 +284,19 @@ async def _apply_deductions(
     必须显式跳过 deduct_quantity=0 的项以避免误扣库存。
     """
     for _order_item, it in zip(created_items, validated_items, strict=False):
-        if not (it['deduct_stock'] and it['deduct_quantity'] > 0):
+        # 抵扣量按订单数量收口（2026-10-17 审计 P1-17）：与 OrderItem.deduct_quantity 同口径，
+        # 否则「3 件的订单填 10 件抵扣」会落成 stock_out=3 而明细=10。
+        deduct_qty = (
+            clamp_deduct_to_quantity(it['deduct_quantity'], it['quantity'])
+            if it['deduct_stock'] else 0
+        )
+        if deduct_qty <= 0:
             continue
         try:
             await process_order_deduction(
                 db, order, it['product_id'], it['quantity'],
                 deduct_stock=True,
-                custom_deduct_quantity=it['deduct_quantity'],
+                custom_deduct_quantity=deduct_qty,
                 product=it['product'],
             )
         except (ValueError, TypeError, RuntimeError, OSError) as ded_err:

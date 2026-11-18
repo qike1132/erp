@@ -22,6 +22,7 @@ from fastapi_app.services.batch_import_core import (
 )
 from fastapi_app.services.batch_service import process_order_deduction
 from fastapi_app.services.numbering import generate_order_number
+from fastapi_app.services.order_deduction_service import clamp_deduct_to_quantity
 from fastapi_app.services.staging._generic import (
     _generic_import_staging_from_excel,
     _generic_update_staging_entity,
@@ -141,11 +142,17 @@ async def _purge_rejected_rows(db: AsyncSession, session_id: str) -> None:
     await db.flush()
 
 
-def _confirmed_order_item(order: Order, staging: StagingOrder, product) -> OrderItem:
+def _confirmed_order_item(
+    order: Order, staging: StagingOrder, product, deduct_quantity: int,
+) -> OrderItem:
     """暂存行 → 订单明细（P1-8）：字段口径与 order_batch_create._create_order_items 一致。
 
     抵扣字段也按暂存行写入：暂存确认确实会扣库存（process_order_deduction），
     明细里记 0 会让订单详情/对账读到的抵扣与库存流水自相矛盾。
+
+    ``deduct_quantity`` 由调用方按 **订单数量** 收口后传入（2026-10-17 审计 P1-17）：
+    `process_order_deduction` 只扣 min(请求, 可用, 订单数量)，明细若照抄请求值，
+    就会出现「明细 10 件 / 实际只扣 3 件」的账面分叉。
     """
     return OrderItem(
         order_id=order.id,
@@ -154,7 +161,7 @@ def _confirmed_order_item(order: Order, staging: StagingOrder, product) -> Order
         product_barcode=getattr(product, 'barcode', None),
         quantity=staging.quantity,
         deduct_stock=bool(staging.deduct_stock),
-        deduct_quantity=int(staging.deduct_quantity or 0),
+        deduct_quantity=deduct_quantity,
         note=staging.note,
     )
 
@@ -198,11 +205,20 @@ async def _write_confirmed_order(
     if _row_factory_rejected(scoped_factory, product.factory):
         raise ValueError('产品不在你的工厂范围，已拒绝该订单')
 
+    # 抵扣量按订单数量收口（2026-10-17 审计 P1-17）：暂存行可以填「3 件的订单抵扣 10 件」，
+    # `process_order_deduction` 只扣 min(请求, 可用, 数量)；明细与落扣必须同口径，
+    # 否则会出现「明细 10 件 / 库存只减 3 件」的永久分叉。
+    deduct_qty = (
+        clamp_deduct_to_quantity(staging.deduct_quantity, staging.quantity)
+        if staging.deduct_stock else 0
+    )
+
     # 明细（P1-8，2026-11-17 审计）：create_order（order/commands.py:157-167）与
     # 批量创建（order_batch_create._create_order_items）两条路径都写 OrderItem，
     # 只有暂存确认这条漏了 —— 这些订单在按 order.items 读取的链路上表现为
     # 「没有明细」，退回订单级摊平的单行口径，SKU 级信息（含抵扣）全部丢失。
-    db.add(_confirmed_order_item(order, staging, product))
+    # 抵扣量用与实扣同口径的收口值（2026-10-17 审计 P1-17），见下方 deduct_qty。
+    db.add(_confirmed_order_item(order, staging, product, deduct_qty))
     # 订单不改物理库存（2026-10-24 修复 P0）：原先此处
     # apply_stock_delta_locked(+quantity) 与 create_order 等三条路径口径相反。
     log = InventoryLog(
@@ -218,13 +234,14 @@ async def _write_confirmed_order(
     )
     db.add(log)
 
-    if staging.deduct_stock and staging.deduct_quantity and staging.deduct_quantity > 0:
+    # 抵扣量已按订单数量收口到 deduct_qty（见上），这里直接用它落扣
+    if deduct_qty > 0:
         await process_order_deduction(
             db, order,
             staging_product_id,
             staging.quantity,
             deduct_stock=True,
-            custom_deduct_quantity=staging.deduct_quantity,
+            custom_deduct_quantity=deduct_qty,
             product=product,
         )
 

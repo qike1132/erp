@@ -23,6 +23,25 @@ from fastapi_app.shared_models import InventoryLog, Order, Product, StockIn, Sto
 logger = logging.getLogger(__name__)
 
 
+def clamp_deduct_to_quantity(requested: int | None, order_quantity: int) -> int:
+    """抵扣数量按订单数量收口（2026-10-17 审计 P1-17）。
+
+    `process_order_deduction` 实际只扣 ``min(自定义量, 可用备货, 订单数量)``，
+    所以**落库的 ``OrderItem.deduct_quantity`` 必须与实扣同口径**：否则「3 件的订单
+    填了 10 件抵扣」会落成 ``stock_out.quantity=3`` 而 ``order_item.deduct_quantity=10``，
+    订单明细/对账与库存流水永远对不上，且没有任何提示。
+
+    非正数（未开启抵扣 / 未填）一律返回 0。
+    """
+    want = int(requested or 0)
+    qty = int(order_quantity or 0)
+    if want <= 0 or qty <= 0:
+        return 0
+    return min(want, qty)
+
+
+
+
 async def process_order_deduction(
     db: AsyncSession,
     order: Order,

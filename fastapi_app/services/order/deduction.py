@@ -296,6 +296,13 @@ async def update_deduct_quantity(
     if new_deduct_quantity < 0:
         raise ValueError('抵扣数量不能为负数')
 
+    # 抵扣量还不得超过订单数量（2026-10-17 审计 P1-17 的第二条写路径）：
+    # `_increase_deduction` 只按可用备货收口，`PUT /orders/deduct/{id}` 是权限内可达的
+    # 公开端点（直连 API / 旧前端仍会调），不过这一关就能给 3 件的订单扣 10 件备货。
+    # 与 `process_order_deduction` 的 min(自定义量, 可用备货, 订单数量) 同一口径。
+    if new_deduct_quantity > int(order.quantity or 0):
+        raise ValueError(f'抵扣数量 {new_deduct_quantity} 超过订单数量 {order.quantity}')
+
     # 查询当前抵扣量
     deduct_map = await _batch_deduct_quantities(db, [order_id])
     current_deduct = deduct_map.get(order_id, 0)
