@@ -47,7 +47,7 @@
         <span class="sc-item-name">{{ s.name }}</span>
         <span class="sc-item-cron mono" :title="s.cron_expr || s.schedule || ''">{{ cronLabel(s.cron_expr || s.schedule) }}</span>
         <span class="sc-item-status">{{ s.enabled ? '已启用' : '已停用' }}</span>
-        <button class="sc-item-del" title="删除" @click="s.id != null && onDelete(s.id)">删除</button>
+        <button class="sc-item-del" title="删除" @click="s.id != null && onDelete(s.id, s.name)">删除</button>
       </div>
       <div v-if="schedules.length === 0" class="sc-empty">暂无定时任务</div>
     </div>
@@ -62,7 +62,8 @@ const props = defineProps<{
   schedules: BackupScheduleItem[]
   saving?: boolean
   onSave: (data: { name: string; task_type: string; cron_expr: string; enabled: boolean }) => void
-  onDelete: (id: number) => void
+  /** 删除需要带上任务名：确认框要写清删的是哪个调度（只传 id 无法给出可读提示） */
+  onDelete: (id: number, name: string) => void
   onTrigger: () => void
 }>()
 

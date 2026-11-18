@@ -264,7 +264,17 @@ async function saveSchedule(data: { name: string; task_type: string; cron_expr: 
     toast.error(errText(e, '保存定时任务失败'))
   } finally { saving.value = false }
 }
-async function deleteSchedule(id: number) {
+async function deleteSchedule(id: number, name: string) {
+  // DELETE /backup/schedule/{id} 是后端**硬删**（无软删、无回收站、无撤销），而「每日全量备份」
+  // 「备份巡检」「恢复演练」这类例行调度恰恰最容易被行内按钮误点：删掉之后系统静默失去自动
+  // 备份能力，getStatus() 仍显示「上次备份成功」，直到某天发现备份缺位才暴露
+  // （2026-10-17 审计 P1-18）。同页「删除备份文件」「上传还原」都是先确认再发请求，此处对齐。
+  const ok = await confirmDialog.confirm(
+    `删除定时任务「${name}」？`,
+    '该任务的例行备份/巡检将不再执行，且无法恢复。',
+    'danger',
+  )
+  if (!ok) return
   try {
     await backupApi.deleteSchedule(id)
     await loadSchedules()
@@ -284,6 +294,13 @@ async function triggerScheduleNow() {
     toast.info('当前没有启用的定时任务')
     return
   }
+  // 手动触发会在后端真入队并立刻开跑（全量备份/恢复演练持续数分钟），确认文案必须写出将要
+  // 触发的任务名，而不是只在成功 toast 里事后告知（2026-10-17 审计 P1-18）。
+  const ok = await confirmDialog.confirm(
+    `立即执行定时任务「${first.name}」？`,
+    '会在后台立即入队执行；全量备份/恢复演练等重任务可能持续数分钟。',
+  )
+  if (!ok) return
   triggering.value = true
   try {
     await backupApi.triggerSchedule(first.name)
