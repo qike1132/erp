@@ -28,7 +28,27 @@ import { resolve, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const srcDir = resolve(__dirname, '..', 'src')
+
+/**
+ * 2026-10-17 审计 F2-1：扫描集合异常缩小必须报错（原实现「空集也打 ✓」）。
+ *
+ * `walk()` 用 try/catch 吞掉 readdir 异常并返回 `[]`，于是 `src/views` 改名或整体挪层时
+ * 脚本仍打印「✓ PC 端所有端点调用均经 src/api/ 层」并 exit 0 —— 唯一的机器护栏静默失效。
+ * 下限取当前实测值 310 的 ~80%。
+ */
+const MIN_SCANNED_FILES = 250
+
+/** `--root <dir>`：只给夹具测试用（默认按脚本位置推断项目根）。 */
+function parseRootArg(argv) {
+  const eq = argv.find((a) => a.startsWith('--root='))
+  if (eq) return resolve(eq.slice('--root='.length))
+  const i = argv.indexOf('--root')
+  if (i >= 0 && argv[i + 1]) return resolve(argv[i + 1])
+  return null
+}
+
+const rootOverride = parseRootArg(process.argv.slice(2))
+const srcDir = rootOverride ? join(rootOverride, 'src') : resolve(__dirname, '..', 'src')
 
 /** 传输层中「非请求」的导出：views 允许导入这些 */
 const ALLOWED_TRANSPORT_EXPORTS = new Set(['resolveStaticUrl', 'clearCsrfCache'])
@@ -78,7 +98,13 @@ function parseNamedImports(clause) {
 }
 
 const violations = []
-const files = walk(join(srcDir, 'views'), ['.vue', '.ts'])
+// 2026-10-17 审计 P2-2：扫描根从 `src/views` 扩到 `src/views + src/mobile`。
+// 原先移动端不在面内 —— 视图里 `import { post } from '@/api/request'` 自拼端点
+// 不会被任何门禁拦住（`check-api-alignment` 只按路径字面量比对，不校验参数）。
+const files = [
+  ...walk(join(srcDir, 'views'), ['.vue', '.ts']),
+  ...walk(join(srcDir, 'mobile'), ['.vue', '.ts']),
+]
 
 for (const file of files) {
   let raw
@@ -140,7 +166,17 @@ for (const file of files) {
 }
 
 console.log('=== PC 端 API 层绕过检查 ===')
-console.log(`扫描文件数: ${files.length}（src/views 下 .vue/.ts）`)
+console.log(`扫描文件数: ${files.length}（src/views + src/mobile 下 .vue/.ts）`)
+
+// 2026-10-17 审计 F2-1：先判「扫到了多少」，再判「命中多少」。退出码 2 = 环境异常，
+// 与「有违规 = 1」区分，这样 CI 红的时候能一眼看出是门禁空转还是真违规。
+if (files.length < MIN_SCANNED_FILES) {
+  console.error(
+    `[ERROR] 扫描集合异常缩小：src/views 只扫到 ${files.length} 个文件（下限 ${MIN_SCANNED_FILES}）`,
+  )
+  console.error('  目录改名/挪层会让本门禁退化成空转；请同步更新脚本路径或下限后再跑。')
+  process.exit(2)
+}
 
 if (violations.length > 0) {
   console.warn(`\n⚠ 发现 ${violations.length} 处绕过 API 层的调用:`)

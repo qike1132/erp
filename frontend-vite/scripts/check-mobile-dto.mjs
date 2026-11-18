@@ -2,7 +2,9 @@
 /**
  * 跨端 DTO 重复声明守卫（三条规则）。
  *
- * R1（既有）src/mobile 下不得重复声明 @/types（src/types/index.ts）已导出的后端 DTO。
+ * R1（既有，2026-10-17 审计 P2-2 扩面）src/mobile 下不得重复声明后端 DTO。
+ *      判定集 = src/types/index.ts ∪ src/types/api.d.ts（生成层）∪ src/api/*.ts。
+ *      原先只对照 types/index.ts 的 76 个名字，生成层 447 个与 api 层导出对其完全无保护。
  *      移动端视图必须复用共享数据层（@/api + @/types），不得自行复制后端 DTO 的字段
  *      定义 —— 复制出来的声明会与后端悄悄漂移（例如移动端自建 StockItem 里的
  *      safety_stock，后端库存接口根本不返回该字段，导致「低库存」筛选恒为假）。
@@ -86,6 +88,19 @@ function walk(dir) {
 const dtoNames = new Set(
   [...readFileSync(typesFile, 'utf-8').matchAll(/export\s+(?:interface|type)\s+(\w+)/g)].map((m) => m[1]),
 )
+
+// 2026-10-17 审计 P2-2：R1 的判定集从「types/index.ts 的导出名」扩到
+// 「手写类型层 ∪ 生成层(api.d.ts) ∪ api 封装层(api/*.ts)」。
+// 原先只对照 76 个名字，而生成层 447 个 + api 层 ~134 个里的大部分对移动端完全无保护：
+// 移动端重复声明一个「只存在于 api.d.ts」的 DTO，R1 依然全绿（夹具实测过）。
+function exportedTypeNames(file) {
+  return [...readFileSync(file, 'utf-8').matchAll(/^export\s+(?:interface|type)\s+(\w+)/gm)].map((m) => m[1])
+}
+
+const apiTsFiles = readdirSync(apiDir).filter((f) => f.endsWith('.ts')).map((f) => join(apiDir, f))
+for (const extra of [generatedFile, ...apiTsFiles]) {
+  for (const name of exportedTypeNames(extra)) dtoNames.add(name)
+}
 
 const violations = []
 for (const file of walk(mobileDir)) {

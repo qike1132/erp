@@ -166,6 +166,21 @@ function main() {
     process.exit(2)
   }
 
+  // 2026-10-17 审计 F2-1：扫描/配对集合异常缩小 → 退出码 2（与「有漂移 = 1」区分）。
+  // 现状：PC 路由 32 条、移动端 15 条、按「移动端 name = M + PC name」配出 10 对。
+  // 移动端一旦改用别的命名约定，pairs 会缩到 0 而脚本照样打 ✓ —— 门禁静默空转。
+  const MIN_PC_ROUTES = 25
+  const MIN_MOBILE_ROUTES = 10
+  if (pcRoutes.length < MIN_PC_ROUTES || mobileRoutes.length < MIN_MOBILE_ROUTES) {
+    console.error(
+      `[ERROR] 路由集合异常缩小：pcRoutes=${pcRoutes.length}（下限 ${MIN_PC_ROUTES}）、`
+      + `mobileRoutes=${mobileRoutes.length}（下限 ${MIN_MOBILE_ROUTES}）`,
+    )
+    console.error('  路由文件结构/命名约定变化会让本门禁退化成空转；请同步更新解析或下限。')
+    process.exit(2)
+  }
+
+
   const pcPaths = new Set(pcRoutes.map((r) => r.path).filter(isComparablePath))
   const mobilePaths = new Set(mobileRoutes.map((r) => r.path).filter(isComparablePath))
   const pcByName = new Map(pcRoutes.filter((r) => r.name).map((r) => [r.name, r.path]))
@@ -187,6 +202,15 @@ function main() {
     }
   }
   pairs.sort((a, b) => a.pcName.localeCompare(b.pcName))
+
+  // 配对集合为空 = 「移动端 name 不再按 M<PCName> 命名」→ 跨端校验静默空转，判环境异常
+  if (pairs.length === 0) {
+    console.error(
+      '[ERROR] 跨端配对集合为空：移动端路由 name 已不再遵循 M<PCName> 约定，'
+      + '本门禁退化成空转。请修正命名或更新本脚本的配对规则。',
+    )
+    process.exit(2)
+  }
 
   const mismatches = pairs.filter((p) => !p.consistent)
   const pcOnlyPaths = [...pcPaths].filter((p) => !mobilePaths.has(p)).sort()

@@ -213,3 +213,31 @@ describe('check:dto 门禁：真实仓库当前状态', () => {
     expect(code, output).toBe(0)
   })
 })
+
+describe('check:dto 门禁：R1 判定集含生成层（2026-10-17 审计 P2-2）', () => {
+  it('移动端重复声明只存在于 api.d.ts 的类型 → 判红（扩面前恒绿）', () => {
+    buildFixture({
+      generatedTypes: 'export interface OnlyGenerated {\n  id: number\n}\n',
+    })
+    writeFileSync(
+      join(fixture, 'src', 'mobile', 'MGen.vue'),
+      '<script setup lang="ts">\ninterface OnlyGenerated {\n  id: number\n}\n</script>\n',
+      'utf-8',
+    )
+    const { code, output } = runGate()
+    expect(code).toBe(1)
+    expect(output).toContain('OnlyGenerated')
+  })
+
+  it('移动端重复声明只存在于 api/*.ts 的类型 → 判红', () => {
+    buildFixture({ apiTypes: 'export interface OnlyApiLayer {\n  id: number\n}\n' })
+    writeFileSync(
+      join(fixture, 'src', 'mobile', 'MApi.vue'),
+      '<script setup lang="ts">\ninterface OnlyApiLayer {\n  id: number\n}\n</script>\n',
+      'utf-8',
+    )
+    const { code, output } = runGate()
+    expect(code).toBe(1)
+    expect(output).toContain('OnlyApiLayer')
+  })
+})
