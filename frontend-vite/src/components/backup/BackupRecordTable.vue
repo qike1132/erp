@@ -23,12 +23,8 @@
             <!-- P1-20（2026-11-17 审计）：加密与否必须逐行可见 —— 只靠文件名后缀判
                  「是不是 .zip.enc」在列表里读不出来，运维会误以为在留加密包。 -->
             <td>
-              <span
-                class="brt-badge"
-                :class="r.encrypted ? 'brt-badge-success' : 'brt-badge-warning'"
-                :title="r.encrypted ? '包内容为密文，需密码才能还原' : '明文包（含全部业务数据）'"
-              >
-                {{ r.encrypted ? '已加密' : '明文' }}
+              <span class="brt-badge" :class="encClass(r.encrypted)" :title="encTitle(r.encrypted)">
+                {{ encLabel(r.encrypted) }}
               </span>
             </td>
             <td class="mono">{{ r.size != null ? fmtSize(r.size) : '—' }}</td>
@@ -68,6 +64,29 @@ export interface BackupRecordRow {
   status?: string
   source?: string  // 'db'=数据库记录 | 'fs'=文件系统补录
   encrypted?: boolean | null
+}
+
+/**
+ * P1-20（2026-11-17 审计）+ 推送前评审：加密是**三态** —— 后端 backup_record.encrypted
+ * 可空，文件系统补录的 .zip 条目也不带这个键。null/undefined 表示「未知」，绝不能
+ * 当成「明文」断言（那正是 P1-20 要防的「未知被说成已知」）。
+ */
+function encLabel(v?: boolean | null): string {
+  if (v === true) return '已加密'
+  if (v === false) return '明文'
+  return '未知'
+}
+
+function encClass(v?: boolean | null): string {
+  if (v === true) return 'brt-badge-success'
+  if (v === false) return 'brt-badge-warning'
+  return 'brt-badge-neutral'
+}
+
+function encTitle(v?: boolean | null): string {
+  if (v === true) return '包内容为密文，需密码才能还原'
+  if (v === false) return '明文包（含全部业务数据）'
+  return '未记录加密状态（老记录或文件系统补录）'
 }
 
 const props = defineProps<{

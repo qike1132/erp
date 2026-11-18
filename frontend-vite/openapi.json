@@ -22591,6 +22591,16 @@
             "title": "Checksum Tables",
             "default": []
           },
+          "encryption_enabled": {
+            "type": "boolean",
+            "title": "Encryption Enabled",
+            "default": false
+          },
+          "encryption_password_configured": {
+            "type": "boolean",
+            "title": "Encryption Password Configured",
+            "default": false
+          },
           "timestamp": {
             "type": "string",
             "title": "Timestamp",

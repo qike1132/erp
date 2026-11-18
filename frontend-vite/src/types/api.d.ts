@@ -343,6 +343,8 @@ export interface BackupStatusOut {
   last_full_backup?: Record<string, unknown> | null
   disk_usage_percent?: number | null
   checksum_tables?: Array<string>
+  encryption_enabled?: boolean
+  encryption_password_configured?: boolean
   timestamp?: string
 }
 

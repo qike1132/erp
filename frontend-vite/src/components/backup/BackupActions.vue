@@ -28,7 +28,7 @@
       <div v-if="encryptionEnabled" class="ba-field">
         <label class="ba-field-label" for="ba-enc-pw">加密密码（可选）</label>
         <input id="ba-enc-pw" v-model="password" type="password" class="ba-input" autocomplete="new-password"
-               placeholder="留空则用服务端配置的密码；两者都没有时后端会拒绝（绝不生成随机密钥）"
+               placeholder="留空则用服务端配置的密码；都没有时会产出明文包（绝不生成随机密钥）"
         />
       </div>
       <div class="ba-field">
@@ -117,9 +117,9 @@ const encryptionHint = computed(() => {
     return '加密已关闭（BACKUP_ENCRYPTION_ENABLED=false）：本次备份为明文包，填写的密码会被后端忽略'
   }
   if (!e.passwordConfigured) {
-    return '加密已开启但服务端未配置密码：填一个密码，或由运维补 BACKUP_ENCRYPTION_PASSWORD'
+    return '加密已开启但服务端未配置密码：留空时后端会降级为明文包，建议填一个密码或补 BACKUP_ENCRYPTION_PASSWORD'
   }
-  return '留空则用服务端配置的密码；两者都没有时后端会拒绝（绝不生成随机密钥）'
+  return '留空则用服务端配置的密码；都没有时会产出明文包（不会生成随机密钥）'
 })
 
 function parseTables(text: string): string[] {
@@ -182,7 +182,7 @@ const taskTitle = computed(() => {
 .ba-enc-badge { font-size: var(--fs-caption); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 .ba-enc-on { background: rgba(40, 199, 111, .12); color: var(--color-success-600); }
 .ba-enc-off { background: rgba(255, 159, 67, .16); color: #b25e00; }
-.ba-adv-warn { color: #b25e00; }
+.ba-adv-hint.ba-adv-warn { color: #b25e00; }
 .ba-adv-toggle { border: none; background: none; cursor: pointer; font-size: var(--fs-caption); font-weight: 600; color: var(--color-primary-600); transition: color 0.2s ease; }
 .ba-adv-toggle:hover { color: var(--color-primary-700); }
 .ba-advanced { margin-top: 16px; padding: 16px; border: 1px dashed var(--color-border-light); border-radius: var(--radius-sm, 10px); display: flex; flex-direction: column; gap: 12px; }
