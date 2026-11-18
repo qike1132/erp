@@ -53,6 +53,10 @@ describe('resolveStaticUrl', () => {
 describe('CSRF：响应头回填与 clearCsrfCache 真实生效', () => {
   beforeEach(() => {
     vi.resetModules()
+    // 2026-11-18 评审：下面「首次不得凭空造出 token」依赖 cookie 为空，而 jsdom 的
+    // cookie jar 在本文件内跨用例共享（request.ts 刻意保留 fastapi_csrf_token 兜底）。
+    // 显式清掉，让前提成立而不是被假设。
+    document.cookie = 'fastapi_csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/'
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -77,7 +81,8 @@ describe('CSRF：响应头回填与 clearCsrfCache 真实生效', () => {
     mod.clearCsrfCache()
     await mod.post('/third', {})
 
-    // 首次：无缓存、cookie 也为空 ⇒ 不得凭空造出 token
+    // 首次：无缓存、且 beforeEach 已显式清掉 cookie ⇒ 不得凭空造出 token
+    expect(document.cookie).not.toContain('fastapi_csrf_token')
     expect(seen[0]?.['X-CSRF-Token']).toBeUndefined()
     // 第二次：来自第一次响应头的缓存（删掉响应拦截器里那行赋值即红）
     expect(seen[1]?.['X-CSRF-Token']).toBe('tok-abc')
@@ -133,7 +138,7 @@ describe('401 刷新单飞与限流窗口（F1-2）', () => {
 
     expect(refreshCalls).toBe(1) // 单飞：并发 401 共享同一次刷新
     releaseRefresh()
-    await expect(Promise.all([p1, p2])).resolves.toBeTruthy()
+    await expect(Promise.all([p1, p2])).resolves.toEqual([{ ok: true }, { ok: true }])
 
     // 刷新成功后原请求各重放一次（_retried 标记生效，不无限重放）
     expect(attempts.get('/a')).toBe(2)
@@ -167,6 +172,61 @@ describe('401 刷新单飞与限流窗口（F1-2）', () => {
     expect(onExpired).not.toHaveBeenCalled()
     // 10s 冷却窗口内第二次 401 直接复用结论，不再往同一个桶里加计数
     expect(refreshCalls).toBe(1)
+  })
+
+  it('重放后仍 401 时不再刷新（_retried 守卫生效），并派发一次 auth:expired', async () => {
+    // 2026-11-18 评审：上一条用例的重放必定成功，所以把 `config._retried = true` 删掉
+    // 也照绿 —— 而它一旦缺失就是「刷新成功 → 重放仍 401 → 再刷新」的刷新风暴。
+    // 这里让重放**一直** 401，并用尝试次数上限兜住死循环（失控路径会先把上限撞破）。
+    const mod = await import('@/api/request')
+    const service = mod.default
+    let refreshCalls = 0
+    let totalAttempts = 0
+    const onExpired = vi.fn()
+    window.addEventListener('auth:expired', onExpired)
+
+    service.defaults.adapter = async (config) => {
+      const url = String(config.url ?? '')
+      if (url.includes('/auth/refresh')) {
+        refreshCalls += 1
+        return { data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config }
+      }
+      totalAttempts += 1
+      if (totalAttempts > 8) throw httpError(config, 500) // 防死循环，并让失控路径暴露
+      throw httpError(config, 401)
+    }
+
+    try {
+      await expect(mod.post('/always-401', {})).rejects.toBeTruthy()
+    } finally {
+      window.removeEventListener('auth:expired', onExpired)
+    }
+
+    expect(refreshCalls).toBe(1)                 // 只刷新一次（守卫生效）
+    expect(onExpired).toHaveBeenCalledTimes(1)   // 结论落到「会话失效」，而不是继续刷
+  })
+
+  it('两次 403 只提示一次（isShowing403 去重），且不派发 auth:expired', async () => {
+    // 文件头声称覆盖「403 限流提示」，此前零用例（2026-11-18 评审）。
+    const toastWarning = vi.fn()
+    vi.doMock('@/composables/useToast', () => ({ toast: { warning: toastWarning } }))
+
+    const mod = await import('@/api/request')
+    const service = mod.default
+    const onExpired = vi.fn()
+    window.addEventListener('auth:expired', onExpired)
+    service.defaults.adapter = async (config) => { throw httpError(config, 403) }
+
+    try {
+      await expect(mod.post('/a', {})).rejects.toBeTruthy()
+      await expect(mod.post('/b', {})).rejects.toBeTruthy()
+    } finally {
+      window.removeEventListener('auth:expired', onExpired)
+      vi.doUnmock('@/composables/useToast')
+    }
+
+    expect(toastWarning).toHaveBeenCalledTimes(1) // 3s 冷却窗口内只提示一次
+    expect(onExpired).not.toHaveBeenCalled()      // 403 ≠ 会话失效
   })
 })
 

@@ -377,9 +377,11 @@ describe('MaterialProgressGrid —— 进度列口径', () => {
   it('0% 显示「0%」（不再用「未到」文案）；部分 → 百分比；100% → 到齐', () => {
     const cells = mountGrid(progressRows()).findAll('td.mp-pct').map((td) => td.text())
 
-    expect(cells[0]).toContain('0%')
+    // 2026-11-18 评审：`toContain('0%')` 会被 "100%"、"10%" 命中；锚定单元格开头
+    // （模板是 `{{progressLabel}}` 打头，逾期时后面再跟「逾期」）。
+    expect(cells[0]).toMatch(/^0%/)
     expect(cells[0]).not.toContain('未到')
-    expect(cells[1]).toContain('30%')
+    expect(cells[1]).toMatch(/^30%/)
     expect(cells[2]).toContain('到齐')
   })
 
@@ -492,7 +494,8 @@ describe('MaterialToolbar —— 单行工具条', () => {
     expect(text).toContain('待收货登记')
     expect(text).toContain('超 30 天未收齐')
     expect(text).toContain('总到货率')
-    expect(text).toContain('54%')
+    // 2026-11-18 评审：子串断言下 "154%" 也命中 '54%'；用数字边界（含小数/千分位）收紧。
+    expect(text).toMatch(/(?<![\d,.])54%(?!\d)/)
   })
 
   it('逾期格 >0 时数字标红，=0 时不标（重要异常才着色）', () => {

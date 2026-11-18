@@ -322,15 +322,25 @@ describe('S12 移动端数据层统一', () => {
 
   describe('MProductionView（复用 @/types 的 DailySummary / MonthlySummary）', () => {
     it('日报读 DailySummary.departments/overall_*，月报读 MonthlySummary.monthly_departments/monthly_total_*', async () => {
-      mocks.dailyProductionApi.dailySummary.mockResolvedValue(dailySummary())
-      mocks.dailyProductionApi.monthlySummary.mockResolvedValue(monthlySummary())
+      // H（2026-11-18 评审）：overall_* 与 departments[0].total_quantity 原来都是 100
+      // （月报都是 50），而 KPI 卡与车间卡都会渲染同一个数字 → 把 KPI 改成读错字段
+      // （如读 departments[0]）时整页 text 里仍有 "100"，用例照绿。这里让两者取不同值，
+      // 并把断言收窄到 KPI 卡自身的 .m-stat-value。
+      mocks.dailyProductionApi.dailySummary.mockResolvedValue(
+        dailySummary({ overall_quantity: 137 }),
+      )
+      mocks.dailyProductionApi.monthlySummary.mockResolvedValue(
+        monthlySummary({ monthly_total_quantity: 73 }),
+      )
 
       const wrapper = mount(MProductionView, { global: { plugins: [makeRouter()] } })
       await flushPromises()
 
+      const kpiQuantity = () =>
+        wrapper.findAll('.m-kpi-row .m-stat-value').at(0)?.text()
+
       expect(wrapper.text()).toContain('充棉部')
-      // F1-3（同上）：日/月报数量用词边界，避免 1000 之类误通过。
-      expect(wrapper.text()).toMatch(/\b100\b/)
+      expect(kpiQuantity()).toBe('137')   // overall_quantity（车间卡仍是 100）
       expect(wrapper.text()).not.toContain('包装部')
 
       const vm = wrapper.vm as unknown as { viewTab: string }
@@ -342,7 +352,7 @@ describe('S12 移动端数据层统一', () => {
         month: expect.any(Number),
       })
       expect(wrapper.text()).toContain('包装部')
-      expect(wrapper.text()).toMatch(/\b50\b/)
+      expect(kpiQuantity()).toBe('73')    // monthly_total_quantity（车间卡仍是 50）
       expect(wrapper.text()).not.toContain('充棉部')
     })
   })

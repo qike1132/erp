@@ -27,10 +27,15 @@ describe('SummaryDiffBlock', () => {
 
     // 横幅：物料名 + 两个数值
     expect(w.text()).toContain('共享布')
-    // F1-3（2026-10-17 审计）：子串断言下 600/6000 也「包含 60」；词边界把
-    // 「多一个数量级」挡在外面（期望值由 diffs 手写：perSku=60, stored=65）。
-    expect(w.text()).toMatch(/\b60\b/)
-    expect(w.text()).toMatch(/\b65\b/)
+    // F1-3（2026-10-17 审计）+ 2026-11-18 评审：
+    // ① 子串断言下 600/6000 也「包含 60」；`\b` 能挡住数字相邻，但挡不住千分位
+    //    （`\b60\b` 命中 "60,000"），所以直接锁横幅元素；
+    // ② 只断「两个数字各自出现过」时，把 perSku/stored 写反（推算 65 / 实际 60）也绿 ——
+    //    这里的正则把顺序与标签一起锁住。期望值由 diffs 手写：perSku=60、stored=65，
+    //    模板（SummaryDiffBlock.vue）固定输出「（推算 60 / 实际 65）」。
+    expect(w.find('tr.sm-diff-banner').text()).toMatch(
+      /推算\s*60(?:\.0+)?\s*\/\s*实际\s*65(?:\.0+)?/,
+    )
     expect(w.text()).toContain('实际下单')
 
     const dataRows = w.findAll('tr.sm-diff-row')
