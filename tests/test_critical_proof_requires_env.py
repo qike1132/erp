@@ -38,7 +38,6 @@ CRITICAL_PROOF_FILES: tuple[str, ...] = (
     'fastapi_app/tests/test_product_stock_check_constraint.py',   # 库存非负 CHECK 约束
     'fastapi_app/tests/test_recovery_validation_fixes.py',        # 恢复校验修复
     'fastapi_app/tests/test_import_idempotency_constraints.py',   # 导入幂等唯一约束
-    'tests/test_p3_health_check.py',                              # 健康检查可 await 语义
 )
 
 #: 「测试库不可达」类理由。刻意**不**匹配「测试库已有 N 行历史数据，跳过以免误删」
@@ -52,11 +51,35 @@ _UNREACHABLE_REASON = re.compile(
 def test_allow_flag_defaults_to_off(monkeypatch) -> None:
     """默认必须「没签字」—— 否则 helper 退化成永远 skip。"""
     monkeypatch.delenv(ALLOW_ENV, raising=False)
+    monkeypatch.delenv('GITHUB_ACTIONS', raising=False)
     assert allow_missing_test_db() is False
     monkeypatch.setenv(ALLOW_ENV, '0')
     assert allow_missing_test_db() is False
     monkeypatch.setenv(ALLOW_ENV, '1')
     assert allow_missing_test_db() is True
+
+
+def test_allow_flag_is_ignored_under_ci(monkeypatch) -> None:
+    """CI 里恒为 False（2026-11-18 评审 Med3）：否则 workflow 加一行就消音全部闸门。
+
+    CI 的 test job 本来就带 postgres service，不需要这个出口；而一旦有人在
+    `env:` 里写 `ALLOW_MISSING_TEST_DB: "1"`，13 道闸门会一起退回 skip，
+    7 条守卫却照样全绿（它们用 monkeypatch，看不到 CI 的真实环境）。
+    """
+    monkeypatch.setenv(ALLOW_ENV, '1')
+    monkeypatch.setenv('GITHUB_ACTIONS', 'true')
+    assert allow_missing_test_db() is False
+    # 行为也要一致：CI 里必须 fail 而不是 skip。用 try/except 而不是
+    # pytest.raises(fail.Exception) —— Skipped 不是 Failed 的子类，会冒泡把
+    # 本用例标成 skipped（正是这条要防的假绿）。
+    try:
+        require_test_db('测试库端口不可达（CI 单测）')
+    except pytest.skip.Exception:  # type: ignore[attr-defined]
+        pytest.fail('CI 环境下 ALLOW_MISSING_TEST_DB 仍然生效 —— 闸门可被一行 env 消音')
+    except pytest.fail.Exception as exc:  # type: ignore[attr-defined]
+        assert ALLOW_ENV in str(exc), str(exc)
+    else:
+        pytest.fail('require_test_db 既没 fail 也没 skip')
 
 
 def test_require_test_db_fails_without_signature(monkeypatch) -> None:
@@ -123,7 +146,11 @@ def test_no_bare_test_db_skip_left_in_critical_proofs() -> None:
     """关键证明里不得再出现裸 `pytest.skip('测试库不可达…')`。
 
     这条是防回退的棘轮：把某处 `require_test_db(...)` 改回 `pytest.skip(...)`，
-    它立刻红。判据是 AST 实参文本，不是行内 grep —— 注释里提到这些词不算。
+    它立刻红。判据是**整条调用表达式的 AST 反解析文本**，不是只看第一个实参 ——
+    原实现的 13 处里有 10 处是 f-string，而 f-string 在 AST 里是 `JoinedStr`
+    不是 `Constant`；只看 `node.args[0]` 的话「改回原写法」根本抓不到
+    （2026-11-18 评审 High1 实测）。`ast.unparse` 同时覆盖 f-string、字符串拼接、
+    变量实参和 `pytest.skip(reason=...)` 关键字形式。
     """
     offenders: list[str] = []
     for rel in CRITICAL_PROOF_FILES:
@@ -135,10 +162,12 @@ def test_no_bare_test_db_skip_left_in_critical_proofs() -> None:
                     and isinstance(node.func.value, ast.Name)
                     and node.func.value.id == 'pytest'):
                 continue
-            arg = node.args[0] if node.args else None
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str) \
-                    and _UNREACHABLE_REASON.search(arg.value):
-                offenders.append(f'{rel}:{node.lineno}: {arg.value[:60]}')
+            try:
+                text = ast.unparse(node)
+            except Exception:  # broad-except: 反解析失败时退回实参 repr，宁可漏报也不让守卫崩
+                text = repr(node.args[0]) if node.args else ''
+            if _UNREACHABLE_REASON.search(text):
+                offenders.append(f'{rel}:{node.lineno}: {text[:90]}')
     assert not offenders, (
         '这些位置又把「测试库不可达」降级成静默 skip 了（应改用 '
         f'require_test_db，缺口需 {ALLOW_ENV}=1 才放行）：\n  ' + '\n  '.join(offenders)

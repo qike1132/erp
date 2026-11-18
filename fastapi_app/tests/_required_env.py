@@ -28,8 +28,12 @@
 
 注意本模块**只管测试库不可达**这类环境前提。以下两类刻意不用它：
   · 「工具链/凭据缺失」（`pg_dump` 不在 PATH、未配 `PG_SUPER_PASSWORD`）——
-    本机生产机确实没有 `pg_dump` 在 PATH 上，改 fail 只会让本地全量永久红；
-    这两条在 CI 上会真跑（CI 装了 postgresql-client-18 并配了超管口令）。
+    本机生产机确实没有 `pg_dump` 在 PATH 上，改 fail 只会让本地全量永久红。
+    另一半原因此前写错过（2026-11-18 评审 Med2 更正）：当时写「这两条在 CI 上会
+    真跑」，但 CI **只装了 postgresql-client-18**（`pg_dump` 那条成立），
+    workflow 里并没有 `PG_SUPER_PASSWORD` —— `test_restore_real_roundtrip.py`
+    的超管分支在**本机和 CI 都不执行**。也就是说它是一个已知的真实缺口，
+    不是「已由 CI 覆盖」。要收口得给 CI 补 `PG_SUPER_PASSWORD` 再把它接进闸门。
   · 「数据前置条件」（测试库已有历史数据，跳过以免误删）—— 那是保护措施，
     不是覆盖缺口。
 """
@@ -43,7 +47,16 @@ ALLOW_ENV = 'ALLOW_MISSING_TEST_DB'
 
 
 def allow_missing_test_db() -> bool:
-    """是否已由人显式放行「测试库不可达」。"""
+    """是否已由人显式放行「测试库不可达」。
+
+    **CI 里恒为 False**（2026-11-18 评审 Med3）：CI 的 test job 本来就带 postgres
+    service，不需要这个出口；而一旦有人在 workflow 的 `env:` 里加一行
+    `ALLOW_MISSING_TEST_DB: "1"`，13 道闸门会一起退回 skip，而守卫测试照样全绿
+    （守卫用的是 `monkeypatch`，看不到 CI 的真实环境）。所以这里硬性关掉 ——
+    缺口在 CI 上必须变成红色，不能靠一个环境变量全部消音。
+    """
+    if os.environ.get('GITHUB_ACTIONS', '').strip().lower() == 'true':
+        return False
     return os.environ.get(ALLOW_ENV) == '1'
 
 
