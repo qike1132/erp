@@ -23,25 +23,35 @@ export interface ProductAvailabilityGate {
 }
 
 export function useStockOutAvailabilityGates(staged: Ref<StagedStockout[]>) {
-  /** 请求序号：快速切换 SKU/客户时丢弃过期响应（F-FE-DESK-CORE-02）。
+  /** 展示区请求序号：只认最后一次响应（快速切换 SKU/客户时丢弃过期响应，F-FE-DESK-CORE-02）。
    *  放在 composable 内而非模块级——多个实例（不同标签页/视图）各自切换 SKU 时，
-   *  共享序号会让后发请求把另一实例的在途响应误判为过期。 */
-  let shipReqSeq = 0
+   *  共享序号会让后发请求把另一实例的在途响应误判为过期。
+   *
+   *  注意：**只有展示区需要这个序号**。操作闸门比对的 `available_quantity` 就是它自己那次
+   *  (产品, 客户) 查出来的数字，被后来的请求顶掉也依然有效；若也按序号丢弃，闸门只会
+   *  拿到 null 并走 fail-open 放行超额行（2026-10-17 审计 P1-16 评审：双击「添加」/切客户
+   *  与闸门请求撞车时，999 件能进暂存区）。 */
+  let displayReqSeq = 0
+
   /**
    * 拉取指定产品/客户的可出货量信息（完整 ShipmentInfo——展示区还要用
    * order_quantity / shipped_quantity，不能只回 available_quantity）。
-   * 返回 null 表示「拿不到」（缺产品/客户、请求失败）——闸门应放行，
-   * 由后端做最终校验，避免前端因一次失败就锁死用户操作。
+   * 返回 null 表示「拿不到」（缺产品/客户、请求失败、展示区响应过期）——
+   * 闸门应放行，由后端做最终校验，避免前端因一次失败就锁死用户操作。
+   *
+   * `consumer='display'` 时启用「丢弃过期响应」；默认 `'gate'`（操作闸门）不丢弃。
    */
   async function fetchAvailableShipment(
     productId?: string | number,
     customer?: string,
+    consumer: 'display' | 'gate' = 'gate',
   ): Promise<ShipmentInfo | null> {
     if (!productId || !customer) return null
-    const seq = ++shipReqSeq
+    const isDisplay = consumer === 'display'
+    const seq = isDisplay ? ++displayReqSeq : 0
     try {
       const data = await stockApi.availableShipment(Number(productId), customer)
-      if (seq !== shipReqSeq) return null // 已有更新的请求在途，丢弃过期响应
+      if (isDisplay && seq !== displayReqSeq) return null // 已有更新的展示请求在途，丢弃过期响应
       // 响应是扁平对象（拦截器已拆信封）：直接返回，别再拆一层 `.data`（2026-10-17 审计 P1-16）
       return data ?? null
     } catch {

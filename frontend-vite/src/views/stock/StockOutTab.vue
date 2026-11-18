@@ -127,7 +127,7 @@ async function fetchShipmentInfo(productId?: string | number, customer?: string)
     shipmentInfo.value = null
     return
   }
-  shipmentInfo.value = await fetchAvailableShipment(pid, cust)
+  shipmentInfo.value = await fetchAvailableShipment(pid, cust, 'display')
 }
 
 // === 成品库存批次列表（选定 SKU 后带出，供按批次扣减） ===

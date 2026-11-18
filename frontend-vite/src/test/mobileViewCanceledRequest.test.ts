@@ -138,4 +138,35 @@ describe('P1-21 防矫枉过正：真实后端失败仍然提示', () => {
     ).toBe(true)
     w.unmount()
   })
+
+  it('MPurchaseView：500 仍然弹「订单加载失败」（并确认请求真的发出过）', async () => {
+    mocks.purchaseOrders.mockRejectedValue(
+      Object.assign(new Error('boom'), { response: { status: 500 } }),
+    )
+    const w = mount(MPurchaseView, { global: { stubs: stubs() } })
+    const vm = w.vm as unknown as { refetchOrders: () => Promise<void> }
+    await vm.refetchOrders()
+    await flushPromises()
+
+    expect(mocks.purchaseOrders).toHaveBeenCalled()
+    expect(failureToastCalled()).toBe(true)
+    w.unmount()
+  })
+
+  it('MPurchaseView：取消时页码仍回退（不留「第 2 页显示第 1 页数据」）', async () => {
+    mocks.purchaseOrders.mockResolvedValue({ data: [], total: 0 })
+    const w = mount(MPurchaseView, { global: { stubs: stubs() } })
+    const vm = w.vm as unknown as {
+      refetchOrders: (page?: number) => Promise<void>
+      ordersPage: number
+    }
+    // 先成功加载第 1 页，再让第 2 页的请求被取消
+    await vm.refetchOrders(1)
+    await flushPromises()
+    mocks.purchaseOrders.mockRejectedValue(CANCELED)
+    await vm.refetchOrders(2)
+    await flushPromises()
+
+    expect(vm.ordersPage).toBe(1)
+  })
 })

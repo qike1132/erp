@@ -46,6 +46,10 @@ import { useStagedEdit } from '@/views/customer-order/composables/useStagedEdit'
 import { deductLimit, deductOverOrderMessage } from '@/views/customer-order/composables/deductRules'
 import type { StagedItem, AvailableStockinItem } from '@/views/customer-order/composables/types'
 
+// 源码原文用 Vite 的 ?raw 导入（与 backupRestoreConfirmFlow.test.ts 同款），
+// 用于锁定「整页挂载成本过高」的调用点顺序契约。
+import customerOrderViewSource from '../views/customer-order/CustomerOrderView.vue?raw'
+
 function stockin(available: number): AvailableStockinItem[] {
   return [{ id: 1, quantity: available, deducted: 0, available }]
 }
@@ -102,7 +106,10 @@ describe('useOrderForm：订单数量改小后抵扣量随之回收', () => {
     mocks.availableStockinsMock.mockResolvedValue(stockin(10))
   })
 
-  it('开启抵扣后把数量从 10 改成 3 → 抵扣量回收到 3（防「3 件订单扣 10 件备货」）', async () => {
+  it('改数量不静默改写抵扣量（实时输入中间态不能把抵扣压成 1/0）', async () => {
+    // 数量是 number 输入框的实时值：10 → 12 会先经过 1（清空编辑还会经过空串）。
+    // 任何 watch 都会在那一帧把抵扣量压成 1/0 且只缩不放 → 用户以为扣 10 件、实际扣 0~1 件。
+    // 因此「抵扣量 ≤ 订单数量」只在提交边界拦（见下一条源码顺序守卫 + useStagedEdit 用例）。
     const { form, handleDeductPreview } = useOrderForm()
     form.customer = '贝乐'
     await nextTick()
@@ -112,27 +119,13 @@ describe('useOrderForm：订单数量改小后抵扣量随之回收', () => {
     await handleDeductPreview()
     expect(form.deductQuantity).toBe(10)
 
-    form.quantity = 3
+    form.quantity = 1
     await nextTick()
+    expect(form.deductQuantity).toBe(10) // 中间态不动
 
-    expect(form.deductQuantity).toBe(3)
-  })
-
-  it('数量改大不放大抵扣量（只回收不放大：自动放大等于替用户多扣备货）', async () => {
-    const { form, handleDeductPreview } = useOrderForm()
-    form.customer = '贝乐'
+    form.quantity = 12
     await nextTick()
-    form.productId = 1
-    form.quantity = 4
-
-    await handleDeductPreview()
-    expect(form.deductQuantity).toBe(4)
-
-    form.quantity = 50
-    await nextTick()
-
-    // 可用备货 10 是物理上限；但「改大订单数量」不该顺手把抵扣量也抬上去
-    expect(form.deductQuantity).toBe(4)
+    expect(form.deductQuantity).toBe(10) // 改大也不放大
   })
 
   it('未开启抵扣时改数量不动抵扣量（不凭空造抵扣）', async () => {
@@ -189,5 +182,29 @@ describe('useStagedEdit：编辑暂存时抵扣量不得超订单数量', () => 
     expect(mocks.showToastMock).not.toHaveBeenCalled()
     expect(items.value[0]!.deductQuantity).toBe(2)
     expect(hook.editStagedVisible.value).toBe(false)
+  })
+})
+
+/**
+ * 录入页「添加」入口的守卫（2026-10-17 审计 P1-17）。
+ *
+ * 整页挂载 CustomerOrderView 的成本极高（十余个子组件 + 多个 onMounted 请求 + 轮询组合式），
+ * 因此按本仓既有取舍（见 `backupRestoreConfirmFlow.test.ts` 的同款说明）用**源码顺序守卫**
+ * 锁住「入暂存区前按订单数量复核抵扣量」这一结构性契约；行为侧的纯函数与保存拦截
+ * 已由上面的用例覆盖。
+ */
+describe('CustomerOrderView.addStaged 抵扣量复核（源码顺序守卫）', () => {
+  const source = customerOrderViewSource
+
+  it('入暂存区之前必须按订单数量拦一次抵扣量', () => {
+    const fnStart = source.indexOf('async function addStaged')
+    expect(fnStart).toBeGreaterThan(-1)
+    const pushAt = source.indexOf('stagedItems.value.push(', fnStart)
+    expect(pushAt).toBeGreaterThan(fnStart)
+
+    const gate = source.slice(fnStart, pushAt)
+    expect(gate).toMatch(/if \(form\.deductQuantity > form\.quantity\)/)
+    expect(gate).toContain('deductOverOrderMessage(')
+    expect(gate).toContain("'添加'")
   })
 })

@@ -87,10 +87,9 @@ async function stageOne(vm: StockOutTabVm, quantity: number, customer = '客户A
   vm.form.customer = customer
   vm.form.quantity = quantity
   vm.form.batchNo = ''
-  // 先让 watch(customer) 触发的「展示用」请求落地：它自增序号，会把闸门自己发起的
-  // 请求判成过期（fetchAvailableShipment 返回 null = 放行），真机上是「选完 SKU→填数量→
-  // 点添加」的时间差，不显形。测试里同步赋值必须显式等一拍，否则闸门被 race 掩盖。
-  await flushPromises()
+  // 刻意**不等** watch(customer) 触发的展示请求：闸门与展示各自独立序号（2026-10-17 审计
+  // P1-16 评审 M2），展示请求在途不该影响闸门判定。若哪天又把两者并回一个序号池，
+  // 这里会 fail-open 放行超额行，下面的用例立刻变红。
   await vm.addStaged()
 }
 
@@ -148,5 +147,22 @@ describe('出货录入可出货量契约（P1-16）', () => {
 
     expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('出货数量超过可出货量'), 'error')
     expect(vm.staged).toHaveLength(1)
+  })
+
+  it('双击「添加」：并发两次闸门请求都不得 fail-open（序号撞车曾放行超额行）', async () => {
+    const wrapper = mountTab()
+    const vm = wrapper.vm as unknown as StockOutTabVm
+
+    vm.form.productId = '7'
+    vm.form.search = '产品A'
+    vm.form.customer = '客户A'
+    vm.form.quantity = 999
+    vm.form.batchNo = ''
+
+    // 不 await 第一次：两次闸门请求同时在途（真机双击即此形态）
+    await Promise.all([vm.addStaged(), vm.addStaged()])
+
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.stringContaining('出货数量超过可出货量'), 'error')
+    expect(vm.staged).toHaveLength(0)
   })
 })

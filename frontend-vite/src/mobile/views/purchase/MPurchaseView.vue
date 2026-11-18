@@ -176,10 +176,13 @@ async function refetchOrders(page = 1) {
     if (seq !== ordersSeq) return
     orders.value = res
   } catch (e) {
-    // 同上：路由切换取消的请求不算失败（2026-10-17 审计 P1-21）
-    if (isCanceledError(e)) return
     if (seq !== ordersSeq) return
+    // 页码先回退：取消也要回退，否则「第 2 页的请求被取消」会留下页码与数据不一致
     ordersPage.value = prev
+    // 路由切换会 abort 在途 GET（router/guards 的 beforeEach → abortPendingRequests）：
+    // 那是我们主动取消，不是后端失败；弹了还会挂到用户刚跳过去的新页面上
+    // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
+    if (isCanceledError(e)) return
     showToast('订单加载失败，请重试', 'error')
   } finally {
     if (seq === ordersSeq) ordersLoading.value = false
@@ -198,10 +201,10 @@ async function loadUnprocessed(page = 1) {
     if (seq !== unprocessedSeq) return
     unprocessed.value = res
   } catch (e) {
-    // 同上：路由切换取消的请求不算失败（2026-10-17 审计 P1-21）
-    if (isCanceledError(e)) return
     if (seq !== unprocessedSeq) return
     unprocessedPage.value = prev
+    // 同上：取消也要回退页码，但不弹提示（2026-10-17 审计 P1-21）
+    if (isCanceledError(e)) return
     showToast('待生成订单加载失败，请重试', 'error')
   } finally {
     if (seq === unprocessedSeq) unprocessedLoading.value = false
@@ -218,12 +221,13 @@ async function loadCompleted(page = 1) {
     if (seq !== completedSeq) return
     completedOrders.value = res
   } catch (e) {
+    if (seq !== completedSeq) return
+    // 页码先回退：取消也要回退，否则「第 2 页的请求被取消」会留下页码与数据不一致
+    completedPage.value = prev
     // 路由切换会 abort 在途 GET（router/guards 的 beforeEach → abortPendingRequests）：
     // 那是我们主动取消，不是后端失败；弹了还会挂到用户刚跳过去的新页面上
     // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
     if (isCanceledError(e)) return
-    if (seq !== completedSeq) return
-    completedPage.value = prev
     showToast('已完成订单加载失败，请重试', 'error')
   } finally {
     if (seq === completedSeq) completedLoading.value = false

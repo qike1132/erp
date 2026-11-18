@@ -208,19 +208,19 @@ export function useOrderForm() {
   }
 
   /**
-   * 订单数量变化时回收抵扣量（2026-10-17 审计 P1-17）。
+   * 关于「订单数量改小后回收抵扣量」（2026-10-17 审计 P1-17）——**刻意不用 watch(quantity)
+   * 自动改抵扣量**。
    *
-   * `enableDeduct` 只在「开启抵扣那一刻」按 min(数量, 可用) 设一次初值；用户随后把订单
-   * 数量改小（10 → 3），抵扣量会停在 10 上 → 3 件的订单扣 10 件备货，后端只按可用量
-   * 截断，多扣的部分静默生效。这里用同一个上限重新收口。
+   * 数量是 `<input type="number">` 的实时值：把 10 改成 12 会先经过 `1`（清空编辑时还会经过
+   * 空串）。任何 watch 都会在这一帧把抵扣量压成 1/0，而「只缩不放」意味着随后的 12 不会把它
+   * 抬回来 —— 用户以为扣了 10 件，实际提交的是 0~1 件，等于用新的静默不一致换旧的。
    *
-   * 只回收、不放大：改大订单数量时自动抬高抵扣量等于替用户多扣备货。
+   * 因此「抵扣量 ≤ 订单数量」改为在两处**边界**强制（都会明确提示、不偷改用户输入）：
+   *   - `CustomerOrderView.addStaged`：超量 → 提示「超过订单数量」并拒绝加入暂存区；
+   *   - `useStagedEdit.saveEditStaged`：同样拦（覆盖编辑弹窗里手打的值）；
+   *   - 后端 `process_order_deduction` 与 `PUT /orders/deduct` 按 min(请求, 可用, 数量) 兜底。
+   * 上限口径统一由 `deductRules.deductLimit` 提供。
    */
-  watch(() => form.quantity, (q) => {
-    if (!form.deductStock) return
-    const limit = deductLimit(q, availableStock.value)
-    if (form.deductQuantity > limit) form.deductQuantity = limit
-  })
 
   function disableDeduct() {
     form.deductStock = false
