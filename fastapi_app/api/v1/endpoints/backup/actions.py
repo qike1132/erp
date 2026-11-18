@@ -14,7 +14,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.api.v1.endpoints.backup._deps import require_backup_permission
+from fastapi_app.api.v1.endpoints.backup._deps import (
+    _resolve_encryption,
+    require_backup_permission,
+    require_superuser_for_encrypted_backup,
+)
 from fastapi_app.core.database import get_async_db
 from fastapi_app.schemas.backup import (
     BackupFullRequest,
@@ -111,6 +115,10 @@ async def trigger_full_backup(
     # 避免 worker 未消费/消费延迟期间轮询 /progress/{task_id} 返回 404 → 前端误报任务失败
     await create_progress(task_id, operation_type='full', progress_type='backup')
     password = payload.password or x_backup_password
+    # 2026-11-18：加密备份会打包现役 JWT 私钥与运行时 .env，仅超管可生成。
+    # 在写密码侧信道**之前**拦，避免为已拒绝的请求留下一次性凭据。
+    _eff_encrypt, _ = _resolve_encryption(payload.encrypt, password, None)
+    require_superuser_for_encrypted_backup(user, effective_encrypt=_eff_encrypt)
     # H3: 密码不进 ARQ 队列（任务参数会被序列化到 Redis 队列、对任何能读 Redis
     # 的人可见），改写入一次性短 TTL 侧信道键，任务消费时原子取走。
     # 写入失败继续入队：任务侧拿不到密码时按既有 fail-safe 降级为不加密。

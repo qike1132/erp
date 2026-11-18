@@ -27,6 +27,7 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     _encrypt_backup_data,
     _resolve_encryption,
     require_backup_permission,
+    require_superuser_for_encrypted_backup,
 )
 from fastapi_app.core.audit_middleware import _buffer_audit_entry
 from fastapi_app.core.backup_progress import _sanitize_error
@@ -443,6 +444,8 @@ async def get_backup_info(
         return h.hexdigest()
 
     effective_encrypt, encryption_password = _resolve_encryption(encrypt, None, x_backup_password)
+    # 加密包才打包现役 JWT 私钥与运行时 .env —— 这类产物仅超管可生成（2026-11-18）。
+    require_superuser_for_encrypted_backup(user, effective_encrypt=effective_encrypt)
     try:
         backup_path, _manifest = await backup_service.create_full_backup_to_file(
             db, user, remark,

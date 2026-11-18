@@ -154,6 +154,43 @@ def require_backup_permission(endpoint_name: str):  # log-context: internal help
     return require_any_permission(permission, 'backup_manage')
 
 
+def require_superuser_for_encrypted_backup(user, *, effective_encrypt: bool) -> None:
+    """加密备份包含现役凭据，仅超管可生成（2026-11-18 审计补口）。
+
+    为什么需要这条（与 `_SUPERUSER_ONLY` 是同一件事的两半）：
+    `create_full_backup` 的 `include_sensitive_config` 只在**加密**时打包
+    现役 JWT 私钥与运行时 `.env`，明文包排除它们（见
+    `services/backup/orchestration/core.py::_write_config_files`）。而这个「是否
+    加密」来自**调用方参数**，于是出现语义矛盾：
+
+        `_SUPERUSER_ONLY` 宣称「包内含私钥与 .env，备份读写权限不该等价于
+        凭据读取权限」，但 `GET /export-info` 与 `POST /full` 只要
+        `backup_create`（回退 `backup_manage`）——**非超管传 encrypt=true
+        就能生成含凭据的包**。
+
+    为什么按「加密与否」而不是「把这个端点整个收成超管」：
+    明文包不含敏感配置，业务数据在 `backup_create` 权限内是合理的；把整个端点
+    收成超管会让只读运维连明文导出都做不了，属于过度收紧。
+
+    为什么不改成「非超管的包一律不含敏感配置」：`create_pre_restore_backup`
+    用的是一个没有 `is_super` 的 dummy user，那条路径必须打包敏感配置，
+    否则灾难恢复到一半发现 JWT 私钥缺失、服务起不来 —— 会打挂 AGENTS §5-4
+    那条红线。所以只能在端点层按「本次是否加密」拦。
+
+    :param effective_encrypt: **实际**是否会加密（已过总开关与密码可得性）。
+        传 `False` 时本函数不做任何事（明文包不含凭据）。
+    """
+    if not effective_encrypt:
+        return
+    if getattr(user, 'is_super', False):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail='加密备份包含现役私钥与运行时 .env，仅超级管理员可生成；'
+               '如需备份业务数据，请改用不加密（明文包已排除敏感配置）',
+    )
+
+
 logger = logging.getLogger(__name__)
 
 

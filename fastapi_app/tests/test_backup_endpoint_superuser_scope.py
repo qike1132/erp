@@ -176,3 +176,86 @@ def test_known_fallback_is_not_stale() -> None:
     mapped = _permission_map_keys() | _superuser_only()
     stale = sorted(n for n in KNOWN_PERMISSION_FALLBACK if n not in wired or n in mapped)
     assert not stale, f'KNOWN_PERMISSION_FALLBACK 里的条目已失效，请删除：{stale}'
+
+
+# --- 加密备份的凭据闸门（2026-11-18 补口） ---------------------------------
+#
+# 语义链：`_SUPERUSER_ONLY` 宣称「包内含现役私钥与 .env，备份读写权限不该等价于
+# 凭据读取权限」，但 `GET /export-info` 与 `POST /full` 只要 `backup_create`
+# （回退 backup_manage）—— 非超管传 encrypt=true 就能生成含凭据的包。
+# 修法不是把这两个端点整个收成超管（明文包已排除敏感配置，业务数据在
+# backup_create 内合理），而是按「本次是否加密」拦。
+
+
+class _StubUser:
+    def __init__(self, is_super: bool) -> None:
+        self.is_super = is_super
+
+
+def test_encrypted_backup_gate_blocks_non_superuser() -> None:
+    """非超管 + 加密 → 403；明文 → 放行（这次改动唯一的行为保证）。"""
+    from fastapi import HTTPException
+
+    from fastapi_app.api.v1.endpoints.backup._deps import (
+        require_superuser_for_encrypted_backup,
+    )
+
+    # 明文（effective_encrypt=False）：不拦 —— 明文包不含敏感配置
+    require_superuser_for_encrypted_backup(_StubUser(False), effective_encrypt=False)
+    # 加密 + 非超管：必须 403
+    with pytest.raises(HTTPException) as exc:
+        require_superuser_for_encrypted_backup(_StubUser(False), effective_encrypt=True)
+    assert exc.value.status_code == 403
+    assert '仅超级管理员' in str(exc.value.detail)
+    # 加密 + 超管：放行
+    require_superuser_for_encrypted_backup(_StubUser(True), effective_encrypt=True)
+    # 缺 is_super 属性的对象（如内部 dummy user）按非超管处理，不能放行
+    with pytest.raises(HTTPException):
+        require_superuser_for_encrypted_backup(object(), effective_encrypt=True)
+
+
+def test_both_encrypting_endpoints_call_the_gate() -> None:
+    """接线断言：两个会产出加密包的端点必须真的调用守卫。
+
+    只测 `require_superuser_for_encrypted_backup` 本身是不够的 —— 把端点里那行
+    调用删掉，函数级用例仍然全绿（这正是上一批踩过的坑：测函数不测接线）。
+    """
+    expected = {
+        'export.py': 'get_backup_info',          # GET /export-info
+        'actions.py': 'trigger_full_backup',     # POST /full
+    }
+    missing: list[str] = []
+    for filename, handler in expected.items():
+        tree = ast.parse((BACKUP_DIR / filename).read_text(encoding='utf-8'))
+        handler_node = next(
+            (n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == handler),
+            None,
+        )
+        assert handler_node is not None, f'{filename} 里找不到端点函数 {handler}'
+        calls_gate = any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == 'require_superuser_for_encrypted_backup'
+            for n in ast.walk(handler_node)
+        )
+        if not calls_gate:
+            missing.append(f'{filename}::{handler}')
+    assert not missing, (
+        '这些端点会产出加密包（含现役私钥与运行时 .env），但没有调用凭据闸门：'
+        f'{missing}\n  非超管传 encrypt=true 即可生成含凭据的备份包。'
+    )
+
+
+def test_plaintext_backup_still_excludes_sensitive_config() -> None:
+    """前提断言：明文包确实排除敏感配置 —— 否则「只拦加密」这个设计不成立。
+
+    如果哪天 `_write_config_files` 不再按 `include_sensitive_config` 排除，
+    「明文包不含凭据」这个前提就塌了，而本文件的放行分支会静默变成漏洞。
+    """
+    core = (PROJECT_ROOT / 'fastapi_app' / 'services' / 'backup'
+            / 'orchestration' / 'core.py').read_text(encoding='utf-8')
+    assert 'should_exclude_file(file_path, archive_path, include_sensitive_config)' in core, (
+        '明文/加密的敏感配置分流不见了（core.py::_write_config_files）—— '
+        '「明文包不含凭据」这个前提失效，请同步收紧 require_superuser_for_encrypted_backup'
+    )
+    assert 'excluded.append(archive_path)' in core, '被排除清单不再记录，无法审计排除结果'
