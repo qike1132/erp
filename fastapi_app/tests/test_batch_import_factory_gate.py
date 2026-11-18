@@ -641,3 +641,30 @@ async def test_stockout_import_rejects_other_factory_row(monkeypatch) -> None:
     assert result.imported == 0
     assert _FACTORY_MSG in result.message
     assert delta.await_count == 0  # 库存分毫未动
+
+
+async def test_all_rows_rejected_by_factory_gate_pins_skipped_count(monkeypatch) -> None:
+    """G7（2026-10-17 审计）：整批行都被工厂闸门拒绝时，``skipped`` 计数丢失。
+
+    ``_build_batch_result`` 只在 ``imported > 0`` 的分支回填 ``skipped``；全部被拒
+    时返回的 ``BatchImportResult`` 把 ``skipped`` 留在默认值 0，用户只看到「导入
+    0 行」、看不到「拒绝了几行」——这是审计刚修出来的闸门在用户侧的样子。
+
+    本用例**显式钉住现状**（此前只是注释里写一句「故不断言 skipped」，改好改坏都
+    不会红）：一旦有人修好这条缺陷（``skipped`` 变成 1），本断言即红，必须连同
+    用例一起改；被改成别的错误值同样红。修复方向见审计 TEST 区 G7 条目。
+    """
+    product = _product(2, 'B厂')
+    rows = [{'产品名称': '产品2', '出货数量': 3, '客户名称': '客户A', '时间': ''}]
+    _patch_stockout_common(monkeypatch, product, rows)
+    db = _FakeDb()
+
+    result = await bis.import_stockouts_service(
+        db, SimpleNamespace(filename='x.xlsx'), scoped_factory='A厂',
+    )
+
+    assert result.imported == 0
+    assert result.skipped == 0, (
+        '现状（已知缺陷 G7）：imported==0 分支不回填 skipped。'
+        '修好这条缺陷时请同步改写本断言。'
+    )

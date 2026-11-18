@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services import stock_common, stock_out_service, stock_service
-from fastapi_app.shared_models import StockOut
+from fastapi_app.shared_models import InventoryLog, StockOut
 
 
 @pytest.fixture(autouse=True)
@@ -167,8 +167,29 @@ class TestBatchCreateStockoutsNormal:
         assert result['results'][0]['success'] is True
         # 50 = 20 + 30，前两个订单全部分配，第三个订单不分配
         assert product.current_stock == 50
-        # 2 次 StockOut add + 1 次 InventoryLog add = 3
-        assert mock_db.add.call_count == 3
+
+        # F4/G2（2026-10-17 审计）：出货分配是否正确，定义在**出货单行**上——
+        # 行数、总量与 current_stock 都挡不住「逆序消耗」「每行 quantity 写成
+        # available」「customer 写错」，而这三样才是订单已出货量、客户结余、
+        # FIFO 账龄的依据（inventory_reconcile 只比产品级 SUM，查不出按订单错配）。
+        # 期望值由 shipment_info 手写推导：20 + 30，第三单不动。
+        stockout_rows = [c.args[0] for c in mock_db.add.call_args_list
+                         if c.args and isinstance(c.args[0], StockOut)]
+        log_rows = [c.args[0] for c in mock_db.add.call_args_list
+                    if c.args and isinstance(c.args[0], InventoryLog)]
+
+        assert [(r.order_id, r.quantity) for r in stockout_rows] == [(1, 20), (2, 30)], (
+            'FIFO 必须先消耗 1 号订单 20、再消耗 2 号订单 30（逆序/超配/按 available 记量即红）'
+        )
+        assert [r.stockout_no for r in stockout_rows] == ['SO-001', 'SO-002']
+        assert [r.customer for r in stockout_rows] == ['客户A', '客户A']
+        assert [r.product_id for r in stockout_rows] == [1, 1]
+        assert [r.batch_no for r in stockout_rows] == [None, None]
+
+        assert len(log_rows) == 1, '整批只写一条库存流水'
+        assert log_rows[0].change_quantity == -50
+        assert log_rows[0].change_type == '出库'
+        assert mock_db.add.call_count == len(stockout_rows) + len(log_rows) == 3
 
 # ==================== 库存不足 ====================
 

@@ -172,20 +172,39 @@ class TestTransactionIntegrity:
 
     @pytest.mark.asyncio
     async def test_delete_rollback(self, db):
+        """2.2（2026-10-17 审计）：原名「删除回滚」但**从不回滚**。
+
+        旧写法把 ``get_before.scalar()`` 的返回值直接丢弃，也没有任何 rollback 与
+        「回滚后行数一致」断言 —— 它实际只验了「DELETE 后在事务内查不到」，删了
+        不滚也能绿（用例名承诺的性质零覆盖）。
+
+        改为真回滚：外层事务插入 → savepoint 内 DELETE → 回滚 savepoint 后必须
+        同时满足 ①被删行重新出现 ②产品总行数仍是「插入后」的值。删掉那句
+        ``await nested.rollback()`` 即红。
+        """
+        before = (await db.execute(text("SELECT COUNT(*) FROM product"))).scalar()
+        assert before is not None, '计数查询必须返回整数，否则期望值无从推导'
+
         await db.execute(text(
             "INSERT INTO product (name, barcode, price, initial_stock, current_stock) "
             "VALUES ('删除测试', 'DEL_TEST_001', 1.0, 0, 0)"
         ))
         await db.flush()
+        assert (await db.execute(text(
+            "SELECT COUNT(*) FROM product WHERE barcode = 'DEL_TEST_001'"
+        ))).scalar() == 1, '插入后必须能查到'
 
-        get_before = await db.execute(text("SELECT COUNT(*) FROM product"))
-        get_before.scalar()
+        async with db.begin_nested() as nested:
+            await db.execute(text("DELETE FROM product WHERE barcode = 'DEL_TEST_001'"))
+            await db.flush()
+            assert (await db.execute(text(
+                "SELECT COUNT(*) FROM product WHERE barcode = 'DEL_TEST_001'"
+            ))).scalar() == 0, 'savepoint 内 DELETE 后应查不到'
+            await nested.rollback()
 
-        await db.execute(text("DELETE FROM product WHERE barcode = 'DEL_TEST_001'"))
-        await db.flush()
-
-        get_mid = await db.execute(
-            text("SELECT COUNT(*) FROM product WHERE barcode = 'DEL_TEST_001'")
-        )
-        assert get_mid.scalar() == 0, "DELETE后应无此记录"
-        print("\n  删除回滚: 完成")
+        assert (await db.execute(text(
+            "SELECT COUNT(*) FROM product WHERE barcode = 'DEL_TEST_001'"
+        ))).scalar() == 1, '回滚 savepoint 必须撤销 DELETE'
+        after = (await db.execute(text("SELECT COUNT(*) FROM product"))).scalar()
+        assert after == before + 1, f'回滚后行数应为插入后的值：期望 {before + 1}，实际 {after}'
+        print("\n  删除回滚: 回滚后被删行已恢复")
