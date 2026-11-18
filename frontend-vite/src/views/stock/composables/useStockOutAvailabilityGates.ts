@@ -42,7 +42,8 @@ export function useStockOutAvailabilityGates(staged: Ref<StagedStockout[]>) {
     try {
       const data = await stockApi.availableShipment(Number(productId), customer)
       if (seq !== shipReqSeq) return null // 已有更新的请求在途，丢弃过期响应
-      return data.data ?? null
+      // 响应是扁平对象（拦截器已拆信封）：直接返回，别再拆一层 `.data`（2026-10-17 审计 P1-16）
+      return data ?? null
     } catch {
       return null
     }

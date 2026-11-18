@@ -94,7 +94,9 @@ function mockBatchesWithHold(holdAt: number) {
       return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
     }
     if (url === '/aux/available-shipment') {
-      return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+      // 真实形状：扁平对象（无 {success,data} 信封）。信封形状会让产品级闸门 fail-open，
+      // 使这些用例「产品闸门没生效」也照绿（2026-10-17 审计 P1-16）
+      return { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 }
     }
     return { success: true, data: [] }
   })
@@ -124,7 +126,7 @@ beforeEach(() => {
     }
     if (url === '/aux/available-shipment') {
       // 产品级可出货量给足，产品闸门放行，聚焦批次闸门
-      return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+      return { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 }
     }
     return { success: true, data: [] }
   })
@@ -250,7 +252,7 @@ describe('StockOutTab — OCR-2 四项修复（双击守卫/批次缺失拦截/s
         return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
       }
       if (url === '/aux/available-shipment') {
-        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+        return { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 }
       }
       return { success: true, data: [] }
     })
@@ -368,7 +370,7 @@ describe('StockOutTab — OCR-3 修复（输入快照 M1 / null 不降级 M2 / �
         return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
       }
       if (url === '/aux/available-shipment') {
-        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+        return { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 }
       }
       return { success: true, data: [] }
     })
@@ -483,7 +485,7 @@ describe('StockOutTab — OCR-4 修复（M1 静默放弃反馈 / M2 页面级批
       if (url === '/aux/available-shipment') {
         shipmentCalls += 1
         if (shipmentCalls === holdAt) await held
-        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+        return { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 }
       }
       return { success: true, data: [] }
     })
@@ -567,7 +569,7 @@ describe('StockOutTab — OCR-4 修复（M1 静默放弃反馈 / M2 页面级批
         return { success: true, data: [{ batch_no: 'B1', available_quantity: 10 }] }
       }
       if (url === '/aux/available-shipment') {
-        return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+        return { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 }
       }
       return { success: true, data: [] }
     })

@@ -30,7 +30,9 @@ function stagedItem(over: Record<string, unknown> = {}) {
 describe('出货提交 batch_no 透传', () => {
   beforeEach(() => {
     batchSubmitStockouts.mockReset().mockResolvedValue({ success: true, results: [{ success: true }] })
-    availableShipment.mockReset().mockResolvedValue({ data: { available_quantity: 9999 } })
+    // 后端 /aux/available-shipment 是扁平对象（无 data 信封）：mock 必须照真实形状，
+    // 否则闸门 fail-open 被 mock 掩盖（2026-10-17 审计 P1-16）
+    availableShipment.mockReset().mockResolvedValue({ order_quantity: 9999, shipped_quantity: 0, available_quantity: 9999 })
   })
 
   it('暂存项的 batch_no 进入提交载荷', async () => {

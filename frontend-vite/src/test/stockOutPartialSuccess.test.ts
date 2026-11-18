@@ -32,7 +32,8 @@ function stagedItem(over: Record<string, unknown> = {}) {
 describe('出货批量提交部分成功处理', () => {
   beforeEach(() => {
     batchSubmitStockouts.mockReset()
-    availableShipment.mockReset().mockResolvedValue({ data: { available_quantity: 9999 } })
+    // 真实形状：扁平对象（无 data 信封）。信封形状会让提交期预检恒跳过（2026-10-17 审计 P1-16）
+    availableShipment.mockReset().mockResolvedValue({ order_quantity: 9999, shipped_quantity: 0, available_quantity: 9999 })
   })
 
   it('部分成功：只移除成功行，失败行留在暂存区', async () => {
@@ -94,6 +95,21 @@ describe('出货批量提交部分成功处理', () => {
     })
     const { submitBatch } = useStockOutActions(staged, ref(false), () => {})
     await submitBatch()
+    expect(staged.value).toHaveLength(1)
+  })
+
+  /**
+   * 提交期预检回归（2026-10-17 审计 P1-16）：`/aux/available-shipment` 是扁平对象，
+   * 原实现 `const shipment = data.data` 恒 undefined → 超额组永远收集不到 → 整批照发。
+   * 改成 `const shipment = data` 后，超额必须在提交前拦住（不发出提交请求）。
+   */
+  it('提交前预检：暂存量超过可出货量 → 整批不提交', async () => {
+    availableShipment.mockResolvedValue({ order_quantity: 3, shipped_quantity: 0, available_quantity: 3 })
+    const staged = ref([stagedItem({ id: 1, product_id: '1', quantity: 5 })])
+    const { submitBatch } = useStockOutActions(staged, ref(false), () => {})
+    await submitBatch()
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('以下组出货量超过可出货量'), 'error')
+    expect(batchSubmitStockouts).not.toHaveBeenCalled()
     expect(staged.value).toHaveLength(1)
   })
 })

@@ -40,9 +40,9 @@ export function useStockOutActions(
         if (!group) return
         const { product_id, customer, stockouts } = group
         try {
-          const data = await stockApi.availableShipment(Number(product_id), customer)
-          const shipment = data.data
-          if (!shipment) return
+          // 扁平对象（拦截器已拆信封）：`.data` 再拆一次会恒 undefined → 超额组永远收集不到
+          // （2026-10-17 审计 P1-16）
+          const shipment = await stockApi.availableShipment(Number(product_id), customer)
           const totalQty = stockouts.reduce((sum: number, stockout: StagedStockout) => sum + stockout.quantity, 0)
           if (totalQty > (shipment.available_quantity ?? 0)) {
             overLimitGroups.push(`客户: ${customer} 产品ID: ${product_id} 可出货${shipment.available_quantity ?? 0}`)

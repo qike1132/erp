@@ -1,5 +1,5 @@
 import { get } from './request'
-import type { ApiResponse, WithRequired } from '@/types'
+import type { WithRequired } from '@/types'
 import type { ProductSearchItem as GenProductSearchItem, AvailableStockinItem as GenAvailableStockinItem } from '@/types/api'
 
 /** 产品搜索建议项（后端 `auxiliary.py::ProductSearchItem`，裸数组响应） */
@@ -12,7 +12,6 @@ export type AvailableStockinItem = WithRequired<GenAvailableStockinItem, 'quanti
  * 辅助数据查询 API
  * - productSearch: 产品搜索
  * - availableStockins: 可用备货量查询
- * - availableShipment: 库存可出货数量查询
  */
 export const auxApi = {
   /**
@@ -42,8 +41,7 @@ export const auxApi = {
    */
   availableStockins: (params: { product_id: number; customer: string }) =>
     get<AvailableStockinItem[]>('/aux/available-stockins', params),
-  availableShipment: (params: {
-    product_id: number
-    customer: string
-  }) => get<ApiResponse<unknown>>('/aux/available-shipment', params),
+  // 可出货量（`/aux/available-shipment`）只在 `stockApi.availableShipment` 声明一处：
+  // 该端点返回**扁平对象**，原来这份 `get<ApiResponse<unknown>>` 形状是错的且全仓零引用，
+  // 两处各自漂移正是 P1-16 的成因（2026-10-17 审计），故删除。
 }

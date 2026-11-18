@@ -107,7 +107,9 @@ beforeEach(() => {
     if (url === '/finished-stock/batches') return { success: true, data: BATCHES }
     if (url === '/aux/available-shipment') {
       // 产品级可出货量给足：聚焦批次闸门，别让产品闸门抢先拦住
-      return { success: true, data: { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 } }
+      // 真实形状：扁平对象（无 {success,data} 信封）。写成信封形状会让产品级闸门 fail-open，
+      // 于是「产品闸门没生效」这件事被 mock 掩盖（2026-10-17 审计 P1-16）
+      return { order_quantity: 1000, shipped_quantity: 0, available_quantity: 1000 }
     }
     return { success: true, data: [] }
   })

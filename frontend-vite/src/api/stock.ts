@@ -1,7 +1,7 @@
 import { get, post, put, del, upload, download } from './request'
 import type {
   Product, StagingListResponse, StagingRow, StagingImportResult,
-  InventoryResponse, StockInRecord, ShipmentInfo, ApiResponse, QueryParams,
+  InventoryResponse, StockInRecord, ShipmentInfo, QueryParams,
 } from '@/types'
 import type { StockStatsData, StockStatsResponse } from '@/types/api'
 
@@ -89,8 +89,16 @@ export const stockApi = {
     put<{ success?: boolean; message?: string }>(`/stock/out/edit/${id}`, data),
   deleteStockout: (id: number) => del(`/stock/out/delete/${id}`),
   searchProducts: (q: string) => get<{ products?: Product }>('/aux/product-search', { q }),
+  /**
+   * 可出货量查询（后端 `auxiliary.py::AvailableShipmentResponse`）。
+   *
+   * ⚠️ 响应是**扁平对象**（`order_quantity` / `shipped_quantity` / `available_quantity`），
+   * **没有 `{success,data}` 信封** —— `request.ts` 的响应拦截器已经拆过一层，调用方直接读字段。
+   * 原声明 `get<ApiResponse<ShipmentInfo>>` 让消费点再拆第二次 `.data`，恒 `undefined`：
+   * 超额闸门 fail-open 恒放行、录入页可出货量恒不显示（2026-10-17 审计 P1-16）。
+   */
   availableShipment: (productId: number, customer: string) =>
-    get<ApiResponse<ShipmentInfo>>('/aux/available-shipment', { product_id: productId, customer }),
+    get<ShipmentInfo>('/aux/available-shipment', { product_id: productId, customer }),
   /**
    * 暂存备货（后端 `staging_stockin.py`）。可用端点：
    * `GET ''`、`POST /import`、`POST /confirm`、`PUT /{id}`、`DELETE /clear`、`DELETE /{id}`。
