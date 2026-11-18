@@ -8,6 +8,7 @@
    「新增一个压测脚本忘了加守卫」被当场拦住。
 """
 import ast
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -89,4 +90,27 @@ def test_every_prod_url_script_calls_guard():
     ]
     assert missing == [], (
         f'以下脚本硬编码生产回环口但缺少 require_non_production 守卫：{missing}'
+    )
+
+
+def test_stress_dir_contributes_no_pytest_cases():
+    """`tests/stress` 是压测脚本目录（0 个 pytest 用例），CI 因此 `--ignore` 它。
+
+    两边必须同口径，本用例把「目录里没有用例」与「CI 忽略它」绑在一起：
+    * 有人往这里加 pytest 用例 → 它不会被 CI 执行（ignore 就在那一行），本断言红；
+    * 有人删掉 CI 的 `--ignore=tests/stress` → 这些脚本会在收集期被 import，而其中
+      若干在没有 `__main__` 守卫的年代会真的发请求（见 test_auth.py docstring 记录的
+      2026-10-03 事故：每次跑 pytest 都打 10 次真实登录），本断言同样红。
+    """
+    stress = REPO / 'tests' / 'stress'
+    offenders = sorted(
+        p.name for p in stress.glob('*.py')
+        if re.search(r'^\s*(async )?def test_', p.read_text(encoding='utf-8'), re.MULTILINE)
+    )
+    assert offenders == [], f'tests/stress 只放压测脚本，不得出现 pytest 用例：{offenders}'
+
+    ci = (REPO / '.github' / 'workflows' / 'ci-cd.yml').read_text(encoding='utf-8')
+    assert '--ignore=tests/stress' in ci, (
+        'tests/stress 无用例却仍在 pytest 收集范围内：删掉 ignore 前必须先把这些脚本'
+        '改成收集期无副作用，否则收集就会发真实请求'
     )

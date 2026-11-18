@@ -147,15 +147,21 @@ jobs:
       #   避免绿色假覆盖。仍在收集的 Flask 路由兼容用例会按具体 reason skip，
       #   skip 计数保留在 CI 日志与 junit xml 中。tests/e2e 只含 fail-closed 目标
       #   守卫（无 Selenium、无默认生产地址），因此不再整目录忽略。
-      # 2026-11-03 审查 S6：tests/qa 仍整目录忽略——该目录混入 import 即连库的造数/基准
-      #   脚本（data_generator*、_bench*），不能在收集期放进主套件。但其中的 19 板块路由
-      #   冒烟（test_smoke.py）不能跟着一起游离出 CI，已由下方独立步骤定向执行。
+      # 2026-11-18（审计 TEST 区，批次 8）：不再 --ignore=tests/qa。
+      #   原先的理由是「该目录混入 import 即连库的造数/基准脚本，不能在收集期放进主套件」，
+      #   但 pytest 只收集 test_*.py，data_generator*/_bench*/perf_final.py 这些都不匹配，
+      #   根本不会被 import。实际被跳过的只有 3 个真用例文件，其中 test_database(10 条) 与
+      #   test_forms(22 条) 此前**从未在 CI 跑过**（test_smoke 另有独立 -v 步骤）。
+      #   tests/qa 整目录本地实测 51 passed / 40s。
       # 2026-11-03 审查 M16：tests/performance 空目录（仅剩 9 个已删文件的陈旧 pyc）已删除，
       #   因此不再需要 --ignore=tests/performance；性能改由 latency_budget 用例把守。
+      # tests/stress（批次 8 复核）：保留 --ignore，因为它确实是**压测脚本目录**，
+      #   0 个 pytest 用例（`def test_` 计数为 0）；那些脚本是 `python tests/stress/xx.py`
+      #   手工跑的，生产回环口守卫由 fastapi_app/tests/test_stress_scripts_have_prod_guard.py
+      #   的棘轮看住。**不要**往这里加 pytest 用例——加了也不会被执行（就是本 ignore）。
       run: |
         pytest \
           tests fastapi_app/tests \
-          --ignore=tests/qa \
           --ignore=tests/stress \
           --cov=fastapi_app \
           --cov=utils \
@@ -441,6 +447,19 @@ jobs:
     # 不依赖任何存量基线（否则基线漂移会把「门禁能拦违规」这件事掩盖掉）。
     - name: Gate self-test (prove bypasses fail, not just pass)
       run: python scripts/quality_gate.py --self-test
+
+    # 2026-11-18（审计 TEST 区，批次 8）：`scripts/_selftest_gate.py` 此前没有任何调用方
+    #   —— CI 不跑它、quality_gate 不能递归自调、只由一个测 stderr 编码的用例 import 了
+    #   它两个函数，于是 18 项自检里绝大部分从未被流水线执行过。与上面的 --self-test 互补：
+    #     --self-test   → 逐门禁端到端（probe-dir：人为违规→非 0 + REGRESS，移除→0）
+    #     _selftest_gate→ 跨门禁语义面：N+1 判定不退化（真 N+1 必报 / for..in iterable
+    #                     不得报 / 就地标注必须带理由 / 白名单 file::func 生效 / 僵尸键必报）、
+    #                     子进程中文 stderr 必须按 UTF-8 读回、语法错误文件与无效路径必须
+    #                     发 WARN 而不是静默 PASS。
+    #   不放进 pytest 主套件：它内部会跑两遍完整 quality_gate，实测 220 秒，塞进 test job
+    #   等于每次全量多付 3.7 分钟；lint job 一次一跑足够。
+    - name: Gate self-test (cross-gate semantics - N+1, whitelist zombies, stderr)
+      run: python scripts/_selftest_gate.py
 
     # P0-11⑧ ruff 区间扩到 scripts/ 与 server_manager/：存量违规按 scripts/gate_baseline.json
     # 的棘轮计数（只降不升）看住，新增即 FAIL。单独跑一次便于在 CI 日志直接看到新范围计数。
