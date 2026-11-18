@@ -1,10 +1,11 @@
 # scripts/archive —— 历史一次性脚本（归档区，不是门禁区）
 
-**这里的任何文件都不参与门禁、CI、pytest、启动流程。** 保留它们的唯一理由是历史追溯；
-新增自动化不得 `import` 或调用本目录内的任何脚本。
+**这里的文件不参与 CI、pytest、启动流程，也不被任何自动化 `import`。** 保留它们的唯一
+理由是历史追溯；新增自动化不得调用本目录内的任何脚本。
 
-`quality_gate.py` / `ruff check scripts/` 仍会扫到本目录（同一 ruff 口径），
-所以归档不等于"可以不遵守 lint"。
+**但它们仍受 `quality_gate.py` 的 ruff / 复杂度棘轮约束** —— `RUFF_TARGETS` 与
+`COMPLEXITY_TARGETS` 都递归包含 `scripts/`，归档区不在任何 exclude 里。换句话说：
+「可以不合规地丢进归档区」是错的，归档只是取消**调用关系**，不是取消**代码标准**。
 
 ## 为什么叫 `check_*` 的脚本会被归档
 

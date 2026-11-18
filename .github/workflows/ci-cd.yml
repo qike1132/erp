@@ -456,8 +456,10 @@ jobs:
     #                     不得报 / 就地标注必须带理由 / 白名单 file::func 生效 / 僵尸键必报）、
     #                     子进程中文 stderr 必须按 UTF-8 读回、语法错误文件与无效路径必须
     #                     发 WARN 而不是静默 PASS。
-    #   不放进 pytest 主套件：它内部会跑两遍完整 quality_gate，实测 220 秒，塞进 test job
-    #   等于每次全量多付 3.7 分钟；lint job 一次一跑足够。
+    #   成本：本自检内部两处 quality_gate 调用已用 `--only function_length` 隔离（探针是
+    #   90 行函数 + 裸 except，单门禁同样能判 REGRESS/PASS），实测 220 秒 → 3.9 秒；
+    #   此前跑两遍**完整** quality_gate 还会在无报告时现场联网跑 pip_audit，CI 里等于
+    #   多两条可 flake 的联网路径。正因为降到 4 秒，它才适合放进 CI 而不是攒到手工跑。
     - name: Gate self-test (cross-gate semantics - N+1, whitelist zombies, stderr)
       run: python scripts/_selftest_gate.py
 

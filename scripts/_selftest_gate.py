@@ -172,11 +172,16 @@ def main() -> int:
     rc, out, _ = run("scripts/check_bare_except.py", str(PROBE.relative_to(ROOT)))
     results.append(("单文件扫描能看见违规", "[FAIL]" in out, f"exit={rc}"))
 
-    rc, out, _ = run("scripts/quality_gate.py")
+    # 只跑 function_length 单门禁（--only 隔离）：探针是「90 行函数 + 裸 except」，
+    # 单门禁同样能得出 REGRESS/PASS 的结论。2026-11-18 评审：此前跑**完整**
+    # quality_gate 两遍，实测把本自检推到 220 秒，且其中 pip_audit 无报告时会现场
+    # 联网（CI 无 .venv 必走这条路），把两遍完整门禁叠进 lint job 等于多两条可 flake
+    # 的联网路径。逐门禁的端到端方向另有 quality_gate.py --self-test（85 项/4 秒）覆盖。
+    rc, out, _ = run("scripts/quality_gate.py", "--only", "function_length")
     results.append(("新增违规 → exit 1 且报 REGRESS", rc == 1 and "REGRESS" in out, f"exit={rc}"))
 
     PROBE.unlink(missing_ok=True)
-    rc, out, _ = run("scripts/quality_gate.py")
+    rc, out, _ = run("scripts/quality_gate.py", "--only", "function_length")
     results.append(("清理后 → exit 0 且 PASS", rc == 0 and "[PASS]" in out, f"exit={rc}"))
 
     # ---- 2. 语法错误文件不能静默 PASS ----
