@@ -26,7 +26,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._constants import _RESTORE_LOCK_KEY, _RESTORE_LOCK_TTL
-from .cache_restore import restore_meilisearch, restore_redis_rdb
+from .cache_restore import redis_restore_note, restore_meilisearch
 from .exceptions import RestoreError
 from .filestore import restore_config, restore_filestore
 from .verify import verify_restore
@@ -65,7 +65,11 @@ async def restore_non_dependent_components(
         tasks.append(('config', asyncio.to_thread(restore_config, zf, confirm_sensitive)))
 
     if 'redis/dump.rdb' in zf.namelist():
-        tasks.append(('redis', restore_redis_rdb(zf)))
+        # P1-11（2026-11-17 审计，口径 A）：本仓**不做** Redis 恢复。老包里带了
+        # redis/dump.rdb 也不恢复 —— Redis 里是缓存/ARQ 队列/进度键，回到旧快照反而
+        # 会把陈旧队列任务带回来；原地整替换再 DEBUG RELOAD 的那条老路还会在 reload
+        # 失败时返回 status=ok（假成功）。这里如实登记「已跳过」。
+        results['redis'] = redis_restore_note(legacy_member=True)
 
     if any(n.startswith('meilisearch/') for n in zf.namelist()):
         tasks.append(('meilisearch', restore_meilisearch(zf)))
@@ -150,16 +154,17 @@ class _KernelProgressReporter:
 async def revoke_all_sessions_after_restore() -> dict[str, Any]:
     """恢复后强制全员重登（B3），返回可被调用方消费的结果。
 
-    覆盖全部四类会把「撤销状态」回滚到备份时点的恢复路径：
-    1. zip/orchestrator 整库（restore_from_zip 末尾）——DB 与 Redis RDB 一起回滚；
+    覆盖会把「撤销状态」回滚到备份时点的恢复路径：
+    1. zip/orchestrator 整库（restore_from_zip 末尾）——DB 与用户状态一起回滚；
     2. 三条 Legacy JSON 整库入口（endpoints/backup/restore.py 的 /import、
        /restore-by-name、/async-* JSON 分支，db_transaction 提交后）——user 表
-       整表回填，token_version/status/password_hash 随行回滚；
-    3. 含 redis/dump.rdb 的组件-only 包（_restore_components_only）——user 表
-       不动，但撤销黑名单随 RDB 回滚消失，登出 token 重新有效。
+       整表回填，token_version/status/password_hash 随行回滚。
 
-    备份时点之后的登出/撤销记录会随 DB 与 Redis RDB 一起回滚——备份后登出的
-    token 会重新有效，已禁用/已撤权的账号也会复活。因此恢复成功后必须：
+    P1-11（2026-11-17 审计，口径 A）：组件-only 包不再恢复 Redis RDB，因此
+    「撤销黑名单随 RDB 回滚」这条通道已不存在（见 cache_restore 模块 docstring）。
+
+    备份时点之后的登出/撤销记录会随 DB 回滚而消失——备份后登出的 token 会重新
+    有效，已禁用/已撤权的账号也会复活。因此恢复成功后必须：
     1. 所有用户 token_version +1（旧 token 下一次请求即失效）；
     2. 清空进程内权限/认证缓存。
 
@@ -430,17 +435,10 @@ async def _restore_components_only(
     await _prog('restore_components', 1.0, '组件恢复完成')
 
     await db.commit()  # manual-tx: 组件还原后提交
-    # B3（组件通道，2026-11-02 审计核实）：组件包虽不覆盖 user 表，但含 redis/dump.rdb
-    # 的包会把撤销黑名单回滚到备份时点（restore_redis_rdb 整体替换 RDB）——备份后
-    # 登出的 token 在 tv 不变的情况下重新有效。RDB 落盘成功（含 auto_reload_failed
-    # 变体：RDB 已写盘，Redis 重启后同样回滚）即必须全员失效。整库 zip 路径已被
-    # restore_from_zip 末尾的 revoke 覆盖，这里只补组件-only 包的缺口。
-    redis_res = results.get('redis') or {}
-    if isinstance(redis_res, dict) and redis_res.get('status') == 'ok':
-        revocation = await revoke_all_sessions_after_restore()
-        results['session_revocation'] = revocation
-        if not revocation.get('ok', True):
-            results['errors'].extend(revocation.get('errors', []))
+    # P1-11（2026-11-17 审计，口径 A）：组件通道不再恢复 Redis RDB，因此「撤销黑名单
+    # 随 RDB 回滚」这个风险面消失 —— 原先这里按 redis.status == 'ok' 触发全员失效的
+    # 分支随之删除（保留它等于留一段永远不可达的死代码）。整库 zip / Legacy JSON
+    # 路径的 revoke 不受影响：它们真会回填 user 表。
     try:
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         await invalidate_related_caches(CacheDomain.ALL)

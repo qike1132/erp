@@ -1,96 +1,48 @@
-"""Redis/Meilisearch 恢复。"""
+"""组件恢复：Meilisearch 索引 + Redis 的明确口径（Redis 不做恢复）。
+
+P1-11（2026-11-17 上线前审计）定口径：**本仓不做 Redis 恢复**。
+
+原先 `restore_redis_rdb()` 会把包内 `redis/dump.rdb` 覆盖到 `<repo>/dump.rdb` 再发
+`DEBUG RELOAD`，但这条链路从来名不副实：
+- 打包侧只在「项目根恰好有 dump.rdb」时才把 RDB 放进包（生产 Redis 的 RDB 在
+  Redis 自己的数据目录，项目根通常没有）→ 产物里几乎永远没有 `redis/`；
+- 恢复侧因此要么不触发，要么落盘后 reload 失败**仍返回 status=ok**（「假成功」），
+  运维会以为缓存/队列语义已回到备份点。
+
+而 Redis 里放的是缓存、ARQ 队列与进度键：恢复到旧快照反而会把陈旧队列任务带回来。
+所以口径改为：不打包 RDB、不恢复 RDB，重建后缓存/队列按自愈处理；若拿到含
+`redis/dump.rdb` 的老包，如实上报「已跳过」，绝不假装恢复成功。
+"""
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
-import os
-import shutil
 
-from ._constants import MEILI_HOST, MEILI_MASTER_KEY, REDIS_DUMP
-from ._proc import run_proc
+from ._constants import MEILI_HOST, MEILI_MASTER_KEY
 
 logger = logging.getLogger(__name__)
 
-
-async def _reload_redis() -> bool:
-    """尝试重新加载 Redis 数据"""
-    redis_cli = shutil.which('redis-cli')
-    if not redis_cli:
-        logger.warning('未找到 redis-cli，无法自动重新加载 Redis')
-        return False
-    try:
-        from fastapi_app.core.config import settings
-        cmd = [redis_cli]
-        cli_env = os.environ.copy()
-        redis_url = settings.REDIS_URL
-        if redis_url:
-            from urllib.parse import urlparse
-            parsed = urlparse(redis_url)
-            if parsed.hostname:
-                cmd.extend(['-h', parsed.hostname])
-            if parsed.port:
-                cmd.extend(['-p', str(parsed.port)])
-            if parsed.password:
-                cli_env['REDISCLI_AUTH'] = parsed.password
-        cmd.extend(['DEBUG', 'RELOAD'])
-        try:
-            proc = await run_proc(cmd, env=cli_env, timeout=10)
-        except TimeoutError:
-            logger.warning('Redis DEBUG RELOAD 超时')
-            return False
-        if proc.returncode == 0:
-            logger.info('Redis DEBUG RELOAD 成功')
-            return True
-        stderr_text = (proc.stderr or b'').decode(errors='replace')
-        logger.warning('Redis DEBUG RELOAD 失败: %s', stderr_text)
-        try:
-            shutdown_cmd = [*cmd[:-2], 'SHUTDOWN', 'NOSAVE']
-            # SHUTDOWN 会让 Redis 断开连接，超时属预期行为
-            with contextlib.suppress(TimeoutError):
-                await run_proc(shutdown_cmd, env=cli_env, timeout=5)
-            logger.info('Redis SHUTDOWN NOSAVE 已发送，等待自动重启')
-            await asyncio.sleep(2)
-            ping_cmd = [*cmd[:-2], 'PING']
-            for _ in range(5):
-                try:
-                    ping_proc = await run_proc(ping_cmd, env=cli_env, timeout=3)
-                except TimeoutError:
-                    await asyncio.sleep(1)
-                    continue
-                if ping_proc.returncode == 0:
-                    logger.info('Redis 已重启成功')
-                    return True
-                await asyncio.sleep(1)
-            logger.warning('Redis 重启后未能响应 PING')
-            return False
-        except (TimeoutError, OSError) as e2:
-            logger.warning('Redis SHUTDOWN 尝试失败: %s', e2)
-            return False
-    except (TimeoutError, OSError) as e:
-        logger.warning('Redis 重新加载失败: %s', e)
-        return False
+# Redis 恢复的对外口径：restore 结果、检查报告都引用这三个常量，避免两处不一致。
+REDIS_RESTORE_STATUS = 'skipped'
+REDIS_RESTORE_REASON = 'not_implemented'
+REDIS_RESTORE_MESSAGE = (
+    '本仓不做 Redis 恢复：备份包不再包含 Redis 快照，重建后缓存/ARQ 队列按自愈处理'
+)
 
 
-async def restore_redis_rdb(zf) -> dict:
-    """恢复 Redis RDB 文件"""
-    try:
-        # B2-07（2026-10-24 审计）：与 filestore/config 的成员上限对称，防构造包 OOM
-        _rdb_info = zf.getinfo('redis/dump.rdb')
-        if _rdb_info.file_size > 512 * 1024 * 1024:
-            return {'status': 'error', 'error': 'redis/dump.rdb 成员超过 512MB 上限，疑似构造包，已拒绝'}
-        rdb_data = zf.read('redis/dump.rdb')
-        if REDIS_DUMP.is_file():
-            backup_path = REDIS_DUMP.with_suffix('.rdb.bak')
-            shutil.copy2(REDIS_DUMP, backup_path)
-        REDIS_DUMP.write_bytes(rdb_data)
-        reload_result = await _reload_redis()
-        if reload_result:
-            return {'status': 'ok', 'message': 'Redis RDB 已恢复并重新加载'}
-        return {'status': 'ok', 'message': 'Redis RDB 已恢复，需手动重启 Redis 生效', 'auto_reload_failed': True}
-    except (OSError, ValueError) as e:
-        return {'status': 'error', 'error': f'Redis RDB 恢复失败: {e}'}
+def redis_restore_note(*, legacy_member: bool = False) -> dict:
+    """Redis 组件的恢复结果：显式「不做 / 已跳过」。
+
+    ``legacy_member=True`` 表示老包里确实带了 ``redis/dump.rdb`` —— 仍然不恢复
+    （口径见模块 docstring），但要把「包里有什么」如实说出来，避免运维误以为
+    缓存已回到备份点。
+    """
+    return {
+        'status': REDIS_RESTORE_STATUS,
+        'reason': REDIS_RESTORE_REASON,
+        'message': REDIS_RESTORE_MESSAGE,
+        'legacy_member_present': legacy_member,
+    }
 
 
 async def restore_meilisearch(zf) -> dict:
@@ -133,7 +85,7 @@ async def restore_meilisearch(zf) -> dict:
                         json=meili_data[settings_key], timeout=10
                     )
                 # Z05-R16：恢复是整体替换语义——先清空索引内文档，避免备份点之后
-                # 已删除的文档作为「幽灵」残留（Redis RDB 恢复同样是整体替换）。
+                # 已删除的文档作为「幽灵」残留。
                 clear_resp = await meili_client.delete(
                     f'{MEILI_HOST}/indexes/{idx_name}/documents',
                     headers={'Authorization': f'Bearer {MEILI_MASTER_KEY}'}, timeout=30

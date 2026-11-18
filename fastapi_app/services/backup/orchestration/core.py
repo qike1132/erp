@@ -25,7 +25,6 @@ from .._constants import (
     MEILI_HOST,
     MEILI_MASTER_KEY,
     PRE_RESTORE_DIR,
-    REDIS_DUMP,
     ROWS_SOURCE_DUMP,
     ROWS_SOURCE_EXACT_COUNT_FALLBACK,
     UPLOADS_DIR,
@@ -647,14 +646,17 @@ def _write_filestore(zf: zipfile.ZipFile, uploads_dir: Path) -> int:
 
 
 async def _write_to_zip_async(zf: zipfile.ZipFile, path: Path, arcname: str) -> None:
-    """大文件（dump.sql.gz / RDB）压缩写 ZIP 也是 CPU 密集操作，下沉线程池。"""
+    """大文件（dump.sql.gz / dump.json）压缩写 ZIP 也是 CPU 密集操作，下沉线程池。"""
     await asyncio.to_thread(zf.write, path, arcname)
 
 
 async def _pack_backup_zip(zip_path: Path, tmpdir_path: Path, pg_dump_available: bool,
                            dump_path: Path, manifest: dict, include_sensitive_config: bool,
                            progress_cb) -> None:
-    """打包 ZIP：数据库导出 + 附件 + 配置 + Redis RDB + MeiliSearch + manifest。"""
+    """打包 ZIP：数据库导出 + 附件 + 配置 + MeiliSearch + manifest。
+
+    P1-11（2026-11-17 审计，口径 A）：**不再打包 Redis RDB**（见下方注释）。
+    """
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
         if pg_dump_available and dump_path.is_file():
             await _write_to_zip_async(zf, dump_path, 'database/dump.sql.gz')
@@ -682,11 +684,10 @@ async def _pack_backup_zip(zip_path: Path, tmpdir_path: Path, pg_dump_available:
         if progress_cb:
             await progress_cb('backup_config', 1.0, f'配置 {len(config_files_added)} 个')
 
-        if REDIS_DUMP.is_file():
-            await _write_to_zip_async(zf, REDIS_DUMP, 'redis/dump.rdb')
-            manifest['includes']['redis_rdb'] = True
-            if progress_cb:
-                await progress_cb('backup_redis', 1.0, 'Redis RDB 已打包')
+        # P1-11（2026-11-17 审计，口径 A）：**不再打包 Redis RDB**。原先只有「项目根
+        # 恰好有 dump.rdb」时才打包（生产 Redis 的 RDB 在自己的数据目录，项目根通常
+        # 没有）→ 包内几乎永远没有 redis/，恢复侧那条通道形同虚设，还会在 reload 失败
+        # 时返回 status=ok。缓存/ARQ 队列按自愈处理，检查侧据 manifest.includes 说明。
 
         await _export_meilisearch(zf, manifest)
         if progress_cb:

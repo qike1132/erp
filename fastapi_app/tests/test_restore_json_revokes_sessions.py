@@ -2,14 +2,15 @@
 
 背景：Legacy JSON 整库恢复会把 user 表整表回滚（token_version/status/password_hash
 随行回到备份时点），备份后被 bump_token_version 撤销的凭据将重新通过 tv 相等判定
-（core/deps.py `_verify_user_active`）；含 redis/dump.rdb 的组件-only 包会把撤销
-黑名单回滚（restore_redis_rdb 整体替换 RDB），登出 token 在 tv 不变的情况下重新
-有效。zip 整库路径此前已在 restore_from_zip 末尾统一 revoke；本文件钉住其余四条
-漏接路径的接线：
+（core/deps.py `_verify_user_active`）。zip 整库路径此前已在 restore_from_zip 末尾
+统一 revoke；本文件钉住其余三条漏接路径的接线：
 - POST /import 的 JSON 分支（db_transaction 提交后）
 - POST /restore-by-name/{filename} 的 JSON 分支（db_transaction 提交后）
 - _run_async_file_restore 的 JSON 分支（get_async_db_context 提交后）
-- _restore_components_only 的 redis/dump.rdb 通道（RDB 落盘成功即失效）
+
+注（P1-11，2026-11-17 审计，口径 A）：组件-only 包的 redis/dump.rdb 通道**已取消**——
+本仓不做 Redis 恢复（Redis 里是缓存/ARQ 队列，回到旧快照反而带回陈旧任务），
+因此「撤销黑名单随 RDB 回滚」这个风险面随之消失，该路径不再 revoke。
 
 接线用 spy 断言（monkeypatch revoke 为 AsyncMock）而非端到端旧 token 请求——
 标准 harness 的 autouse override_deps 会把鉴权依赖整体 stub，HTTP 级「旧 token
@@ -246,16 +247,19 @@ async def _run_components_only(monkeypatch, components: dict) -> tuple[dict, lis
     return result, calls
 
 
-async def test_components_only_with_redis_rdb_revokes_sessions(monkeypatch) -> None:
-    """RDB 落盘成功（含 auto_reload_failed 变体）→ 黑名单回滚 → 必须 revoke。"""
-    for variant in (
-        {'redis': {'status': 'ok', 'message': 'Redis RDB 已恢复并重新加载'}},
-        {'redis': {'status': 'ok', 'message': 'Redis RDB 已恢复，需手动重启 Redis 生效', 'auto_reload_failed': True}},
-    ):
-        _, calls = await _run_components_only(monkeypatch, variant)
-        assert calls == ['revoke'], (
-            f'含 redis/dump.rdb 的组件包恢复后未失效会话: {variant} -> {calls}'
-        )
+async def test_components_only_with_redis_member_reports_skipped_without_revoke(monkeypatch) -> None:
+    """老包带 redis/dump.rdb：如实报「已跳过」，且不再全员登出。
+
+    P1-11（2026-11-17 审计，口径 A）后组件通道不再替换 RDB ⇒ 撤销黑名单不回滚
+    ⇒ 不需要为这条通道 revoke；原先按 ``redis.status == 'ok'`` 触发的分支
+    已随死路径一起删除（见 restore.py / cache_restore.py）。
+    """
+    result, calls = await _run_components_only(
+        monkeypatch, {'redis': {'status': 'skipped', 'reason': 'not_implemented'}},
+    )
+
+    assert calls == [], f'组件包不再回滚撤销状态，不应 revoke: {calls}'
+    assert result['redis']['status'] == 'skipped'
 
 
 async def test_components_only_without_redis_skips_revoke(monkeypatch) -> None:

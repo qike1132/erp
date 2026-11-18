@@ -73,7 +73,6 @@ from ._constants import (
     MEILI_MASTER_KEY,
     PRE_RESTORE_DIR,
     PROJECT_ROOT,
-    REDIS_DUMP,
     UPLOADS_DIR,
 )
 from .cache_restore import *  # noqa: F403
@@ -134,7 +133,6 @@ __all__ = [  # noqa: RUF022
     "MEILI_MASTER_KEY",
     "PRE_RESTORE_DIR",
     "PROJECT_ROOT",
-    "REDIS_DUMP",
     "UPLOADS_DIR",
     # 端口
     "AdvisoryLock",
@@ -225,8 +223,8 @@ __all__ = [  # noqa: RUF022
     "restore_legacy_json",
     "restore_meilisearch",
     "restore_non_dependent_components",
-    # cache_restore
-    "restore_redis_rdb",
+    # cache_restore（Redis 恢复口径：本仓不做，见该模块 docstring）
+    "redis_restore_note",
     # dump
     "run_pg_dump",
     # json_backup

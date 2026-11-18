@@ -54,7 +54,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 UPLOADS_DIR = PROJECT_ROOT / 'static' / 'uploads'
 CONFIG_DIR = PROJECT_ROOT / 'config'
 ENV_FILE = PROJECT_ROOT / '.env.production'
-REDIS_DUMP = PROJECT_ROOT / 'dump.rdb'
 MEILI_HOST = os.environ.get('MEILI_HOST', 'http://localhost:7700')
 MEILI_MASTER_KEY = os.environ.get('MEILI_MASTER_KEY', '')
 BACKUP_FORMAT_VERSION = '2.0'
