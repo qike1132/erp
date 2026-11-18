@@ -34,7 +34,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  *
  * `walk()` 用 try/catch 吞掉 readdir 异常并返回 `[]`，于是 `src/views` 改名或整体挪层时
  * 脚本仍打印「✓ PC 端所有端点调用均经 src/api/ 层」并 exit 0 —— 唯一的机器护栏静默失效。
- * 下限取当前实测值 310 的 ~80%。
+ * 下限取当前实测值 346 的 ~72%（src/views 311 + src/mobile 35，2026-11-18 实测）。
  */
 const MIN_SCANNED_FILES = 250
 
@@ -172,7 +172,7 @@ console.log(`扫描文件数: ${files.length}（src/views + src/mobile 下 .vue/
 // 与「有违规 = 1」区分，这样 CI 红的时候能一眼看出是门禁空转还是真违规。
 if (files.length < MIN_SCANNED_FILES) {
   console.error(
-    `[ERROR] 扫描集合异常缩小：src/views 只扫到 ${files.length} 个文件（下限 ${MIN_SCANNED_FILES}）`,
+    `[ERROR] 扫描集合异常缩小：src/views + src/mobile 只扫到 ${files.length} 个文件（下限 ${MIN_SCANNED_FILES}）`,
   )
   console.error('  目录改名/挪层会让本门禁退化成空转；请同步更新脚本路径或下限后再跑。')
   process.exit(2)

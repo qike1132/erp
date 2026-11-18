@@ -20,8 +20,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  * 并 exit 0 —— 门禁静默退化成空转。下限取当前实测值的 ~80%。
  */
 const MIN_MOBILE_FILES = 28
-// 本脚本只扫 `.vue`（204 个，2026-11-18 实测）；310 是 check-pc-api-bypass 的口径（含 .ts）。
-const MIN_PC_VIEW_FILES = 160
+/**
+ * 判定基准 `src/api` 也必须保底（2026-11-18 评审 M1）。
+ *
+ * 原实现只给 mobile/views 加下限，而**本门禁真正比对的一侧**是 `src/api`：
+ * 它被改名/挪层时 `apiLayerEndpoints` 成空集，`src/mobile` 里当前零个
+ * `/api/v1/...` 字面量 ⇒ `mobileDirectCalls` 也空 ⇒ 打印「✓ 移动端所有 API
+ * 调用均通过共享 API 层」并 exit 0。下限取实测 28 的 ~78%。
+ */
+const MIN_API_FILES = 22
 
 /** `--root <dir>`：只给夹具测试用（默认按脚本位置推断项目根）。 */
 function parseRootArg(argv) {
@@ -86,10 +93,17 @@ const pcViewFiles = walkDir(join(srcDir, 'views'), ['.vue'])
 
 // 2026-10-17 审计 F2-1：扫描集合异常缩小 → 退出码 2（与「有违规=1」区分）。
 // 触发条件：目录被改名/整体挪层，或 walkDir 因权限问题吞掉异常返回空数组。
-if (mobileFiles.length < MIN_MOBILE_FILES || pcViewFiles.length < MIN_PC_VIEW_FILES) {
+//
+// 2026-11-18 评审 M1/M2：
+//   · M1：判定基准 `src/api` 必须也在下限里 —— 它才是本脚本比对的一侧；
+//     只给 mobile/views 加下限时，`src/api` 挪走后仍打 ✓ 并 exit 0。
+//   · M2：删掉 views 下限 —— 本脚本从头到尾不判定 `src/views`，在这里报
+//     「扫描集合异常缩小」会把人引到与 check:api 无关的目录；views 的下限
+//     由 check-pc-api-bypass.mjs 的 MIN_SCANNED_FILES 负责。
+if (apiFiles.length < MIN_API_FILES || mobileFiles.length < MIN_MOBILE_FILES) {
   console.error(
-    `[ERROR] 扫描集合异常缩小：src/mobile=${mobileFiles.length}（下限 ${MIN_MOBILE_FILES}）、`
-    + `src/views=${pcViewFiles.length}（下限 ${MIN_PC_VIEW_FILES}）`,
+    `[ERROR] 扫描集合异常缩小：src/api=${apiFiles.length}（下限 ${MIN_API_FILES}）、`
+    + `src/mobile=${mobileFiles.length}（下限 ${MIN_MOBILE_FILES}）`,
   )
   console.error('  目录改名/挪层会让本门禁退化成空转；请同步更新脚本路径或下限后再跑。')
   process.exit(2)

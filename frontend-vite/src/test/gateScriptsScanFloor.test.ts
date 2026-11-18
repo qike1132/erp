@@ -61,7 +61,9 @@ afterEach(() => {
 
 describe('check-api-alignment（check:api）', () => {
   function buildCleanRoot(): string {
-    mkdirSync(join(fixture, 'src', 'api'), { recursive: true })
+    // 2026-11-18 评审 M1：`src/api` 现在也有下限（MIN_API_FILES=22），
+    // 夹具必须同步扩到下限之上，否则「达标 → exit 0」用例会假红。
+    fillFiles(join(fixture, 'src', 'api'), 22, 'ts', '')
     writeFileSync(
       join(fixture, 'src', 'api', 'widget.ts'),
       "export const widgetApi = { get: () => get<Widget>('/api/v1/widget') }\n",
@@ -71,6 +73,15 @@ describe('check-api-alignment（check:api）', () => {
     fillFiles(join(fixture, 'src', 'views'), 160, 'vue')
     return fixture
   }
+
+  it('src/api 缺失 → exit 2（评审 M1：判定基准必须有下限）', () => {
+    // 只有 mobile 达标、api 为 0：旧实现会打印「✓ 移动端所有 API 调用均
+    // 通过共享 API 层」并 exit 0 —— 而被比对的 api 层其实是空的。
+    fillFiles(join(fixture, 'src', 'mobile'), 28, 'vue')
+    const result = runScript('check-api-alignment.mjs', ['--root', fixture])
+    expect(result.code).toBe(2)
+    expect(result.out).toContain('src/api=0')
+  })
 
   it('扫描量达标且无违规 → exit 0', () => {
     const root = buildCleanRoot()
