@@ -247,13 +247,17 @@ async def test_optimistic_lock_retries_after_version_conflict():
     assert product is fresh, '重试必须返回重读后的对象，而不是陈旧对象'
 
     # 写入口的最终值取自真正发出的 UPDATE 语句（db.refresh 在替身里是空操作，
-    # 内存对象不会回填，故不能断言 product.current_stock）
+    # 内存对象不会回填，故不能断言 product.current_stock）。取绑定值用编译器的公开
+    # 接口 compile().params，不用 `_values` 这类私有结构（升级 SQLAlchemy 会误红）。
+    from sqlalchemy.dialects import postgresql
+
     updates = [c.args[0] for c in db.execute.await_args_list
                if getattr(c.args[0], 'is_update', False)]
     assert len(updates) == 2, f'冲突轮与重试轮各发一次 UPDATE，实际 {len(updates)} 次'
-    written = {col.key: bind.value for col, bind in updates[1]._values.items()}
+    written = updates[1].compile(dialect=postgresql.dialect()).params
     assert written['current_stock'] == 90, '库存只允许被扣一次（100-10）'
     assert written['version'] == 3, '成功写入必须把 version 递增到重读后的 old+1'
+    assert written['version_1'] == 2, '重试的 WHERE 必须用重读后的旧 version（=2）'
 
 
 # ---------------------------------------------------------------------------
@@ -301,19 +305,30 @@ async def test_production_negative_delta_blocked_by_balance(monkeypatch):
 
 
 async def test_production_negative_delta_passes_with_balance(monkeypatch):
-    """结余充足时放行（净减量 ≤ 结余）。"""
+    """结余充足时放行，且扣减真的以 -50 落到库存写入口（不是只「不抛异常」）。
+
+    2026-11-18 评审：原来 await 一次就结束 —— 把 apply_stock_delta_locked 改成空操作
+    本条照绿。这里断言它被 await 一次且拿到 -50（-50 由 delta 手写推导）。
+    """
     from fastapi_app.services import daily_production_service as dps
 
     record = _production_record()
     product = SimpleNamespace(current_stock=500, version=1, name='产品A')
+    apply_delta = AsyncMock()
     monkeypatch.setattr(dps, 'get_product_for_update', AsyncMock(return_value=product))
-    monkeypatch.setattr(dps, 'apply_stock_delta_locked', AsyncMock())
+    monkeypatch.setattr(dps, 'apply_stock_delta_locked', apply_delta)
     monkeypatch.setattr(
         'fastapi_app.services.stock_inventory_service.get_inventory_balance',
         AsyncMock(return_value=60),
     )
 
     await dps._apply_production_stock(db=AsyncMock(), record=record, delta=-50)
+
+    assert apply_delta.await_count == 1, '放行路径必须真的走库存写入口'
+    args, kwargs = apply_delta.await_args
+    assert -50 in args or kwargs.get('delta') == -50, (
+        f'扣减必须传 -50，实际 args={args} kwargs={kwargs}'
+    )
 
 
 async def test_production_non_packaging_skips_balance_gate(monkeypatch):
@@ -347,16 +362,19 @@ async def test_department_move_out_blocked_by_balance(monkeypatch):
 
     record = _production_record(quantity=100)
     db = _db_returning(record)
-    locked: list[int] = []
+    calls: list[str] = []
 
     async def _fake_lock(_db, pid):
-        locked.append(pid)
+        calls.append(f'lock:{pid}')
         return SimpleNamespace(id=pid)
+
+    async def _fake_balance(_db, pid):
+        calls.append(f'balance:{pid}')
+        return 60
 
     monkeypatch.setattr(dps, 'get_product_for_update', _fake_lock)
     monkeypatch.setattr(
-        'fastapi_app.services.stock_inventory_service.get_inventory_balance',
-        AsyncMock(return_value=60),
+        'fastapi_app.services.stock_inventory_service.get_inventory_balance', _fake_balance,
     )
     sync = AsyncMock()
     monkeypatch.setattr(dps, '_sync_stock_after_update', sync)
@@ -364,7 +382,12 @@ async def test_department_move_out_blocked_by_balance(monkeypatch):
     with pytest.raises(ValueError, match='结余'):
         await dps.update_record(db, 7, department='handcraft')
 
-    assert locked == [5], '读结余前必须先锁旧产品行（H10：与出货链同一互斥区间）'
+    # 顺序也要锁住：把行锁挪到「读结余」之后，这两个动作仍都会发生，只是顺序反过来 ——
+    # 而 H10 要的正是「锁在结余读取之前」（与出货链同一互斥区间），只断言「锁发生过」
+    # 测不出这一点（2026-11-18 评审指出的假通过）。
+    assert calls == ['lock:5', 'balance:5'], (
+        f'必须先锁旧产品行、再读结余（H10），实际顺序：{calls}'
+    )
     sync.assert_not_awaited()
 
 

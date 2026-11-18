@@ -162,24 +162,26 @@ class TestBatchCreateStockoutsNormal:
              patch('fastapi_app.services.stock_service.calculate_available_shipment_quantity', new_callable=AsyncMock, return_value=shipment_info), \
              patch('fastapi_app.services.stock_service.generate_stockout_number', new_callable=AsyncMock, side_effect=lambda *a, **k: next(stockout_numbers)):
 
-            result = await stock_service.batch_create_stockouts(mock_db, [_make_stockout_data(quantity=50)])
+            result = await stock_service.batch_create_stockouts(mock_db, [_make_stockout_data(quantity=45)])
 
         assert result['results'][0]['success'] is True
-        # 50 = 20 + 30，前两个订单全部分配，第三个订单不分配
-        assert product.current_stock == 50
+        # 45 = 20 + 25：第 1 单整单出完，第 2 单只出一部分，第 3 单不动
+        assert product.current_stock == 55
 
-        # F4/G2（2026-10-17 审计）：出货分配是否正确，定义在**出货单行**上——
-        # 行数、总量与 current_stock 都挡不住「逆序消耗」「每行 quantity 写成
-        # available」「customer 写错」，而这三样才是订单已出货量、客户结余、
-        # FIFO 账龄的依据（inventory_reconcile 只比产品级 SUM，查不出按订单错配）。
-        # 期望值由 shipment_info 手写推导：20 + 30，第三单不动。
+        # F4/G2（2026-10-17 审计）：出货分配是否正确，定义在**出货单行**上——行数、
+        # 总量与 current_stock 都挡不住「逆序消耗」「每行 quantity 写成 available」
+        # 「customer 写错」，而这三样才是订单已出货量、客户结余、FIFO 账龄的依据
+        # （inventory_reconcile 只比产品级 SUM，查不出按订单错配）。
+        # 2026-11-18 评审：出货量必须**不能整除**各单 available，否则
+        # `min(remaining, available)` 与 `available` 两种写法结果完全相同、断言分不出来。
+        # 45 让第 2 单出现部分分配（25 < 30）；写成 available 会得到 (2, 30)、总量 50。
         stockout_rows = [c.args[0] for c in mock_db.add.call_args_list
                          if c.args and isinstance(c.args[0], StockOut)]
         log_rows = [c.args[0] for c in mock_db.add.call_args_list
                     if c.args and isinstance(c.args[0], InventoryLog)]
 
-        assert [(r.order_id, r.quantity) for r in stockout_rows] == [(1, 20), (2, 30)], (
-            'FIFO 必须先消耗 1 号订单 20、再消耗 2 号订单 30（逆序/超配/按 available 记量即红）'
+        assert [(r.order_id, r.quantity) for r in stockout_rows] == [(1, 20), (2, 25)], (
+            'FIFO 必须先消耗 1 号订单 20、再消耗 2 号订单 25（逆序/超配/按 available 记量即红）'
         )
         assert [r.stockout_no for r in stockout_rows] == ['SO-001', 'SO-002']
         assert [r.customer for r in stockout_rows] == ['客户A', '客户A']
@@ -187,7 +189,7 @@ class TestBatchCreateStockoutsNormal:
         assert [r.batch_no for r in stockout_rows] == [None, None]
 
         assert len(log_rows) == 1, '整批只写一条库存流水'
-        assert log_rows[0].change_quantity == -50
+        assert log_rows[0].change_quantity == -45
         assert log_rows[0].change_type == '出库'
         assert mock_db.add.call_count == len(stockout_rows) + len(log_rows) == 3
 

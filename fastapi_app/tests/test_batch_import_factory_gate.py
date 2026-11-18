@@ -668,3 +668,9 @@ async def test_all_rows_rejected_by_factory_gate_pins_skipped_count(monkeypatch)
         '现状（已知缺陷 G7）：imported==0 分支不回填 skipped。'
         '修好这条缺陷时请同步改写本断言。'
     )
+    # 只断 imported/skipped 分不清「整批被闸门拒绝」与「整批崩了」：若闸门改成在写入行
+    # 内抛异常，core 会计 skipped、而 imported==0 分支同样把它丢成 0，pin 用例照绿。
+    # 因此同时钉住文案（与兄弟用例 :642 同口径）。
+    assert _FACTORY_MSG in result.message, (
+        f'被拒原因必须回显给用户（否则「导入 0 行」无从判断是闸门拒绝还是崩了）：{result.message}'
+    )

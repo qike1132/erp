@@ -17,6 +17,11 @@
 会被判为「表不存在」而拒绝导出（那是它 fail-closed 的正确行为）。故载荷按该函数
 逐字相同的循环体构造（`serialize_value` + columns/rows/count 同结构）。还原侧
 ——也就是真正不可逆的那一半——走的是生产函数本体。
+
+**已知缺口（明确登记，不假装覆盖）**：导出函数本体（`information_schema` 表存在性过滤、
+导出行序列化失败时的 ``{'error': ...}`` 载荷形状、`tables/exclude_tables` 过滤语义）本用例
+**零覆盖** —— 载荷是照抄它的循环体拼的。要覆盖导出侧需另开一条用例（临时目录 + tmp 库或
+对 `_validate_json_backup_payload` 的 fail-closed 分支单独断言）。
 """
 import json
 
@@ -79,6 +84,9 @@ async def isolated_schema(test_engine):
     factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
     async with factory() as db:
+        # 幂等：上一次若真留下残骸（例如某次 restore 加了 commit），这里先清干净，
+        # 否则 CREATE SCHEMA 直接报错，且残留表会让隔离自检以难懂的方式失败。
+        await db.execute(text(f'DROP SCHEMA IF EXISTS {_quote(SCHEMA)} CASCADE'))
         await db.execute(text(f'CREATE SCHEMA {_quote(SCHEMA)}'))
         # public 必须留在 search_path 里：pg_trgm 的 gin_trgm_ops 操作符类装在 public，
         # 而 customer 带 trgm GIN 索引；专用 schema 排在最前，非限定表名仍落在它里面。
@@ -98,6 +106,16 @@ async def test_json_restore_roundtrip_keeps_rows_and_primary_keys(isolated_schem
     from fastapi_app.services.backup.json_backup import restore_legacy_json
 
     db = isolated_schema
+
+    async def _public_counts() -> dict[str, int]:
+        """public 同名表的行数——用来证明本次往返没有碰到 public 里的数据。"""
+        counts: dict[str, int] = {}
+        for table in CORE_TABLES:
+            counts[table] = (await db.execute(
+                text(f'SELECT COUNT(*) FROM public.{_quote(table)}')  # nosec B608 - 表名来自本文件常量
+            )).scalar() or 0
+        return counts
+
     # 1) 真实写入三张核心表（显式主键，便于事后逐个比对）
     await db.execute(text(
         'INSERT INTO customer (id, name, status) '
@@ -121,6 +139,11 @@ async def test_json_restore_roundtrip_keeps_rows_and_primary_keys(isolated_schem
         'product': [301, 302],
         'supplier': [201],
     }, f'专用 schema 隔离失效（表落到了 public）：{before}'
+
+    # 隔离后置守卫：本次往返只允许在专用 schema 里发生。restore 若将来加一次真
+    # commit，`SET LOCAL search_path` 就会失效、语句落回 public（其中 setval 不受事务
+    # 保护、回滚不掉），所以把 public 的行数快照也一起比。
+    public_before = await _public_counts()
 
     # 2) 备份载荷（同生产导出结构）
     rows_by_table: dict[str, tuple[list[str], list]] = {}
@@ -147,9 +170,24 @@ async def test_json_restore_roundtrip_keeps_rows_and_primary_keys(isolated_schem
     assert result['database']['status'] == 'ok'
     assert result['total_inserted'] == sum(len(v) for v in before.values())
 
+    # 生产自己的「还原后校验」也必须过：_verify_restored_json 失败时只写
+    # verification.overall_pass=False + _verification_failed，**不进 errors**、status 仍是
+    # ok —— 只断 errors/status 的话，这条校验链路整段失效本用例照绿（2026-11-18 评审）。
+    assert result['verification']['overall_pass'] is True, (
+        f"生产还原校验未通过：{result['verification']}"
+    )
+
     # 5) 行数与主键集合必须与备份点完全一致
     after = await _snapshot(db)
     assert after == before, f'还原后主键集合不一致：{before} vs {after}'
+
+    # 隔离后置守卫（2026-11-18 评审）：public 的行数一秒没动，且连接仍在专用 schema 上。
+    public_after = await _public_counts()
+    assert public_after == public_before, (
+        f'本次往返改动了 public 里的表（隔离失效）：{public_before} → {public_after}'
+    )
+    search_path = (await db.execute(text("SELECT current_setting('search_path')"))).scalar() or ''
+    assert SCHEMA in search_path, f'连接已不在专用 schema 上（search_path={search_path}）'
 
     # 值也要回来（不止主键）：抽查被清空前记录的业务字段
     qty = (await db.execute(text('SELECT current_stock FROM product WHERE id = 301'))).scalar()
