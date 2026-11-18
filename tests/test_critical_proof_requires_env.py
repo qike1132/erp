@@ -105,14 +105,18 @@ def test_require_test_db_fails_without_signature(monkeypatch) -> None:
 
 
 def test_require_test_db_skips_with_signature(monkeypatch) -> None:
-    """显式签字后才允许 skip，且理由里必须留下签字痕迹。"""
+    """显式签字后才允许 skip，且理由里必须留下签字痕迹。
+
+    必须清掉 `GITHUB_ACTIONS`：`allow_missing_test_db()` 在 CI 里**恒为 False**
+    （见 Med3 的修法），不清的话这条在 CI 上会拿到 fail 而不是 skip。
+    第一版漏了这一步，CI run 44276396686 就是这么红的。
+    """
+    monkeypatch.delenv('GITHUB_ACTIONS', raising=False)
     monkeypatch.setenv(ALLOW_ENV, '1')
     with pytest.raises(pytest.skip.Exception) as excinfo:  # type: ignore[attr-defined]
         require_test_db('测试库端口不可达（单测）')
     message = str(excinfo.value)
     assert ALLOW_ENV in message, message
-
-
 def test_helper_module_has_no_other_mode() -> None:
     """helper 只有「fail」与「显式签字后 skip」两种出口，不得新增静默通过分支。"""
     src = Path(_required_env.__file__).read_text(encoding='utf-8')
