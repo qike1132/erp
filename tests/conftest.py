@@ -620,6 +620,30 @@ async def normal_user(async_db_session):
 
 
 @pytest_asyncio.fixture
+async def non_admin_headers(async_client, normal_user):
+    """普通用户（零权限码）的认证头 —— 用于断言写端点对非超管真的 403。
+
+    3.1（2026-10-17 审计 P2）：根套件的 ``auth_headers`` 只用 admin（``is_super=True``），
+    绝大多数用例跑在超管身份下，**权限依赖是否正确根本不参与判定** —— 端点漏写
+    ``require_permission``、或把 ``_manage`` 写成 ``_view``，根套件不会变红，而线上表现是
+    「普通员工能删单 / 能改采购单」。这里的普通用户不带任何 permission，因此任何
+    「带权限码依赖」的写端点都必须 403。
+    """
+    resp = await async_client.post(
+        "/api/v1/auth/login",
+        json={"username": "testuser", "password": "test123"},
+    )
+    assert resp.status_code == 200, (
+        f"普通用户登录失败 HTTP {resp.status_code}: {resp.text[:200]}"
+    )
+    # 浏览器登录把令牌放 httpOnly cookie，body 的 access_token 恒为 None（auth.py:436-438）——
+    # 从 body 取会得到空串，实际发出去的是 "Authorization: Bearer "（全靠 cookie jar 才通）。
+    token = async_client.cookies.get("access_token", "")
+    assert token, "普通用户登录成功但 cookie jar 里没有 access_token"
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
 async def test_product(async_db_session):
     """每个用例创建独立产品，杜绝库存、订单和流水跨用例隐式传递。
 
