@@ -138,7 +138,7 @@ jobs:
         python -m alembic -c migrations/alembic.ini upgrade head
         python -m alembic -c migrations/alembic.ini check
     
-    - name: Run gated test suite
+    - name: Run gated test suite (Linux 恒 skip 的 Windows-only 用例见 tests/test_windows_only_skip_inventory.py)
       # 注意：tests/contract 未被 --ignore 排除，会随本步骤执行。
       #   其中两条静态守卫（快照存在性、不得夹带原始响应体）在本 job 真的会跑；
       #   "与真实后端比对"那条因 CI 无常驻后端而自动 skip。
@@ -155,6 +155,11 @@ jobs:
       #   tests/qa 整目录本地实测 51 passed / 40s。
       # 2026-11-03 审查 M16：tests/performance 空目录（仅剩 9 个已删文件的陈旧 pyc）已删除，
       #   因此不再需要 --ignore=tests/performance；性能改由 latency_budget 用例把守。
+      # 2026-11-19（审计 TEST 区 1.7）：本 step 在 ubuntu runner 上恒 skip 的 Windows-only 用例
+      #   共 20 条（server_manager 的 NSSM 启停、PowerShell 迁移脚本 dry-run、Windows Job Object
+      #   与信号处理）。清单由 tests/test_windows_only_skip_inventory.py 冻结，增减必须显式登记。
+      #   **CI 绿 ≠ 这些用例被覆盖**：它们只在生产机（Windows）本地跑，改动 server_manager/
+      #   或 prod_runner 的 Windows 分支时，CI 给不了任何证据。
       # tests/stress（批次 8 复核）：保留 --ignore，因为它确实是**压测脚本目录**，
       #   0 个 pytest 用例（`def test_` 计数为 0）；那些脚本是 `python tests/stress/xx.py`
       #   手工跑的，生产回环口守卫由 fastapi_app/tests/test_stress_scripts_have_prod_guard.py

@@ -44,6 +44,7 @@ AI 说"修好了/应该没问题/测试过了"而实际没跑，是最高频的 
 - **变异检查**：交付前把被测代码改坏一处（错常量/错分支/漏校验空输入），对应测试**必须能红**；没有测试会红 = 该行为无保护。
 - 只被测试调用的夹具/清理逻辑放测试工具，**不上生产类**。
 - owner 问法：「**把这条测试测的行为故意改坏，跑给我看它变红**」——红了是真测试，没红整条打回。
+- **跳过的测试也是假测试的一种**：Linux CI 上恒 skip 的 20 条 Windows-only 用例（server_manager 启停、`scripts/migrate_erp_web.ps1` dry-run、`core.prod_runner` 的 Job Object / 信号分支）在流水线里只体现为一个 `s`。清单由 `tests/test_windows_only_skip_inventory.py` 冻结（新增/删除必须显式登记、`skipif` 必须写清 Windows 理由、CI 步骤名必须标注），但**判定的是「可见」，不是「覆盖」**——改动这些 Windows 分支时 CI 给不了任何证据，只能上生产机本地跑。
 
 ## 4. 新眼睛评审（源：superpowers requesting-code-review；BMAD）
 
