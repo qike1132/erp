@@ -16,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 
 from fastapi_app.core.config import settings
 from fastapi_app.main import app
+from tests.qa._shape_assert import assert_list_shape
 
 if "test" not in settings.ALLOWED_HOSTS:
     settings.ALLOWED_HOSTS.append("test")
@@ -41,15 +42,42 @@ async def client(admin_user, async_db_session):
 async def auth_headers(client):
     resp = await client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
     assert resp.status_code == 200, f"登录失败 HTTP {resp.status_code}: {resp.text[:200]}"
-    token = resp.json().get("access_token", "")
+    # 浏览器登录把令牌放 httpOnly cookie，body 里是 None（见 auth.py:436-438）——
+    # 原来这里取 body 的 access_token 得到空串，实际发出去的是 "Authorization: Bearer "
+    # 这种**假覆盖**（请求全靠 cookie jar 才通）。改为从 cookie jar 取真实令牌，
+    # 保持 Bearer 与 cookie 两条通道都被覆盖。
+    token = client.cookies.get("access_token", "")
+    assert token, "登录成功但 client cookie jar 里没有 access_token"
     return {"Authorization": f"Bearer {token}"}
 
 
 class TestLoginForm:
     @pytest.mark.asyncio
     async def test_login_valid(self, client):
+        """浏览器登录：token 只进 httpOnly cookie，响应体 access_token 必须为 None。
+
+        审计 2.5：原来只断 ``status_code == 200`` —— 「200 但既不下发 cookie 也不回
+        任何 token」照样通过。这里钉住两条真实契约（见 auth.py:436-438）：
+        1. cookie 必须下发且带 httpOnly（浏览器唯一的取 token 通道）；
+        2. 响应体**不得**回传 token（防 XSS/日志/浏览器历史泄露，Capacitor 才回传）。
+        """
         resp = await client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
-        assert resp.status_code == 200
+        assert resp.status_code == 200, f"登录失败 HTTP {resp.status_code}: {resp.text[:200]}"
+        body = resp.json()
+        assert body.get("access_token") is None, (
+            f"浏览器登录不得在响应体回传 access_token：{body}"
+        )
+        assert (body.get("user") or {}).get("username") == "admin", f"登录响应缺少用户信息：{body}"
+        access_cookies = [
+            c for c in resp.headers.get_list("set-cookie")
+            if c.lower().startswith("access_token=")
+        ]
+        assert access_cookies, (
+            f"登录成功但未下发 access_token cookie：{resp.headers.get_list('set-cookie')}"
+        )
+        assert "httponly" in access_cookies[0].lower(), (
+            f"access_token cookie 必须 httpOnly（否则 JS 可读，等同 body 泄露）：{access_cookies[0]}"
+        )
 
     @pytest.mark.asyncio
     async def test_login_empty_username(self, client):
@@ -81,12 +109,12 @@ class TestProductForm:
     @pytest.mark.asyncio
     async def test_product_list(self, client, auth_headers):
         resp = await client.get("/api/v1/products/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '产品列表')
 
     @pytest.mark.asyncio
     async def test_product_search(self, client, auth_headers):
         resp = await client.get("/api/v1/products/search", headers=auth_headers, params={"keyword": "测试"})
-        assert resp.status_code == 200
+        assert_list_shape(resp, '产品搜索')
 
     @pytest.mark.asyncio
     async def test_product_query_negative_page(self, client, auth_headers):
@@ -98,66 +126,66 @@ class TestOrderForm:
     @pytest.mark.asyncio
     async def test_order_list(self, client, auth_headers):
         resp = await client.get("/api/v1/orders/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '订单列表')
 
     @pytest.mark.asyncio
     async def test_order_query_valid(self, client, auth_headers):
         resp = await client.get("/api/v1/orders/list", headers=auth_headers, params={"page": 1, "per_page": 10})
-        assert resp.status_code == 200
+        assert_list_shape(resp, '订单列表(分页)')
 
 
 class TestCustomerForm:
     @pytest.mark.asyncio
     async def test_customer_list(self, client, auth_headers):
         resp = await client.get("/api/v1/customers/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '客户列表')
 
 
 class TestSupplierForm:
     @pytest.mark.asyncio
     async def test_supplier_list(self, client, auth_headers):
         resp = await client.get("/api/v1/suppliers/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '供应商列表')
 
 
 class TestUserForm:
     @pytest.mark.asyncio
     async def test_user_list(self, client, auth_headers):
         resp = await client.get("/api/v1/users/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '用户列表')
 
 
 class TestApprovalForm:
     @pytest.mark.asyncio
     async def test_approval_list(self, client, auth_headers):
         resp = await client.get("/api/v1/approvals/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '审批列表')
 
 
 class TestStockForm:
     @pytest.mark.asyncio
     async def test_stock_in_list(self, client, auth_headers):
         resp = await client.get("/api/v1/stock/in/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '入库列表')
 
     @pytest.mark.asyncio
     async def test_stock_out_list(self, client, auth_headers):
         resp = await client.get("/api/v1/stock/out/list", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '出库列表')
 
 
 class TestCaseForm:
     @pytest.mark.asyncio
     async def test_case_list(self, client, auth_headers):
         resp = await client.get("/api/v1/cases/search", headers=auth_headers, params={"keyword": "测试"})
-        assert resp.status_code == 200
+        assert_list_shape(resp, '皮套搜索')
 
 
 class TestMaterialForm:
     @pytest.mark.asyncio
     async def test_material_list(self, client, auth_headers):
         resp = await client.get("/api/v1/material-registrations/registrations", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '来料登记列表')
 
 
 class TestBackupForm:
@@ -170,7 +198,7 @@ class TestBackupForm:
         fail-closed 由 fastapi_app/tests/test_strict_auth_wiring.py 等专项测试覆盖。
         """
         resp = await client.get("/api/v1/backup/list", headers=auth_headers)
-        assert resp.status_code == 200, f"合法令牌应可读备份列表，实际 {resp.status_code}"
+        assert_list_shape(resp, '备份列表')
 
     @pytest.mark.asyncio
     async def test_backup_list_requires_auth(self, client):
@@ -183,4 +211,4 @@ class TestReportForm:
     @pytest.mark.asyncio
     async def test_report_statistics(self, client, auth_headers):
         resp = await client.get("/api/v1/reports/order-logs", headers=auth_headers)
-        assert resp.status_code == 200
+        assert_list_shape(resp, '报表日志列表')

@@ -14,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from fastapi_app.core.config import settings
 from fastapi_app.main import app
+from tests.qa._shape_assert import assert_list_shape
 
 if "test" not in settings.ALLOWED_HOSTS:
     settings.ALLOWED_HOSTS.append("test")
@@ -78,7 +79,11 @@ async def auth_headers(client):
     # 登录失败不允许静默放行：返回空头会让全部用例吃 401 而 401 恰在断言白名单里，
     # 整个文件"假绿"，接口契约漂移（如 year&month 必填）被发现不了。
     assert resp.status_code == 200, f"smoke 登录失败 HTTP {resp.status_code}: {resp.text[:200]}"
-    return {"Authorization": f"Bearer {resp.json().get('access_token', '')}"}
+    # 浏览器登录把令牌放 httpOnly cookie，body 的 access_token 恒为 None（auth.py:436-438）——
+    # 从 body 取会得到空串，实际发出去的是 "Authorization: Bearer "（全靠 cookie jar 才通）。
+    token = client.cookies.get("access_token", "")
+    assert token, "smoke 登录成功但 client cookie jar 里没有 access_token"
+    return {"Authorization": f"Bearer {token}"}
 
 
 # 显式豁免（收口审计 2026-10-03）：整棵 /api/v1/backup 路由挂
@@ -115,32 +120,8 @@ async def test_smoke(client, auth_headers, name, method, url, body):
 
 #: 3.3（2026-10-17 审计 P2）：只断状态码时，「接口活着但返回空 / 形状漂移」会静默通过。
 #: 对 5 个高频列表页补**形状断言**（不断数据内容，只断「有一个列表容器」）。
-SHAPE_LIST_KEYS = ('items', 'data', 'records', 'list')
+#: 判定实现与 tests/qa/test_forms.py 共用 `_shape_assert` —— 两处各写一份必然漂移。
 SHAPE_EXPECT_LIST = {'客户订单', '产品清单', '客户管理', '出库管理', '系统管理'}
-
-
-def _find_list(payload):
-    """在响应体里找列表容器，允许分页包一层（``{'data': {'items': [...]}}``）。"""
-    if isinstance(payload, list):
-        return payload
-    if not isinstance(payload, dict):
-        return None
-    for key in SHAPE_LIST_KEYS:
-        value = payload.get(key)
-        if isinstance(value, list):
-            return value
-    # 容器键名不止一份真相源：客户列表用的是 'customers'……不逐一登记键名（登记表会漂移），
-    # 改为接受「任一顶层值是列表」。仍然拦住审计 3.3 要拦的形状：返回 {} / 标量 /
-    # 只有 success+total 而没有任何列表。
-    for value in payload.values():
-        if isinstance(value, list):
-            return value
-    for value in payload.values():
-        if isinstance(value, dict):
-            nested = _find_list(value)
-            if nested is not None:
-                return nested
-    return None
 
 
 @pytest.mark.asyncio
@@ -154,16 +135,4 @@ async def test_list_endpoints_return_list_shape(client, auth_headers, name):
     method, url = next((m, u) for n, m, u, _b in SMOKE_TESTS if n == name)
     assert method == 'GET'
     resp = await client.get(url, headers=auth_headers)
-    assert resp.status_code in (200, 201), f"【{name}】{url} → HTTP {resp.status_code}: {resp.text[:200]}"
-
-    body = resp.json()
-    assert _find_list(body) is not None, (
-        f"【{name}】响应里没有列表容器（形状漂移）："
-        f"keys={sorted(body) if isinstance(body, dict) else type(body)}"
-    )
-    if isinstance(body, dict):
-        for key in ('total', 'page', 'per_page'):
-            if key in body:
-                assert isinstance(body[key], int), (
-                    f"【{name}】{key} 必须是整数，实际 {type(body[key])}"
-                )
+    assert_list_shape(resp, name)
