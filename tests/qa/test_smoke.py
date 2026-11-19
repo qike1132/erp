@@ -111,3 +111,59 @@ async def test_smoke(client, auth_headers, name, method, url, body):
         print(f"\n  [PASS] {name}: {method} {url}")
     else:
         print(f"\n  [ENV] {name}: {method} {url} -> {resp.status_code} (严格认证需 Redis，环境性豁免)")
+
+
+#: 3.3（2026-10-17 审计 P2）：只断状态码时，「接口活着但返回空 / 形状漂移」会静默通过。
+#: 对 5 个高频列表页补**形状断言**（不断数据内容，只断「有一个列表容器」）。
+SHAPE_LIST_KEYS = ('items', 'data', 'records', 'list')
+SHAPE_EXPECT_LIST = {'客户订单', '产品清单', '客户管理', '出库管理', '系统管理'}
+
+
+def _find_list(payload):
+    """在响应体里找列表容器，允许分页包一层（``{'data': {'items': [...]}}``）。"""
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+    for key in SHAPE_LIST_KEYS:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    # 容器键名不止一份真相源：客户列表用的是 'customers'……不逐一登记键名（登记表会漂移），
+    # 改为接受「任一顶层值是列表」。仍然拦住审计 3.3 要拦的形状：返回 {} / 标量 /
+    # 只有 success+total 而没有任何列表。
+    for value in payload.values():
+        if isinstance(value, list):
+            return value
+    for value in payload.values():
+        if isinstance(value, dict):
+            nested = _find_list(value)
+            if nested is not None:
+                return nested
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", sorted(SHAPE_EXPECT_LIST))
+async def test_list_endpoints_return_list_shape(client, auth_headers, name):
+    """高频列表页必须有列表容器，且 total/page（若存在）是整数。
+
+    审计 3.3：``test_smoke.py`` 是全仓唯一在 ASGI 端到端层扫 19 个板块只读端点的用例，
+    此前只断状态码 —— 端点返回 ``{}`` 或某个标量也照样「冒烟通过」。
+    """
+    method, url = next((m, u) for n, m, u, _b in SMOKE_TESTS if n == name)
+    assert method == 'GET'
+    resp = await client.get(url, headers=auth_headers)
+    assert resp.status_code in (200, 201), f"【{name}】{url} → HTTP {resp.status_code}: {resp.text[:200]}"
+
+    body = resp.json()
+    assert _find_list(body) is not None, (
+        f"【{name}】响应里没有列表容器（形状漂移）："
+        f"keys={sorted(body) if isinstance(body, dict) else type(body)}"
+    )
+    if isinstance(body, dict):
+        for key in ('total', 'page', 'per_page'):
+            if key in body:
+                assert isinstance(body[key], int), (
+                    f"【{name}】{key} 必须是整数，实际 {type(body[key])}"
+                )

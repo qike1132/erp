@@ -22,6 +22,7 @@ from fastapi_app.services.customer_service import (
     toggle_customer_status,
     update_customer,
 )
+from fastapi_app.shared_models import Customer
 
 
 class TestGetCustomers:
@@ -183,7 +184,12 @@ class TestCreateCustomer:
 
         assert result.name == '新客户'
         assert result.status is True
-        mock_async_db.add.assert_called_once()
+        # 2.3（2026-10-17 审计 P2）：断言落库实体本身，而不是「add 被调用过」——
+        # create_customer 漏传 contact/phone/address/note 时原断言仍绿。
+        created = mock_async_db.add.call_args.args[0]
+        assert isinstance(created, Customer), f'add 必须收到 Customer 实体：{type(created)}'
+        assert (created.name, created.contact, created.phone) == ('新客户', '张三', '13800138000')
+        assert (created.address, created.note) == ('深圳市', '重要客户')
 
     @pytest.mark.asyncio
     async def test_create_customer_duplicate_name(self, mock_async_db):

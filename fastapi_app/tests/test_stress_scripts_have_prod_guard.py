@@ -10,7 +10,6 @@
 import ast
 import re
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 
@@ -36,16 +35,28 @@ def test_loopback_blocked_by_default(monkeypatch):
 
 
 @pytest.mark.parametrize('url', [
-    'http://localhost:5002', 'http://0.0.0.0:5002', 'http://::1:5002',
-    'http://192.168.0.95:5002',
-], ids=['localhost', 'all-zero', 'ipv6', 'lan'])
+    'http://localhost:5002', 'http://0.0.0.0:5002', 'http://192.168.0.95:5002',
+], ids=['localhost', 'all-zero', 'lan'])
 def test_non_loopback_or_allowed_passes(url, monkeypatch):
     # 非回环地址不拦；回环地址显式允许后放行
     monkeypatch.delenv('STRESS_TEST_ALLOW_PROD', raising=False)
-    host = (urlparse(url).hostname or '').lower()
-    if host in {'127.0.0.1', 'localhost', '0.0.0.0', '::1', ''}:
-        monkeypatch.setenv('STRESS_TEST_ALLOW_PROD', '1')
-    require_non_production(url)  # 不抛即通过
+    monkeypatch.setenv('STRESS_TEST_ALLOW_PROD', '1')
+    require_non_production(url)
+
+
+@pytest.mark.parametrize('url', ['http://[::1]:5002', 'http://[0:0:0:0:0:0:0:1]:5002'],
+                         ids=['ipv6-short', 'ipv6-long'])
+def test_ipv6_loopback_blocked_by_default(url, monkeypatch):
+    """`::1` 也是回环，默认必须拦。
+
+    2.3（2026-10-17 审计 P2）：原参数化用例传的是**无方括号**的 `http://::1:5002`，
+    `urlparse(...).hostname` 解析不出 `::1`（得到 ''），于是走了「显式允许 → 不抛」的
+    分支 —— `require_non_production` 退化成 no-op 也照绿。改用标准写法并断言默认被拦
+    （守卫的 `_LOOPBACK_HOSTS` 本来就含 '::1'，此前只是没被真正测到）。
+    """
+    monkeypatch.delenv('STRESS_TEST_ALLOW_PROD', raising=False)
+    with pytest.raises(SystemExit):
+        require_non_production(url)
 
 
 def test_explicit_allow_env(monkeypatch):

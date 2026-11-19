@@ -16,7 +16,7 @@
     "loop_shadow": 12,
     "pip_audit": 0,
     "nosec_budget": 79,
-    "bandit": 21,
+    "bandit": 20,
     "semantic_guards": 49
   }
 }

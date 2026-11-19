@@ -7,10 +7,28 @@ BASE_URL = "http://127.0.0.1:5002"（本机生产 uvicorn 回环口），除 str
 本模块是 stress_test.py:769-774 守卫的共享版：
 回环/空主机 + 未显式设置允许环境变量 → 直接终止进程。
 """
+import ipaddress
 import os
 from urllib.parse import urlparse
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "::1", ""}
+
+
+def _is_blocked_host(host: str) -> bool:
+    """回环 / 未指定地址判定。
+
+    2026-11-19（审计 2.3 补测时发现）：只比对字面量集合会漏掉 IPv6 的**长写**与其它等价
+    形式 —— ``urlparse('http://[0:0:0:0:0:0:0:1]:5002').hostname`` 给的是
+    ``'0:0:0:0:0:0:0:1'``，不在集合里，于是守卫把「本机生产」当成「专门的压测环境」放行。
+    用 ``ipaddress`` 归一化，任何写法的回环/未指定地址都拦。
+    """
+    if host in _LOOPBACK_HOSTS:
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified
 
 
 def require_non_production(base_url: str, *, env_var: str = "STRESS_TEST_ALLOW_PROD") -> None:
@@ -20,7 +38,7 @@ def require_non_production(base_url: str, *, env_var: str = "STRESS_TEST_ALLOW_P
     「默认值即生产回环口」这一事故形状。
     """
     host = (urlparse(base_url).hostname or "").lower()
-    if host in _LOOPBACK_HOSTS and os.getenv(env_var) != "1":
+    if _is_blocked_host(host) and os.getenv(env_var) != "1":
         raise SystemExit(
             f"拒绝运行：base_url={base_url} 指向本机（生产）。"
             f" 确认要对该环境执行写操作时，请显式设置 {env_var}=1。"

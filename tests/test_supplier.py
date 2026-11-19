@@ -20,6 +20,7 @@ from fastapi_app.services.purchase_supplier_service import (
     get_suppliers,
     update_supplier,
 )
+from fastapi_app.shared_models import Supplier
 
 
 class TestGetSuppliers:
@@ -142,8 +143,15 @@ class TestCreateSupplier:
 
         assert result['name'] == '新供应商'
         assert 'id' in result
-        mock_async_db.add.assert_called_once()
-        mock_async_db.flush.assert_called_once()
+        # 2.3（2026-10-17 审计 P2）：`add.assert_called_once()` 只证明「调过一次」——
+        # 传错对象、或字段被丢掉也照样过。断言落库实体的关键字段。
+        created = mock_async_db.add.call_args.args[0]
+        assert isinstance(created, Supplier), f'add 必须收到 Supplier 实体：{type(created)}'
+        assert created.name == '新供应商'
+        assert created.contact_person == '李四'
+        assert created.phone == '13900139000'
+        assert created.remark == '优质供应商'
+        mock_async_db.flush.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_create_supplier_duplicate_name(self, mock_async_db):
@@ -169,7 +177,13 @@ class TestCreateSupplier:
         result = await create_supplier(mock_async_db, data)
 
         assert result['name'] == '最小供应商'
-        mock_async_db.add.assert_called_once()
+        # 2.3（同上）：断言落库实体本身，而不是「add 被调用过」
+        created = mock_async_db.add.call_args.args[0]
+        assert isinstance(created, Supplier), f'add 必须收到 Supplier 实体：{type(created)}'
+        assert created.name == '最小供应商'
+        # 最小数据路径：其余可选字段不得被塞默认值/脏值
+        assert created.contact_person in (None, '')
+        assert created.phone in (None, '')
 
 
 class TestUpdateSupplier:
@@ -204,7 +218,13 @@ class TestUpdateSupplier:
         assert result['id'] == 1
         assert result['name'] == '新名称'
         assert supplier.name == '新名称'
-        mock_async_db.flush.assert_called()
+        # 2.3（2026-10-17 审计 P2）：`flush.assert_called()` 只证明「调过一次」，
+        # 而且 AsyncMock 上 assert_called 不区分是否 await。两件都补上：
+        mock_async_db.flush.assert_awaited()
+        # 每个字段都真的写进实体（只断 name 时，其余字段漏写不会红）
+        assert (
+            supplier.contact_person, supplier.phone, supplier.address, supplier.remark,
+        ) == ('新联系人', '新电话', '新地址', '新备注')
 
     @pytest.mark.asyncio
     async def test_update_supplier_not_found(self, mock_async_db):
