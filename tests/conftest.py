@@ -30,6 +30,7 @@ Fixtures:
     无标记                       — 默认单元测试（Mocks）
 """
 import contextlib
+import logging
 import os
 import sys
 from datetime import UTC, datetime
@@ -46,6 +47,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # 项目根目录
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _project_root)
+
+logger = logging.getLogger(__name__)
 
 # 测试基线：强制非生产，避免继承本机 .env 的 APP_ENV=production（与
 # fastapi_app/tests/conftest.py 同一约定）。否则 TrustedHostMiddleware 用
@@ -343,9 +346,33 @@ async def test_engine(_exclusive_test_db_lock):
     # 且 create_all 对已存在的旧表不会补新列，导致列漂移（如 product.default_bom_label）。
     # 整库重置一次性消除这两类漂移。仅作用于 erp_system_test 测试库。
     from fastapi_app.shared_models import Base
+    from tests._test_db_reset import ENV_SKIP, database_name_from_url, record_reset, reset_enabled
+
     async with engine.begin() as conn:
-        await conn.execute(text("DROP SCHEMA public CASCADE"))
-        await conn.execute(text("CREATE SCHEMA public"))
+        if reset_enabled():
+            # 留痕必须在 DROP **之前**（审计 TEST 区 1.4）：随后崩溃也能回答「谁清了哪个库」。
+            tables_before = await conn.scalar(
+                text("SELECT count(*) FROM information_schema.tables "
+                     "WHERE table_schema = 'public'")
+            )
+            record_reset(
+                database=database_name_from_url(TEST_DATABASE_URL),
+                tables=int(tables_before or 0),
+            )
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
+        else:
+            # 逃生口：本轮不重置（仍在下面补缺表）。副作用要说清：残留数据与旧列都不会被清理。
+            logger.warning(
+                "按 %s 跳过测试库整库重置：残留数据/旧列不会被清理"
+                "（create_all 不补已存在表的新列），本会话的偶发假红请先怀疑这一点",
+                ENV_SKIP,
+            )
+            exists = await conn.scalar(
+                text("SELECT count(*) FROM information_schema.schemata WHERE schema_name = 'public'")
+            )
+            if not exists:
+                await conn.execute(text("CREATE SCHEMA public"))
         # pg_trgm：customer/case 等模型的 trgm GIN 索引依赖（DROP SCHEMA 会连带删除）
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(Base.metadata.create_all)
