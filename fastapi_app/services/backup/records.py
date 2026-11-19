@@ -510,6 +510,20 @@ def get_backup_status() -> dict:  # log-context: internal helper 无请求上下
     }
 
 
+def table_row_count(table_data: dict) -> int:
+    """单表行数：优先 ``count``（int 且非负），缺失才数 ``rows`` 的长度。
+
+    2026-11-19 评审：这个口径必须只有一份实现 —— 校验预览（端点
+    `backup/validation._extract_backup_metadata`）与本函数此前各写一套，`count` 为
+    ``None``/``0.0`` 时两边结果不同（一边回退数 rows，一边 sum(None) 抛 TypeError）。
+    """
+    count = table_data.get('count')
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+        return count
+    rows = table_data.get('rows')
+    return len(rows) if isinstance(rows, list) else 0
+
+
 def validate_backup_file(content: bytes, filename: str) -> dict:  # log-context: internal helper 无请求上下文
     """验证备份文件，不执行恢复，仅返回摘要信息"""
     is_zip = filename.endswith('.zip') or content[:4] == b'PK\x03\x04'
@@ -573,17 +587,47 @@ def validate_backup_file(content: bytes, filename: str) -> dict:  # log-context:
         'exported_by': backup_data.get('exported_by'),
         'remark': backup_data.get('remark', ''),
         'table_count': len(backup_data['tables']),
-        'total_rows': sum(t.get('count', len(t.get('rows', []))) for t in backup_data['tables'].values()),
+        'total_rows': sum(
+            table_row_count(t) for t in backup_data['tables'].values() if isinstance(t, dict)
+        ),
         'checksums_ok': None, 'tables': [],
     }
     for table_name, table_data in backup_data['tables'].items():
-        row_count = table_data.get('count', len(table_data.get('rows', [])))
+        row_count = table_row_count(table_data)
         summary['tables'].append({
             'name': table_name, 'rows': row_count,
             'exists': table_name in existing_tables,
             'has_error': 'error' in table_data,
         })
     return summary
+
+
+def _counts_as_restorable(entry: dict) -> bool:
+    """该条目是否算「还有一份可还原的备份」。
+
+    「最后一份」保护若只数文件个数，一个 0 字节或读不出的包就能把保护骗过去 ——
+    管理员删掉唯一能用的那份，剩下的坏包并不能还原任何东西。
+    """
+    name = str(entry.get('filename') or '')
+    if not name or entry.get('error'):
+        return False
+    if int(entry.get('size') or 0) <= 0:
+        return False
+    # 加密包的信息来自 .meta sidecar；没有 sidecar 的 .zip.enc 视为「不可还原」
+    return not name.endswith('.zip.enc') or (BACKUP_DIR / (name + '.meta')).is_file()
+
+
+def _list_restorable_backups() -> list[dict]:
+    """扫描备份目录并只留可还原条目；扫描本身失败时 fail-closed。
+
+    `list_backup_files` 逐个文件自吞 `BadZipFile`，但第三方压缩算法会抛
+    `NotImplementedError`（不在它的 except 元组里）—— 那会让「删除备份」从成功变 500，
+    或者更糟：在无法判定剩余份数时仍然往下删。这里一律转成拒绝删除。
+    """
+    try:
+        return [f for f in list_backup_files() if _counts_as_restorable(f)]
+    except (OSError, ValueError, RuntimeError, NotImplementedError) as e:
+        raise BackupFileError(f'无法判定剩余备份数量，拒绝删除：{e}') from e
 
 
 def delete_backup_file(filename: str, *, force: bool = False) -> str:  # log-context: internal helper 无请求上下文
@@ -601,11 +645,13 @@ def delete_backup_file(filename: str, *, force: bool = False) -> str:  # log-con
     if not filepath.exists():
         raise BackupFileError('备份文件不存在')
     if not force:
-        remaining = [f for f in list_backup_files() if f.get('filename') != safe_name]
+        # 只把「存在且看起来可用」的备份算作剩余：0 字节 / 读不出的包 / 没有 .meta 的加密包
+        # 不能充当「还有一份」，否则删掉唯一可还原的那份之后才发现剩下的是坏包（评审 Medium）。
+        remaining = [f for f in _list_restorable_backups() if f.get('filename') != safe_name]
         if not remaining:
             raise BackupFileError(
                 '不允许删除最后一份备份：这是当前唯一可还原的全量备份。'
-                '请先创建新备份；确需清空请显式 force=True'
+                '请先创建新备份后再删除'
             )
     try:
         filepath.unlink()

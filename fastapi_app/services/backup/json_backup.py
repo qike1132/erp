@@ -409,6 +409,10 @@ def _validate_json_backup_payload(backup_data: dict) -> None:
                 broken.append(f'{name}(缺少 rows：仅 columns 不足以恢复)')
             elif not isinstance(rows, list):
                 broken.append(f'{name}(rows 不是数组：{type(rows).__name__})')
+            elif any(not isinstance(row, dict) for row in rows):
+                # 行必须是对象：list-of-list 会让恢复侧 `c in row` 判否、整表静默插 0 行
+                # （2026-11-19 评审 Medium）。导出侧本来就写 dict，这里不是误杀。
+                broken.append(f'{name}(rows 元素不是对象)')
     if broken:
         raise RestoreError(
             'JSON 备份包含导出失败/不完整的表，拒绝恢复（否则会先清空该表再写入 0 行）：'
@@ -569,6 +573,40 @@ async def _reset_sequences_after_json_restore(db, tables) -> tuple[list[str], li
     return reset, errors
 
 
+def _resolve_restore_layout(table, table_data: dict, table_name: str):
+    """确定本次插入用的 (columns, rows, 表列名集合, 列类型映射)。
+
+    P2-8（2026-10-17 审计）：`columns` 可缺（缺则按表结构推断），但 `rows` 必须在；
+    列名与当前表结构**无交集**（备份 schema 漂移，如老列名 order_nos）同样中止 ——
+    否则逐行都会因 `c in type_map` 判否而静默跳过，最后是「清空 + 写 0 行」。
+    """
+    raw_columns = table_data.get('columns')
+    table_col_names = {c.name for c in table.columns}
+    type_map = build_column_type_map(table)
+    if raw_columns is None:
+        columns = [c.name for c in table.columns]
+    elif not isinstance(raw_columns, list):
+        raise JsonRestoreFatalError(
+            f'还原中止: 表 "{table_name}" 的 columns 不是数组'
+            f'（{type(raw_columns).__name__}）'
+        )
+    else:
+        columns = raw_columns
+    rows = table_data.get('rows')
+    if not isinstance(rows, list):
+        raise JsonRestoreFatalError(
+            f'还原中止: 表 "{table_name}" 的 rows 缺失或不是数组 —— '
+            '该表已被清空，继续会留下空表'
+        )
+    if rows and not [c for c in columns if c in type_map and c in table_col_names]:
+        raise JsonRestoreFatalError(
+            f'还原中止: 表 "{table_name}" 的 columns 与当前表结构无交集'
+            f'（备份列 {columns[:5]}，当前列 {sorted(table_col_names)[:5]}）—— '
+            '备份 schema 已漂移，继续会写入 0 行'
+        )
+    return columns, rows, table_col_names, type_map
+
+
 async def _restore_tables_from_json(db, tables_to_restore, backup_data, _report, total_tables) -> tuple[dict, int, list]:
     """逐表从 JSON 恢复数据，返回 (results, total_inserted, errors)。"""
     results = {}
@@ -578,18 +616,12 @@ async def _restore_tables_from_json(db, tables_to_restore, backup_data, _report,
     for table in tables_to_restore:
         table_name = str(table.name)
         table_data = backup_data['tables'][table_name]
-        # P2-8（2026-10-17 审计）：`columns` 可缺（缺则按表结构推断，原来缺了会让
-        # valid_cols 为空、整表静默插 0 行）；`rows` 必须在，缺失/非数组直接中止 ——
-        # 此刻该表已被 _clear_tables_for_restore 清空，静默跳过就是「合法地清空整表」。
-        columns = table_data.get('columns') or [c.name for c in table.columns]
-        rows = table_data.get('rows')
-        if not isinstance(rows, list):
-            raise JsonRestoreFatalError(
-                f'还原中止: 表 "{table_name}" 的 rows 缺失或不是数组 —— '
-                '该表已被清空，继续会留下空表'
-            )
-        table_col_names = {c.name for c in table.columns}
-        type_map = build_column_type_map(table)
+        # P2-8（2026-10-17 审计）：`columns` 可缺（缺则按表结构推断）、`rows` 必须在；
+        # 校验与推断细节见 _resolve_restore_layout —— 此刻该表已被 _clear_tables_for_restore
+        # 清空，任何「静默跳过」都等于合法地清空整表。
+        columns, rows, table_col_names, type_map = _resolve_restore_layout(
+            table, table_data, table_name
+        )
         BATCH_SIZE = 500
         inserted = 0
         batch_errors = []
@@ -698,6 +730,12 @@ async def restore_legacy_json(backup_data: dict, db: AsyncSession, task_id: str 
         errors.extend(seq_errors)
         await _invalidate_caches_after_restore()
         verification = await _verify_restored_json(db, backup_data)
+    except JsonRestoreFatalError:
+        # 非端点调用方（ARQ 异步恢复 / 恢复演练）没有 db_transaction 兜底：
+        # 这里必须先回滚，否则 get_async_db_context 正常退出时会把「已清空的表」提交
+        # （2026-11-19 评审 High）。端点路径也会经过这里，回滚后重新抛出即可。
+        await db.rollback()  # manual-tx: fail-fast 信号必须先撤销已清空的数据
+        raise
     except (SQLAlchemyError, ValueError, OSError) as e:
         await db.rollback()  # manual-tx: try/except 内显式事务控制
         raise RestoreError(f'恢复过程中出错: {e}') from e

@@ -251,12 +251,25 @@ class TestValidateBackupFile:
             validate_backup_file(b'{"version": "1.0"}', 'test.json')
 
 
+def _write_valid_zip(path, *, remark: str = '') -> None:
+    """写一个「可还原」的最小备份包（带 manifest.json）。
+
+    「最后一份」保护的判定会过滤 0 字节 / 读不出的包：用 ``b'dummy'`` 造的第二份
+    不算「还有一份可还原备份」（2026-11-19 评审 Medium）。
+    """
+    with zipfile.ZipFile(path, 'w') as zf:
+        zf.writestr('manifest.json', json.dumps({
+            'version': '2.0', 'type': 'full', 'exported_at': '2024-01-16 10:30:00',
+            'remark': remark,
+        }))
+
+
 class TestDeleteBackupFile:
     def test_delete_success(self, tmp_path):
-        """有第二份备份时，删任意一份都允许（保底只在会删光时介入）。"""
+        """有第二份**可还原**备份时，删任意一份都允许（保底只在会删光时介入）。"""
         test_file = tmp_path / 'erp_backup_20240115_103000.zip'
-        test_file.write_bytes(b'dummy')
-        (tmp_path / 'erp_backup_20240116_103000.zip').write_bytes(b'dummy')
+        _write_valid_zip(test_file)
+        _write_valid_zip(tmp_path / 'erp_backup_20240116_103000.zip')
         with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = delete_backup_file('erp_backup_20240115_103000.zip')
             assert result == 'erp_backup_20240115_103000.zip'
@@ -265,16 +278,26 @@ class TestDeleteBackupFile:
     def test_refuses_to_delete_last_backup(self, tmp_path):
         """P2-2（2026-10-17 审计）：手动删除不得与清理链口径相反 —— 不许删光。"""
         only = tmp_path / 'erp_backup_20240115_103000.zip'
-        only.write_bytes(b'dummy')
+        _write_valid_zip(only)
         with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             with pytest.raises(BackupFileError, match='最后一份'):
                 delete_backup_file('erp_backup_20240115_103000.zip')
         assert only.exists(), '被拒绝的删除不得动文件'
 
+    def test_refuses_when_only_other_backup_is_broken(self, tmp_path):
+        """「还剩一份」必须是真的能还原的那一份 —— 坏包不算（评审 Medium）。"""
+        good = tmp_path / 'erp_backup_20240115_103000.zip'
+        _write_valid_zip(good)
+        (tmp_path / 'erp_backup_20240116_103000.zip').write_bytes(b'dummy')   # 坏包
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
+            with pytest.raises(BackupFileError, match='最后一份'):
+                delete_backup_file(good.name)
+        assert good.exists(), '唯一可还原的备份不得被删'
+
     def test_force_allows_deleting_last_backup(self, tmp_path):
         """确需清空必须显式 force —— 逃生口要存在，但不能是默认行为。"""
         only = tmp_path / 'erp_backup_20240115_103000.zip'
-        only.write_bytes(b'dummy')
+        _write_valid_zip(only)
         with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             assert delete_backup_file(only.name, force=True) == only.name
         assert not only.exists()

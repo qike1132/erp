@@ -77,3 +77,32 @@ class TestEndpointSanitizers:
             )
         for leaked in ('SELECT', 'orders', 'order_no'):
             assert leaked not in detail, f'500 详情泄露了库结构：{detail}'
+
+    async def test_order_list_500_detail_has_no_sql_in_production(self, monkeypatch):
+        """行为断言（评审 Low：纯文本守卫可被注释满足）：真抛 SQLAlchemyError 看响应详情。"""
+        from types import SimpleNamespace
+
+        import pytest
+        from fastapi import HTTPException
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from fastapi_app.api.v1.endpoints import order as order_mod
+
+        async def _boom(*args, **kwargs):
+            raise SQLAlchemyError('SELECT order_no FROM orders WHERE id=1')
+
+        monkeypatch.setattr(order_mod.order_service, 'get_orders', _boom)
+
+        with patch.object(settings, 'FASTAPI_DEBUG', False), \
+             patch.dict(os.environ, {'APP_ENV': 'production'}):
+            with pytest.raises(HTTPException) as excinfo:
+                await order_mod.list_orders(
+                    page=1, per_page=10, customer=None, product_id=None, status=None,
+                    start_date=None, end_date=None, factory=None, keyword=None,
+                    db=object(), user=SimpleNamespace(factory=None, is_super=True),
+                )
+
+        assert excinfo.value.status_code == 500
+        detail = str(excinfo.value.detail)
+        for leaked in ('SELECT', 'order_no', 'orders'):
+            assert leaked not in detail, f'500 详情泄露库结构：{detail}'

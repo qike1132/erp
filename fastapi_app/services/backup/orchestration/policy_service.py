@@ -337,6 +337,54 @@ class BackupPolicyService:
             checks['policy_checks'] = {'passed': False, 'message': f'策略检查失败: {e!s}'}
             return checks
 
+    def _select_retention_deletions(self, all_records, records_to_delete):
+        """按保底规则算出「本次真能删」的文件名集合，并返回被救回的名字。
+
+        这条清理链此前会把备份删光（P2-1）。保底候选必须同时满足「磁盘上真有」与
+        「不是 failed/running 记录」——否则救回的是打不开（或根本不存在）的东西，
+        真实备份反而被全删（2026-11-19 评审 High）。
+        """
+        from fastapi_app.services.backup.cleanup.service import apply_keep_floor
+
+        names_in_order = [
+            r.filename for r in all_records
+            if r.filename and (BACKUP_DIR / r.filename).is_file()
+        ]
+        corrupted = {
+            r.filename for r in all_records
+            if r.filename and r.status in ('failed', 'running')
+        }
+        to_delete_names = {r.filename for r in records_to_delete if r.filename}
+        if names_in_order:
+            to_delete_names = apply_keep_floor(names_in_order, to_delete_names, corrupted)
+        elif to_delete_names:
+            # DB 记录与磁盘文件不一致（有记录无文件）：无法判定哪份是「最后一份」，
+            # 保守起见本轮不删任何文件，把不一致交给 sync_backup_records 自愈。
+            logger.warning('保留策略跳过删除：DB 记录与磁盘文件不一致（无可定位的备份文件）')
+            to_delete_names = set()
+        rescued = {r.filename for r in records_to_delete if r.filename} - to_delete_names
+        return to_delete_names, rescued
+
+    @staticmethod
+    def _unlink_retention_files(records_to_delete) -> list[str]:
+        """删掉这些记录对应的备份文件与 sidecar，返回实际删除的文件名。"""
+        from fastapi_app.services.backup.records import _delete_backup_sidecars
+
+        deleted_files: list[str] = []
+        for record in records_to_delete:
+            if not record.filename:
+                continue
+            backup_file = BACKUP_DIR / record.filename
+            if not backup_file.exists():
+                continue
+            try:
+                backup_file.unlink()
+                deleted_files.append(record.filename)
+                _delete_backup_sidecars(backup_file)
+            except OSError as e:
+                logger.error(f"删除备份文件失败 {record.filename}: {e}")
+        return deleted_files
+
     async def _apply_retention_policy(self, policy: dict[str, Any]) -> dict[str, Any]:
         """应用保留策略"""
         try:
@@ -370,13 +418,12 @@ class BackupPolicyService:
                 # P2-1（2026-10-17 审计）：本仓有两条清理链 —— 这里与 smart_cleanup。此前这条
                 # 既没有「至少留一份」保底（能删光），也不删 .meta/.record（留下「有元数据没
                 # 文件」的僵尸条目）。保底规则复用 cleanup 的同一实现，sidecar 复用同一 helper。
-                from fastapi_app.services.backup.cleanup.service import apply_keep_floor
-                from fastapi_app.services.backup.records import _delete_backup_sidecars
-
-                names_in_order = [r.filename for r in all_records if r.filename]
-                to_delete_names = {r.filename for r in records_to_delete if r.filename}
-                to_delete_names = apply_keep_floor(names_in_order, to_delete_names)
-                rescued = {r.filename for r in records_to_delete if r.filename} - to_delete_names
+                # P2-1（2026-10-17 审计）：本仓有两条清理链 —— 这里与 smart_cleanup。此前这条
+                # 既没有「至少留一份」保底（能删光），也不删 .meta/.record（留下「有元数据没
+                # 文件」的僵尸条目）。保底与 sidecar 清理都收进下面的私有方法。
+                to_delete_names, rescued = self._select_retention_deletions(
+                    all_records, records_to_delete
+                )
                 if rescued:
                     logger.warning('保留策略本次会删光全部备份，已强制保留 %s', sorted(rescued))
                     records_to_delete = [
@@ -386,17 +433,7 @@ class BackupPolicyService:
                     # 被保底救回的记录要计入「保留」，否则 kept/deleted 两个数对不上实际文件数
                     records_to_keep.extend(r for r in all_records if r.filename in rescued)
 
-                deleted_files = []
-                for record in records_to_delete:
-                    if record.filename:
-                        backup_file = BACKUP_DIR / record.filename
-                        if backup_file.exists():
-                            try:
-                                backup_file.unlink()
-                                deleted_files.append(record.filename)
-                                _delete_backup_sidecars(backup_file)
-                            except OSError as e:
-                                logger.error(f"删除备份文件失败 {record.filename}: {e}")
+                deleted_files = self._unlink_retention_files(records_to_delete)
 
                 # 删除数据库记录（单条批量 DELETE 替代逐条 session.delete）
                 if records_to_delete:

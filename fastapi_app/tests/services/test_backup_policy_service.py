@@ -452,7 +452,7 @@ class _FakeCtx:
 def _record(filename: str, created_at: datetime):
     from fastapi_app.shared_models.backup_record import BackupRecord
 
-    return BackupRecord(filename=filename, created_at=created_at, status='completed')
+    return BackupRecord(filename=filename, created_at=created_at, status='success')
 
 
 class TestRetentionKeepFloor:
@@ -496,6 +496,9 @@ class TestRetentionKeepFloor:
         assert not (tmp_path / 'erp_backup_old.zip.meta').exists(), 'sidecar 必须一起删'
         assert result['deleted_records'] == 1, result
         assert result['kept_records'] == 1, '被保底救回的那份要按「保留」计数'
+        assert len(session.deleted_statements) == 1, '只应发一条批量 DELETE'
+        # 被救回的记录不得出现在删除集里（DB 与文件必须一致）
+        assert session.committed is True
 
     async def test_retention_removes_sidecars_for_every_deleted_file(
         self, policy_service, tmp_path, monkeypatch
@@ -537,3 +540,37 @@ class TestRetentionKeepFloor:
             assert not (tmp_path / gone).exists()
             assert not (tmp_path / (gone + '.meta')).exists(), f'{gone} 的 sidecar 未清理'
         assert result['deleted_records'] == 2, result
+        assert len(session.deleted_statements) == 1, '删除记录应是一条批量 DELETE'
+        assert session.committed is True, '删除记录后必须提交（文件已物理删除）'
+
+    async def test_ghost_record_never_causes_deleting_the_real_backup(
+        self, policy_service, tmp_path, monkeypatch
+    ):
+        """DB 记录在、文件没了（上次 unlink 后 commit 失败）：保底救回的必须是真文件。
+
+        评审（2026-11-19 High）：候选列表若取自 DB 记录，救回的会是那份幽灵记录，
+        真实文件全被删 —— 正是 P2-1 要防的「零备份」，而且报成功。
+        """
+        import importlib
+
+        policy_mod = importlib.import_module(
+            'fastapi_app.services.backup.orchestration.policy_service'
+        )
+        monkeypatch.setattr(policy_mod, 'BACKUP_DIR', tmp_path)
+        ghost = _record('erp_backup_ghost.zip', datetime(2026, 11, 3, 3, 0))   # 磁盘上没有
+        real = _record('erp_backup_real.zip', datetime(2026, 11, 2, 3, 0))
+        (tmp_path / 'erp_backup_real.zip').write_bytes(b'x')
+
+        session = _FakeSession([ghost, real])
+        monkeypatch.setattr(policy_mod, 'get_async_db_context', lambda: _FakeCtx(session))
+        monkeypatch.setattr(policy_service, '_should_keep_backup', lambda *a, **k: False)
+
+        result = await policy_service._apply_retention_policy({
+            'retention': {'enabled': True, 'strategy': 'hybrid',
+                          'keep_manual_backups': True, 'keep_failed_backups': False}
+        })
+
+        assert (tmp_path / 'erp_backup_real.zip').exists(), '唯一真实备份不得被删'
+        assert result['deleted_files'] == [], result
+        # 幽灵记录本身仍应清掉：文件已不存在，留着只会继续骗过保底判定
+        assert len(session.deleted_statements) == 1

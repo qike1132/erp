@@ -162,3 +162,75 @@ async def test_superuser_toggles_session_replication_role(monkeypatch):
 
     assert any("'replica'" in s for s in db.replica_roles)
     assert any("'origin'" in s for s in db.replica_roles)
+
+
+@pytest.mark.asyncio
+async def test_missing_columns_falls_back_to_table_structure(monkeypatch):
+    """P2-8：``columns`` 可缺 —— 缺了要按表结构推断，不能整表静默插 0 行。
+
+    此前 ``columns = table_data.get('columns', [])`` 得到空列表，``valid_cols`` 恒空，
+    每行都被 ``continue`` 掉：表已被清空、却报 ``status='ok'``。
+    """
+    _patch_verify(monkeypatch, {'overall_pass': True})
+    db = FakeSession()
+
+    result = await json_backup.restore_legacy_json(
+        {'tables': {'pattern_maker': {'rows': [{'id': 7}]}}}, db
+    )
+
+    inserts = [s for s in db.executed if s.startswith('INSERT INTO')]
+    assert len(inserts) == 1, f'缺 columns 也必须照表结构插入，实际 SQL={db.executed}'
+    assert '"id"' in inserts[0]
+    assert result['total_inserted'] == 1
+    assert result['results']['pattern_maker'] == {'status': 'ok', 'inserted': 1}
+
+
+def _pattern_maker_table() -> list:
+    return [t for t in Base.metadata.sorted_tables if str(t.name) == 'pattern_maker']
+
+
+@pytest.mark.asyncio
+async def test_restore_side_aborts_when_rows_missing():
+    """恢复侧兜底：``rows`` 缺失直接中止（校验被绕过时也不能「清空 + 写 0 行」）。"""
+    db = FakeSession()
+
+    with pytest.raises(json_backup.JsonRestoreFatalError, match='rows'):
+        await json_backup._restore_tables_from_json(
+            db, _pattern_maker_table(),
+            {'tables': {'pattern_maker': {'columns': ['id']}}}, None, 1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_restore_side_aborts_when_columns_drifted():
+    """列名与当前表结构无交集（备份 schema 漂移）必须中止，而不是插 0 行。"""
+    db = FakeSession()
+
+    with pytest.raises(json_backup.JsonRestoreFatalError, match='无交集'):
+        await json_backup._restore_tables_from_json(
+            db, _pattern_maker_table(),
+            {'tables': {'pattern_maker': {'columns': ['order_nos'], 'rows': [{'order_nos': 1}]}}},
+            None, 1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fatal_error_rolls_back_instead_of_committing_cleared_tables(monkeypatch):
+    """P2-8 复核（评审 High）：致命错误必须先回滚。
+
+    异步恢复路径用 ``get_async_db_context``，它在**正常退出**时 commit —— 若
+    ``JsonRestoreFatalError``（RuntimeError）不被本函数接住，已清空的表会被提交，
+    用户看到「恢复失败」而库里已是空表。
+    """
+    _patch_verify(monkeypatch, {'overall_pass': True})
+    db = FakeSession()
+
+    async def _boom(*args, **kwargs):
+        raise json_backup.JsonRestoreFatalError('模拟致命约束错误')
+
+    monkeypatch.setattr(json_backup, '_restore_tables_from_json', _boom)
+
+    with pytest.raises(json_backup.JsonRestoreFatalError):
+        await json_backup.restore_legacy_json(_backup_data(), db)
+
+    assert db.rolled_back is True, '致命错误必须先 rollback，否则清表结果会被提交'

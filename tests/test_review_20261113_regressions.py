@@ -45,7 +45,7 @@ def test_b1_rejects_table_with_export_error():
 
 def test_b1_rejects_declared_failed_tables():
     payload = {
-        'tables': {'orders': {'columns': ['id'], 'rows': [[1]]}},
+        'tables': {'orders': {'columns': ['id'], 'rows': [{'id': 1}]}},
         'failed_tables': ['order_items'],
     }
     with pytest.raises(RestoreError, match='failed_tables'):
@@ -54,7 +54,7 @@ def test_b1_rejects_declared_failed_tables():
 
 def test_b1_rejects_incomplete_coverage():
     payload = {
-        'tables': {'orders': {'columns': ['id'], 'rows': [[1]]}},
+        'tables': {'orders': {'columns': ['id'], 'rows': [{'id': 1}]}},
         'failed_tables': [],
         'coverage': {'complete': False},
     }
@@ -98,9 +98,19 @@ def test_p2_8_accepts_empty_rows_list():
     }
     assert _validate_json_backup_payload(payload) is None
 
+
+def test_p2_8_rejects_rows_whose_elements_are_not_objects():
+    """行必须是对象：list-of-list 会让恢复侧 ``c in row`` 判否、整表静默插 0 行。"""
+    for bad_rows in ([[1]], ['', 0], [None]):
+        with pytest.raises(RestoreError, match='orders'):
+            _validate_json_backup_payload(
+                {'tables': {'orders': {'columns': ['id'], 'rows': bad_rows}}}
+            )
+
+
 def test_b1_accepts_healthy_payload():
     payload = {
-        'tables': {'orders': {'columns': ['id'], 'rows': [[1]]}},
+        'tables': {'orders': {'columns': ['id'], 'rows': [{'id': 1}]}},
         'failed_tables': [],
         'coverage': {'complete': True},
     }

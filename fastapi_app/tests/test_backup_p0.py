@@ -263,11 +263,9 @@ class TestMetaSidecar:
         manifest = {'version': '2.0', 'type': 'full', 'exported_at': '2026-08-23 12:00:01'}
         records_mod.write_backup_meta_file(f, manifest)
         assert (d / (f.name + '.meta')).exists()
-        # P2-2（2026-11-19）：delete_backup_file 现在有「最后一份」保底 —— 本用例只验
-        # sidecar 清理，放第二份备份让保底不介入。
-        (d / 'erp_backup_20260823_120002.zip').write_bytes(b'x')
-
-        records_mod.delete_backup_file(f.name)
+        # P2-2（2026-11-19）：delete_backup_file 现在有「最后一份」保底 ——
+        # 本用例只验 sidecar 清理，用 force 跳过探测（保底逻辑另有 test_backup.py 专项用例）。
+        records_mod.delete_backup_file(f.name, force=True)
         assert not f.exists()
         assert not (d / (f.name + '.meta')).exists()
 

@@ -236,12 +236,13 @@ class BackupCleanupService:
         """兜底：任何情况下至少留一个可还原的全量备份（委托模块级纯函数）。
 
         只在**会删光**时介入，从删除集里救回最新且未被判定损坏的一个
-        （列表按 mtime 倒序，首个非 corrupted 即最新可还原者）。
+        （列表按 mtime 倒序，首个非 corrupted 即最新可还原者；全损坏时仍保最新一份）。
 
-        注意：全量-only 扫描（_get_backup_files_info）已不产出 health_status，
-        `f.get('health_status') != 'corrupted'` 当前恒真、candidates 恒等于全部 ——
-        保留该过滤是**有意的防御分支**（未来若恢复健康检测可直接生效，
-        test_backup_cleanup_keep_floor.py 仍直测它）。
+        规则本体在 `apply_keep_floor`（policy_service 那条清理链共用同一实现）——
+        本方法只负责把「按 mtime 倒序的 dict 列表」翻译成纯函数要的两个参数集。
+        注意：全量-only 扫描（_get_backup_files_info）当前不产出 health_status，
+        因此 `corrupted` 实际恒空；保留这条通路是**有意的防御分支**，将来恢复健康
+        检测即可直接生效（test_backup_cleanup_keep_floor.py 直测纯函数语义）。
         """
         names_in_order = [f['name'] for f in backup_files]
         corrupted = {f['name'] for f in backup_files if f.get('health_status') == 'corrupted'}

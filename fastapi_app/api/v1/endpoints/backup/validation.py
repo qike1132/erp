@@ -39,6 +39,7 @@ from fastapi_app.schemas.backup import (
 )
 from fastapi_app.services import backup as backup_service
 from fastapi_app.services.backup import BackupFileError
+from fastapi_app.services.backup.records import table_row_count
 from fastapi_app.services.backup.verify.query_service import _infer_type_from_filename
 from fastapi_app.shared_models import User
 
@@ -528,19 +529,6 @@ def _validate_backup_format(content: bytes, filename: str) -> tuple[bool, list[s
     return valid, issues
 
 
-def _table_row_count(table_data: dict) -> int:
-    """单表行数：优先 ``count``，缺失才数 ``rows``（JSON 备份里没有 ``data`` 键）。
-
-    P2-4（2026-10-17 审计）：此前这里写的是 ``len(table_data.get('data', []))`` ——
-    JSON 备份从来不产出 ``data`` 键，于是校验接口的 ``total_rows`` 恒为 0，
-    「备份里有 12 万行」在预览页显示成 0 行，灾备可信度直接失真。
-    """
-    count = table_data.get('count')
-    if isinstance(count, int) and count >= 0:
-        return count
-    rows = table_data.get('rows')
-    return len(rows) if isinstance(rows, list) else 0
-
 
 def _extract_backup_metadata(content: bytes, filename: str) -> tuple:
     """尝试从备份文件提取元数据，返回 (format_version, table_count, total_rows, created_at)。"""
@@ -561,12 +549,17 @@ def _extract_backup_metadata(content: bytes, filename: str) -> tuple:
         elif filename.endswith('.json') or filename.endswith('.json.enc'):
             backup_data = json.loads(content.decode('utf-8'))
             format_version = backup_data.get('format_version', '1.0')
-            table_count = len(backup_data.get('tables', {}))
+            # `tables` 不是 dict（list / None）时 `.values()` 会 AttributeError，被下面的
+            # except 吞掉会让预览退化成「未知」—— 显式归一成空 dict。
+            tables = backup_data.get('tables')
+            if not isinstance(tables, dict):
+                tables = {}
+            table_count = len(tables)
             # P2-4（2026-10-17 审计）：JSON 备份的行数键是 count / rows，不是 data ——
-            # 取 data 会让 total_rows 恒为 0。与 records.validate_backup_file:576 同一口径。
+            # 取 data 会让 total_rows 恒为 0。行数口径的唯一实现在 records.table_row_count
+            # （2026-11-19 评审：两处各写一套会在 count=None/0.0 时给出不同结果）。
             total_rows = sum(
-                _table_row_count(td)
-                for td in backup_data.get('tables', {}).values() if isinstance(td, dict)
+                table_row_count(td) for td in tables.values() if isinstance(td, dict)
             )
             created_at = backup_data.get('exported_at')
     except (ValueError, TypeError, OSError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
