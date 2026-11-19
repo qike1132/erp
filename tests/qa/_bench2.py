@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -55,7 +56,11 @@ for name, sql in tests:
 c.close()
 e.dispose()
 
-outpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "perf_result.csv")
+# 4.4（2026-10-17 审计 P2）：不要把结果写进仓库 —— 原先落 tests/qa/perf_result.csv，
+# 跑一次就在工作区留一个未跟踪的脏文件（且 .gitignore 没覆盖它）。默认落系统临时目录，
+# 需要留档时用 PERF_OUTPUT_DIR 显式指定。
+_out_dir = os.getenv("PERF_OUTPUT_DIR") or tempfile.gettempdir()
+outpath = os.path.join(_out_dir, "perf_result.csv")
 with open(outpath, "w", encoding="utf-8") as f:
     f.write("test_name,response_ms,status\n")
     for line in lines:

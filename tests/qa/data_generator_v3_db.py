@@ -27,7 +27,7 @@ import os
 import random
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -42,6 +42,7 @@ BATCH_SIZE = 1000
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from fastapi_app.core.business_time import business_today
 from fastapi_app.core.config import settings
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.security import hash_password
@@ -86,12 +87,14 @@ def _rand_datetime(days_back=730):
 
 
 def _rand_date(days_back=730):
-    d = date.today() - timedelta(days=random.randint(0, days_back))
+    d = business_today() - timedelta(days=random.randint(0, days_back))
     return d
 
 
 def _rand_future_date(days_ahead=90):
-    d = date.today() + timedelta(days=random.randint(0, days_ahead))
+    # 4.1（2026-10-17 审计 P2）：业务日取业务时区（与生产 business_today 同一口径），
+    # 不用进程本地 date.today()——UTC 机器 / 北京 00:00–08:00 窗口会差一天。
+    d = business_today() + timedelta(days=random.randint(0, days_ahead))
     return d
 
 

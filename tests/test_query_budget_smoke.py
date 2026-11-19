@@ -11,7 +11,7 @@ Flask 时代的 performance 套件随被测目标删除而整体 skip（且被 C
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 pytestmark = pytest.mark.integration
@@ -69,14 +69,19 @@ class _StatementCounter:
             if statement.lstrip().upper().startswith('SELECT'):
                 self.selects += 1
 
-        event.listen(self._engine, 'after_cursor_execute', _after_cursor_execute)
+        # 闭包存成属性：__exit__ 要按同一对象摘监听器（event.remove 按函数身份匹配）
+        self._handler = _after_cursor_execute
 
     def __enter__(self):
+        # 监听必须在 with 入口注册、出口摘掉。4.5（2026-10-17 审计 P2）：原实现在
+        # __init__ 注册且**从不反注册**，而 self._engine 是会话级引擎（跨用例存活）——
+        # 之后每个用例的 SELECT 都会累加进这个已废弃的计数器；同一用例里若出现两个
+        # 计数器，两个实例都会被重复累加，断言（selects <= N）随之失真。
+        event.listen(self._engine, 'after_cursor_execute', self._handler)
         return self
 
     def __exit__(self, *exc):
-        # event 监听随引擎生命周期存续（会话级引擎），计数器用完即弃不反注册——
-        # 每个测试新开计数器互不影响；引擎在进程结束时统一释放。
+        event.remove(self._engine, 'after_cursor_execute', self._handler)
         return False
 
 
@@ -110,3 +115,24 @@ async def test_inventory_page_time_budget(db, seeded_products):
     )
     elapsed = time.monotonic() - start
     assert elapsed < 5.0, f'库存分页耗时 {elapsed:.2f}s——疑似灾难级性能回归（AUD-13）'
+
+
+@pytest.mark.asyncio
+async def test_statement_counter_stops_counting_after_with(db):
+    """4.5 回归锁：with 块结束后监听器必须摘掉。
+
+    原实现只在 ``__init__`` 里 ``event.listen``、从不 ``event.remove``，而 ``self._engine``
+    是**会话级**引擎（跨用例存活）—— 之后每个用例的 SELECT 都会继续累加进这个已废弃的
+    计数器；同一用例里出现两个计数器时两个实例都会被重复累加，``selects <= N`` 的预算
+    断言随之失真。
+    """
+    counter = _StatementCounter(db)
+    with counter:
+        await db.execute(text('SELECT 1'))
+    counted = counter.selects
+    assert counted >= 1, 'with 块内必须真的计到语句（否则本用例什么都没验证）'
+
+    await db.execute(text('SELECT 1'))
+    assert counter.selects == counted, (
+        f'with 结束后监听器仍挂在引擎上：计数从 {counted} 涨到 {counter.selects}'
+    )

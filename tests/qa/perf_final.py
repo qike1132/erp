@@ -1,6 +1,7 @@
 """ERP系统性能基准测试 - 最终版"""
 import os
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -82,7 +83,10 @@ c.close()
 e.dispose()
 
 # 生成报告
-outpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "performance_final_report.txt")
+# 4.4（2026-10-17 审计 P2）：不要把报告写进仓库（原先落 tests/qa/，跑一次就多一个
+# 未跟踪脏文件，且 .gitignore 没覆盖）。默认落系统临时目录，需要留档用 PERF_OUTPUT_DIR。
+_out_dir = os.getenv("PERF_OUTPUT_DIR") or tempfile.gettempdir()
+outpath = os.path.join(_out_dir, "performance_final_report.txt")
 with open(outpath, "w", encoding="utf-8") as f:
     f.write("=" * 70 + "\n")
     f.write("  ERP系统性能优化最终报告\n")

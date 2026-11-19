@@ -5,11 +5,18 @@ import pytest
 
 
 def _production_py_files():
-    root = pathlib.Path('fastapi_app')
-    for path in root.rglob('*.py'):
-        if 'tests' in path.parts:
-            continue
-        yield path
+    """生产树下的 .py 文件（路径按 __file__ 解析，不依赖 cwd）。
+
+    4.3（2026-10-17 审计 P2）：原写法 `pathlib.Path('fastapi_app')` 是**相对 cwd** 的，
+    换 cwd 跑（IDE、`pytest --rootdir`、CI 子目录调用）时 rglob 扫到空集合 →
+    `hits == []` 恒真，这条守卫等于不存在。并把扫描面做成自证的下限断言。
+    """
+    root = pathlib.Path(__file__).resolve().parents[1] / 'fastapi_app'
+    files = [p for p in root.rglob('*.py') if 'tests' not in p.parts]
+    # 扫描面不能为空：路径解析错 / 目录改名 / 误删时，下面的断言会「恒真」通过。
+    # 本仓 fastapi_app/** 有 400+ 个 .py，100 这个阈值不可能误报。
+    assert len(files) > 100, f'扫描面异常：仅 {len(files)} 个文件（root={root}）'
+    return files
 
 
 def test_no_production_code_raises_custom_country_error():

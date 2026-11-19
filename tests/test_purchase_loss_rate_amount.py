@@ -20,7 +20,7 @@
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from fastapi_app.services.purchase_order_crud import (
     _recalc_item_total_price,
@@ -29,6 +29,38 @@ from fastapi_app.services.purchase_order_crud import (
 from fastapi_app.services.purchase_order_query import export_completed_orders
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 
+
+@pytest.fixture(autouse=True)
+async def _cr_purchase_orders_cleanup(async_db_session):
+    """本文件用固定单号（``CR-*``）写真实测试库，必须**前后各清一次**。
+
+    4.2（2026-10-17 审计 P2）：``async_db_session`` 是提交模式（共享测试库只在会话开始时
+    整库重置），而本文件 6 张采购单以固定单号提交进去、没有任何 teardown：
+    * 同一会话内重跑（``--lf`` / IDE 单条重跑 / pytest-rerunfailures）→
+      ``purchase_order.order_no`` 唯一键冲突 → 假红；
+    * 残行会带偏任何对 purchase_order 做全表聚合 / 按 create_time 排序 / 按状态过滤的
+      断言（本区有 test_purchase_order_detail_loss_rate / test_purchase_revoke_source_lock）。
+
+    前置清理一并解决「上一次运行留下的残行」——比给 6 处单号加随机后缀改动更小，
+    而且对历史残行同样有效。
+    """
+    async def _purge() -> None:
+        order_ids = (await async_db_session.execute(
+            select(PurchaseOrder.id).where(PurchaseOrder.order_no.like('CR-%'))
+        )).scalars().all()
+        if not order_ids:
+            return
+        await async_db_session.execute(
+            delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id.in_(order_ids))
+        )
+        await async_db_session.execute(
+            delete(PurchaseOrder).where(PurchaseOrder.id.in_(order_ids))
+        )
+        await async_db_session.commit()
+
+    await _purge()
+    yield
+    await _purge()
 
 async def _make_order(db, *, order_no='CR-0001', spare_rate=None, product_quantity=100):
     order = PurchaseOrder(

@@ -43,12 +43,13 @@ from __future__ import annotations
 
 import time
 from contextlib import suppress
-from datetime import date
 from typing import Any
 
 import httpx
 import pytest
 import pytest_asyncio
+
+from fastapi_app.core.business_time import business_today
 
 pytestmark = pytest.mark.e2e_api
 
@@ -321,7 +322,12 @@ async def _create_product(
                 "barcode": barcode,
                 "unit_price": 0,
                 "quantity": stock,
-                "production_date": date.today().isoformat(),
+                # 4.1（2026-10-17 审计 P2）：业务日期必须取**业务时区**（Asia/Shanghai），
+                # 不能用进程本地的 date.today()。UTC runner / 北京 00:00–08:00 窗口下两者
+                # 差一天 → production_date 落在「明天」被后端拒、或出库日与包装入库日错位
+                # 导致结余取不到（本仓 2026-10-25 CI 三跑实锤过同型假红）。时间源唯一：
+                # fastapi_app.core.business_time.business_today（与生产同一口径）。
+                "production_date": business_today().isoformat(),
                 "remark": "E2E 包装部入库",
             },
             headers=headers,
@@ -556,7 +562,7 @@ class TestStockOutDeduction:
                         "product_id": product_id,
                         "quantity": quantity,
                         "customer": customer,
-                        "stockout_date": date.today().isoformat(),
+                        "stockout_date": business_today().isoformat(),
                         "order_type": "regular",
                     },
                     headers=write_headers,
@@ -588,7 +594,7 @@ class TestStockOutDeduction:
                     "product_id": product_id,
                     "quantity": 5,
                     "customer": customer,
-                    "stockout_date": date.today().isoformat(),
+                    "stockout_date": business_today().isoformat(),
                     "order_type": "regular",
                 },
                 headers=write_headers,
@@ -635,7 +641,7 @@ class TestStockOutDeduction:
                     "product_id": product_id,
                     "quantity": 10,
                     "customer": customer,
-                    "stockout_date": date.today().isoformat(),
+                    "stockout_date": business_today().isoformat(),
                     "order_type": "regular",
                 },
                 headers=write_headers,
@@ -672,7 +678,7 @@ class TestReturnFlow:
                     "product_id": product_id,
                     "quantity": 10,
                     "customer": customer,
-                    "stockout_date": date.today().isoformat(),
+                    "stockout_date": business_today().isoformat(),
                     "order_type": "regular",
                 },
                 headers=write_headers,
