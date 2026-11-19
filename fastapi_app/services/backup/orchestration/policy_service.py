@@ -367,6 +367,25 @@ class BackupPolicyService:
                         records_to_delete.append(record)
 
                 # 删除备份文件
+                # P2-1（2026-10-17 审计）：本仓有两条清理链 —— 这里与 smart_cleanup。此前这条
+                # 既没有「至少留一份」保底（能删光），也不删 .meta/.record（留下「有元数据没
+                # 文件」的僵尸条目）。保底规则复用 cleanup 的同一实现，sidecar 复用同一 helper。
+                from fastapi_app.services.backup.cleanup.service import apply_keep_floor
+                from fastapi_app.services.backup.records import _delete_backup_sidecars
+
+                names_in_order = [r.filename for r in all_records if r.filename]
+                to_delete_names = {r.filename for r in records_to_delete if r.filename}
+                to_delete_names = apply_keep_floor(names_in_order, to_delete_names)
+                rescued = {r.filename for r in records_to_delete if r.filename} - to_delete_names
+                if rescued:
+                    logger.warning('保留策略本次会删光全部备份，已强制保留 %s', sorted(rescued))
+                    records_to_delete = [
+                        r for r in records_to_delete
+                        if not r.filename or r.filename in to_delete_names
+                    ]
+                    # 被保底救回的记录要计入「保留」，否则 kept/deleted 两个数对不上实际文件数
+                    records_to_keep.extend(r for r in all_records if r.filename in rescued)
+
                 deleted_files = []
                 for record in records_to_delete:
                     if record.filename:
@@ -375,6 +394,7 @@ class BackupPolicyService:
                             try:
                                 backup_file.unlink()
                                 deleted_files.append(record.filename)
+                                _delete_backup_sidecars(backup_file)
                             except OSError as e:
                                 logger.error(f"删除备份文件失败 {record.filename}: {e}")
 

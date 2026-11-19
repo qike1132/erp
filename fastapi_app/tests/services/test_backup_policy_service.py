@@ -394,3 +394,146 @@ class TestBackupPolicyService:
             assert result['success'] is True
             assert result['policy_applied'] is True
             assert result['storage_result']['applied'] is False  # 未启用 = 合法 no-op
+
+# ---------------------------------------------------------------------------
+# P2-1（2026-10-17 审计备份区）：保留策略这条清理链也必须「至少留一份」
+# ---------------------------------------------------------------------------
+# 本仓有两条清理链：BackupCleanupService.smart_cleanup 与
+# policy_service._apply_retention_policy。保底规则此前只有前者有 —— 后者能把备份删光，
+# 而且不删 .meta/.record（留下「有元数据没文件」的僵尸条目）。两条链现在共用
+# cleanup.service.apply_keep_floor 与 records._delete_backup_sidecars。
+
+
+class _Scalars:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return _Scalars(self._rows)
+
+
+class _FakeSession:
+    """只回答两种语句：SELECT（返回预置记录）与 DELETE（记录下来）。"""
+
+    def __init__(self, records):
+        self.records = records
+        self.deleted_statements = []
+        self.committed = False
+
+    async def execute(self, statement):
+        if 'select' in str(statement).lower():
+            return _Result(self.records)
+        self.deleted_statements.append(statement)
+        return None
+
+    async def commit(self):
+        self.committed = True
+
+
+class _FakeCtx:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _record(filename: str, created_at: datetime):
+    from fastapi_app.shared_models.backup_record import BackupRecord
+
+    return BackupRecord(filename=filename, created_at=created_at, status='completed')
+
+
+class TestRetentionKeepFloor:
+    """保留策略链的保底与 sidecar 清理（P2-1，2026-10-17 审计备份区）。"""
+
+    @pytest.fixture
+    def policy_service(self):
+        # 这两条只跑 _apply_retention_policy（策略字典由用例显式给出），
+        # 不依赖 .env 里的保留期配置，因此只构造实例即可。
+        service = BackupPolicyService()
+        service.__init__()
+        return service
+
+    async def test_retention_never_deletes_the_last_backup(self, policy_service, tmp_path, monkeypatch):
+        """删光场景：必须救回最新一份，文件与 DB 记录都留。"""
+        import importlib
+
+        policy_mod = importlib.import_module(
+            'fastapi_app.services.backup.orchestration.policy_service'
+        )
+
+        monkeypatch.setattr(policy_mod, 'BACKUP_DIR', tmp_path)
+        old = _record('erp_backup_old.zip', datetime(2026, 11, 1, 3, 0))
+        new = _record('erp_backup_new.zip', datetime(2026, 11, 2, 3, 0))
+        for name in ('erp_backup_old.zip', 'erp_backup_new.zip'):
+            (tmp_path / name).write_bytes(b'x')
+            (tmp_path / (name + '.meta')).write_text('{}', encoding='utf-8')
+
+        session = _FakeSession([new, old])          # 调用方按 created_at desc 取
+        monkeypatch.setattr(policy_mod, 'get_async_db_context', lambda: _FakeCtx(session))
+        monkeypatch.setattr(policy_service, '_should_keep_backup', lambda *a, **k: False)
+
+        result = await policy_service._apply_retention_policy({
+            'retention': {'enabled': True, 'strategy': 'hybrid',
+                          'keep_manual_backups': True, 'keep_failed_backups': False}
+        })
+
+        assert (tmp_path / 'erp_backup_new.zip').exists(), '最新一份必须被保底救回'
+        assert (tmp_path / 'erp_backup_new.zip.meta').exists()
+        assert not (tmp_path / 'erp_backup_old.zip').exists()
+        assert not (tmp_path / 'erp_backup_old.zip.meta').exists(), 'sidecar 必须一起删'
+        assert result['deleted_records'] == 1, result
+        assert result['kept_records'] == 1, '被保底救回的那份要按「保留」计数'
+
+    async def test_retention_removes_sidecars_for_every_deleted_file(
+        self, policy_service, tmp_path, monkeypatch
+    ):
+        """非删光场景：照常删旧文件，但 .meta 必须同步清理（不留僵尸条目）。"""
+        import importlib
+
+        # `import a.b.c.policy_service as m` 会拿到**包属性**（orchestration/__init__ 里
+        # 把同名实例绑成了 attribute），不是模块 —— 必须走 importlib 才能 patch 模块级名字。
+        policy_mod = importlib.import_module(
+            'fastapi_app.services.backup.orchestration.policy_service'
+        )
+
+        monkeypatch.setattr(policy_mod, 'BACKUP_DIR', tmp_path)
+        names = ['erp_backup_a.zip', 'erp_backup_b.zip', 'erp_backup_c.zip']
+        records = [
+            _record(n, datetime(2026, 11, d, 3, 0))
+            for d, n in zip((3, 2, 1), names, strict=True)
+        ]
+        for name in names:
+            (tmp_path / name).write_bytes(b'x')
+            (tmp_path / (name + '.meta')).write_text('{}', encoding='utf-8')
+
+        session = _FakeSession(records)
+        monkeypatch.setattr(policy_mod, 'get_async_db_context', lambda: _FakeCtx(session))
+        # 最新一份保留，其余两份按策略删除
+        monkeypatch.setattr(
+            policy_service, '_should_keep_backup',
+            lambda record, *a, **k: record.filename == 'erp_backup_a.zip',
+        )
+
+        result = await policy_service._apply_retention_policy({
+            'retention': {'enabled': True, 'strategy': 'count',
+                          'keep_manual_backups': True, 'keep_failed_backups': False}
+        })
+
+        assert (tmp_path / 'erp_backup_a.zip').exists()
+        for gone in ('erp_backup_b.zip', 'erp_backup_c.zip'):
+            assert not (tmp_path / gone).exists()
+            assert not (tmp_path / (gone + '.meta')).exists(), f'{gone} 的 sidecar 未清理'
+        assert result['deleted_records'] == 2, result

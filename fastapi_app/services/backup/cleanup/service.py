@@ -233,7 +233,7 @@ class BackupCleanupService:
 
     def _enforce_keep_floor(self, backup_files: list[dict[str, Any]],
                             files_to_delete: set[str]) -> set[str]:
-        """兜底：任何情况下至少留一个可还原的全量备份。
+        """兜底：任何情况下至少留一个可还原的全量备份（委托模块级纯函数）。
 
         只在**会删光**时介入，从删除集里救回最新且未被判定损坏的一个
         （列表按 mtime 倒序，首个非 corrupted 即最新可还原者）。
@@ -243,17 +243,13 @@ class BackupCleanupService:
         保留该过滤是**有意的防御分支**（未来若恢复健康检测可直接生效，
         test_backup_cleanup_keep_floor.py 仍直测它）。
         """
-        if any(f['name'] not in files_to_delete for f in backup_files):
-            return files_to_delete
-        candidates = [f for f in backup_files if f.get('health_status') != 'corrupted']
-        if not candidates:
-            candidates = list(backup_files)
-        if not candidates:
-            return files_to_delete
-        survivor = candidates[0]['name']
-        files_to_delete.discard(survivor)
-        logger.warning('本次清理会删光全部 %d 个备份，已强制保留 %s', len(backup_files), survivor)
-        return files_to_delete
+        names_in_order = [f['name'] for f in backup_files]
+        corrupted = {f['name'] for f in backup_files if f.get('health_status') == 'corrupted'}
+        kept = apply_keep_floor(names_in_order, set(files_to_delete), corrupted)
+        if kept != files_to_delete:
+            logger.warning('本次清理会删光全部 %d 个备份，已强制保留 %s',
+                           len(backup_files), sorted(set(files_to_delete) - kept))
+        return kept
 
     async def _execute_cleanup(self, files_to_delete: set[str]) -> dict[str, Any]:
         """执行清理操作"""
@@ -488,6 +484,28 @@ class BackupCleanupService:
         except OSError as e:
             logger.error(f"获取清理历史失败: {e}")
             return []
+
+
+def apply_keep_floor(names_in_priority_order: list[str], files_to_delete: set[str],
+                     corrupted: set[str] | None = None) -> set[str]:
+    """「至少留一份可还原备份」的**唯一实现**（纯函数）。
+
+    P2-1（2026-10-17 审计）：本仓有两条清理链 —— `BackupCleanupService.smart_cleanup`
+    与 `policy_service._apply_retention_policy`。保底规则此前只有前者有，后者能把备份
+    删光。规则抽成纯函数由两处共用，避免「同一件事两条规则」再次漂移。
+
+    ``names_in_priority_order``：按「最新优先」排好的文件名（列表按 mtime 倒序）；
+    ``corrupted``：已判定损坏、不该作为幸存者的文件名集合（当前无人产出，留作防御分支）。
+    """
+    if not names_in_priority_order:
+        return files_to_delete
+    if any(name not in files_to_delete for name in names_in_priority_order):
+        return files_to_delete          # 本来就不会删光，无需介入
+    survivors = [n for n in names_in_priority_order if n not in (corrupted or set())]
+    if not survivors:
+        survivors = list(names_in_priority_order)
+    files_to_delete.discard(survivors[0])
+    return files_to_delete
 
 
 # 全局清理服务实例
