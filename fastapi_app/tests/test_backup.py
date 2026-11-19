@@ -253,12 +253,31 @@ class TestValidateBackupFile:
 
 class TestDeleteBackupFile:
     def test_delete_success(self, tmp_path):
+        """有第二份备份时，删任意一份都允许（保底只在会删光时介入）。"""
         test_file = tmp_path / 'erp_backup_20240115_103000.zip'
         test_file.write_bytes(b'dummy')
+        (tmp_path / 'erp_backup_20240116_103000.zip').write_bytes(b'dummy')
         with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
             result = delete_backup_file('erp_backup_20240115_103000.zip')
             assert result == 'erp_backup_20240115_103000.zip'
             assert not test_file.exists()
+
+    def test_refuses_to_delete_last_backup(self, tmp_path):
+        """P2-2（2026-10-17 审计）：手动删除不得与清理链口径相反 —— 不许删光。"""
+        only = tmp_path / 'erp_backup_20240115_103000.zip'
+        only.write_bytes(b'dummy')
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
+            with pytest.raises(BackupFileError, match='最后一份'):
+                delete_backup_file('erp_backup_20240115_103000.zip')
+        assert only.exists(), '被拒绝的删除不得动文件'
+
+    def test_force_allows_deleting_last_backup(self, tmp_path):
+        """确需清空必须显式 force —— 逃生口要存在，但不能是默认行为。"""
+        only = tmp_path / 'erp_backup_20240115_103000.zip'
+        only.write_bytes(b'dummy')
+        with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):
+            assert delete_backup_file(only.name, force=True) == only.name
+        assert not only.exists()
 
     def test_delete_not_found(self, tmp_path):
         with patch('fastapi_app.services.backup.records.BACKUP_DIR', tmp_path):

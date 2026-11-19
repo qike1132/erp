@@ -586,14 +586,27 @@ def validate_backup_file(content: bytes, filename: str) -> dict:  # log-context:
     return summary
 
 
-def delete_backup_file(filename: str) -> str:  # log-context: internal helper 无请求上下文
-    """删除服务器上的指定备份文件"""
+def delete_backup_file(filename: str, *, force: bool = False) -> str:  # log-context: internal helper 无请求上下文
+    """删除服务器上的指定备份文件。
+
+    P2-2（2026-10-17 审计）：清理链（`smart_cleanup` / `_apply_retention_policy`）都保底
+    「至少留一份可还原备份」，而**手动删除**没有这道保底 —— 一条 DELETE 就能把灾备清成
+    零，且与清理链口径相反（同一件事两条规则）。这里前置探测（删除后无法回滚，只能先问）：
+    删掉本文件后若一份都不剩，则拒绝；确需清空必须显式 ``force=True``。
+    """
     safe_name = Path(filename).name
     if safe_name != filename:
         raise BackupFileError('无效的文件名')
     filepath = BACKUP_DIR / safe_name
     if not filepath.exists():
         raise BackupFileError('备份文件不存在')
+    if not force:
+        remaining = [f for f in list_backup_files() if f.get('filename') != safe_name]
+        if not remaining:
+            raise BackupFileError(
+                '不允许删除最后一份备份：这是当前唯一可还原的全量备份。'
+                '请先创建新备份；确需清空请显式 force=True'
+            )
     try:
         filepath.unlink()
     except (OSError, ValueError) as e:
