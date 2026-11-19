@@ -21,6 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = PROJECT_ROOT / 'deploy' / 'install_package.ps1'
 RESTART_BAT = PROJECT_ROOT / 'scripts' / 'restart_erp_prod.bat'
 RESTART_PY = PROJECT_ROOT / 'scripts' / 'restart_backend.py'
+BUILD_PACKAGE = PROJECT_ROOT / 'deploy' / 'build_package.ps1'
 
 
 def _lines(path: Path) -> list[str]:
@@ -190,3 +191,35 @@ def test_restart_bat_checks_the_delegate_exit_code() -> None:
         '没有管理员检测 —— NSSM stop/start 需要提权，'
         '不提权会静默失败（NSSM 非提权调用退出码仍为 0）'
     )
+
+
+def test_build_package_refuses_non_main_branch() -> None:
+    """P2-5（2026-10-17 审计）：发布包只能来自 **main**。
+
+    原实现只查「工作区脏」不查分支 —— 而 NSSM 的 AppDirectory 就是本仓库工作区，
+    从特性分支打出来的包会被当作发布版本（2026-10-14 已有 75 分钟实害事故）。
+    `-DryRun` 是演练（`deploy/tests/e2e_dryrun.ps1` 会 clone 当前分支后再跑），
+    因此分支不符只 WARN —— 这条降级必须留着，否则演练在特性分支上就废了。
+    """
+    code = '\n'.join(_code_lines(BUILD_PACKAGE))
+
+    assert '--abbrev-ref HEAD' in code, '构建脚本没有读当前分支'
+    assert "'main'" in code, '构建脚本没有与 main 比对'
+    assert '不是 main' in code, '缺少拒绝文案（拒绝时必须说清原因）'
+    assert 'DryRun' in code, '分支闸门必须保留 DryRun 降级，否则演练在特性分支上跑不了'
+
+
+def test_build_package_git_failure_is_fail_closed() -> None:
+    """P2-5（2026-10-17 审计）：git 命令失败必须拒绝打包。
+
+    原实现把 `git status --porcelain` 的输出直接当判据：命令失败（`.git/index.lock`
+    残留 / 不在仓库 / `safe.directory` 拒绝）时输出为空 → 直接放行；同时下方 manifest
+    的 `git_head` 会是空串 —— 事后无法证明发布的到底是哪个提交。
+    """
+    code = '\n'.join(_code_lines(BUILD_PACKAGE))
+
+    for var in ('$rcBranch', '$rcDirty', '$rcHead'):
+        assert var in code, f'缺少 {var}：git 退出码没有被消费（失败会 fail-open）'
+    assert re.search(r'\$rcBranch\s+-ne\s+0', code), '没判 `git rev-parse --abbrev-ref` 的退出码'
+    assert re.search(r'\$rcHead\s+-ne\s+0', code), '没判 `git rev-parse HEAD` 的退出码'
+    assert 'Trim().Length' in code, '读不到 HEAD 时未拒绝（manifest 会写成空 git_head）'

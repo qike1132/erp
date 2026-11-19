@@ -706,19 +706,32 @@ class ServiceOps:
           AppDirectory 是本仓库工作区，重启 = 把当前签出分支跑进生产
           （2026-10-14 已有 75 分钟实害事故）。非 main 直接拒绝。
         """
-        if verb in ('restart', 'start'):
-            ok, msg = git_guard.check_production_branch(self._project_dir)
-            if not ok:
-                self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
-                # 2026-10-18 OCR 复评：被拒绝时也要收_hosting_refresh，否则界面
-                # 停在「动作执行中」的空档；_prod_start_ts 未刷新，hosting 会按
-                # 陈旧状态文件真实告警。
-                self._msg_queue.put(('hosting_refresh', {}))
-                return
-            if git_guard.is_warning(msg):
-                self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
-            # 闸门已放行：通知 app 刷新启动宽限时间戳（拒绝路径投 hosting_refresh、不投本消息）
-            self._msg_queue.put(('service_action_accepted', {'verb': verb}))
+        if verb not in ('restart', 'stop'):
+            # P2-2（2026-10-17 审计）：'start' 曾出现在下面的闸门白名单里，但本方法**没有**
+            # start 分支 —— verb='start' 会跑完 git 分支闸门、投 service_action_accepted
+            # （界面显示"已接受"），然后什么都不启动就走到末尾的 hosting_refresh 返回：
+            # 典型假成功。唯一入口是 app._service_cmd(verb)，它只传 'stop' / 'restart'
+            # （整栈启动走 _start_services_flow），所以这里 fail-closed：新动词必须连分支
+            # 一起补，不允许"闸门放行但没人干活"。
+            self._msg_queue.put(('log', {
+                'text': f'不支持的服务动作：{verb!r}（仅支持 stop / restart）', 'level': 'ERROR'}))
+            self._msg_queue.put(('hosting_refresh', {}))
+            return
+        # git 分支闸门：stop / restart 都在动生产进程（NSSM 的 AppDirectory 就是本仓库
+        # 工作区），非 main 直接拒绝（2026-10-14 已有 75 分钟实害事故）。动词白名单已在
+        # 上面 fail-closed，走到这里 verb 必然是 'stop' 或 'restart'。
+        ok, msg = git_guard.check_production_branch(self._project_dir)
+        if not ok:
+            self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
+            # 2026-10-18 OCR 复评：被拒绝时也要收_hosting_refresh，否则界面
+            # 停在「动作执行中」的空档；_prod_start_ts 未刷新，hosting 会按
+            # 陈旧状态文件真实告警。
+            self._msg_queue.put(('hosting_refresh', {}))
+            return
+        if git_guard.is_warning(msg):
+            self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
+        # 闸门已放行：通知 app 刷新启动宽限时间戳（拒绝路径投 hosting_refresh、不投本消息）
+        self._msg_queue.put(('service_action_accepted', {'verb': verb}))
         nssm = self.find_nssm()
         if verb == 'restart':
             # 清一次即可：清的是**非受管**端口占用，与迭代顺序无关，不必每个服务重扫。

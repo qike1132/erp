@@ -9,9 +9,11 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,33 @@ OVERRIDE_ENV = 'ERP_ALLOW_NON_MAIN'
 # 脏工作区覆盖开关（与分支覆盖分开：两者的风险面不同，运维通常只需临时放行其一）
 DIRTY_OVERRIDE_ENV = 'ERP_ALLOW_DIRTY'
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# 覆盖开关的**持久化证据**（P2-13，2026-10-17 审计）：两个 override 只靠「环境变量=1」
+# 就能放行，事后没有任何痕迹 —— 一旦有人把它写进机器级环境变量或 NSSM 服务配置，
+# 闸门就长期静默失效（2026-11-02~04 的 safe.directory 事故正是这种形态：每次启动只打
+# 一行警告，没人看）。这里把每次覆盖落盘一行，供事后审计与界面红条告警。
+OVERRIDE_LEDGER = PROJECT_ROOT / 'logs' / 'gate_override.jsonl'
+
+
+def _record_override(env_name: str, *, branch: str, detail: str) -> None:
+    """把「哪条闸门被哪个开关放行」追加到 ``logs/gate_override.jsonl``。
+
+    落盘失败只告警、不影响放行结论：放行已经发生，本函数唯一职责是留痕。
+    """
+    entry = {
+        'ts': datetime.now(UTC).isoformat(timespec='seconds'),
+        'env': env_name,
+        'branch': branch,
+        'detail': detail[:300],
+        'pid': os.getpid(),
+        'cwd': os.getcwd(),
+    }
+    try:
+        OVERRIDE_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        with OVERRIDE_LEDGER.open('a', encoding='utf-8') as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    except OSError as exc:  # broad-except: 留痕失败不得改判闸门结论
+        logger.warning('覆盖留痕写入失败（%s）：%s', OVERRIDE_LEDGER, exc)
 # 「放行但需警告」的消息前缀（2026-10-18 OCR 复评：调用方不再靠嗅探中文字串）
 WARNING_PREFIX = '警告：'
 
@@ -88,6 +117,9 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
             # （2026-11-02~11-04 的真实状态），因此这里改为 fail-closed，
             # 并保留显式 override 作为应急出口。
             if os.environ.get(OVERRIDE_ENV) == '1':
+                _record_override(
+                    OVERRIDE_ENV, branch='(git 不可用)', detail=f'git 不可用：{err or "未知"}',
+                )
                 return True, f'分支闸门已被 {OVERRIDE_ENV}=1 覆盖（git 不可用：{err or "未知"}）'
             msg = (
                 f'拒绝：仓库存在但无法读取 git 分支（{err or "git 不可用"}），'
@@ -101,6 +133,7 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
         return True, msg
 
     if os.environ.get(OVERRIDE_ENV) == '1':
+        _record_override(OVERRIDE_ENV, branch=branch, detail='非白名单分支放行')
         return True, f'分支闸门已被 {OVERRIDE_ENV}=1 覆盖，当前分支 {branch}'
 
     # 2026-10-18 OCR 评审：detached HEAD 时 abbrev-ref 返回字面量 'HEAD'。
@@ -154,6 +187,10 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
         )
     if status:
         if os.environ.get(DIRTY_OVERRIDE_ENV) == '1':
+            _record_override(
+                DIRTY_OVERRIDE_ENV, branch='(未读取)',
+                detail=f'工作区脏放行：{[ln for ln in status.splitlines() if ln.strip()][:5]}',
+            )
             return True, f'警告：工作区有未提交改动，已被 {DIRTY_OVERRIDE_ENV}=1 放行'
         entries = [ln for ln in status.splitlines() if ln.strip()]
         blocking = [ln for ln in entries if not _is_harmless_untracked(ln)]

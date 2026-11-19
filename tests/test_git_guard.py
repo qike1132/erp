@@ -3,6 +3,7 @@
 缺陷：NSSM 服务直接吃工作区源码，重启前无人校验分支；2026-10-14 已有
 75 分钟实害事故。本测试用临时 git 仓库验证闸门行为。
 """
+import json
 import subprocess
 
 import pytest
@@ -207,3 +208,88 @@ def test_untracked_directory_containing_python_blocks(repo, monkeypatch):
 
     assert ok is False
     assert 'newpkg' in msg
+
+
+def test_dirty_override_writes_persistent_evidence(repo, monkeypatch, tmp_path):
+    """P2-13（2026-10-17 审计）：覆盖开关放行必须**落盘留痕**。
+
+    两个 override 只靠「环境变量=1」就能放行，事后没有任何痕迹 —— 一旦有人把它写进
+    机器级环境变量或 NSSM 服务配置，闸门就长期静默失效（2026-11-02~04 的
+    safe.directory 事故正是这种形态：每次启动只打一行警告，没人看）。
+    """
+    _git(repo, 'checkout', '-q', '-b', 'main')
+    (repo / 'a.txt').write_text('changed', encoding='utf-8')      # 已跟踪文件被改 = 脏
+    ledger = tmp_path / 'logs' / 'gate_override.jsonl'
+    monkeypatch.setattr(git_guard, 'OVERRIDE_LEDGER', ledger)
+    monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    monkeypatch.setenv(git_guard.DIRTY_OVERRIDE_ENV, '1')
+
+    ok, msg = git_guard.check_production_branch(repo)
+
+    assert ok is True and '放行' in msg
+    entries = [
+        json.loads(ln) for ln in ledger.read_text(encoding='utf-8').splitlines() if ln.strip()
+    ]
+    assert len(entries) == 1, f'每次覆盖必须恰好留一条痕迹，实际 {entries}'
+    assert entries[0]['env'] == git_guard.DIRTY_OVERRIDE_ENV
+    assert entries[0]['ts'] and entries[0]['detail'], '痕迹必须带时间与明细（否则事后没法查）'
+
+
+def test_no_override_leaves_no_ledger(repo, monkeypatch, tmp_path):
+    """阴性对照：没使用覆盖时不得凭空写痕迹（否则「有痕迹」不再等于「有人放行」）。"""
+    _git(repo, 'checkout', '-q', '-b', 'main')
+    ledger = tmp_path / 'logs' / 'gate_override.jsonl'
+    monkeypatch.setattr(git_guard, 'OVERRIDE_LEDGER', ledger)
+    monkeypatch.delenv(git_guard.OVERRIDE_ENV, raising=False)
+    monkeypatch.delenv(git_guard.DIRTY_OVERRIDE_ENV, raising=False)
+
+    ok, _msg = git_guard.check_production_branch(repo)
+
+    assert ok is True
+    assert not ledger.exists(), '未使用覆盖开关却写了留痕'
+
+
+def test_branch_override_writes_persistent_evidence(repo, monkeypatch, tmp_path):
+    """P2-13 的**第二条** override：非白名单分支放行同样必须落痕。
+
+    变异实测（2026-11-19）：把 git_guard:136 的 _record_override 删掉，原有用例全绿 ——
+    因为唯一的留痕用例只覆盖「脏工作区」那条（DIRTY_OVERRIDE_ENV）。也就是说
+    「三处 override 各记一条」当时只有一处被钉住，另外两处删了没人知道。
+    """
+    _git(repo, 'checkout', '-q', '-b', 'feature-x')
+    ledger = tmp_path / 'logs' / 'gate_override.jsonl'
+    monkeypatch.setattr(git_guard, 'OVERRIDE_LEDGER', ledger)
+    monkeypatch.setenv(git_guard.OVERRIDE_ENV, '1')
+    monkeypatch.delenv(git_guard.DIRTY_OVERRIDE_ENV, raising=False)
+
+    ok, msg = git_guard.check_production_branch(repo)
+
+    assert ok is True and '覆盖' in msg
+    entries = [
+        json.loads(ln) for ln in ledger.read_text(encoding='utf-8').splitlines() if ln.strip()
+    ]
+    assert len(entries) == 1, f'分支覆盖必须恰好一条痕迹，实际 {entries}'
+    assert entries[0]['env'] == git_guard.OVERRIDE_ENV
+    assert entries[0]['branch'] == 'feature-x'
+    assert entries[0]['ts'] and '分支' in entries[0]['detail']
+
+
+def test_unreadable_branch_override_writes_persistent_evidence(tmp_path, monkeypatch):
+    """P2-13 的**第三条** override：有 .git 却读不出分支时放行，同样必须落痕。"""
+    ledger = tmp_path / 'logs' / 'gate_override.jsonl'
+    monkeypatch.setattr(git_guard, 'OVERRIDE_LEDGER', ledger)
+    monkeypatch.setenv(git_guard.OVERRIDE_ENV, '1')
+    (tmp_path / '.git').mkdir()
+    monkeypatch.setattr(
+        git_guard, '_git', lambda args, cwd: (128, '', 'fatal: dubious ownership')
+    )
+
+    ok, msg = git_guard.check_production_branch(tmp_path)
+
+    assert ok is True and '覆盖' in msg
+    entries = [
+        json.loads(ln) for ln in ledger.read_text(encoding='utf-8').splitlines() if ln.strip()
+    ]
+    assert len(entries) == 1, f'读不出分支的覆盖也必须留痕，实际 {entries}'
+    assert entries[0]['env'] == git_guard.OVERRIDE_ENV
+    assert entries[0]['branch'] == '(git 不可用)'

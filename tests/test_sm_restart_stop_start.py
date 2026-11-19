@@ -399,3 +399,43 @@ def test_start_timeout_localized_is_not_a_warning():
     ops.start_one_service('erp-redis')
     texts = q.texts()
     assert not any('返回非零' in t for t in texts), f'1053 超时类不得报 WARNING，实际={texts}'
+
+
+class TestUnsupportedVerbFailsClosed:
+    """P2-2（2026-10-17 审计）：`'start'` 曾在闸门白名单里，但 `service_cmd_sync` **没有**
+    start 分支 —— verb='start' 会跑完 git 分支闸门、投 `service_action_accepted`
+    （界面显示"已接受"），然后什么都不启动就返回 `hosting_refresh`：典型假成功。
+
+    唯一入口 `app._service_cmd(verb)` 只传 `'stop'` / `'restart'`（整栈启动走
+    `_start_services_flow`），所以现在改为动词白名单 fail-closed：新动词必须连分支一起补。
+    """
+
+    def test_start_verb_is_rejected_without_touching_services(self):
+        ops, q = _ops()
+
+        ops.service_cmd_sync('start')
+
+        assert ops.calls == [], f'不支持的动词不得发出任何服务命令，实际 {ops.calls}'
+        accepted = [d for kind, d in q.msgs if kind == 'service_action_accepted']
+        assert accepted == [], (
+            '被拒绝的动词不得投 service_action_accepted —— 否则界面会显示"已接受"，'
+            '而实际什么都没启动（这正是本用例要防的假成功）'
+        )
+        assert any('不支持' in t for t in q.texts()), (
+            f'必须在日志里说明该动词不受支持，实际日志={q.texts()}'
+        )
+
+    def test_restart_verb_still_accepted(self):
+        """阳性对照：合法动词仍要过闸门并投 accepted。
+
+        没有这一条，上面的「start 被拒绝」可能只是「所有动词都被拒绝」。
+        （这里不跑 'stop'：它走真实 ``sc query`` 轮询，不适合在单测里触发。）
+        """
+        ops, q = _ops()
+
+        ops.service_cmd_sync('restart')
+
+        accepted = [d for kind, d in q.msgs if kind == 'service_action_accepted']
+        assert accepted and accepted[0].get('verb') == 'restart', (
+            f'restart 应被闸门放行并投 accepted，实际 {q.msgs[:5]}'
+        )

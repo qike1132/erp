@@ -40,11 +40,30 @@ if($binMiss){
 if(-not $PyDir){ foreach($c in @("$env:LOCALAPPDATA\Programs\Python\Python313","C:\Python313")){ if(Test-Path (Join-Path $c 'python.exe')){ $PyDir=$c; break } } }
 if(-not $PyDir -or -not (Test-Path (Join-Path $PyDir 'python.exe'))){ Write-Fail '未找到系统 Python 3.13（-PyDir）'; exit 1 }
 
-# git 清洁（不打包未提交改动）
+# git 闸门（2026-10-17 审计 P2-5）：发布包只能来自 **main 的干净提交**。
+#   ① git 命令失败必须 fail-closed —— 原实现把 `git status` 的输出直接当判据：命令失败
+#      （index.lock / 非仓库 / safe.directory 拒绝）时输出为空 → 放行，且下方 manifest 的
+#      git_head 会是空串（= 无法证明打的是哪个提交）；
+#   ② 必须校验分支 —— NSSM 的 AppDirectory 就是本仓库工作区，从特性分支打包等于把该分支
+#      当发布版本（2026-10-14 已有 75 分钟实害事故）；
+#   ③ `-DryRun` 是演练（deploy\tests\e2e_dryrun.ps1 会 clone 当前分支后再跑），因此
+#      **分支不符只 WARN**；但「git 读不出」与「工作区脏」不因演练放宽。
 Push-Location $ProjectDir
-$dirty = (git status --porcelain); $head = (git rev-parse HEAD)
+$branch = (git rev-parse --abbrev-ref HEAD 2>$null); $rcBranch = $LASTEXITCODE
+$dirty  = (git status --porcelain 2>$null);          $rcDirty  = $LASTEXITCODE
+$head   = (git rev-parse HEAD 2>$null);              $rcHead   = $LASTEXITCODE
 Pop-Location
-if($dirty){ Write-Fail "工作区不干净，拒绝打包（先提交/清理）"; exit 1 }
+if($rcBranch -ne 0 -or $rcDirty -ne 0 -or $rcHead -ne 0){
+  if($DryRun){ Write-Warn ("DryRun：git 命令失败（branch=" + $rcBranch + " dirty=" + $rcDirty + " head=" + $rcHead + "），跳过 git 闸门（真实构建此处 FAIL）") }
+  else { Write-Fail ("git 命令失败（branch=" + $rcBranch + " dirty=" + $rcDirty + " head=" + $rcHead + "）—— 无法证明打包的是哪个提交，拒绝打包"); exit 1 }
+} else {
+  if(-not $head -or $head.Trim().Length -lt 7){ Write-Fail ("读不到 HEAD 提交（'" + $head + "'）—— 拒绝打包"); exit 1 }
+  if($branch.Trim() -ne 'main'){
+    if($DryRun){ Write-Warn ("DryRun：当前分支 '" + $branch.Trim() + "' 不是 main（真实构建此处 FAIL）") }
+    else { Write-Fail ("当前分支 '" + $branch.Trim() + "' 不是 main —— 发布包只能来自 main"); exit 1 }
+  }
+  if($dirty){ Write-Fail "工作区不干净，拒绝打包（先提交/清理）"; exit 1 }
+}
 
 # 组装
 if(Test-Path $OutDir){ Remove-Item $OutDir -Recurse -Force }
