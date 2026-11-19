@@ -400,8 +400,15 @@ def _validate_json_backup_payload(backup_data: dict) -> None:
         error = table_data.get('error')
         if error:
             broken.append(f'{name}({str(error)[:80]})')
-        elif 'rows' not in table_data and 'columns' not in table_data:
-            broken.append(f'{name}(缺少 rows/columns)')
+        else:
+            # P2-8（2026-10-17 审计）：原判据是「rows 与 columns 都缺才报」——
+            # **只有 columns 没有 rows** 的载荷照样通过，随后先清空该表再写 0 行。
+            # rows 是数据本体，缺了就不是「空表」而是「导出残缺」。
+            rows = table_data.get('rows')
+            if 'rows' not in table_data:
+                broken.append(f'{name}(缺少 rows：仅 columns 不足以恢复)')
+            elif not isinstance(rows, list):
+                broken.append(f'{name}(rows 不是数组：{type(rows).__name__})')
     if broken:
         raise RestoreError(
             'JSON 备份包含导出失败/不完整的表，拒绝恢复（否则会先清空该表再写入 0 行）：'
@@ -571,8 +578,16 @@ async def _restore_tables_from_json(db, tables_to_restore, backup_data, _report,
     for table in tables_to_restore:
         table_name = str(table.name)
         table_data = backup_data['tables'][table_name]
-        columns = table_data.get('columns', [])
-        rows = table_data.get('rows', [])
+        # P2-8（2026-10-17 审计）：`columns` 可缺（缺则按表结构推断，原来缺了会让
+        # valid_cols 为空、整表静默插 0 行）；`rows` 必须在，缺失/非数组直接中止 ——
+        # 此刻该表已被 _clear_tables_for_restore 清空，静默跳过就是「合法地清空整表」。
+        columns = table_data.get('columns') or [c.name for c in table.columns]
+        rows = table_data.get('rows')
+        if not isinstance(rows, list):
+            raise JsonRestoreFatalError(
+                f'还原中止: 表 "{table_name}" 的 rows 缺失或不是数组 —— '
+                '该表已被清空，继续会留下空表'
+            )
         table_col_names = {c.name for c in table.columns}
         type_map = build_column_type_map(table)
         BATCH_SIZE = 500

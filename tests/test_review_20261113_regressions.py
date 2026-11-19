@@ -71,6 +71,32 @@ def test_b1_rejects_table_missing_rows_and_columns():
     with pytest.raises(RestoreError, match='orders'):
         _validate_json_backup_payload({'tables': {'orders': {'count': 3}}})
 
+def test_p2_8_rejects_columns_without_rows():
+    """P2-8（2026-10-17 审计备份区）：只有 columns 没有 rows 的载荷必须拒。
+
+    原判据是「rows 与 columns **都**缺才报」—— 于是 ``{'columns': ['id']}`` 通过校验，
+    恢复时先 ``_clear_tables_for_restore`` 清空该表、再按 ``rows=[]`` 插 0 行：
+    一次残缺载荷 = 合法地清空整表。``rows`` 是数据本体，缺了不是「空表」而是「导出残缺」。
+    """
+    with pytest.raises(RestoreError, match='orders'):
+        _validate_json_backup_payload({'tables': {'orders': {'columns': ['id']}}})
+
+
+def test_p2_8_rejects_rows_that_are_not_a_list():
+    """``rows`` 存在但不是数组（如被写成 dict/None）同样必须拒。"""
+    for bad_rows in ({'id': 1}, None, 'oh-no'):
+        with pytest.raises(RestoreError, match='orders'):
+            _validate_json_backup_payload({'tables': {'orders': {'columns': ['id'], 'rows': bad_rows}}})
+
+
+def test_p2_8_accepts_empty_rows_list():
+    """空表是合法载荷（``rows: []`` 存在且是数组）—— 不能把「真的没有行」也拒掉。"""
+    payload = {
+        'tables': {'orders': {'columns': ['id'], 'rows': []}},
+        'failed_tables': [],
+        'coverage': {'complete': True},
+    }
+    assert _validate_json_backup_payload(payload) is None
 
 def test_b1_accepts_healthy_payload():
     payload = {
