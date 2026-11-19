@@ -151,6 +151,12 @@ class TestCreateSupplier:
         assert created.contact_person == '李四'
         assert created.phone == '13900139000'
         assert created.remark == '优质供应商'
+        # 评审（2026-11-19 Low）：漏了 address —— 字段被服务层丢弃也照样绿；且「恰好一次」
+        # 的语义不能丢（原来只取 call_args 最后一次，重复 add 不会红）。
+        assert created.address == '深圳市南山区'
+        assert mock_async_db.add.call_count == 1, (
+            f'add 必须恰好调用一次，实际 {mock_async_db.add.call_count} 次'
+        )
         mock_async_db.flush.assert_awaited_once()
 
     @pytest.mark.asyncio

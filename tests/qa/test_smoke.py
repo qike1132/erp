@@ -80,7 +80,7 @@ async def auth_headers(client):
     # 整个文件"假绿"，接口契约漂移（如 year&month 必填）被发现不了。
     assert resp.status_code == 200, f"smoke 登录失败 HTTP {resp.status_code}: {resp.text[:200]}"
     # 浏览器登录把令牌放 httpOnly cookie，body 的 access_token 恒为 None（auth.py:436-438）——
-    # 从 body 取会得到空串，实际发出去的是 "Authorization: Bearer "（全靠 cookie jar 才通）。
+    # 从 body 取会得到空串、只能靠 cookie 通，「Bearer 通道活着」就没被测到。
     token = client.cookies.get("access_token", "")
     assert token, "smoke 登录成功但 client cookie jar 里没有 access_token"
     return {"Authorization": f"Bearer {token}"}

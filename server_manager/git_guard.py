@@ -27,7 +27,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # 覆盖开关的**持久化证据**（P2-13，2026-10-17 审计）：两个 override 只靠「环境变量=1」
 # 就能放行，事后没有任何痕迹 —— 一旦有人把它写进机器级环境变量或 NSSM 服务配置，
 # 闸门就长期静默失效（2026-11-02~04 的 safe.directory 事故正是这种形态：每次启动只打
-# 一行警告，没人看）。这里把每次覆盖落盘一行，供事后审计与界面红条告警。
+# 一行警告，没人看）。这里把每次覆盖落盘一行，供事后审计（`grep gate_override`）。
 OVERRIDE_LEDGER = PROJECT_ROOT / 'logs' / 'gate_override.jsonl'
 
 
@@ -133,7 +133,13 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
         return True, msg
 
     if os.environ.get(OVERRIDE_ENV) == '1':
-        _record_override(OVERRIDE_ENV, branch=branch, detail='非白名单分支放行')
+        # 留痕要如实：环境变量残留时分支可能就是白名单内的 main，写成「非白名单分支放行」会
+        # 让事后审计误判（2026-11-19 评审）。
+        detail = (
+            '非白名单分支放行' if branch not in ALLOWED_BRANCHES
+            else f'分支 {branch} 本在白名单内，覆盖开关仍在生效'
+        )
+        _record_override(OVERRIDE_ENV, branch=branch, detail=detail)
         return True, f'分支闸门已被 {OVERRIDE_ENV}=1 覆盖，当前分支 {branch}'
 
     # 2026-10-18 OCR 评审：detached HEAD 时 abbrev-ref 返回字面量 'HEAD'。
@@ -187,8 +193,10 @@ def check_production_branch(root: Path | str | None = None) -> tuple[bool, str]:
         )
     if status:
         if os.environ.get(DIRTY_OVERRIDE_ENV) == '1':
+            # branch 传真实分支（原来写死 '(未读取)'，但此刻分支已读过并通过白名单 —— 记录失真
+            # 会让事后审计分不清「工作区脏」与「分支不对」）。
             _record_override(
-                DIRTY_OVERRIDE_ENV, branch='(未读取)',
+                DIRTY_OVERRIDE_ENV, branch=branch,
                 detail=f'工作区脏放行：{[ln for ln in status.splitlines() if ln.strip()][:5]}',
             )
             return True, f'警告：工作区有未提交改动，已被 {DIRTY_OVERRIDE_ENV}=1 放行'

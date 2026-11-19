@@ -439,3 +439,39 @@ class TestUnsupportedVerbFailsClosed:
         assert accepted and accepted[0].get('verb') == 'restart', (
             f'restart 应被闸门放行并投 accepted，实际 {q.msgs[:5]}'
         )
+
+
+class TestGitGateAppliesOnlyToRestart:
+    """git 闸门只拦 restart（2026-11-19 推送前评审）。
+
+    评审发现上一版把闸门写成无条件执行 —— 于是 `stop` 在工作区脏 / git 读不出时也被拒，
+    而那两类状态恰恰是最需要能停机的事故态（拒绝文案还会让人去 commit/stash，与停机无关）。
+    """
+
+    @staticmethod
+    def _deny(monkeypatch, msg='当前工作区不干净（已跟踪文件被改）'):
+        monkeypatch.setattr(
+            git_guard, 'check_production_branch', lambda *a, **k: (False, msg)
+        )
+
+    def test_restart_is_blocked_when_gate_denies(self, monkeypatch):
+        self._deny(monkeypatch)
+        ops, q = _ops()
+
+        ops.service_cmd_sync('restart')
+
+        assert ops.calls == [], f'闸门拒绝后不得执行任何 nssm 动作，实际 {ops.calls}'
+        assert any('拒绝执行' in t for t in q.texts()), f'缺少拒绝日志：{q.texts()}'
+        assert not [d for kind, d in q.msgs if kind == 'service_action_accepted'], (
+            '拒绝路径不得投 service_action_accepted（否则界面显示「已受理」而服务没动）'
+        )
+
+    def test_stop_is_not_blocked_when_gate_denies(self, monkeypatch):
+        """停机是事故态的逃生通道：闸门拒绝也不许拦住 stop。"""
+        self._deny(monkeypatch)
+        ops, q = _ops()
+
+        ops.service_cmd_sync('stop')
+
+        assert ops.calls, 'stop 必须真的下发（否则工作区一脏就停不了服务）'
+        assert not any('拒绝执行' in t for t in q.texts()), f'stop 不该被闸门拒绝：{q.texts()}'

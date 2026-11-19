@@ -34,14 +34,23 @@ def test_loopback_blocked_by_default(monkeypatch):
         require_non_production('http://127.0.0.1:5002')
 
 
-@pytest.mark.parametrize('url', [
-    'http://localhost:5002', 'http://0.0.0.0:5002', 'http://192.168.0.95:5002',
-], ids=['localhost', 'all-zero', 'lan'])
-def test_non_loopback_or_allowed_passes(url, monkeypatch):
-    # 非回环地址不拦；回环地址显式允许后放行
-    monkeypatch.delenv('STRESS_TEST_ALLOW_PROD', raising=False)
+@pytest.mark.parametrize('url', ['http://localhost:5002', 'http://0.0.0.0:5002'],
+                         ids=['localhost', 'all-zero'])
+def test_loopback_or_unspecified_passes_with_explicit_allow(url, monkeypatch):
+    """回环/未指定地址在显式允许后放行（默认拦由 test_loopback_blocked_by_default 看住）。"""
     monkeypatch.setenv('STRESS_TEST_ALLOW_PROD', '1')
     require_non_production(url)
+
+
+def test_lan_address_passes_without_any_override(monkeypatch):
+    """非回环地址**不需要**任何 override 就该放行。
+
+    评审（2026-11-19）：原来 'lan' 与回环地址共用同一参数化，而那个用例无条件
+    setenv('STRESS_TEST_ALLOW_PROD','1') —— 环境变量一置 1 就什么都不拦，于是
+    「非回环不拦」这条行为彻底失去判定力（把 _is_blocked_host 改成恒 True 也不会红）。
+    """
+    monkeypatch.delenv('STRESS_TEST_ALLOW_PROD', raising=False)
+    require_non_production('http://192.168.0.95:5002')
 
 
 @pytest.mark.parametrize('url', ['http://[::1]:5002', 'http://[0:0:0:0:0:0:0:1]:5002'],
@@ -53,6 +62,23 @@ def test_ipv6_loopback_blocked_by_default(url, monkeypatch):
     `urlparse(...).hostname` 解析不出 `::1`（得到 ''），于是走了「显式允许 → 不抛」的
     分支 —— `require_non_production` 退化成 no-op 也照绿。改用标准写法并断言默认被拦
     （守卫的 `_LOOPBACK_HOSTS` 本来就含 '::1'，此前只是没被真正测到）。
+    """
+    monkeypatch.delenv('STRESS_TEST_ALLOW_PROD', raising=False)
+    with pytest.raises(SystemExit):
+        require_non_production(url)
+
+
+@pytest.mark.parametrize('url', [
+    'http://[::ffff:127.0.0.1]:5002',   # IPv4-mapped：ipaddress.is_loopback 为 False
+    'http://127.1:5002',                # 省略写法：ipaddress 不接受，系统解析器认
+    'http://localhost.:5002',           # FQDN 尾点
+], ids=['ipv4-mapped', 'short-form', 'fqdn-dot'])
+def test_loopback_equivalents_blocked_by_default(url, monkeypatch):
+    """回环的等价写法也必须默认拦（评审 2026-11-19：`::ffff:127.0.0.1` 当时能过）。
+
+    `_is_blocked_host` 只靠 `is_loopback`/`is_unspecified` 时，IPv4-mapped 形式
+    （`::ffff:127.0.0.1`）的 `is_loopback` 是 False，于是被当成「专门的压测环境」放行 ——
+    而它指向的正是本机生产 uvicorn。
     """
     monkeypatch.delenv('STRESS_TEST_ALLOW_PROD', raising=False)
     with pytest.raises(SystemExit):

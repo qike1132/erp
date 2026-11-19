@@ -61,7 +61,11 @@ e.dispose()
 # 需要留档时用 PERF_OUTPUT_DIR 显式指定。
 _out_dir = os.getenv("PERF_OUTPUT_DIR") or tempfile.gettempdir()
 outpath = os.path.join(_out_dir, "perf_result.csv")
+# 目录不存在时原来要等全部查询跑完才 FileNotFoundError（白跑一遍）；就地创建（评审 2026-11-19）。
+os.makedirs(_out_dir, exist_ok=True)
 with open(outpath, "w", encoding="utf-8") as f:
     f.write("test_name,response_ms,status\n")
     for line in lines:
         f.write(line + "\n")
+
+print(f"\n结果已保存: {outpath}")

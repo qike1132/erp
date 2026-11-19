@@ -206,6 +206,12 @@ def test_build_package_refuses_non_main_branch() -> None:
     assert '--abbrev-ref HEAD' in code, '构建脚本没有读当前分支'
     assert "'main'" in code, '构建脚本没有与 main 比对'
     assert '不是 main' in code, '缺少拒绝文案（拒绝时必须说清原因）'
+    assert re.search(r"\$branch\.Trim\(\)\s+-ne\s+'main'", code), (
+        '分支比对取的是原始 $branch（含空白）或已被改写 —— 必须是 $branch.Trim() -ne \'main\''
+    )
+    assert re.search(r'不是 main[^\n]*;\s*exit 1', code), (
+        '「不是 main」的拒绝分支没有紧跟 exit 1（Write-Fail 只写 stderr、不退出 = fail-open）'
+    )
     assert 'DryRun' in code, '分支闸门必须保留 DryRun 降级，否则演练在特性分支上跑不了'
 
 
@@ -223,3 +229,18 @@ def test_build_package_git_failure_is_fail_closed() -> None:
     assert re.search(r'\$rcBranch\s+-ne\s+0', code), '没判 `git rev-parse --abbrev-ref` 的退出码'
     assert re.search(r'\$rcHead\s+-ne\s+0', code), '没判 `git rev-parse HEAD` 的退出码'
     assert 'Trim().Length' in code, '读不到 HEAD 时未拒绝（manifest 会写成空 git_head）'
+
+    # 只断言「字符串还在」挡不住 fail-open：deploy/_lib.ps1 的 Write-Fail 只写 stderr、**不退出**，
+    # 所以每条拒绝分支都是手写的 `Write-Fail ...; exit 1`。删掉 exit 1（或把条件改成 $false）后
+    # 上面那些字符串全都还在、用例照绿，而脚本会继续 robocopy 并打出 BUILD COMPLETE
+    # —— 正是这条用例要防的「特性分支/脏工作区的包被当发布版本」（2026-11-19 评审）。
+    assert code.count('exit 1') >= 4, (
+        f'拒绝分支少了退出：期望 ≥4 处 `exit 1`，实际 {code.count("exit 1")} 处'
+        '（Write-Fail 不退出，只留文案等于放行）'
+    )
+    assert re.search(r'HEAD 失败[^\n]*拒绝打包"\)\s*\n\s*exit 1', code), (
+        'git rev-parse HEAD 失败的分支没有紧跟 exit 1（fail-open）'
+    )
+    assert re.search(r'不是 main[^\n]*;\s*exit 1', code), (
+        '「不是 main」的拒绝分支没有紧跟 exit 1（fail-open）'
+    )

@@ -30,7 +30,7 @@ from fastapi_app.services.purchase_order_query import export_completed_orders
 from fastapi_app.shared_models import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 async def _cr_purchase_orders_cleanup(async_db_session):
     """本文件用固定单号（``CR-*``）写真实测试库，必须**前后各清一次**。
 
@@ -99,6 +99,7 @@ async def _reload_item(db, item_id: int) -> PurchaseOrderItem:
     )).scalars().one()
 
 
+@pytest.mark.usefixtures('_cr_purchase_orders_cleanup')
 class TestOrderLevelRateReachesLineAmounts:
     """F1：订单级损耗率改了，行金额与订单金额必须跟着走"""
 
@@ -197,6 +198,7 @@ class TestLineTotalQuantization:
         assert item.total_price == Decimal('7.50'), item.total_price
 
 
+@pytest.mark.usefixtures('_cr_purchase_orders_cleanup')
 class TestCompletedOrdersExportCaliber:
     """F3：导出表里「数量 × 单价 == 金额」"""
 
@@ -219,11 +221,14 @@ class TestCompletedOrdersExportCaliber:
 
         rows = await export_completed_orders(async_db_session)
 
-        assert rows, '导出应有明细行'
-        row = rows[0]
+        # 同 test_export_without_loss_rate…：按单号定位，别依赖「恰好排在第一行」。
+        matched = [r for r in rows if r['order_no'] == 'CR-EXP-1']
+        assert matched, f'导出里找不到本用例的采购单 CR-EXP-1（共 {len(rows)} 行）'
+        row = matched[0]
         assert row['quantity'] == pytest.approx(200), row
         assert row['amount'] == pytest.approx(1000), row
         assert row['quantity'] * row['unit_price'] == pytest.approx(row['amount']), row
+
 
     @pytest.mark.asyncio
     async def test_export_without_loss_rate_keeps_raw_quantity(self, async_db_session):
@@ -239,6 +244,10 @@ class TestCompletedOrdersExportCaliber:
 
         rows = await export_completed_orders(async_db_session)
 
-        row = rows[0]
+        # 导出按 completed_at DESC 排全表：`rows[0]` 会被别的文件/历史残行顶掉（评审 2026-11-19），
+        # 按单号定位本用例自己那一行，并断言它确实在。
+        matched = [r for r in rows if r['order_no'] == 'CR-EXP-2']
+        assert matched, f'导出里找不到本用例的采购单 CR-EXP-2（共 {len(rows)} 行）'
+        row = matched[0]
         assert row['quantity'] == pytest.approx(100), row
         assert row['amount'] == pytest.approx(500), row

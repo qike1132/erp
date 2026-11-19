@@ -72,5 +72,15 @@ def record_reset(*, database: str, tables: int | None) -> dict | None:
 
 
 def database_name_from_url(url: str) -> str:
-    """从 SQLAlchemy URL 取库名（只用于留痕；取不到就给整串）。"""
-    return url.rsplit("/", 1)[-1].split("?", 1)[0] or url
+    """从 SQLAlchemy URL 取库名（只用于留痕）。
+
+    用 `make_url` 解析而不是字符串切分：取不到库名时回落 ``<unknown>``，**绝不回落整串 URL** ——
+    整串里含口令（`postgresql+asyncpg://erp:secret@host:5432/`），会把它写进
+    `logs/test_db_reset.jsonl`（2026-11-19 评审）。
+    """
+    from sqlalchemy.engine import make_url
+
+    try:
+        return make_url(url).database or "<unknown>"
+    except Exception:      # 非法 URL / 缺驱动段：留痕只需要一个可读名字
+        return "<unknown>"

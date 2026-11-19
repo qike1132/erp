@@ -28,7 +28,9 @@ WRITE_ENDPOINTS = [
     ('POST', '/api/v1/purchase-center/orders', 'purchase_center_manage'),
     ('DELETE', '/api/v1/purchase-center/orders/1', 'purchase_center_manage'),
     ('POST', '/api/v1/batch/import-orders', 'batch_import'),
-    ('POST', '/api/v1/staging-orders/confirm', 'staging_manage'),
+    # 实测挂的是 batch_import + order_manage（评审 2026-11-19：原来声明 staging_manage 是错的，
+    # 而声明一旦参与判定，写错就会当场红 —— 这正是「声明要可判定」的价值）。
+    ('POST', '/api/v1/staging-orders/confirm', 'order_manage'),
 ]
 
 
@@ -64,7 +66,34 @@ async def test_same_request_not_403_for_admin(async_client, auth_headers, method
     """
     resp = await async_client.request(method, url, headers=auth_headers, json={})
 
-    assert resp.status_code != 403, (
-        f'{method} {url} 对超管也返回 403 —— 说明那个 403 不是权限层给的，'
-        f'非超管那组断言测的不是权限。响应: {resp.text[:300]}'
+    resp = await async_client.request(method, url, headers=auth_headers, json={})
+
+    # 只排除 403 不够：登录坏掉时这里收到的是 401，`401 != 403` 会让阳性对照静默失效，
+    # 「超管能越过权限层」这个前提就从未被验证过。
+    assert resp.status_code not in (401, 403), (
+        f'{method} {url} 对超管返回 {resp.status_code}（不应是 401 也不应是 403）——'
+        f' 401 说明超管身份没建立起来（夹具/登录坏了），403 说明那个 403 不是权限层给的。'
+        f' 响应: {resp.text[:300]}'
     )
+
+
+def test_declared_codes_are_actually_wired() -> None:
+    """声明的权限码必须真的挂在那条路由上 —— 否则它只是失败信息里的死数据。
+
+    推送前评审（2026-11-19）：`WRITE_ENDPOINTS` 第三列此前只出现在失败文案里，不参与判定，
+    于是「把 `_manage` 写成 `_view`」这个审计要点根本没有判定力（零权限用户对两者都是 403）。
+    这里把声明与**路由树上的实际权限码**对上：改成 `_view` 后本表与路由树不一致，当场红。
+
+    比「造一个只带 `*_view` 的用户」更便宜，也不需要往测试库里种权限数据。
+    """
+    from fastapi_app.main import app
+    from fastapi_app.tests._route_introspect import codes_for_request
+
+    problems: list[str] = []
+    for method, url, code in WRITE_ENDPOINTS:
+        codes = codes_for_request(app, method, url)
+        if codes is None:
+            problems.append(f'{method} {url} 在路由树里找不到（URL 可能已改，请以 openapi 为准）')
+        elif code not in codes:
+            problems.append(f'{method} {url} 声明 {code!r}，实际挂的是 {sorted(codes)}')
+    assert problems == [], '声明与接线漂移（权限码被降级/改名，或 URL 已改）：' + '；'.join(problems)

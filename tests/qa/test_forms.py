@@ -45,7 +45,8 @@ async def auth_headers(client):
     # 浏览器登录把令牌放 httpOnly cookie，body 里是 None（见 auth.py:436-438）——
     # 原来这里取 body 的 access_token 得到空串，实际发出去的是 "Authorization: Bearer "
     # 这种**假覆盖**（请求全靠 cookie jar 才通）。改为从 cookie jar 取真实令牌，
-    # 保持 Bearer 与 cookie 两条通道都被覆盖。
+    # 同时带 Bearer 与 cookie（服务端先认哪个都行）；Bearer **单独**可用由
+    # test_bearer_channel_alone_is_accepted 钉住，否则两通道同在等于只测了 cookie。
     token = client.cookies.get("access_token", "")
     assert token, "登录成功但 client cookie jar 里没有 access_token"
     return {"Authorization": f"Bearer {token}"}
@@ -111,6 +112,18 @@ class TestProductForm:
         resp = await client.get("/api/v1/products/list", headers=auth_headers)
         assert_list_shape(resp, '产品列表')
 
+
+    @pytest.mark.asyncio
+    async def test_bearer_channel_alone_is_accepted(self, client, auth_headers):
+        """Bearer 通道单独也要通 —— Capacitor 客户端唯一可用的通道。
+
+        评审（2026-11-19）：`auth_headers` 现在带的是真令牌，但请求同时带着 client 的
+        cookie jar，服务端先认 cookie 就永远测不到 `Authorization` 解析。这里清掉 cookie
+        再发，「Bearer 通道活着」才有判定力。
+        """
+        client.cookies.clear()
+        resp = await client.get("/api/v1/products/list", headers=auth_headers)
+        assert_list_shape(resp, "产品列表(Bearer-only)")
     @pytest.mark.asyncio
     async def test_product_search(self, client, auth_headers):
         resp = await client.get("/api/v1/products/search", headers=auth_headers, params={"keyword": "测试"})

@@ -53,9 +53,19 @@ $branch = (git rev-parse --abbrev-ref HEAD 2>$null); $rcBranch = $LASTEXITCODE
 $dirty  = (git status --porcelain 2>$null);          $rcDirty  = $LASTEXITCODE
 $head   = (git rev-parse HEAD 2>$null);              $rcHead   = $LASTEXITCODE
 Pop-Location
-if($rcBranch -ne 0 -or $rcDirty -ne 0 -or $rcHead -ne 0){
-  if($DryRun){ Write-Warn ("DryRun：git 命令失败（branch=" + $rcBranch + " dirty=" + $rcDirty + " head=" + $rcHead + "），跳过 git 闸门（真实构建此处 FAIL）") }
-  else { Write-Fail ("git 命令失败（branch=" + $rcBranch + " dirty=" + $rcDirty + " head=" + $rcHead + "）—— 无法证明打包的是哪个提交，拒绝打包"); exit 1 }
+# 「git 读不出」（rc≠0）与「读不到 HEAD」不因演练放宽 —— 演练产物同样要能证明打的是哪个提交；
+# 只有「分支不符」在 -DryRun 下降级为 WARN（e2e_dryrun.ps1 会 clone 当前分支再跑）。
+if($rcHead -ne 0){
+  Write-Fail ("git rev-parse HEAD 失败（退出码 " + $rcHead + "）—— 无法证明打包的是哪个提交，拒绝打包")
+  exit 1
+}
+if($rcDirty -ne 0){
+  Write-Fail ("git status 失败（退出码 " + $rcDirty + "）—— 读不出工作区状态，拒绝打包")
+  exit 1
+}
+if($rcBranch -ne 0){
+  if($DryRun){ Write-Warn ("DryRun：git rev-parse --abbrev-ref 失败（退出码 " + $rcBranch + "），跳过分支闸门（真实构建此处 FAIL）") }
+  else { Write-Fail ("git rev-parse --abbrev-ref 失败（退出码 " + $rcBranch + "）—— 无法确定打包分支，拒绝打包"); exit 1 }
 } else {
   if(-not $head -or $head.Trim().Length -lt 7){ Write-Fail ("读不到 HEAD 提交（'" + $head + "'）—— 拒绝打包"); exit 1 }
   if($branch.Trim() -ne 'main'){

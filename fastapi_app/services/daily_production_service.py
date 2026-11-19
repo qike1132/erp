@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.expression import Join
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
-from fastapi_app.core.business_time import fmt_business
+from fastapi_app.core.business_time import business_today, fmt_business
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.production_scope import PRODUCTION_DEPARTMENTS
@@ -497,7 +497,10 @@ async def create_record(
     prod_date = parse_date_with_fallback(production_date_str)
 
     # 限制不能录入未来日期的数据
-    if prod_date > date.today():
+    # 业务时区口径（与 e2e / 前端口径一致）：裸 date.today() 取的是**进程本地**日期，
+    # UTC runner 上它与北京日期每天有 8 小时错位 → 测试按业务日提交「今天」会被判成未来
+    # （2026-11-19 推送前评审）。审计 AUD-23 已把口径统一到 business_time。
+    if prod_date > business_today():
         raise ValueError('不能录入未来日期的生产数据')
 
     customer_name = await _resolve_customer_name(db, customer_id)
@@ -635,7 +638,7 @@ async def update_record(
             )
     if 'production_date' in kwargs and kwargs['production_date'] is not None:
         new_date = parse_date_with_fallback(kwargs['production_date'])
-        if new_date > date.today():
+        if new_date > business_today():
             raise ValueError('不能将生产日期修改为未来日期')
         record.production_date = new_date
 

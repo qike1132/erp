@@ -9,6 +9,7 @@ BASE_URL = "http://127.0.0.1:5002"（本机生产 uvicorn 回环口），除 str
 """
 import ipaddress
 import os
+import re
 from urllib.parse import urlparse
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "::1", ""}
@@ -20,15 +21,22 @@ def _is_blocked_host(host: str) -> bool:
     2026-11-19（审计 2.3 补测时发现）：只比对字面量集合会漏掉 IPv6 的**长写**与其它等价
     形式 —— ``urlparse('http://[0:0:0:0:0:0:0:1]:5002').hostname`` 给的是
     ``'0:0:0:0:0:0:0:1'``，不在集合里，于是守卫把「本机生产」当成「专门的压测环境」放行。
-    用 ``ipaddress`` 归一化，任何写法的回环/未指定地址都拦。
+    ``ipaddress`` 归一化后覆盖长写/IPv4-mapped（``::ffff:127.0.0.1``）；另外处理 FQDN
+    尾点（``localhost.``）与省略写法（``127.1``，``ipaddress`` 不接受但系统解析器认）。
     """
+    host = host.rstrip('.') or host
     if host in _LOOPBACK_HOSTS:
+        return True
+    if re.fullmatch(r'127(?:\.\d{1,3}){1,3}', host):
         return True
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return address.is_loopback or address.is_unspecified
+    if address.is_loopback or address.is_unspecified:
+        return True
+    mapped = getattr(address, 'ipv4_mapped', None)
+    return mapped is not None and (mapped.is_loopback or mapped.is_unspecified)
 
 
 def require_non_production(base_url: str, *, env_var: str = "STRESS_TEST_ALLOW_PROD") -> None:

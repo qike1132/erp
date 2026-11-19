@@ -702,9 +702,11 @@ class ServiceOps:
         ★ 停机失败必须**中止本轮重启**（2026-10-16 实机事故）：曾有无视停机终态、
           无条件进入启动阶段的实现 —— broker 停不掉却照常启动 → arq 重连 6380 把
           被依赖服务永久钉死 → 下次重启同样失败（自锁循环）。停不掉就不起。
-        ★ 2026-10-17 审计 AUD-28：重启/启动前先过 git 分支闸门。NSSM 的
+        ★ 2026-10-17 审计 AUD-28：**重启**前先过 git 分支闸门。NSSM 的
           AppDirectory 是本仓库工作区，重启 = 把当前签出分支跑进生产
           （2026-10-14 已有 75 分钟实害事故）。非 main 直接拒绝。
+          stop 不过该闸门：停机不加载工作区代码，且事故态（工作区脏 / git 不可读）
+          恰恰是最需要能停机的场合。
         """
         if verb not in ('restart', 'stop'):
             # P2-2（2026-10-17 审计）：'start' 曾出现在下面的闸门白名单里，但本方法**没有**
@@ -717,19 +719,21 @@ class ServiceOps:
                 'text': f'不支持的服务动作：{verb!r}（仅支持 stop / restart）', 'level': 'ERROR'}))
             self._msg_queue.put(('hosting_refresh', {}))
             return
-        # git 分支闸门：stop / restart 都在动生产进程（NSSM 的 AppDirectory 就是本仓库
-        # 工作区），非 main 直接拒绝（2026-10-14 已有 75 分钟实害事故）。动词白名单已在
-        # 上面 fail-closed，走到这里 verb 必然是 'stop' 或 'restart'。
-        ok, msg = git_guard.check_production_branch(self._project_dir)
-        if not ok:
-            self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
-            # 2026-10-18 OCR 复评：被拒绝时也要收_hosting_refresh，否则界面
-            # 停在「动作执行中」的空档；_prod_start_ts 未刷新，hosting 会按
-            # 陈旧状态文件真实告警。
-            self._msg_queue.put(('hosting_refresh', {}))
-            return
-        if git_guard.is_warning(msg):
-            self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
+        # git 分支闸门**只拦 restart**（2026-11-19 推送前评审修正）：stop 只向已加载旧代码
+        # 的进程发控制，不会把工作区源码跑进来；而工作区脏 / git 读不出正是最需要停机的
+        # 事故态 —— 在那里拦住「停止」按钮等于锁死逃生通道（拒绝文案还会让人去
+        # commit/stash，与停机毫无关系）。动词白名单已在上面 fail-closed。
+        if verb == 'restart':
+            ok, msg = git_guard.check_production_branch(self._project_dir)
+            if not ok:
+                self._msg_queue.put(('log', {'text': f'拒绝执行：{msg}', 'level': 'ERROR'}))
+                # 2026-10-18 OCR 复评：被拒绝时也要收_hosting_refresh，否则界面
+                # 停在「动作执行中」的空档；_prod_start_ts 未刷新，hosting 会按
+                # 陈旧状态文件真实告警。
+                self._msg_queue.put(('hosting_refresh', {}))
+                return
+            if git_guard.is_warning(msg):
+                self._msg_queue.put(('log', {'text': msg, 'level': 'WARNING'}))
         # 闸门已放行：通知 app 刷新启动宽限时间戳（拒绝路径投 hosting_refresh、不投本消息）
         self._msg_queue.put(('service_action_accepted', {'verb': verb}))
         nssm = self.find_nssm()

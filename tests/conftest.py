@@ -583,13 +583,17 @@ async def auth_headers(async_client, admin_user):
         "/api/v1/auth/login",
         json={"username": "admin", "password": "admin123"},
     )
-    if resp.status_code == 200:
-        data = resp.json()
-        # CSRF double-submit 由 async_client 的请求钩子统一处理（见上），
-        # 这里只需带 Bearer 头。
-        return {"Authorization": f"Bearer {data.get('access_token', '')}"}
-    # 登录失败时返回空头（测试会因 401 失败）
-    return {}
+    # 登录失败不允许静默降级成「空头」：整套用例会因此吃 401 而「恰好」通过某些断言，
+    # 而阳性对照（如 3.1 的「超管不得被 403 拦」）就会静默失去意义（2026-11-19 评审）。
+    assert resp.status_code == 200, (
+        f"admin 登录失败 HTTP {resp.status_code}: {resp.text[:200]}"
+    )
+    # 浏览器登录把令牌放 httpOnly cookie，**响应体 access_token 恒为 None**（auth.py:436-438），
+    # 从 body 取会得到空串、实际发出 "Authorization: Bearer "（请求全靠 cookie 才通）——
+    # 那是假覆盖。改从 cookie jar 取真实令牌；CSRF double-submit 仍由 async_client 钩子处理。
+    token = async_client.cookies.get("access_token", "")
+    assert token, "admin 登录成功但 client cookie jar 里没有 access_token"
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ============================================================

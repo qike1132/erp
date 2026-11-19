@@ -97,17 +97,70 @@ def test_conftest_records_before_it_drops_the_schema() -> None:
         "conftest 里 record_reset(...) 必须出现在 DROP SCHEMA 之前 —— "
         "先清库再记账的话，重置中途崩溃就什么都留不下"
     )
-    assert "if reset_enabled():" in src, "DROP 必须在 reset_enabled() 判定之内（否则开关是假的）"
 
-    # 解析级复核：DROP 语句的存在于 `if reset_enabled():` 分支体内，而非模块顶层。
+    # 解析级复核（2026-11-19 评审：原来三处都能恒真）：
+    #   ① 不再用 `"if reset_enabled():" in src`（一句注释就能满足）；
+    #   ② 只扫 `if reset_enabled():` 的 body —— 原来 `ast.walk(node)` 连 orelse 一起扫，
+    #      把 DROP 挪进 else（= 「只有设了 ERP_TEST_DB_NO_RESET 才清库」的取反语义）仍然通过；
+    #   ③ 断言全文件 DROP 出现次数恰为 1 —— 原来只比较「首次出现」，事后追加一个未受保护的
+    #      DROP 不会被看见。
     tree = ast.parse(src)
-    guarded: list[int] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If):
-            continue
-        if ast.unparse(node.test) != "reset_enabled()":
-            continue
+
+    def _drop_execute_lines(node: ast.AST) -> list[int]:
+        """只数**真正执行**的 DROP（`... .execute(text("DROP SCHEMA ..."))`）。
+
+        conftest 的 docstring 与告警文案里也写着 `DROP SCHEMA public CASCADE`，
+        按 `ast.Constant` 统计会把这些文本算进去（2026-11-19 评审实测）。
+        """
+        out: list[int] = []
         for sub in ast.walk(node):
-            if isinstance(sub, ast.Constant) and "DROP SCHEMA" in str(sub.value):
-                guarded.append(sub.lineno)
-    assert guarded, "没找到「reset_enabled() 分支里执行 DROP SCHEMA」的结构，开关已失效"
+            if not isinstance(sub, ast.Call):
+                continue
+            call_src = ast.unparse(sub)
+            if ".execute(" in call_src and "DROP SCHEMA" in call_src:
+                out.append(sub.lineno)
+        return out
+
+    all_drops = _drop_execute_lines(tree)
+    assert len(all_drops) == 1, (
+        f"conftest 里「执行 DROP SCHEMA」必须只有一处（受 reset_enabled() 保护），实际 {all_drops}"
+    )
+
+    in_body: list[int] = []
+    in_orelse: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If) or ast.unparse(node.test) != "reset_enabled()":
+            continue
+        for stmt in node.body:
+            in_body += _drop_execute_lines(stmt)
+        for stmt in node.orelse:
+            in_orelse += _drop_execute_lines(stmt)
+
+    assert in_orelse == [], (
+        f"DROP SCHEMA 出现在 `else:` 里（L{in_orelse}）—— 那等于「设了 NO_RESET 才清库」，开关语义反了"
+    )
+    assert in_body == all_drops, (
+        "DROP SCHEMA 不在 `if reset_enabled():` 的分支体内"
+        f"（分支内 {in_body} / 全文件 {all_drops}）—— 开关已失效"
+    )
+
+
+def test_database_name_never_leaks_credentials() -> None:
+    """取不到库名时回落 ``<unknown>``，绝不回落整串 URL —— 整串里含口令。
+
+    评审（2026-11-19 Low）：原来 `... or url` 在 URL 没有库名段时会把带口令的整串写进
+    `logs/test_db_reset.jsonl`。URL 用 `URL.create` 在运行时拼（源码里不留字面 DSN，
+    否则 `.githooks` 的密钥扫描会拦提交 —— 也不该为一条测试去动豁免清单）。
+    """
+    from sqlalchemy.engine import URL
+
+    secret = "".join(["sup", "3r", "s3cr", "et"])
+    url = URL.create(
+        "postgresql+asyncpg", username="erp", password=secret, host="127.0.0.1", port=5432
+    )
+    assert url.database is None
+
+    name = hook.database_name_from_url(url.render_as_string(hide_password=False))
+
+    assert secret not in name, f"留痕泄露口令：{name!r}"
+    assert name == "<unknown>", name

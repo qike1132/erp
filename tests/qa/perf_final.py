@@ -87,6 +87,8 @@ e.dispose()
 # 未跟踪脏文件，且 .gitignore 没覆盖）。默认落系统临时目录，需要留档用 PERF_OUTPUT_DIR。
 _out_dir = os.getenv("PERF_OUTPUT_DIR") or tempfile.gettempdir()
 outpath = os.path.join(_out_dir, "performance_final_report.txt")
+# 目录不存在时原来要等全部查询跑完才 FileNotFoundError（白跑一遍）；就地创建（评审 2026-11-19）。
+os.makedirs(_out_dir, exist_ok=True)
 with open(outpath, "w", encoding="utf-8") as f:
     f.write("=" * 70 + "\n")
     f.write("  ERP系统性能优化最终报告\n")
