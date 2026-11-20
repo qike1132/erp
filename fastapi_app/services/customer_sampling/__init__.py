@@ -15,25 +15,30 @@ from .common import (
     _resolve_supplier_name,
     _write_change_log,
 )
-from .crud import (
-    batch_create_parts,
-    copy_part_version,
-    create_part,
-    create_project,
-    delete_part,
-    delete_project,
-    get_part_field_candidates,
-    get_project_detail,
-    list_parts,
-    list_projects,
-    set_part_final_version,
-    update_part,
-    update_project,
-    update_project_status,
-)
 from .grouping import (
     _project_to_summary,
     get_grouped_list,
+)
+
+# 部位/项目域函数直接从实际模块导入（原经 crud.py facade 转发一层，
+# 该 facade 全仓无其他消费方，已删除——审计 L-5）。
+from .parts import (
+    batch_create_parts,
+    copy_part_version,
+    create_part,
+    delete_part,
+    get_part_field_candidates,
+    list_parts,
+    set_part_final_version,
+    update_part,
+)
+from .projects import (
+    create_project,
+    delete_project,
+    get_project_detail,
+    list_projects,
+    update_project,
+    update_project_status,
 )
 from .roles import (
     create_role,
