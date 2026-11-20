@@ -384,10 +384,6 @@ class Settings(BaseSettings):
     REQUIRE_REDIS_AUTH: bool = os.getenv("REQUIRE_REDIS_AUTH", "false").lower() in (
         "true", "1", "yes",
     )
-    # Redis Sentinel 高可用配置（可选，生产环境使用）
-    # 格式: "host1:port1,host2:port2,host3:port3"
-    # 为空时使用单机模式（REDIS_HOST/REDIS_PORT）；非空时通过 Sentinel 发现 master
-    REDIS_SENTINEL_HOSTS: str = os.getenv("REDIS_SENTINEL_HOSTS", "")
 
     # Redis 独立实例拆分（缓存 / ARQ Broker）
     # 推荐生产环境使用独立实例或独立 Redis 数据库，避免单实例混用导致相互影响
