@@ -259,6 +259,31 @@ async def update_order_process(db: AsyncSession, process_id: int, data: dict) ->
         new_type = data['process_type'].strip()
         if not new_type:
             raise ValueError('工序类型不能为空')
+        if new_type != p.process_type:
+            # 重名预检（审计 hubei-M-4，口径对齐预设侧 update_process_type）：唯一索引
+            # uq_oosp_order_item_product_process（NULLS NOT DISTINCT）撞名只会在 flush 时抛
+            # IntegrityError → 端点默认映射 500「数据库操作失败」。这里先查同
+            # (order_id, order_item_id, product_id) 下是否已有同名工序，给可读文案；
+            # 排除自身（id != p.id）使同名提交成为无害 no-op。预检与写入之间的并发窗口
+            # 由端点 error_map 把 IntegrityError 兜底映射为 409 同文案。
+            # order_item_id 可能为 NULL（单 SKU 旧订单）：SQL 等值匹配不了 NULL，
+            # 须按 NULLS NOT DISTINCT 语义用 IS NULL 参与查重。
+            item_cond = (
+                OrderOutsourceProcess.order_item_id.is_(None)
+                if p.order_item_id is None
+                else OrderOutsourceProcess.order_item_id == p.order_item_id
+            )
+            dup = await db.execute(
+                select(OrderOutsourceProcess.id).where(
+                    OrderOutsourceProcess.order_id == p.order_id,
+                    item_cond,
+                    OrderOutsourceProcess.product_id == p.product_id,
+                    OrderOutsourceProcess.process_type == new_type,
+                    OrderOutsourceProcess.id != p.id,
+                )
+            )
+            if dup.scalar_one_or_none() is not None:
+                raise ValueError('该 SKU 已存在同名工序')
         p.process_type = new_type
     if data.get('sort_order') is not None:
         p.sort_order = data['sort_order']
@@ -422,8 +447,15 @@ async def delete_order_process(db: AsyncSession, process_id: int) -> None:
 
     不把外键改成 SET NULL：流水表只有 process_id，没有订单/产品冗余列，
     置空后只剩「某时刻有人发了 50 件」的无上下文残行，比删掉更糟。
+
+    with_for_update（审计 hubei-M-5）：下方两道「有流水禁删」守卫与 db.delete 是
+    check-then-act。不持锁时存在 TOCTOU 窗口——并发 ship_order_process 可在检查
+    之后、DELETE 之前提交，DELETE 仍会命中该行，外键 ondelete=CASCADE 把刚生成的
+    发货/收货流水一并物理删除（台账无痕丢失，正是本函数 docstring 要防的事故）。
+    持行锁后，「检查→删除」整段持有工序行锁：并发发货在 ship_order_process 的
+    with_for_update 上等待，删除提交后才能继续 → 守卫串行化生效（与 ship/receive 同款）。
     """
-    p = await db.get(OrderOutsourceProcess, process_id)
+    p = await db.get(OrderOutsourceProcess, process_id, with_for_update=True)
     if not p:
         raise ValueError('外发工序不存在')
     if (p.shipped_quantity or 0) > 0 or (p.received_quantity or 0) > 0:

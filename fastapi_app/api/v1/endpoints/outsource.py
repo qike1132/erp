@@ -263,7 +263,13 @@ async def update_order_process(
     _user: User = Depends(require_permission("outsource_manage")),
 ) -> OrderProcessListResponse:
     """更新订单外发工序（计划时间/工序类型/备注）。"""
-    async with db_transaction(db):
+    async with db_transaction(db, error_map={
+        # 审计 hubei-M-4：服务层预检拦截常规重名（ValueError→400「该 SKU 已存在
+        # 同名工序」）；这里只承接预检通过后、提交前另一请求抢先插入同名工序、
+        # flush 撞唯一索引 uq_oosp_order_item_product_process 的毫秒级并发窗口，
+        # 兜底映射为 409 同文案（对照预设端点 update_process_type 的写法）。
+        IntegrityError: (409, '该 SKU 已存在同名工序'),
+    }):
         item = await outsource_service.update_order_process(
             db, process_id, data.model_dump(exclude_unset=True),
         )

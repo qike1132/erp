@@ -4,7 +4,7 @@
 """
 import logging
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.outsource._common import (
@@ -83,7 +83,7 @@ def _detach_page_items(items: list[dict]) -> list[dict]:
 def _process_status_order_filter(status: str):
     """把外发整体状态下推为 Order 分支的 IN 子查询（审计 M-05）。
 
-    口径与 `_common._matches_process_status` 一致：
+    口径（原 Python 版 `_matches_process_status` 已随审计 hubei-L-2 删除，此处为唯一实现）：
     - pending：有工序且全部未发货（started=0）
     - in_progress：有工序已发货且未全部收齐（started>0 且 completed<total）
     - completed：全部工序已收齐（completed=total）
@@ -123,7 +123,7 @@ async def list_outsource_orders(
 
     process_status：按订单外发工序整体状态过滤（pending/in_progress/completed），
     条件已下推到 Order 分支 SQL（HAVING），不再跨页拉全量后内存过滤；
-    备货行不属于任何工序状态，状态筛选时一并排除（与 _matches_process_status 一致）。
+    备货行不属于任何工序状态，状态筛选时一并排除（同上方 HAVING 口径）。
     进度统计由数据库聚合完成（见 _common）。
     """
     from fastapi_app.services.order_crud import get_beile_orders_with_stockins
@@ -183,23 +183,14 @@ async def list_order_flows(db: AsyncSession, order_id: int) -> list[dict]:
     ]
 
 
-async def list_unshipped_processes(db: AsyncSession) -> list[dict]:
-    """跨全部湖北订单聚合「未发完」工序明细（导出/打印未到货清单）。
+def _unshipped_preset_branch(shipped_qty):
+    """未到货清单·新单分支（有 OrderItem）：SKU 明细驱动 + 启用预设展开。
 
-    口径（用户裁决）：未到数量 = 订单数量 - 已发数量，仅保留 > 0 的工序。
-
-    **工序来源为 SKU 预设**（outsource_process_type，is_active）——即用户为每个 SKU
-    配置的应做工序，而非下单时生成、之后不再随预设更新的订单工序实例快照。这样
-    预设变更（增删工序）后导出/打印即时生效，与每个 SKU 的预设完全一致。
-
-    已发数量左连接订单工序实例（按 order_id + order_item_id + process_type 精确匹配）；
-    无对应实例的预设工序视为未发（已发数量 0）。
-    排除软删除订单（与 beile-list 一致）；下单时间按北京时间展示（与列表同口径）。
+    目标量 = OrderItem.quantity；已发数量左连接订单工序实例（按 order_id +
+    order_item_id + process_type 精确匹配），无对应实例的预设工序视为未发（0）。
+    预设变更（增删工序）后导出/打印即时生效，与每个 SKU 的预设一致。
     """
-    from fastapi_app.services.order.beile import _fmt_beile_time
-
-    shipped_qty = func.coalesce(OrderOutsourceProcess.shipped_quantity, 0)
-    stmt = (
+    return (
         select(
             Order.id.label('order_id'),
             Order.order_no,
@@ -234,13 +225,70 @@ async def list_unshipped_processes(db: AsyncSession) -> list[dict]:
             Product.factory == '湖北',
             OrderItem.quantity > shipped_qty,
         )
-        .order_by(
+    )
+
+
+def _unshipped_legacy_branch(shipped_qty):
+    """未到货清单·旧单分支（无 OrderItem，hubei-M-3；P1-6 单 SKU 旧订单）。
+
+    实例驱动 + 整单数量回退（口径同 _process_target_quantity）。仅认「整单无
+    SKU 明细」的真旧单（订单其实已有明细的 NULL 实例属脏数据，
+    _process_target_quantity 对其 fail-closed 拒发，不进清单）。
+    """
+    return (
+        select(
+            Order.id.label('order_id'),
+            Order.order_no,
+            Order.customer,
             Order.order_date,
-            Order.id,
-            OrderItem.id,
-            OutsourceProcessType.sort_order,
-            OutsourceProcessType.id,
+            Product.name.label('product_name'),
+            Product.barcode.label('product_barcode'),
+            OrderOutsourceProcess.process_type,
+            Order.quantity.label('target_qty'),
+            shipped_qty.label('shipped_qty'),
         )
+        .select_from(OrderOutsourceProcess)
+        .join(Order, Order.id == OrderOutsourceProcess.order_id)
+        .join(Product, Product.id == OrderOutsourceProcess.product_id)
+        .where(
+            Order.is_deleted.isnot(True),
+            Product.factory == '湖北',
+            OrderOutsourceProcess.order_item_id.is_(None),
+            ~select(OrderItem.id).where(OrderItem.order_id == Order.id).exists(),
+            Order.quantity > shipped_qty,
+        )
+    )
+
+
+async def list_unshipped_processes(db: AsyncSession) -> list[dict]:
+    """跨全部湖北订单聚合「未发完」工序明细（导出/打印未到货清单）。
+
+    口径（用户裁决）：未到数量 = 订单数量 - 已发数量，仅保留 > 0 的工序。
+
+    两个分支 UNION（审计 hubei-M-3；目标量对齐 list_shippable_processes 与
+    _process_target_quantity 的 coalesce(OrderItem.quantity, Order.quantity)），
+    分支构造见 _unshipped_preset_branch / _unshipped_legacy_branch：
+
+    - 新单（有 OrderItem）：SKU 明细按启用预设展开；
+    - 旧单（无 OrderItem，P1-6 单 SKU 旧订单）：实例驱动，目标量回退
+      Order.quantity——旧实现以 OrderItem 为驱动表，旧单整单漏出——发货面板
+      可见可发、却从未出现在未到货清单（对账差异）。
+
+    排除软删除订单（与 beile-list 一致）；下单时间按北京时间展示（与列表同口径）。
+    """
+    from fastapi_app.services.order.beile import _fmt_beile_time
+
+    shipped_qty = func.coalesce(OrderOutsourceProcess.shipped_quantity, 0)
+    preset_branch = _unshipped_preset_branch(shipped_qty)
+    # 旧单分支（hubei-M-3）：实例驱动 + 整单数量回退（口径同 _process_target_quantity）
+    legacy_branch = _unshipped_legacy_branch(shipped_qty)
+    # 两分支列同构且业务上不相交（有明细 vs 整单无明细），UNION 去重兜底脏数据；
+    # 排序用输出列名（UNION 的 ORDER BY 只能引用结果列）。
+    stmt = preset_branch.union(legacy_branch).order_by(
+        literal_column('order_date'),
+        literal_column('order_id'),
+        literal_column('product_name'),
+        literal_column('process_type'),
     )
     rows = (await db.execute(stmt)).all()
     return [
