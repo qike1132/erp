@@ -10,6 +10,13 @@ export interface GroupedRow {
   totalVersionCount: number
 }
 
+/** 版本号数值解析：T10 → 10；空值/非法值排最后。全前端唯一实现。 */
+export function versionNumber(versionNo: string | null | undefined): number {
+  if (!versionNo) return Number.MAX_SAFE_INTEGER
+  const n = parseInt(versionNo.replace(/^T/i, ''), 10)
+  return isNaN(n) ? Number.MAX_SAFE_INTEGER : n
+}
+
 export function usePartsVersionFilter(
   partsByVersion: Ref<PartDetail[]>,
   finalVersion: Ref<string>,
@@ -93,8 +100,8 @@ export function usePartsVersionFilter(
       let maxNum = -1
       for (const item of group) {
         if (item.version_no) {
-          const n = parseInt(item.version_no.replace(/^T/i, ''), 10)
-          if (!isNaN(n) && n > maxNum) maxNum = n
+          const n = versionNumber(item.version_no)
+          if (n !== Number.MAX_SAFE_INTEGER && n > maxNum) maxNum = n
         }
       }
       const latestVersionNo = maxNum >= 0 ? `T${maxNum}` : null
@@ -117,9 +124,9 @@ export function usePartsVersionFilter(
 
       // 排序：按版本号数值升序，无版本号排最后
       const sorted = [...filteredItems].sort((a, b) => {
-        const va = a.version_no ? parseInt(a.version_no.replace(/^T/i, ''), 10) : Number.MAX_SAFE_INTEGER
-        const vb = b.version_no ? parseInt(b.version_no.replace(/^T/i, ''), 10) : Number.MAX_SAFE_INTEGER
-        return (isNaN(va) ? Number.MAX_SAFE_INTEGER : va) - (isNaN(vb) ? Number.MAX_SAFE_INTEGER : vb)
+        const va = versionNumber(a.version_no)
+        const vb = versionNumber(b.version_no)
+        return va - vb
       })
 
       result.push({

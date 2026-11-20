@@ -188,7 +188,7 @@ function onSort(event: { field: string; order: number }) {
 const { runExport } = useExport({ start: false, success: false })
 
 function handleExport() {
-  runExport(() => stockApi.exportInventory({ customer: filters.customer, product: filters.product }))
+  runExport(() => stockApi.exportInventory({ customer: filters.customer, product: debouncedProduct.value }))
 }
 
 watch(() => [filters.customer, debouncedProduct.value], () => {

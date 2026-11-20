@@ -20,6 +20,7 @@ import { ref, defineComponent, h, nextTick } from 'vue'
 const mocks = vi.hoisted(() => ({
   beileListMock: vi.fn(),
   queryData: null as unknown as ReturnType<typeof ref<unknown>>,
+  refetchMock: vi.fn(),
 }))
 
 vi.mock('@/api', () => ({
@@ -35,7 +36,7 @@ vi.mock('@tanstack/vue-query', async () => {
   const dataRef = r<unknown>(null)
   mocks.queryData = dataRef
   return {
-    useQuery: () => ({ data: dataRef, isLoading: r(false), isFetching: r(false), refetch: vi.fn() }),
+    useQuery: () => ({ data: dataRef, isLoading: r(false), isFetching: r(false), refetch: mocks.refetchMock }),
     useQueryClient: () => ({ setQueryData: vi.fn() }),
     keepPreviousData: {},
   }
@@ -193,5 +194,18 @@ describe('beile-order 搜索：自由键入防抖自动应用（BUG-1）', () =>
     bo.filters.productKw = ''
     await flushPromises()
     expect(bo.appliedProduct.value).toBe('')
+  })
+
+  it('查询/重置不再显式 refetch（queryKey 已响应式触发）', async () => {
+    const wrapper = await mountHost()
+    const bo = (wrapper.vm as unknown as {
+      bo: { handleSearch: () => void; handleReset: () => void }
+    }).bo
+    mocks.refetchMock.mockClear()
+
+    bo.handleSearch()
+    bo.handleReset()
+
+    expect(mocks.refetchMock).not.toHaveBeenCalled()
   })
 })

@@ -45,10 +45,8 @@
             <ProjectDetailPanel
               :project="projectHook.currentProject.value"
               :parts-by-version="partHook.partsByVersion.value"
-              :version-list="partHook.versionList.value"
               :final-version="partHook.finalVersion.value"
               :final-versions="partHook.finalVersions.value"
-              :version-loading="versionHook.loading.value"
               :part-loading="partHook.loading.value"
               :can-manage="canManage"
               :can-print="canPrint"
@@ -131,7 +129,6 @@ import PatternRoomSplitBody from './components/PatternRoomSplitBody.vue'
 import { useCustomerSampling } from './composables/useCustomerSampling'
 import { useSamplingProject } from './composables/useSamplingProject'
 import { useSamplingPart } from './composables/useSamplingPart'
-import { useSamplingVersion } from './composables/useSamplingVersion'
 import { useSamplingRole } from './composables/useSamplingRole'
 
 import { usePatternRoomPrint } from './composables/usePatternRoomPrint'
@@ -155,8 +152,6 @@ const projectHook = useSamplingProject()
 const selectedProjectId = ref<number | null>(null)
 const roleHook = useSamplingRole(selectedProjectId)
 const partHook = useSamplingPart(selectedProjectId, roleHook.currentRoleId)
-const versionHook = useSamplingVersion(selectedProjectId)
-
 const {
   statusFilter,
   searchKeyword,
@@ -262,7 +257,6 @@ const {
   selectedProjectId,
   projectHook,
   partHook,
-  versionHook,
   roleHook,
 })
 

@@ -64,7 +64,7 @@ onUnmounted(() => {
 
 // 原「退出登录」项既无 `to` 也无 `@click`，而 MListItem 只处理 `to`，
 // 点击什么都不发生 —— **移动端根本没法登出**（共用终端下用户以为已退出、会话仍在）。
-// 与桌面端 DashboardToolbar.handleLogout 同款：接口失败也照样清本地态并跳登录页。
+// 与桌面端 DashboardView.handleLogout 同款：接口失败也照样清本地态并跳登录页。
 async function onLogout() {
   try {
     await authApi.logout()

@@ -22,12 +22,10 @@ function toastActionError(e: unknown, fallback: string) {
 import { createManageGuard } from './useManageGuard'
 import type { useSamplingProject } from './useSamplingProject'
 import type { useSamplingPart } from './useSamplingPart'
-import type { useSamplingVersion } from './useSamplingVersion'
 import type { useSamplingRole } from './useSamplingRole'
 
 type ProjectHook = ReturnType<typeof useSamplingProject>
 type PartHook = ReturnType<typeof useSamplingPart>
-type VersionHook = ReturnType<typeof useSamplingVersion>
 type RoleHook = ReturnType<typeof useSamplingRole>
 type ConfirmDialog = ReturnType<typeof useConfirmDialog>
 
@@ -48,8 +46,6 @@ interface UsePatternRoomPartActionsOptions {
   projectHook: ProjectHook
   /** 部位 Hook */
   partHook: PartHook
-  /** 版本 Hook */
-  versionHook: VersionHook
   /** 角色 Hook */
   roleHook: RoleHook
 }
@@ -61,7 +57,6 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     selectedProjectId,
     projectHook,
     partHook,
-    versionHook,
     roleHook,
   } = options
 
@@ -265,21 +260,9 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     }
   }
 
-  /** 是否当前版本（选中版本为项目最新版本） */
-  const isCurrentVersion = computed(() => {
-    const proj = projectHook.currentProject.value
-    const detail = versionHook.versionDetail.value
-    if (!proj || !detail) return false
-    return detail.version_no === proj.current_version
-  })
-
-  function onSwitchVersion(versionId: number) {
-    versionHook.fetchVersionDetail(versionId)
-  }
-
   function onSelectRole(roleId: number) {
     roleHook.setCurrentRole(roleId)
-    // partHook / versionHook 会自动 watch currentRoleId 重新加载
+    // partHook 会自动 watch 项目/角色变化重新加载
   }
 
   async function onAddRole(roleName: string) {
@@ -323,8 +306,6 @@ export function usePatternRoomPartActions(options: UsePatternRoomPartActionsOpti
     onStartEdit,
     onCancelEdit,
     onDeleteVersion,
-    isCurrentVersion,
-    onSwitchVersion,
     onSelectRole,
     onAddRole,
     onRemoveRole,

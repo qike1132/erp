@@ -94,14 +94,12 @@ function buildPartActions(roleHook = makeRoleHook()) {
     clearParts: vi.fn(),
   }
   const projectHook = makeProjectHook()
-  const versionHook = { versions: ref([]), versionDetail: ref(null), fetchVersionDetail: vi.fn() }
   const actions = usePatternRoomPartActions({
     canManage: ref(true),
     confirmDialog: { confirm: vi.fn(async () => true) } as never,
     selectedProjectId: ref<number | null>(7),
     projectHook: projectHook as never,
     partHook: partHook as never,
-    versionHook: versionHook as never,
     roleHook: roleHook as never,
   })
   return { actions, partHook }

@@ -470,10 +470,10 @@ export function useBeileOrders() {
   }
 
   function handleSearch() {
-    // 点击查询按钮：将输入框当前文本确认为筛选值
+    // 点击查询按钮：将输入框当前文本确认为筛选值；queryKey 已含 applied* ref，
+    // 赋值即触发新查询，不再手动 refetch（审计 L-26）。
     appliedProduct.value = filters.productKw
     appliedCustomer.value = filters.customer
-    refetch()
   }
 
   function handleReset() {
@@ -482,7 +482,6 @@ export function useBeileOrders() {
     appliedProduct.value = ''
     appliedCustomer.value = ''
     page.value = 1
-    refetch()
   }
 
   function goPage(p: number) {

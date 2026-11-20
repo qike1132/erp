@@ -30,7 +30,7 @@ interface UsePatternRoomPrintOptions {
  * 已不存在的版本（此时按最终版本过滤会得到 0 行，整个角色从打样单上消失），
  * 而该角色的部位仍存在于更早的版本中。
  *
- * versions 由后端按 (长度, 字典序) 升序返回，末位即最新版本。
+ * versions 由后端按 (数值序, 字典序) 升序返回，末位即最新版本。
  */
 function pickNewestVersionRows(items: PartDetail[], versions: string[]): PartDetail[] {
   for (let i = versions.length - 1; i >= 0; i--) {

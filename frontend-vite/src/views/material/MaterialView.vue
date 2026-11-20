@@ -112,7 +112,7 @@ const ReceiveDialog = defineAsyncComponent(() => import('./components/ReceiveDia
 // --- Internal Types ---
 
 const authStore = useAuthStore()
-const canManage = computed(() => authStore.hasPermission('product_manage'))
+const canManage = computed(() => authStore.hasAnyPermission(['product_manage', 'material_registration']))
 
 const activeTab = ref('progress')
 
