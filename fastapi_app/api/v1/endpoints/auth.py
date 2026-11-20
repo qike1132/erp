@@ -271,8 +271,14 @@ async def _check_user_lock(username: str, client_ip: str = '') -> None:
         )
 
     # 全局兜底（评审 F15）：来源键挡不住「换 IP 喷洒同一账号」，这里用远高于
-    # 单人误输的阈值兜一道；Redis 不可用时同样 fail-open（上面已提前 return）。
-    global_fails = int(await _redis.get(_user_fail_key(username)) or 0)
+    # 单人误输的阈值兜一道；Redis 不可用时同样 fail-open。这次读取必须自带
+    # 兜底：它在上面的 try 之外（2026-11-20 审计 system-M-1——两读之间断连
+    # 会让 api_login 500，违反本函数「缓存故障不得锁死登录」的声明契约）。
+    try:
+        global_fails = int(await _redis.get(_user_fail_key(username)) or 0)
+    except Exception as e:  # defensive: 缓存故障不得锁死登录入口（fail-open）
+        logger.warning("[Login] 全局失败计数读取失败，已放行（fail-open）: %s", e)
+        return
     if global_fails >= LOGIN_USER_GLOBAL_FAIL_LIMIT:
         logger.warning(
             "[Login] 账号已触发全局失败上限（多来源）: 窗口内累计%d次", global_fails,
