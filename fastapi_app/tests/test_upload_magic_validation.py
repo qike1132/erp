@@ -207,7 +207,8 @@ async def test_encrypted_backup_is_not_rejected_by_magic(client):
 # --------------------------------------------------------------------------
 _REQUIRE_SITES = {
     'fastapi_app/api/v1/endpoints/production_plan.py': ('upload_excel',),
-    'fastapi_app/api/v1/endpoints/production_summary.py': ('upload_packaging_excel',),
+    # production_summary.upload_packaging_excel 已按审计 M-1/L-1（2026-11-21）整体
+    # 410 停用（不再接收任何上传），无需再接魔数校验层，故从本清单移除。
     'fastapi_app/api/v1/endpoints/auth.py': ('upload_file',),
     'fastapi_app/api/v1/endpoints/ocr_import.py': ('upload_shipping_docs', 'preview_shipping_doc', 'preview_order_doc'),
     'fastapi_app/api/v1/endpoints/backup/validation.py': ('validate_backup',),

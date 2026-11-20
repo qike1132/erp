@@ -62,24 +62,25 @@ def test_anonymous_vitals_has_small_dedicated_body_limit():
 
 
 def test_endpoint_level_declared_limits_within_effective_middleware_limit():
-    """端点级文件上限（batch 七端点 / packaging 上传）必须小于中间件有效 body 上限。
+    """端点级文件上限（batch 七端点）必须小于中间件有效 body 上限。
 
     M2（2026-10-25 上线前检查）：multipart 请求体 = 文件 + 边界/字段头开销。
     body 上限与文件上限相等时，「恰好 10MB 的合法文件」会在抵达端点**之前**被
     413——端点常量成死配置、用户看不到友好报错。中间件预算 = 文件上限 +
     _MULTIPART_OVERHEAD_BYTES，本断言锁「严格大于」（余量存在）。
+
+    审计 M-1/L-1（2026-11-21）：packaging/upload 端点已 410、端点级 10MB 文件上限
+    常量（MAX_PACKAGING_UPLOAD_SIZE）随之删除；中间件对该路径的放宽作为兼容余量
+    保留，断言收口为「不低于默认 10MB 预算」。
     """
     from fastapi_app.api.v1.endpoints.import_guard import (
         MAX_IMPORT_FILE_SIZE as GUARD_LIMIT,
-    )
-    from fastapi_app.api.v1.endpoints.production_summary import (
-        MAX_PACKAGING_UPLOAD_SIZE,
     )
 
     assert max_body_size_for_path('/api/v1/batch/import-orders') > GUARD_LIMIT
     assert max_body_size_for_path(
         '/api/v1/production-summary/packaging/upload'
-    ) > MAX_PACKAGING_UPLOAD_SIZE
+    ) >= MAX_REQUEST_BODY_SIZE
 
 
 def test_multipart_overhead_is_covered_for_at_limit_file():
@@ -208,15 +209,19 @@ def test_deployed_nginx_import_limit_covers_declared_import_max_size():
 
 
 def test_deployed_nginx_excel_limits_leave_multipart_headroom():
-    """M2：nginx 对 batch/packaging 的 body 上限必须大于端点文件上限（余量给足）。"""
+    """M2：nginx 对 batch 的 body 上限必须大于端点文件上限（余量给足）。
+
+    审计 M-1/L-1（2026-11-21）：packaging/upload 端点已 410、端点级 10MB 文件上限
+    常量（MAX_PACKAGING_UPLOAD_SIZE）随之删除；nginx 的精确放宽 location 保留
+    （兼容余量），断言收口为「不低于默认 10MB」。
+    """
     from fastapi_app.api.v1.endpoints.import_guard import MAX_IMPORT_FILE_SIZE
-    from fastapi_app.api.v1.endpoints.production_summary import MAX_PACKAGING_UPLOAD_SIZE
 
     limits = _location_body_limits(_NGINX_CONF.read_text(encoding='utf-8'))
     assert limits['/api/v1/batch/'] > MAX_IMPORT_FILE_SIZE, (
         'nginx 与文件上限相等 = 恰好 10MB 的合法文件被边缘 413（M2）'
     )
-    assert limits['=/api/v1/production-summary/packaging/upload'] > MAX_PACKAGING_UPLOAD_SIZE
+    assert limits['=/api/v1/production-summary/packaging/upload'] >= MAX_REQUEST_BODY_SIZE
 
 # --------------------------------------------------------------------------
 # 无 Content-Length（chunked / 流式）请求体上限（P0-12）
