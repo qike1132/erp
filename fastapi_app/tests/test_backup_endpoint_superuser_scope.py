@@ -317,6 +317,45 @@ def test_both_encrypting_endpoints_call_the_gate() -> None:
     )
 
 
+async def test_backup_task_trigger_gate_fires_before_enqueue(monkeypatch) -> None:
+    """行为级（2026-11-21 审计 records-H3）：非超管触发备份类任务，闸门必须在入队**之前**拦成 403。
+
+    H-3 的形态恰好是上面 `test_both_encrypting_endpoints_call_the_gate` 拦不住的：
+    `_gate_if_backup` 确实调用了闸门、也传了 `effective_encrypt=` 变量（非字面量
+    False），但变量来自 `_resolve_encryption(False, …)`——resolver 对
+    `encrypt is False` 直接短路返回 `(False, None)`，变量恒 False，闸门恒放行。
+    本用例打**真实 resolver**（开关+密码全真），实参错在来源上时必红。
+    """
+    from fastapi import HTTPException
+
+    from fastapi_app.api.v1.endpoints.backup.records import trigger_backup_schedule
+    from fastapi_app.services.backup import crypto as backup_crypto
+    from fastapi_app.tasks import backup_tasks
+
+    # 加密开启且口令可得：此时任务产物必为加密包（含现役私钥与 .env），非超管必须被拦
+    monkeypatch.setattr(backup_crypto, 'BACKUP_ENCRYPTION_ENABLED', True)
+    monkeypatch.setattr(backup_crypto, 'get_backup_encryption_password', lambda: 'test-pw')
+
+    # 入队桩一被触达即失败——证明 403 发生在入队之前（拦晚了等于没拦）
+    async def _no_pool():
+        raise AssertionError('凭据闸门未生效：已经走到 ARQ 入队')
+
+    monkeypatch.setattr('fastapi_app.core.arq_app.get_arq_pool', _no_pool)
+    # 免 DB：把目标任务塞进内置 cron 表（端点函数内 import，运行时读模块属性）
+    monkeypatch.setattr(
+        'fastapi_app.core.arq_app.cron_schedules',
+        [{'name': 'audit-gate-probe', 'func': backup_tasks.manual_full_backup_task}],
+    )
+
+    class _NonSuperUser:
+        is_super = False
+
+    with pytest.raises(HTTPException) as exc:
+        await trigger_backup_schedule(task_name='audit-gate-probe', user=_NonSuperUser())
+    assert exc.value.status_code == 403
+    assert '仅超级管理员' in str(exc.value.detail)
+
+
 def test_plaintext_backup_still_excludes_sensitive_config() -> None:
     """前提断言：明文包确实排除敏感配置 —— 否则「只拦加密」这个设计不成立。
 

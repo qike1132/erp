@@ -334,7 +334,12 @@ async def trigger_backup_schedule(
         """
         if func_name not in _BACKUP_FUNCS:
             return
-        effective, _ = _resolve_encryption(False, None, None)   # 任务侧继承 env 口令
+        # 第一实参必须传 True（意图=「本次产物是加密包」）：resolver 对
+        # `encrypt is False` 直接短路返回 (False, None)，传 False 会让 effective
+        # 恒 False、闸门恒不生效（2026-11-21 审计 records-H3）。任务侧口令
+        # 继承 env（第二/三实参 None）；总开关关闭时 resolver 返回 False，
+        # 明文包不含凭据，不拦是正确语义。
+        effective, _ = _resolve_encryption(True, None, None)
         require_superuser_for_encrypted_backup(user, effective_encrypt=effective)
 
     # 1) 内置 cron_schedules（sync-shipment/级联等）
