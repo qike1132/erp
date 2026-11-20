@@ -176,7 +176,7 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
     params: dict[str, object] = {}
 
     if customer:
-        where_clauses.append("o.customer LIKE :customer")
+        where_clauses.append("o.customer ILIKE :customer ESCAPE '\\'")
         params['customer'] = f'%{escape_like(customer)}%'
     if product:
         # 与 SELECT 的显示口径同源（item_name/item_barcode 都是
@@ -184,9 +184,9 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
         # 按名字搜不到」——左连接下 p.name 为 NULL，旧写法直接把它排除掉。
         # 2026-10-13：搜索框兼作「订单号」搜索——追加 o.order_no 匹配（订单级条件，
         # 命中即整单所有 SKU 行都出；前端搜索框占位符已同步为「产品名称 / SKU / 订单号」）。
-        cond = ("(COALESCE(p.name, oi.product_name) LIKE :product "
-                "OR COALESCE(p.barcode, oi.product_barcode) LIKE :product "
-                "OR o.order_no LIKE :product)")
+        cond = ("(COALESCE(p.name, oi.product_name) ILIKE :product ESCAPE '\\' "
+                "OR COALESCE(p.barcode, oi.product_barcode) ILIKE :product ESCAPE '\\' "
+                "OR o.order_no ILIKE :product ESCAPE '\\')")
         where_clauses.append(cond)
         item_where_clauses.append(cond)
         params['product'] = f'%{escape_like(product)}%'
@@ -272,10 +272,10 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
     params: dict[str, object] = {}
 
     if customer:
-        where_clauses.append("COALESCE(sr.customer, '') LIKE :customer")
+        where_clauses.append("COALESCE(sr.customer, '') ILIKE :customer ESCAPE '\\'")
         params['customer'] = f'%{escape_like(customer)}%'
     if product:
-        where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
+        where_clauses.append("(COALESCE(p.name, '') ILIKE :product ESCAPE '\\' OR COALESCE(p.barcode, '') ILIKE :product ESCAPE '\\')")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
@@ -406,10 +406,10 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
     params: dict[str, object] = {}
 
     if customer:
-        where_clauses.append("COALESCE(s.customer, '') LIKE :customer")
+        where_clauses.append("COALESCE(s.customer, '') ILIKE :customer ESCAPE '\\'")
         params['customer'] = f'%{escape_like(customer)}%'
     if product:
-        where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
+        where_clauses.append("(COALESCE(p.name, '') ILIKE :product ESCAPE '\\' OR COALESCE(p.barcode, '') ILIKE :product ESCAPE '\\')")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
@@ -473,10 +473,10 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
     params: dict[str, object] = {}
 
     if customer:
-        where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
+        where_clauses.append("COALESCE(so.customer, '') ILIKE :customer ESCAPE '\\'")
         params['customer'] = f'%{escape_like(customer)}%'
     if product:
-        where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
+        where_clauses.append("(COALESCE(p.name, '') ILIKE :product ESCAPE '\\' OR COALESCE(p.barcode, '') ILIKE :product ESCAPE '\\')")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
@@ -543,10 +543,10 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
     params: dict[str, object] = {}
 
     if customer:
-        where_clauses.append("COALESCE(so.customer, '') LIKE :customer")
+        where_clauses.append("COALESCE(so.customer, '') ILIKE :customer ESCAPE '\\'")
         params['customer'] = f'%{escape_like(customer)}%'
     if product:
-        where_clauses.append("(COALESCE(p.name, '') LIKE :product OR COALESCE(p.barcode, '') LIKE :product)")
+        where_clauses.append("(COALESCE(p.name, '') ILIKE :product ESCAPE '\\' OR COALESCE(p.barcode, '') ILIKE :product ESCAPE '\\')")
         params['product'] = f'%{escape_like(product)}%'
     if factory:
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）

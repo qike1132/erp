@@ -104,11 +104,13 @@ def _apply_date_filters(query, date_field, start_date, end_date):
 
 
 def _apply_product_filter(query, product):
+    # ilike（大小写不敏感）：与库存页 _resolve_products 同口径——like 在 PG 大小写敏感，
+    # m01 搜 M01 会假阴性（审计 data-M-3，report_service 屏幕侧同 PR 同步 ILIKE 化）
     if product:
         query = query.where(
             or_(
-                Product.name.like(f'%{escape_like(product)}%'),
-                Product.barcode.like(f'%{escape_like(product)}%')
+                Product.name.ilike(f'%{escape_like(product)}%', escape='\\'),
+                Product.barcode.ilike(f'%{escape_like(product)}%', escape='\\')
             )
         )
     return query
@@ -140,7 +142,7 @@ def _apply_order_filters(query, customer, product, status, start_date, end_date,
     # 该列可空，用 IS NOT TRUE 同时覆盖 false 与 NULL，且与 partial 索引谓词同形。
     query = query.where(Order.is_deleted.isnot(True))
     if customer:
-        query = query.where(Order.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(Order.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     # 产品筛选与显示同源：显示用 COALESCE(Product.name, OrderItem.product_name)
     # （见 _order_log_row），筛选也必须带上 SKU 快照，否则产品行缺失（被删）的行
     # 「显示得出、按名字搜不到」（左连接下 Product.name 为 NULL，旧写法把它排除）。
@@ -153,9 +155,9 @@ def _apply_order_filters(query, customer, product, status, start_date, end_date,
         # Excel 与页面所见集合不同。补齐同款条件。
         query = query.where(
             or_(
-                func.coalesce(Product.name, OrderItem.product_name).like(like),
-                func.coalesce(Product.barcode, OrderItem.product_barcode).like(like),
-                Order.order_no.like(like),
+                func.coalesce(Product.name, OrderItem.product_name).ilike(like, escape='\\'),
+                func.coalesce(Product.barcode, OrderItem.product_barcode).ilike(like, escape='\\'),
+                Order.order_no.ilike(like, escape='\\'),
             )
         )
     query = _apply_factory_filter(query, factory)
@@ -275,7 +277,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date, factory=
         selectinload(StockIn.stockin_stockouts)
     )
     if customer:
-        query = query.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(StockIn.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     query = _apply_product_filter(query, product)
     query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockIn.stockin_date, start_date, end_date)
@@ -285,7 +287,7 @@ def _get_stockin_logs(session, customer, product, start_date, end_date, factory=
         func.coalesce(func.sum(StockIn.quantity), 0),
     ).join(Product, StockIn.product_id == Product.id)
     if customer:
-        stats_query = stats_query.where(StockIn.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(StockIn.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     stats_query = _apply_product_filter(stats_query, product)
     stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockIn.stockin_date, start_date, end_date)
@@ -341,7 +343,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date, factory
         selectinload(StockOut.order)
     )
     if customer:
-        query = query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(StockOut.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     query = _apply_product_filter(query, product)
     query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockOut.stockout_date, start_date, end_date)
@@ -357,7 +359,7 @@ def _get_stockout_logs(session, customer, product, start_date, end_date, factory
         or_(StockOut.order_id.is_(None), Order.is_deleted.isnot(True)),
     )
     if customer:
-        stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(StockOut.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     stats_query = _apply_product_filter(stats_query, product)
     stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockOut.stockout_date, start_date, end_date)
@@ -410,7 +412,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date, factor
         selectinload(StockOut.order)
     )
     if customer:
-        query = query.filter(StockOut.customer.like(f'%{escape_like(customer)}%'))
+        query = query.filter(StockOut.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     query = _apply_product_filter(query, product)
     query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockOut.stockout_date, start_date, end_date)
@@ -427,7 +429,7 @@ def _get_deduction_logs(session, customer, product, start_date, end_date, factor
         (StockOut.quantity - StockOut.returned_quantity) > 0,
     )
     if customer:
-        stats_query = stats_query.where(StockOut.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(StockOut.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     stats_query = _apply_product_filter(stats_query, product)
     stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockOut.stockout_date, start_date, end_date)
@@ -478,7 +480,7 @@ def _get_return_logs(session, customer, product, start_date, end_date, factory='
         StockReturn.status == 'active',
     ).options(selectinload(StockReturn.product))
     if customer:
-        query = query.where(StockReturn.customer.like(f'%{escape_like(customer)}%'))
+        query = query.where(StockReturn.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     query = _apply_product_filter(query, product)
     query = _apply_factory_filter(query, factory)
     query = _apply_date_filters(query, StockReturn.return_date, start_date, end_date)
@@ -490,7 +492,7 @@ def _get_return_logs(session, customer, product, start_date, end_date, factory='
         StockReturn.status == 'active',
     )
     if customer:
-        stats_query = stats_query.where(StockReturn.customer.like(f'%{escape_like(customer)}%'))
+        stats_query = stats_query.where(StockReturn.customer.ilike(f'%{escape_like(customer)}%', escape='\\'))
     stats_query = _apply_product_filter(stats_query, product)
     stats_query = _apply_factory_filter(stats_query, factory)
     stats_query = _apply_date_filters(stats_query, StockReturn.return_date, start_date, end_date)

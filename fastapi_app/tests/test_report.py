@@ -27,10 +27,9 @@ class TestReportSchemas:
         assert row['stockout_nos'] == 'SO-20261006-0001'
         assert row['order_note'] == '抵扣备注'
 
-    def test_report_export_request(self):
-        from fastapi_app.schemas.report import ReportExportRequest
-        req = ReportExportRequest(type="order", customer="客户1")
-        assert req.type == "order"
+    # test_report_export_request 已随 schemas.report.ReportExportRequest 死模型删除
+    # （审计 data-L-2：该模型零生产引用，导出请求唯一真相在 endpoints/tasks.py 的
+    # 本地同名模型，勿在 schemas/ 重建）。
 
 
 class TestReportService:
@@ -72,7 +71,8 @@ class TestReportService:
 
         sqls = [str(call.args[0]) for call in mock_db.execute.call_args_list]
         assert sqls, '应至少执行一次查询'
-        assert any('o.order_no LIKE :product' in sql for sql in sqls), '订单号搜索条件缺失'
+        # ILIKE（审计 data-M-3，大小写不敏感口径）＋订单号搜索条件（2026-10-13）
+        assert any('o.order_no ILIKE :product' in sql for sql in sqls), '订单号搜索条件缺失'
 
     @pytest.mark.asyncio
     async def test_get_stockin_logs_empty(self, mock_db, mock_empty_result):

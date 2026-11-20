@@ -103,6 +103,18 @@ _OI_OR_O_PID = ' AND (oi.product_id = ANY(:pids) OR (oi.id IS NULL AND o.product
 # get_stock_overview_stats 的口径保持一致）。
 _O_NOT_DELETED = ' AND o.is_deleted IS NOT TRUE'
 
+# 出货台账进「结余」的 change_type 五元组：出库为负数，求和即净流出。
+# 三处共用（漏改任何一处都会让 /stock 页「库存」列与出货闸门 get_inventory_balance
+# 口径分叉——页面显示有货而闸门不放行，或反之；审计 data-M-1）：
+#   1. get_inventory_balance_detail（写闸门唯一尺子）
+#   2. get_inventory_balance_detail_batch（暂存出货导入预检等批量场景）
+#   3. _build_inventory_cte_sql 的 ship 子查询（/stock 页结余列）
+# 抵扣三型（订单抵扣/取消抵扣/抵扣回滚）刻意不在此列：抵扣期间两侧对称净影响为零。
+_BALANCE_CHANGE_TYPES: tuple[str, ...] = ('出库', '出库修改', '出库删除', '退货', '退货取消')
+# text() CTE 用不了 .in_()，字面量拼接同一常量；元素均为上面的仓内硬编码中文枚举，
+# 不含引号/用户输入，与模块级 SQL 片段常量同一安全边界（值仍走绑定参数）。
+_BALANCE_CHANGE_SQL_IN = ', '.join(f"'{t}'" for t in _BALANCE_CHANGE_TYPES)
+
 
 def _factory_match(factory: str):
     """读侧工厂条件：本厂产品 + 未分配工厂的历史行（与写侧 factory_scope 放行口径一致）。"""
@@ -153,7 +165,9 @@ async def get_stockins(db: AsyncSession, page: int=1, per_page: int=50,
     total = (await db.execute(select(func.count()).select_from(base_where.subquery()))).scalar() or 0
     id_result = await db.execute(
         base_where
-        .order_by(StockIn.stockin_date.desc())
+        # id DESC 作 tie-breaker：stockin_date 精度到微秒，同秒多行时 PG 输出顺序不稳定，
+        # LIMIT/OFFSET 翻页会重复/漏行（审计 data-M-2，与报表侧 data_sql 的 id DESC 同口径）
+        .order_by(StockIn.stockin_date.desc(), StockIn.id.desc())
         .offset((page - 1) * per_page)
         .limit(per_page)
     )
@@ -227,7 +241,9 @@ async def get_stockouts(db: AsyncSession, page: int=1, per_page: int=50,
     total = (await db.execute(select(func.count()).select_from(id_query.subquery()))).scalar() or 0
 
     id_result = await db.execute(
-        id_query.order_by(StockOut.stockout_date.desc()).offset((page - 1) * per_page).limit(per_page)
+        # id DESC tie-breaker，同 get_stockins（审计 data-M-2）
+        id_query.order_by(StockOut.stockout_date.desc(), StockOut.id.desc())
+        .offset((page - 1) * per_page).limit(per_page)
     )
     page_ids = [row[0] for row in id_result.all()]
     if not page_ids:
@@ -307,7 +323,7 @@ async def get_stockreturns(db: AsyncSession, stockout_id: int | None = None,
         select(StockReturn)
         .where(*conditions)
         .options(joinedload(StockReturn.product), joinedload(StockReturn.stockout))
-        .order_by(StockReturn.return_date.desc())
+        .order_by(StockReturn.return_date.desc(), StockReturn.id.desc())
         .offset((page - 1) * per_page).limit(per_page)
     )
     returns = result.scalars().unique().all()
@@ -590,9 +606,7 @@ async def get_inventory_balance_detail(db: AsyncSession, product_id: int) -> tup
     )).scalar() or 0
     shipped_net = (await db.execute(
         select(func.coalesce(func.sum(InventoryLog.change_quantity), 0)).where(
-            InventoryLog.change_type.in_(
-                ('出库', '出库修改', '出库删除',
-                 '退货', '退货取消')),
+            InventoryLog.change_type.in_(_BALANCE_CHANGE_TYPES),
             InventoryLog.product_id == product_id,
         )
     )).scalar() or 0
@@ -625,9 +639,7 @@ async def get_inventory_balance_detail_batch(
             InventoryLog.product_id,
             func.coalesce(func.sum(InventoryLog.change_quantity), 0),
         ).where(
-            InventoryLog.change_type.in_(
-                ('出库', '出库修改', '出库删除',
-                 '退货', '退货取消')),
+            InventoryLog.change_type.in_(_BALANCE_CHANGE_TYPES),
             InventoryLog.product_id.in_(ids),
         ).group_by(InventoryLog.product_id)
     )).all()
@@ -813,8 +825,7 @@ filtered AS (
         --   （2026-10-08 实测：退货 2500 后结余纹丝不动）。
         SELECT product_id, SUM(change_quantity) AS shipped_net
         FROM inventory_log
-        WHERE change_type IN ('出库', '出库修改', '出库删除',
-                              '退货', '退货取消')
+        WHERE change_type IN ({_BALANCE_CHANGE_SQL_IN})
               AND product_id IS NOT NULL
         GROUP BY product_id
     ) ship ON ship.product_id = ic.product_id
