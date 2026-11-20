@@ -147,7 +147,9 @@ function sortValue(row: InventoryItem, field: string): number {
 const inventory = computed(() => {
   const rows = (invData.value?.data ?? []).map((item) => ({
     ...item,
-    _rowKey: `${item.customer}-${item.product_name}`,
+    // product_id 才唯一（product.name 无唯一约束，同名产品会撞键）；CTE 按
+    // (product_id, customer) 分组（审计 data-L-4）
+    _rowKey: `${item.customer}-${item.product_id}`,
   }))
   const s = sort.value
   if (!s) return rows
