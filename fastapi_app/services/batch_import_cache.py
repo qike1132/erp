@@ -44,6 +44,11 @@ BATCH_IMPORT_CACHE_PATTERNS: tuple[str, ...] = (
     'products:*',
     PRODUCT_LIST_CACHE_PATTERN,
     'product:search:*',
+    # 导入写 Order/StockIn/StockOut，会引入新客户名；/stock 客户 chips 缓存
+    # customers:all（ttl=120）不清则新客户 60-120s 不出现在筛选里。与
+    # 2026-10-24 P2 对正常写路径的修复（cache_invalidation.invalidate_stock_and_order
+    # 里的 customers:*）同根因——导入路径此前漏网（2026-11-20 审计 M-20）。
+    'customers:*',
 )
 
 
