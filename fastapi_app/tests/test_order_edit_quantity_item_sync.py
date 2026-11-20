@@ -134,6 +134,10 @@ async def test_approval_edit_quantity_syncs_item():
     with patch(
         "fastapi_app.services.approval_service.get_product_for_update",
         new_callable=AsyncMock, return_value=MagicMock(id=1, current_stock=100),
+    ), patch(
+        # 出货计划联动由 test_shipment_plan_sku_purge 覆盖；这里只验证明细数量同步
+        "fastapi_app.services.approval_service.purge_shipment_plan_details_for_sku",
+        new_callable=AsyncMock,
     ):
         await approval_service._handle_edit_approval(db, approval, order, user)
 

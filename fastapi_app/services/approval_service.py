@@ -30,6 +30,7 @@ from fastapi_app.services.order_utils import (
     compute_order_status_from_db,
     sync_single_item_quantity,
 )
+from fastapi_app.services.shipment_plan_sync import purge_shipment_plan_details_for_sku
 from fastapi_app.shared.order_stock_rollback import rollback_order_stock_by_sku
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
@@ -365,6 +366,12 @@ async def _handle_edit_approval(
         if product_id is None:
             raise ValueError(f'产品ID {product_id} 不存在')
         await get_product_for_update(db, product_id)
+        # H-1（2026-11-21 审计）：与直改三路径（update_order_item / delete_order_item /
+        # _update_order_directly，A-M10）同口径——改量后按「本订单 + 本 SKU」清理按
+        # remark 溯源同步出的采购计划明细，否则月历/采购计划继续按旧量备料（超采购）。
+        # TODO(multi-sku-order): 多 SKU 下 order.product_id 是首 item 兼容值，
+        # 与下方 sync_single_item_quantity 同一 TODO 限制。
+        await purge_shipment_plan_details_for_sku(db, order.order_no, order.product_id)
 
         db.add(InventoryLog(
             product_id=order.product_id,
