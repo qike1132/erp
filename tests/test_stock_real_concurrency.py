@@ -12,7 +12,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.core.exceptions import ConflictError, db_transaction
-from fastapi_app.services import stock_in_service, stock_out_service, stock_return_service, stock_service
+from fastapi_app.services import (
+    batch_import_core,
+    stock_in_service,
+    stock_out_service,
+    stock_return_service,
+    stock_service,
+)
 from fastapi_app.services.stock_out_service import batch_create_stockouts
 from fastapi_app.shared_models import (
     DailyProductionRecord,
@@ -373,3 +379,101 @@ async def test_concurrent_same_request_id_stockout_returns_409(
     assert stockouts == 1
     assert logs == 1
     assert len(orders) == 2
+
+
+async def _import_stockout_count(
+    factory, deps, product_name: str, customer: str, qty: int,
+) -> int:
+    async with factory() as session:
+        try:
+            async with db_transaction(session):
+                count, _messages = await batch_import_core.import_stockouts_from_data(
+                    session,
+                    [{'产品名称': product_name, '客户名称': customer, '数量': qty}],
+                    deps=deps,
+                )
+            return count
+        except HTTPException:
+            await session.rollback()
+            return -1
+
+
+async def test_manual_and_import_stockout_lock_order_no_deadlock(
+    async_db_session, test_engine, monkeypatch,
+):
+    """手工出货（Product→Order）与综合导入出货（修复前 Order→Product）并发不得死锁。
+
+    栅栏让两路同时停在「下一步就要锁对方持有的行」的瞬间：
+    - 手工路（create_stockout_core）已持 Product 行锁，正等 calculate_available…
+      去锁 Order；
+    - 导入路（import_stockouts_from_data）修复前已由 calculate_available… 锁住
+      Order，正等 get_product_for_update 去锁 Product。
+    两路互等各自持有的行 → PostgreSQL 40P01，手工路被 db_transaction 转成 500、
+    导入行被 _run_import_row 吞成跳过（count=0）。
+
+    修复后导入路在算可出货量之前先锁 Product（与手工/批量路径统一 P→O），
+    两路在 Product 行锁处自然串行，最终都成功且库存/流水一致。
+    """
+    product_id, _order_id, customer = await _seed_competition(
+        async_db_session, stock=100, order_qty=50,
+    )
+    product = await async_db_session.get(Product, product_id)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    barrier = asyncio.Barrier(2)
+
+    # 手工路：已持 Product 行锁，在 calculate_available… 锁 Order 行之前停住
+    real_available = stock_service.calculate_available_shipment_quantity
+
+    async def manual_available(db, pid, cust, **kwargs):
+        await asyncio.wait_for(barrier.wait(), timeout=10)
+        return await real_available(db, pid, cust, **kwargs)
+
+    monkeypatch.setattr(
+        stock_service, 'calculate_available_shipment_quantity', manual_available,
+    )
+
+    # 导入路：在请求 Product 行锁之前停住（修复前它此时已持 Order 行锁）
+    real_lock = batch_import_core.get_product_for_update
+
+    async def import_lock(db, pid):
+        await asyncio.wait_for(barrier.wait(), timeout=10)
+        return await real_lock(db, pid)
+
+    counter = 0
+    tag = uuid4().hex[:8]
+
+    async def gen(_db):
+        nonlocal counter
+        counter += 1
+        return f'SO-{tag}-{counter:03d}'
+
+    monkeypatch.setattr(stock_service, 'generate_stockout_number', gen)
+    deps = batch_import_core.ImportDeps(
+        generate_stockout_number=gen,
+        get_product_for_update=import_lock,
+    )
+
+    manual_status, import_count = await asyncio.gather(
+        _stockout_status(factory, product_id, customer, f'race-manual-{uuid4().hex}'),
+        _import_stockout_count(factory, deps, product.name, customer, 10),
+    )
+
+    assert manual_status == 200 and import_count == 1, (
+        f'手工/导入同产品同客户并发不得死锁：{manual_status=}, {import_count=}'
+    )
+    async with factory() as check:
+        product_row = await check.get(Product, product_id)
+        stockouts = await check.scalar(
+            select(func.count()).select_from(StockOut).where(StockOut.product_id == product_id)
+        )
+        net_log = await check.scalar(
+            select(func.coalesce(func.sum(InventoryLog.change_quantity), 0)).where(
+                InventoryLog.product_id == product_id,
+                InventoryLog.change_type == '出库',
+            )
+        )
+    assert product_row.current_stock == 80
+    assert stockouts == 2
+    assert net_log == -20

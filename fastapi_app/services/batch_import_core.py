@@ -1110,6 +1110,15 @@ async def _resolve_stockout_inputs(
         debug_messages.append(f'行{idx}: 出库数量必须是整数')
         return None
 
+    # 锁序（Product → Order）：先锁 Product，再算可出货量。calculate_available_
+    # shipment_quantity 默认对 Order 行 FOR UPDATE；手工单条（create_stockout_core）
+    # 与批量（_process_single_stockout）都是先锁 Product —— 本路径此前先锁 Order、
+    # 后锁 Product，同产品同客户并发时两路互等对方持有的行 → PostgreSQL 40P01。
+    # 位置在本地校验（产品/工厂/数量）之后、DB 闸门之前：后续闸门拒绝该行时
+    # 不会写入任何数据，但 PostgreSQL 行锁不随 SAVEPOINT 释放——产品锁会持有到
+    # 外层事务提交（导入整批共用一个事务），这是预期语义。
+    product = await deps.get_product_for_update(db, product.id)
+
     # 负库存判定统一走统一入口（P1-2b）；策略拒绝时按原行为跳过该行
     if (reason := check_stock_available(
         product.current_stock, -qty,
@@ -1169,10 +1178,10 @@ async def import_stockouts_from_data(
             stockout_date=stockout_date, note=note, shipment_info=shipment_info,
         )
 
-        # 使用悲观锁更新产品库存，防止并发修改
-        locked_product = await deps.get_product_for_update(db, product.id)
+        # 产品行锁已在 _resolve_stockout_inputs 解析时按 P→O 取得，
+        # 这里沿用同一个已加锁的 Product 对象写入，不再重复查询。
         # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `locked_product.current_stock -= qty` 直写，改走统一写入口。
-        await apply_stock_delta_locked(db, locked_product, -qty)
+        await apply_stock_delta_locked(db, product, -qty)
 
         log = InventoryLog(
             product_id=product.id,
