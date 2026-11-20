@@ -287,9 +287,12 @@ class TestExportTypeParity:
     def test_type_sets_identical(self):
         from fastapi_app.api.v1.endpoints.report import ALLOWED_REPORT_TYPES
         from fastapi_app.api.v1.endpoints.tasks import ASYNC_EXPORT_REPORT_TYPES
+        from fastapi_app.shared.report_export import EXPORT_METHOD_NAMES, REPORT_TYPES
         from fastapi_app.tasks.report_tasks import _EXPORT_METHODS
 
-        assert set(ALLOWED_REPORT_TYPES) == set(ASYNC_EXPORT_REPORT_TYPES) == set(_EXPORT_METHODS)
+        assert ALLOWED_REPORT_TYPES is REPORT_TYPES
+        assert ASYNC_EXPORT_REPORT_TYPES is REPORT_TYPES
+        assert _EXPORT_METHODS is EXPORT_METHOD_NAMES
 
     def test_worker_methods_resolve(self):
         from fastapi_app.tasks.report_tasks import _EXPORT_METHODS
@@ -299,11 +302,56 @@ class TestExportTypeParity:
             assert callable(getattr(ReportExporter, attr)), attr
 
 
+class TestExportLimitMessage:
+    def test_order_counts_include_both_orders_and_rows(self):
+        from fastapi_app.shared.report_export import export_limit_message
+
+        msg = export_limit_message(12000, 9000)
+        assert '订单 9000 单' in msg
+        assert '明细 12000 行' in msg
+
+
+class _OrderStatsResult:
+    def one(self):
+        return (1, 10, 0, 1, 1)
+
+
+class _EmptyOrderRows:
+    def __iter__(self):
+        return iter(())
+
+
+class _OrderCaptureSession:
+    def __init__(self):
+        self.statements = []
+
+    def execute(self, stmt, *args, **kwargs):
+        self.statements.append(stmt)
+        if len(self.statements) == 1:
+            return _OrderStatsResult()
+        return _EmptyOrderRows()
+
+
+class TestExportOrderSecondarySort:
+    def test_secondary_sort_matches_screen_desc(self):
+        """屏幕用 o.id DESC；导出必须同向，且 stats 带 distinct 订单数（审计 L-21/L-22）。"""
+        from sqlalchemy.dialects import postgresql
+
+        from fastapi_app.shared.report_data_service import _get_order_logs
+
+        session = _OrderCaptureSession()
+        logs, stats = _get_order_logs(session, '', '', '', '', '')
+
+        assert logs == []
+        assert stats['order_count'] == 1
+        sql = str(session.statements[1].compile(dialect=postgresql.dialect()))
+        assert 'order_date DESC' in sql
+        assert '"order".id DESC' in sql or 'order.id DESC' in sql
+
+
 # ============================================================
 # 2026-11-16 上线前审计的 5 个缺陷：回归测试
 # ============================================================
-
-# 与 report_service.get_return_logs 的 SELECT 别名逐一对应（含 total_count）：
 # 真实 SQLAlchemy Row 才会像线上那样「没有哪一列就取不到哪个属性」。
 _RETURN_ROW_SQL = (
     "SELECT 1 AS record_id, 'RT-2026-1001' AS record_no, "
@@ -481,7 +529,7 @@ class TestOrderNoteParity:
         prod = SimpleNamespace(name='备注产品', barcode='SKU-NOTE-1')
 
         stats_result = MagicMock()
-        stats_result.one.return_value = (1, 2, 0, 0)
+        stats_result.one.return_value = (1, 2, 0, 0, 1)
         session = MagicMock()
         session.execute.side_effect = [stats_result, iter([(order, item, prod)])]
 

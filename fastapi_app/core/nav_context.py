@@ -74,7 +74,9 @@ HIDDEN_NAV_CODES = {'order_batch_manage'}
 # approval_manage 仍以 is_nav=True 挂在权限树里可被勾选 —— 勾了的人会看到「审批管理」
 # 菜单，点开全 403（"分配好权限却 403"那一类）。把它标成 superuser_only，
 # 前端 filteredNavSections 按 is_super 过滤：超管照旧看到，其他人看不到假入口。
-SUPERUSER_ONLY_NAV_CODES = {'approval_manage'}
+# user_manage 同因：endpoints/user.py 所有端点 require_superuser()，导航层也必须
+# 隐藏，否则被直接改库授权的非超管会看到一个点开全 403 的「用户管理」。
+SUPERUSER_ONLY_NAV_CODES = {'approval_manage', 'user_manage'}
 
 # 权限端点名 → 前端路由路径映射
 PERMISSION_URL_MAP = {

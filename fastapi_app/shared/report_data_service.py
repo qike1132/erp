@@ -28,10 +28,11 @@ logger = logging.getLogger(__name__)
 
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.shared.report_export import MAX_EXPORT_ROWS
 from fastapi_app.utils import parse_date_strict
 
 _YIELD_PER_BATCH = 500
-_MAX_EXPORT_ROWS = 10000  # 报表导出最大行数，避免内存溢出
+_MAX_EXPORT_ROWS = MAX_EXPORT_ROWS  # 单一事实来源：fastapi_app.shared.report_export
 
 
 def get_all_logs_data(
@@ -214,12 +215,14 @@ def _get_order_logs(session, customer, product, status, start_date, end_date, fa
         query, customer, product, status, start_date, end_date, factory)
 
     # 统计与明细同粒度（订单 × SKU）：按 SKU 筛选时 count/sum 才对得上明细行。
+    # 另带 distinct 订单数，供超限拒绝文案同时给出「订单 N 单 / 明细 M 行」。
     stats_query = (
         select(
             func.count(),
             func.coalesce(func.sum(item_qty), 0),
             func.count().filter(Order.status == ORDER_STATUS_PENDING_STOCK),
             func.count().filter(Order.status == ORDER_STATUS_SHIPPED),
+            func.count(func.distinct(Order.id)),
         )
         .select_from(Order)
         .outerjoin(OrderItem, OrderItem.order_id == Order.id)
@@ -227,11 +230,11 @@ def _get_order_logs(session, customer, product, status, start_date, end_date, fa
     )
     stats_query = _apply_order_filters(
         stats_query, customer, product, status, start_date, end_date, factory)
-    total, total_quantity, pending_count, completed_count = session.execute(stats_query).one()
+    total, total_quantity, pending_count, completed_count, order_count = session.execute(stats_query).one()
 
     logger.info(f'订单查询结果数: {total}')
     logs: list[dict[str, Any]] = []
-    stmt = (query.order_by(Order.order_date.desc(), Order.id, OrderItem.id)
+    stmt = (query.order_by(Order.order_date.desc(), Order.id.desc(), OrderItem.id)
             .execution_options(yield_per=_YIELD_PER_BATCH))
     for order, item, prod in session.execute(stmt):
         if len(logs) >= _MAX_EXPORT_ROWS:
@@ -259,7 +262,8 @@ def _get_order_logs(session, customer, product, status, start_date, end_date, fa
         'total_count': total,
         'total_quantity': int(total_quantity),
         'pending_count': pending_count,
-        'completed_count': completed_count
+        'completed_count': completed_count,
+        'order_count': int(order_count),
     }
     logger.info('订单报表数据处理完成')
     return logs, stats

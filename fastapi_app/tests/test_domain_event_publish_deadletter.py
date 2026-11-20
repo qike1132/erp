@@ -110,6 +110,28 @@ async def test_handler_deadletter_also_honours_override(deadletter_file, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_handler_deadletter_runs_off_event_loop(deadletter_file, monkeypatch):
+    """审计 M-30：handler 死信写盘必须离开事件循环（同步 open 会串行拖慢 worker）。"""
+    import threading
+
+    main_thread = threading.get_ident()
+    seen: dict = {}
+
+    def fake_append(*_args, **_kwargs):
+        seen['thread'] = threading.get_ident()
+
+    async def boom(_event):
+        raise RuntimeError('handler 炸了')
+
+    monkeypatch.setattr(de, '_append_deadletter_handler', fake_append)
+    monkeypatch.setattr(de, '_subscribers', {de.DomainEventType.ORDER_DELETED: [boom]})
+
+    await de._dispatch_in_process(_event())
+
+    assert seen['thread'] != main_thread
+
+
+@pytest.mark.asyncio
 async def test_patrol_reads_the_same_path_as_writer(deadletter_file, no_redis):
     """巡检读的必须就是写入口写的那个文件，否则「0 条」是假的。"""
     await de.publish_with_retry(_event(), max_retries=0, delay=0)

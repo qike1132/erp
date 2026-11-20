@@ -28,6 +28,9 @@ from .common import (
     _ensure_role_belongs_to_project,
     _get_primary_role_id,
 )
+from .common import (
+    version_order_key as _version_sort_key,
+)
 
 
 async def list_versions(db: AsyncSession, project_id: int) -> dict:
@@ -123,6 +126,16 @@ def _next_version(version_no: str | None) -> str:
     if num <= 0:
         return 'T1'
     return f'T{num + 1}'
+
+
+def _next_version_after(*version_nos: str | None) -> str:
+    """在若干版本号中取最大值再 +1；全部无效时降级为 T1。
+
+    copy_part_version 需要「同部位全部版本 + 当前版本」的最大值，此函数是
+    该语义的唯一实现，避免调用方各自内联 max(...) + 1。
+    """
+    max_no = max((_version_num(v) for v in version_nos), default=0)
+    return f'T{max_no + 1}' if max_no > 0 else 'T1'
 
 
 
@@ -257,10 +270,6 @@ def _compute_diff(snapshot_n: list[dict], snapshot_prev: list[dict]) -> list[dic
 
 
 
-def _version_sort_key(version_no: str | None) -> tuple[int, str]:
-    """版本号排序键：与 `version_list` 一致，保证「最新版本」判定唯一"""
-    v = version_no or ''
-    return (len(v), v)
 
 
 def _pick_final_or_latest_per_part(

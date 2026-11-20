@@ -91,6 +91,33 @@ class TestNextVersion:
         assert _next_version('TXX') == 'T1'
 
 
+class TestNextVersionAfter:
+    """多版本取最大后再递增（copy_part_version 的唯一实现）"""
+
+    def test_uses_max_across_all_versions(self):
+        from fastapi_app.services.customer_sampling.version_diff import _next_version_after
+
+        assert _next_version_after('T2', 'T10', 'T1') == 'T11'
+        assert _next_version_after('T3', None, 'invalid') == 'T4'
+
+    def test_empty_input_returns_t1(self):
+        from fastapi_app.services.customer_sampling.version_diff import _next_version_after
+
+        assert _next_version_after() == 'T1'
+
+
+class TestVersionSortKey:
+    """后端版本号排序只允许数值序一份实现"""
+
+    def test_matches_numeric_order(self):
+        from fastapi_app.services.customer_sampling.projects import _version_order_key
+        from fastapi_app.services.customer_sampling.version_diff import _version_sort_key
+
+        for version in ('T1', 'T2', 'T10', 'T01', 'invalid', None):
+            assert _version_sort_key(version) == _version_order_key(version)
+        assert sorted(['T2', 'T01'], key=_version_sort_key) == ['T01', 'T2']
+
+
 # ============================================================
 # 2. 纯函数测试 — _normalize_value
 # ============================================================

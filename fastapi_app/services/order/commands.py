@@ -784,8 +784,12 @@ async def _purge_outsource_processes(db: AsyncSession, process_ids: list[int]) -
 
 async def _purge_order_related_rows(
     db: AsyncSession, order: Order, order_id: int, graph: dict,
+    keep_approval_id: int | None = None,
 ) -> dict:
     """删除/解绑订单的全部关联记录（出库、同步、审批、工序、状态日志、明细）。
+
+    keep_approval_id：审批删单传入当前审批行 ID，保留它及其日志供审批流程收尾；
+    直删传 None，全部审批一并清理。
 
     返回出货计划级联清理结果（供删除消息透出）。
     """
@@ -795,8 +799,12 @@ async def _purge_order_related_rows(
     await db.execute(delete(StockOut).where(StockOut.order_id == order.id))
     await db.execute(delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order_id))
     await db.execute(delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order_id))
-    await _delete_in_batches(db, ApprovalLog, graph['approval_ids'], ApprovalLog.approval_request_id)
-    await db.execute(delete(ApprovalRequest).where(ApprovalRequest.order_id == order_id))
+    approval_ids = [aid for aid in graph['approval_ids'] if aid != keep_approval_id]
+    await _delete_in_batches(db, ApprovalLog, approval_ids, ApprovalLog.approval_request_id)
+    approval_delete = delete(ApprovalRequest).where(ApprovalRequest.order_id == order_id)
+    if keep_approval_id is not None:
+        approval_delete = approval_delete.where(ApprovalRequest.id != keep_approval_id)
+    await db.execute(approval_delete)
     await _purge_outsource_processes(db, graph['process_ids'])
     await db.execute(update(OutsourceShipment).where(OutsourceShipment.order_id == order_id).values(order_id=None))
     await db.execute(delete(OrderStatusLog).where(OrderStatusLog.order_no == order.order_no))

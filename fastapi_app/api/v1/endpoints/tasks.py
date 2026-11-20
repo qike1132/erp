@@ -15,6 +15,7 @@ from fastapi_app.core.deps import require_any_permission, require_permission
 from fastapi_app.core.logger import logger
 from fastapi_app.core.response import success_response
 from fastapi_app.shared.factory_scope import factory_scope_of
+from fastapi_app.shared.report_export import REPORT_TYPES
 from fastapi_app.shared_models import User
 
 # ARQ Job 状态 → 对外状态映射
@@ -111,10 +112,9 @@ class TaskStatusResponse(BaseModel):
     progress: float | None = None
 
 
-# 异步导出支持的报表类型 —— 必须与 /reports/export 的 ALLOWED_REPORT_TYPES、
-# report_data_service.get_all_logs_data / ReportExporter 的分支保持同口径
-# （tests/test_report.py::TestExportTypeParity 钉住三处一致）。
-ASYNC_EXPORT_REPORT_TYPES = ('order', 'stockin', 'stockout', 'deduction', 'return')
+# 异步导出支持的报表类型 —— 单一事实来源：fastapi_app.shared.report_export
+# （tests/test_report.py::TestExportTypeParity 钉住与同步导出同一集合）。
+ASYNC_EXPORT_REPORT_TYPES = REPORT_TYPES
 
 
 class ReportExportRequest(BaseModel):

@@ -28,3 +28,27 @@ async def test_validation_does_not_block_loop(monkeypatch):
     )
     assert len(ticks) == 5
     assert ticks[0] < 0.1, f"事件循环被同步校验阻塞了 {ticks[0]:.3f}s"
+
+
+@pytest.mark.asyncio
+async def test_oversize_file_rejected_before_read():
+    """审计 M-14：超过 10MB 必须在 read() 之前拒绝，避免整文件进内存。"""
+    import io
+
+    from fastapi import HTTPException
+    from starlette.datastructures import UploadFile
+
+    class ExplodingUpload(UploadFile):
+        async def read(self, size: int = -1) -> bytes:
+            raise AssertionError('大小校验前不得读取文件内容')
+
+    file = ExplodingUpload(
+        file=io.BytesIO(b''), size=10 * 1024 * 1024 + 1, filename='big.png',
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await ep.api_upload_project_image(
+            project_id=1, file=file, version=None, db=None, current_user=None,
+        )
+
+    assert exc.value.status_code == 413

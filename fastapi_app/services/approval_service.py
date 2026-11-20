@@ -14,8 +14,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -29,7 +28,6 @@ from fastapi_app.services.approval_log_service import create_approval_log as _cr
 from fastapi_app.services.order_utils import (
     assert_no_linked_returns,
     compute_order_status_from_db,
-    detach_cancelled_returns_for_order,
     sync_single_item_quantity,
 )
 from fastapi_app.shared.order_stock_rollback import rollback_order_stock_by_sku
@@ -40,13 +38,7 @@ from fastapi_app.shared_models import (
     AuditLog,
     InventoryLog,
     Order,
-    OrderItem,
-    OrderOutsourceProcess,
-    OrderStatusLog,
-    OrderSyncRecord,
-    OutsourceShipment,
     StockOut,
-    SyncRetryQueue,
     User,
 )
 from fastapi_app.utils import calc_total_pages
@@ -417,13 +409,15 @@ def _add_delete_audit_log(
 
 async def _backup_and_audit_deleted_order(
     db: AsyncSession, order: Order, current_user: User, approval_id: int,
-) -> None:
+) -> dict:
     """备份订单删除图并写审批删除审计日志（与直删路径同口径，可追溯可恢复）。
 
     调用时点契约（2026-10-19 OCR 第二轮 M5）：必须在任何 sa_delete 批量
     DELETE（StockOut/OrderSyncRecord/SyncRetryQueue/OrderStatusLog/审批/
     明细）**之前**调用——内部 _collect_order_deletion_graph 重新查库，
     DELETE 已在事务内生效时查到的对应段恒为空，备份无法还原抵扣明细。
+
+    返回删除图，供调用方复用 `_purge_order_related_rows`（审计 M-01）。
     """
     from fastapi_app.services.order.commands import (
         _collect_order_deletion_graph,
@@ -436,6 +430,7 @@ async def _backup_and_audit_deleted_order(
         len(backup_graph['status_logs']) + len(backup_graph['retry_records']),
     ))
     _add_delete_audit_log(db, current_user, order, approval_id, backup_path)
+    return backup_graph
 
 
 async def _handle_delete_approval(
@@ -496,58 +491,20 @@ async def _handle_delete_approval(
     # 重新查库，DELETE 已在事务内生效时查到的 stockouts/sync_records 恒为空，
     # 备份无法还原本单抵扣明细（原顺序与直删路径相反）。审批/状态日志/
     # 重试队列此刻均未删，快照完整。
-    await _backup_and_audit_deleted_order(db, order, current_user, approval.id)
+    backup_graph = await _backup_and_audit_deleted_order(db, order, current_user, approval.id)
 
-    # 先解除已取消退货对外键的引用（否则 RESTRICT 外键挡住下面的 stock_out 删除）；
-    # active 退货已在开头的 assert_no_linked_returns 处被拒。
-    await detach_cancelled_returns_for_order(db, order.id)
-    # 批量删除出库记录，避免逐条 ORM delete
-    await db.execute(sa_delete(StockOut).where(StockOut.order_id == order.id))
-
-    await db.execute(sa_delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order.id))
-    # 与直删路径同口径（Round16 B1/B2）：同步重试队列与状态日志随订单清理。
-    await db.execute(sa_delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order.id))
-    await db.execute(sa_delete(OrderStatusLog).where(OrderStatusLog.order_no == order.order_no))
-    approval_result = await db.execute(
-        select(ApprovalRequest.id).where(
-            ApprovalRequest.order_id == order.id,
-            ApprovalRequest.id != approval.id,
-        )
+    # 与直删共用同一份清理实现（审计 M-01）：保留当前审批行及其日志供本流程收尾，
+    # 其余出库/同步/重试/状态日志/外发工序/发货单/订单明细/出货计划明细全部按
+    # 直删同口径清理，避免两份手工拷贝再次漂移。
+    from fastapi_app.services.order.commands import _purge_order_related_rows
+    await _purge_order_related_rows(
+        db, order, order.id, backup_graph, keep_approval_id=approval.id,
     )
-    approval_ids = [row[0] for row in approval_result.all()]
-    if approval_ids:
-        await db.execute(sa_delete(ApprovalLog).where(ApprovalLog.approval_request_id.in_(approval_ids)))
-    await db.execute(sa_delete(ApprovalRequest).where(
-        ApprovalRequest.order_id == order.id,
-        ApprovalRequest.id != approval.id,
-    ))
-
-    # 与直删路径同口径（2026-10-25 上线前审计 M-3）：清掉本订单的外发工序并
-    # 解绑发货单。OrderItem 的 CASCADE 只带走有明细的工序——order_item_id
-    # IS NULL 的历史工序行与 OutsourceShipment.order_id（SET NULL 仅对硬删
-    # 生效）此前残留，审批删单后出货计划仍挂已删订单号。
-    from fastapi_app.services.order.commands import _purge_outsource_processes
-    _process_ids = (await db.execute(
-        select(OrderOutsourceProcess.id).where(OrderOutsourceProcess.order_id == order.id)
-    )).scalars().all()
-    await _purge_outsource_processes(db, list(_process_ids))
-    await db.execute(update(OutsourceShipment).where(
-        OutsourceShipment.order_id == order.id).values(order_id=None))
-
-    # 清掉订单明细：与直删路径（order/commands.py::_purge_order_related_rows）同口径。
-    # 明细的 product_id 是 FK NO ACTION，残留会永久阻塞该产品的删除；
-    # outsource.order_item_id 为 CASCADE，随明细一并清理。
-    await db.execute(sa_delete(OrderItem).where(OrderItem.order_id == order.id))
-
-    # 级联清理该订单同步产生的采购计划明细（2026-10-06 删除联动，
-    # 与 order_crud._delete_order_directly 同一口径）
-    from fastapi_app.services.shipment_plan_sync import purge_shipment_plan_details_for_order
-    await purge_shipment_plan_details_for_order(db, order.order_no)
 
     # 「订单删除(审批)」汇总流水（2026-10-19 OCR 第二轮 M2/M3 重写）：
     # - 值 = rollback_order_stock_by_sku 的返回值（**实际回滚量**），不再是
-    #   「全部出库行净量和」——旧式求和在上方 sa_delete(StockOut)（bulk
-    #   delete 的 synchronize_session='auto' 会 expunge 实例）之后读
+    #   「全部出库行净量和」——旧式求和在上方共享清理批量删除 StockOut
+    #   （bulk delete 的 synchronize_session='auto' 会 expunge 实例）之后读
     #   order_stockouts 属性属过期读（M2），且含负组/产品缺失被跳过组时
     #   与实际落账不符；实际回滚量与逐 SKU「抵扣回滚」流水之和严格对账。
     # - 共享实现已传 write_summary=False 不再写「订单删除」汇总，本段是

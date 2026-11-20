@@ -24,13 +24,6 @@ from fastapi_app.shared_models import (
 
 logger = logging.getLogger(__name__)
 
-
-def _version_order_key(version_no: str | None) -> tuple[int, str]:
-    """版本号数值序：字符串序会把 T10 排到 T2 前面。"""
-    raw = (version_no or '').strip().upper()
-    digits = raw[1:] if raw.startswith('T') else raw
-    return (int(digits), raw) if digits.isdigit() else (0, raw)
-
 class _UnsetType(Enum):
     """"未传参"哨兵类型（枚举字面量便于类型收窄）。
 
@@ -46,6 +39,7 @@ class _UnsetType(Enum):
 _UNSET = _UnsetType.MARKER
 
 from .common import (
+    _build_project_filter_conditions,
     _ensure_part_name_unique,
     _ensure_project_exists,
     _ensure_role_belongs_to_project,
@@ -55,6 +49,9 @@ from .common import (
     _resolve_pattern_maker_name,
     _resolve_supplier_name,
     _write_change_log,
+)
+from .common import (
+    version_order_key as _version_order_key,
 )
 from .grouping import _project_to_summary
 from .upload import _batch_get_image_urls, _get_product_image_urls, _register_project_image_cleanup
@@ -466,27 +463,9 @@ async def list_projects(
     显式传 'all' 返回全部状态的项目；传 in_progress/completed/cancelled 按对应状态过滤。
     """
     # status 缺省时默认按"进行中"过滤（兜底），显式传 'all' 可返回全部状态
-    if status is None:
-        status = 'in_progress'
-
-    conditions = []
-    if keyword:
-        # 用户输入中的 % _ 先转义，避免"100%"这类词被当作通配符全量匹配
-        like = f'%{_escape_like(keyword)}%'
-        conditions.append(
-            or_(
-                CustomerSamplingProject.sequence_no.ilike(like, escape='\\'),
-                CustomerSamplingProject.product_name.ilike(like, escape='\\'),
-                # 与 grouping.py 的 get_grouped_list 同口径：搜索框承诺「搜索版师
-                # 或项目」，列表页漏了版师姓名就会与分组页结果不一致（同一关键词
-                # 在一个接口命中、另一个不命中）。
-                CustomerSamplingProject.pattern_maker_name.ilike(like, escape='\\'),
-            )
-        )
-    if pattern_maker_id is not None:
-        conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
-    if status != 'all':
-        conditions.append(CustomerSamplingProject.status == status)
+    conditions = _build_project_filter_conditions(
+        keyword=keyword, pattern_maker_id=pattern_maker_id, status=status,
+    )
 
     # 计算总数
     count_query = select(func.count()).select_from(CustomerSamplingProject)

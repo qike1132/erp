@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload, selectinload
 
@@ -17,7 +17,7 @@ from fastapi_app.shared_models import (
     CustomerSamplingProject,
 )
 
-from .common import _escape_like
+from .common import _build_project_filter_conditions
 from .upload import _batch_get_image_urls
 
 logger = logging.getLogger(__name__)
@@ -61,37 +61,11 @@ async def get_grouped_list(
     Returns:
         GroupedListResponse dict
     """
-    # status 缺省时默认按"进行中"过滤（兜底），显式传 'all' 可返回全部状态
-    if status is None:
-        status = 'in_progress'
-
-    # 构建查询条件
-    conditions = []
-    if keyword:
-        # 关键词作为绑定参数，通配符由 SQL 侧 concat 拼接（不在 Python 侧拼 SQL 片段）；
-        # 用户输入中的 % _ 先转义，避免"100%"这类词被当作通配符全量匹配
-        kw_pattern = func.concat('%', _escape_like(keyword), '%')
-        conditions.append(
-            or_(
-                CustomerSamplingProject.sequence_no.ilike(
-                    kw_pattern, escape='\\',
-                ),
-                CustomerSamplingProject.product_name.ilike(
-                    kw_pattern, escape='\\',
-                ),
-                # 版师姓名：搜索框（CustomerGroupSearchBar）的 placeholder 与
-                # aria-label 都承诺「搜索版师或项目」，只搜序列号/产品名会让按版师名
-                # 搜「张师傅」恒为零结果。pattern_maker_name 是项目表上的冗余列
-                # （create/update 时写入），直接过滤即可，无需 join 版师表。
-                CustomerSamplingProject.pattern_maker_name.ilike(
-                    kw_pattern, escape='\\',
-                ),
-            )
-        )
-    if pattern_maker_id is not None:
-        conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
-    if status != 'all':
-        conditions.append(CustomerSamplingProject.status == status)
+    # status 缺省时默认按"进行中"过滤（兜底），显式传 'all' 可返回全部状态；
+    # 条件构建与 list_projects 共用同一实现。
+    conditions = _build_project_filter_conditions(
+        keyword=keyword, pattern_maker_id=pattern_maker_id, status=status,
+    )
 
     # 统计符合筛选条件的项目总数（供前端展示统计信息）
     count_query = select(func.count()).select_from(CustomerSamplingProject)

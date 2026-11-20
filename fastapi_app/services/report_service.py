@@ -332,6 +332,11 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
 
     from fastapi_app.core.database import SyncSessionLocal
     from fastapi_app.shared.report_data_service import get_all_logs_data
+    from fastapi_app.shared.report_export import (
+        EXPORT_METHOD_NAMES,
+        MAX_EXPORT_ROWS,
+        export_limit_message,
+    )
     from utils.report_exporter import ReportExporter
 
     if SyncSessionLocal is None:
@@ -354,20 +359,16 @@ async def export_report_to_excel(db, report_type: str, customer: str = '', produ
             # 原实现只写 logger.warning 就把 logs 截到 10000，用户拿到少数据的 Excel
             # 且页面无任何提示，对账缺行无法察觉；同仓 export_limits 对超限是抛错
             # （端点转 4xx），两套口径并存。这里对齐 export_limits：拒绝并告知实际条数。
-            if total_count > 10000:
-                logger.warning(f"报表导出超限：共{total_count}条，上限10000条，已拒绝导出")
+            if total_count > MAX_EXPORT_ROWS:
+                logger.warning(f"报表导出超限：共{total_count}条，上限{MAX_EXPORT_ROWS}条，已拒绝导出")
                 raise ValueError(
-                    f'导出数据量 {total_count} 条超过单次上限 10000 条，'
-                    f'请缩小日期范围或增加筛选条件后重试'
+                    export_limit_message(total_count, stats.get('order_count')),
                 )
 
             exporter = ReportExporter()
             export_methods = {
-                "order": exporter.export_order_logs,
-                "stockin": exporter.export_stockin_logs,
-                "stockout": exporter.export_stockout_logs,
-                "deduction": exporter.export_deduction_logs,
-                "return": exporter.export_return_logs,
+                report_type_name: getattr(exporter, method_name)
+                for report_type_name, method_name in EXPORT_METHOD_NAMES.items()
             }
 
             export_func = export_methods.get(report_type)

@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
@@ -36,6 +37,37 @@ def _escape_like(keyword: str) -> str:
     使用 ESCAPE '\' 子句；keyword 中的 % 不会被误当作"任意字符串"导致全量匹配。
     """
     return keyword.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
+
+
+def version_order_key(version_no: str | None) -> tuple[int, str]:
+    """版本号数值序：字符串序会把 T10 排到 T2 前面。"""
+    raw = (version_no or '').strip().upper()
+    digits = raw[1:] if raw.startswith('T') else raw
+    return (int(digits), raw) if digits.isdigit() else (0, raw)
+
+
+def _build_project_filter_conditions(
+    *, keyword: str | None, pattern_maker_id: int | None, status: str | None,
+) -> list[Any]:
+    """分组列表与普通列表共用的项目筛选条件（单一事实源）。
+
+    status 缺省时默认「进行中」，显式传 'all' 返回全部。
+    """
+    if status is None:
+        status = 'in_progress'
+    conditions: list[Any] = []
+    if keyword:
+        kw_pattern = func.concat('%', _escape_like(keyword), '%')
+        conditions.append(or_(
+            CustomerSamplingProject.sequence_no.ilike(kw_pattern, escape='\\'),
+            CustomerSamplingProject.product_name.ilike(kw_pattern, escape='\\'),
+            CustomerSamplingProject.pattern_maker_name.ilike(kw_pattern, escape='\\'),
+        ))
+    if pattern_maker_id is not None:
+        conditions.append(CustomerSamplingProject.pattern_maker_id == pattern_maker_id)
+    if status != 'all':
+        conditions.append(CustomerSamplingProject.status == status)
+    return conditions
 
 async def _ensure_part_name_unique(
     db: AsyncSession,

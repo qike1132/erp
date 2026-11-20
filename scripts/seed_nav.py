@@ -62,6 +62,12 @@ NAV_SEED: list[dict] = [
     # 之下，则历史上被过宽授予 outsource_manage 的贝乐会原样继承回来，拆码等于没拆。
     # 顶层行 + 必须显式勾选，才真正收窄。无迁移（本批不写迁移），只登记。
     {'code': 'outsource_preset_manage', 'name': '维护外发工序预设', 'icon': None, 'url': None, 'section': None, 'section_name': None, 'sort_order': 0, 'is_nav': False},
+    # 外发细粒度码（审计 L-02）：原先只由 add_outsource_*.py 一次性脚本种入，
+    # 新机按本权威种子重建权限时会漏，导致 /outsource 整页 403。与 preset 同策略：
+    # 顶层行 + 必须显式勾选，不挂到 outsource_manage 之下（避免旧过宽授权自动继承）。
+    {'code': 'outsource_view', 'name': '湖北外发（查看）', 'icon': None, 'url': None, 'section': 'core', 'section_name': '核心业务', 'sort_order': 0, 'is_nav': False},
+    {'code': 'outsource_ship', 'name': '湖北外发（发货）', 'icon': None, 'url': None, 'section': 'core', 'section_name': '核心业务', 'sort_order': 0, 'is_nav': False},
+    {'code': 'outsource_receive', 'name': '湖北外发（收货）', 'icon': None, 'url': None, 'section': 'core', 'section_name': '核心业务', 'sort_order': 0, 'is_nav': False},
 ]
 
 _SEED_FIELDS = ('name', 'icon', 'url', 'section', 'section_name', 'sort_order', 'is_nav')

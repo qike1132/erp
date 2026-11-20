@@ -37,7 +37,7 @@ from .common import (
 )
 from .grouping import _project_to_summary
 from .upload import _batch_get_image_urls, _get_product_image_urls
-from .version_diff import _version_num
+from .version_diff import _next_version_after
 
 
 async def create_part(
@@ -513,9 +513,8 @@ async def copy_part_version(
             CustomerSamplingPart.part_name == part.part_name,
         )
     )).all()
-    max_no = max((_version_num(v) for (v,) in ver_rows), default=0)
     current_ver = part.version_no or 'T1'
-    new_version_no = f'T{max(max_no, _version_num(current_ver)) + 1}'
+    new_version_no = _next_version_after(*(v for (v,) in ver_rows), current_ver)
 
     # 确保新版本号下同名称不重复（防御性检查）
     await _ensure_part_name_unique(

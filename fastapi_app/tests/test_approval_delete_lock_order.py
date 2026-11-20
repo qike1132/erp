@@ -58,10 +58,7 @@ async def test_delete_approval_prelocks_products_before_order_lock(mock_db):
         new=AsyncMock(return_value=0),
     ), patch(
         'fastapi_app.services.approval_service._backup_and_audit_deleted_order',
-        new=AsyncMock(),
-    ), patch(
-        'fastapi_app.services.approval_service.detach_cancelled_returns_for_order',
-        new=AsyncMock(),
+        new=AsyncMock(return_value={'approval_ids': [], 'process_ids': []}),
     ), patch(
         'fastapi_app.services.shipment_plan_sync.purge_shipment_plan_details_for_order',
         new=AsyncMock(),

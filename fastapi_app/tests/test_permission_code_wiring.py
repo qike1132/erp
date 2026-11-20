@@ -57,6 +57,22 @@ def test_approval_nav_is_superuser_only():
     assert 'approval_manage' in _src('scripts/seed_nav.py')
 
 
+def test_user_manage_nav_is_superuser_only():
+    """用户管理接口全部 require_superuser，导航层也必须标超管专属，
+    否则被直接改库勾选 user_manage 的非超管会看到点开全 403 的假入口。"""
+    from fastapi_app.core import nav_context
+
+    assert 'user_manage' in nav_context.SUPERUSER_ONLY_NAV_CODES
+    assert 'user_manage' in _src('scripts/seed_nav.py')
+
+
+def test_outsource_fine_grained_codes_are_in_authoritative_seed():
+    """外发细粒度码必须进 seed_nav，不能只靠一次性脚本（审计 L-02）。"""
+    src = _src('scripts/seed_nav.py')
+    for code in ('outsource_view', 'outsource_ship', 'outsource_receive'):
+        assert f"'{code}'" in src, f'权威种子 seed_nav.py 缺少权限码: {code}'
+
+
 def test_superuser_only_flag_does_not_leak_into_permission_codes():
     """超管专属标记不得顺手把 approval_manage 从 permission_codes 里删掉 ——
     权限码本身要保留（存量授权不破坏），隐藏是前端按 is_super 做的一层。"""

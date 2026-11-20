@@ -16,10 +16,11 @@ from fastapi_app.core.deps import require_permission
 from fastapi_app.core.limiter import limiter, rate_limit_key
 from fastapi_app.schemas.report import ReportResponse
 from fastapi_app.services import report_service
+from fastapi_app.shared.report_export import REPORT_TYPES
 from fastapi_app.shared_models import User
 
-# 允许导出的报表类型
-ALLOWED_REPORT_TYPES = ('order', 'stockin', 'stockout', 'deduction', 'return')
+# 允许导出的报表类型（单一事实来源：fastapi_app.shared.report_export）
+ALLOWED_REPORT_TYPES = REPORT_TYPES
 
 
 def _factory_scope(user: User) -> str:

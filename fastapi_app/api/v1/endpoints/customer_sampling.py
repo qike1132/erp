@@ -243,9 +243,13 @@ async def api_upload_project_image(
     current_user: User = Depends(require_permission(PERM)),
 ) -> dict[str, Any]:
     """上传产品图片（复用 storage_service，限制 JPEG/PNG/WebP ≤ 10MB）"""
-    content = await file.read()
-    # 文件大小校验（10MB 上限），先于数据库查询快速失败
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
+    # 先按声明大小快速拒绝：>1MB 的 UploadFile 落盘 spool，整读进内存后才拒绝
+    # 会让单请求内存尖峰打到上限值（审计 M-14）。
+    if file.size is not None and file.size > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=413, detail='文件大小超过 10MB 限制')
+    content = await file.read()
+    # 兜底：size 不可用或声明值不实时，仍按实际内容再判一次
     if len(content) > MAX_IMAGE_SIZE:
         raise HTTPException(status_code=413, detail='文件大小超过 10MB 限制')
     # 项目存在性优先（404 语义先于文件校验 400），

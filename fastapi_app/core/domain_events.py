@@ -117,7 +117,9 @@ async def _dispatch_in_process(event: DomainEvent) -> None:
                 '领域事件处理失败: event=%s handler=%s error=%s',
                 event.event_type.value, handler.__name__, e,
             )
-            _append_deadletter_handler(event, handler, e)
+            # 同步文件写不能占住事件循环（审计 M-30）：死信爆发时串行磁盘写会
+            # 拖慢同 worker 的所有请求；与 _append_deadletter 的 to_thread 同口径。
+            await asyncio.to_thread(_append_deadletter_handler, event, handler, e)
 
 
 async def _broadcast(event: DomainEvent, force: bool = False) -> bool:
@@ -356,7 +358,10 @@ async def start_event_listener():
                             # 同口径。原先只 logger.error，多 worker 下「非发布进程」那一份失败不留
                             # 证据，按 domain_events_deadletter.jsonl 巡检重放会漏。
                             logger.error('跨进程领域事件处理失败: %s', e)
-                            _append_deadletter_handler(event, handler, e, stage='handler_cross_process')
+                            await asyncio.to_thread(
+                                _append_deadletter_handler, event, handler, e,
+                                stage='handler_cross_process',
+                            )
                 except Exception as e:  # defensive: 单条消息解析失败不能中断监听器
                     logger.error('领域事件消息解析失败: %s', e)
         except Exception as e:  # defensive: 监听器异常后自动重连

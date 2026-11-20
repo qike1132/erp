@@ -11,21 +11,18 @@ from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.core.database import get_sync_engine
 from fastapi_app.core.logger import logger
+from fastapi_app.shared.report_export import (
+    EXPORT_METHOD_NAMES,
+    MAX_EXPORT_ROWS,
+    export_limit_message,
+)
 
 _SyncSession = sessionmaker(
     autocommit=False, autoflush=False, bind=get_sync_engine()
 )
 
-# 导出方法表：与 /reports/export 的 ALLOWED_REPORT_TYPES、tasks.py 的
-# ASYNC_EXPORT_REPORT_TYPES、report_data_service.get_all_logs_data 的分支同口径
-# （tests/test_report.py::TestExportTypeParity 钉住一致，新增报表类型四处同步改）。
-_EXPORT_METHODS = {
-    'order': 'export_order_logs',
-    'stockin': 'export_stockin_logs',
-    'stockout': 'export_stockout_logs',
-    'deduction': 'export_deduction_logs',
-    'return': 'export_return_logs',
-}
+# 导出方法表单一事实来源：fastapi_app.shared.report_export（审计 L-24）。
+_EXPORT_METHODS = EXPORT_METHOD_NAMES
 
 
 async def export_report_task(ctx, report_type: str, filters: dict, user_id: int):
@@ -64,8 +61,8 @@ async def export_report_task(ctx, report_type: str, filters: dict, user_id: int)
                 # 第十轮审计：原「先全量读入内存 → 截断 10000」，截断发生在内存峰值之后，
                 # 防不住超量导出撑爆 worker；且静默截断让用户拿到不完整报表而不自知。
                 # 改为 fail-closed：超限直接失败并引导缩小范围（与 export_limits 门禁同语义）。
-                if total_count > 10000:
-                    return {'success': False, 'error': f'报表数据量过大（{total_count} 行，上限 10000），请缩小筛选范围后重新导出', 'task_id': job_id}
+                if total_count > MAX_EXPORT_ROWS:
+                    return {'success': False, 'error': export_limit_message(total_count, stats.get('order_count')), 'task_id': job_id}
                 exporter = ReportExporter()
                 method_name = _EXPORT_METHODS.get(report_type)
                 if not method_name:
