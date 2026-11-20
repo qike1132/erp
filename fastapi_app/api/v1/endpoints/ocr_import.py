@@ -3,7 +3,6 @@ OCR 出货单识别 FastAPI 端点
 
 支持批量上传 PDF / 图片文件，离线 OCR 识别后写入暂存区。
 """
-import asyncio
 import logging
 import os
 
@@ -27,6 +26,7 @@ from fastapi_app.schemas.ocr_import import (
 )
 from fastapi_app.services import ocr_service as svc
 from fastapi_app.services.ocr._extractors import OcrDependencyError, OcrPageBudgetExceededError
+from fastapi_app.services.ocr._import import _prog_fn, _recognize_items
 from fastapi_app.services.ocr_service import IMAGE_EXTENSIONS
 from fastapi_app.shared_models import User
 
@@ -167,22 +167,18 @@ async def preview_shipping_doc(file: UploadFile=File(..., description='PDF 或�
         raise HTTPException(status_code=400, detail='文件超过 10MB 限制')
     require_upload_magic(content, ext, filename=filename)  # P0-12：文件头校验，失败 400
     try:
-        table_pages = await asyncio.to_thread(svc.extract_table_structure, content, filename)
-        if table_pages:
-            parsed_items = svc.parse_html_shipping_tables(table_pages)
-            if not parsed_items:
-                pages = await asyncio.to_thread(svc.extract_text, content, filename)
-                if pages:
-                    parsed_items = svc.parse_shipping_document(pages)
-            else:
-                pages = [{'page': p['page'], 'text': p.get('text', '')[:500]} for p in table_pages]
-        else:
-            pages = await asyncio.to_thread(svc.extract_text, content, filename)
-            if pages:
-                parsed_items = svc.parse_shipping_document(pages)
-            else:
-                pages = []
-                parsed_items = []
+        # M-2（2026-11-21 审计）：识别梯子只保留一份实现——预览与正式导入共用
+        # ocr/_import._recognize_items（RapidTable 表格优先 → 解析不出回退文本 OCR +
+        # parse_shipping_document）。此前预览在端点里内联重排了一份，改梯子只改一处
+        # 就会造成「预览说识别得出、正式导入识别不出」的分叉，预览的存在意义失效。
+        # 预览无 task_id：_prog_fn('') 对空 task_id 短路（进度回调变 no-op，不写 Redis）。
+        file_type = 'PDF' if ext == '.pdf' else '图片'
+        parsed_items, table_pages, pages = await _recognize_items(
+            content, filename, file_type, _prog_fn(''),
+        )
+        if parsed_items and not pages and table_pages:
+            # 预览特有分支：表格识别命中时把表格页文本作为预览页（500 字符截断）
+            pages = [{'page': p['page'], 'text': p.get('text', '')[:500]} for p in table_pages]
         if not pages and (not parsed_items):
             return OcrPdfPreviewResult(success=False, message='无法提取文本内容', filename=filename, page_count=0, pages=[], parsed_items=[])
         return OcrPdfPreviewResult(success=True, message=f'识别完成，共 {len(pages)} 页，识别到 {len(parsed_items)} 个出货项', filename=filename, page_count=len(pages), pages=[OcrPdfPagePreview(page=p.get('page', 0), text=p.get('text', '')[:500]) for p in pages], parsed_items=[OcrPdfParsedItem.model_validate(it) for it in parsed_items])
