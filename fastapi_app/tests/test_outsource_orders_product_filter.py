@@ -25,15 +25,20 @@ async def test_service_passes_product_kw_to_beile(monkeypatch) -> None:
 
 
 async def test_process_status_branch_passes_product(monkeypatch) -> None:
-    scan = AsyncMock(return_value=[])
-    monkeypatch.setattr(_queries, '_scan_beile_items_with_progress', scan)
-    db = AsyncMock()
+    from fastapi_app.services import order_crud
+
+    beile = AsyncMock(return_value={'items': [], 'total': 0, 'page': 1, 'per_page': 10})
+    monkeypatch.setattr(order_crud, 'get_beile_orders_with_stockins', beile)
 
     await _queries.list_outsource_orders(
-        db, page=1, per_page=10, customer='客户A', product='杯', process_status='completed',
+        AsyncMock(), page=1, per_page=10, customer='客户A', product='杯',
+        process_status='completed',
     )
 
-    scan.assert_awaited_once_with(db, '客户A', '杯')
+    kwargs = beile.await_args.kwargs
+    assert kwargs['product_kw'] == '杯'
+    assert kwargs['include_stockins'] is False
+    assert kwargs['cache_variant'] == 'process_status:completed'
 
 
 async def test_endpoint_forwards_product(monkeypatch) -> None:

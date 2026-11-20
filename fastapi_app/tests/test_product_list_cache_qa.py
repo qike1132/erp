@@ -529,12 +529,18 @@ class TestWriteInvalidationEndToEnd:
 # ⑥ 非 product.py 写入口的失效覆盖 & 防击穿
 # ---------------------------------------------------------------------------
 class TestCoverageGapsAndStampede:
-    async def test_domain_product_pattern_does_not_cover_product_list_key(self, real_fallback_cache):
-        """CacheDomain.PRODUCT 映射 'products:*'（复数），与 'product:list:*'（单数）不同层，
-        故既有域失效不会顺带清掉新缓存（这正是需要独立 _invalidate_product_list_cache 的原因）。"""
+    async def test_domain_product_pattern_covers_real_product_caches(self, real_fallback_cache):
+        """PRODUCT 域必须覆盖全部真实键空间：products:*（products:all /
+        products:staging_map）+ product:list/search + purchase:products。"""
         await safe_set(_KEY_P20, {'items': [], 'total': 0}, timeout=60)
+        await safe_set('products:all:limit5000', [{'id': 1}], timeout=60)
+        await safe_set('product:search:qa', {'items': []}, timeout=60)
+        await safe_set('purchase:products:qa', {'items': []}, timeout=60)
         await cache_mgr.invalidate(InvalidationStrategy.DOMAIN, CacheDomain.PRODUCT)
-        assert await safe_get(_KEY_P20) is not None
+        assert await safe_get(_KEY_P20) is None
+        assert await safe_get('products:all:limit5000') is None
+        assert await safe_get('product:search:qa') is None
+        assert await safe_get('purchase:products:qa') is None
 
     async def test_stock_write_path_clears_product_list(self, real_fallback_cache):
         """#2 修复后：invalidate_stock_and_order() 额外下发 'product:list:*'，

@@ -57,8 +57,8 @@ async def _invalidate_product_list_cache() -> None:
 
     商品写操作会改变列表首屏内容，必须失效；与域级失效是「广覆盖 + 竞态兜底」的分工，
     不是重复：
-      · 域级失效（cache_mgr.invalidate 的 INVENTORY 域，映射见 core/cache.py 的
-        _DOMAIN_PATTERN_MAP）可能在**提交前**触发，用于广覆盖各类改库存的写入口；
+      · 域级失效（cache_mgr.invalidate 的 PRODUCT/INVENTORY 域，映射见 core/cache.py 的
+        _DOMAIN_PATTERN_MAP）可能在**提交前**触发，用于广覆盖各类改库存/产品/BOM 的写入口；
       · 本回调在**提交后**执行，保证提交完成后必定再清一次，从而清除并发读在提交前
         读到旧数据并回写缓存所产生的脏数据，消除竞态窗口。
 
@@ -77,10 +77,8 @@ async def _invalidate_product_search_cache() -> None:
     客户归属变化会改变「哪些客户能搜到这个 SKU」，产品改名/改条码会改变关键词命中，
     两者都必须清搜索缓存，否则最长 5 分钟内下单页仍按旧归属返回结果。
 
-    注意：域级失效覆盖不到它 —— _DOMAIN_PATTERN_MAP 里 PRODUCT 域是 `products:*`
-    （复数），SEARCH 域是 `search:*`（无 product 前缀），都匹配不到 `product:search:*`。
-    故此处显式清，并沿用 post-commit 时机（与商品列表缓存同因：提交前失效会被并发读
-    回写脏数据）。
+    PRODUCT 域现已映射 product:search:*（见 core/cache.py），域级失效会在提交前
+    广覆盖一次；本回调仍在提交后清一次，用于消除并发读回写脏数据的竞态窗口。
     """
     try:
         from fastapi_app.services.product_search_service import product_search_service

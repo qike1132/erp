@@ -436,7 +436,11 @@ class TestDomainPatternMultiMap:
         assert PRODUCT_LIST_CACHE_PATTERN in patterns
         # 其余域仍为单元素 tuple，结构升级不改变既有语义
         assert _DOMAIN_PATTERN_MAP[CacheDomain.ORDER] == ('orders:*',)
-        assert _DOMAIN_PATTERN_MAP[CacheDomain.PRODUCT] == ('products:*',)
+        # PRODUCT 域必须覆盖全部真实键空间：products:*（products:all /
+        # products:staging_map）+ product:list/search + 采购中心选品缓存
+        assert set(_DOMAIN_PATTERN_MAP[CacheDomain.PRODUCT]) == {
+            'products:*', 'product:list:*', 'product:search:*', 'purchase:products:*',
+        }
 
     async def test_inventory_domain_clears_product_list_and_inventory(self, fallback_cache):
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
@@ -470,18 +474,22 @@ class TestDomainPatternMultiMap:
         assert await safe_get(_EXPECTED_KEY) is None, 'ORDER_AND_INVENTORY 应清 product:list:*'
         assert await safe_get('orders:some') is None
 
-    async def test_product_domain_does_not_clear_product_list(self, fallback_cache):
-        """PRODUCT 域映射仍为 products:*（复数），不得误清 product:list:*（单数）"""
+    async def test_product_domain_clears_real_product_caches(self, fallback_cache):
+        """PRODUCT 域必须清真实存在的三组产品缓存（含采购中心选品缓存）"""
         from fastapi_app.core.cache import CacheDomain, invalidate_related_caches
         from fastapi_app.core.redis_wrapper import safe_get, safe_set
 
         await safe_set(_EXPECTED_KEY, {'items': [], 'total': 0}, timeout=60)
         await safe_set('products:all:limit5000', [{'id': 1}], timeout=60)
+        await safe_set('product:search:qa', {'items': []}, timeout=60)
+        await safe_set('purchase:products:qa', {'items': []}, timeout=60)
 
         await invalidate_related_caches(CacheDomain.PRODUCT)
 
-        assert await safe_get('products:all:limit5000') is None
-        assert await safe_get(_EXPECTED_KEY) is not None, 'PRODUCT 域不应清 product:list:*'
+        assert await safe_get(_EXPECTED_KEY) is None, 'PRODUCT 域应清 product:list:*'
+        assert await safe_get('products:all:limit5000') is None, 'PRODUCT 域应清 products:all'
+        assert await safe_get('product:search:qa') is None, 'PRODUCT 域应清 product:search:*'
+        assert await safe_get('purchase:products:qa') is None, 'PRODUCT 域应清 purchase:products:*'
 
 
 class TestPostCommitRaceE2E:

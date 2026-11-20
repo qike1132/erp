@@ -4,13 +4,13 @@
 """
 import logging
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.services.outsource._common import (
+    OutsourceOrderViewStatus,
     _attach_progress_to_orders,
     _fmt_dt,
-    _matches_process_status,
     _serialize_order_process,
 )
 from fastapi_app.shared_models import (
@@ -63,9 +63,6 @@ async def _process_target_quantity(db: AsyncSession, p: OrderOutsourceProcess) -
 
 # ==================== 湖北外发订单列表 ====================
 
-# 状态筛选需跨页统计，故按页遍历取回全量合并列表（单页上限 500 由 beile 查询约定）
-_SCAN_PAGE_SIZE = 500
-
 
 def _detach_page_items(items: list[dict]) -> list[dict]:
     """复制一页记录（含 SKU 明细），避免就地改写被缓存的数据。
@@ -83,36 +80,33 @@ def _detach_page_items(items: list[dict]) -> list[dict]:
     return detached
 
 
-async def _scan_beile_items_with_progress(
-    db: AsyncSession, customer: str | None, product: str | None = None,
-) -> list[dict]:
-    """按页遍历取回全部订单+备货记录，并逐页附加外发工序进度。
+def _process_status_order_filter(status: str):
+    """把外发整体状态下推为 Order 分支的 IN 子查询（审计 M-05）。
 
-    状态筛选是跨页统计，不能只取首页：此前固定 page=1&per_page=500，
-    第 500 条之后的记录被静默丢弃，这些订单在任何状态筛选下都查不到。
-    进度按页附加（每页 ≤500 个 id），避免把全量订单 id 堆进一条 IN 查询。
-
-    已知局限：订单列表本身由 order_crud.get_beile_orders_with_stockins 提供，
-    其 SQL 不接收「工序状态」条件，因此状态筛选仍需跨页扫描后再过滤；
-    进度统计已下推到数据库聚合（见 _attach_progress_to_orders）。
+    口径与 `_common._matches_process_status` 一致：
+    - pending：有工序且全部未发货（started=0）
+    - in_progress：有工序已发货且未全部收齐（started>0 且 completed<total）
+    - completed：全部工序已收齐（completed=total）
+    未配置工序的订单（total=0）与备货行不属于任何状态；未知状态保留「有工序」的订单
+    （对应 Python 实现的 total==0 → False）。
     """
-    from fastapi_app.services.order_crud import get_beile_orders_with_stockins
-    items: list[dict] = []
-    page = 1
-    while True:
-        page_data = await get_beile_orders_with_stockins(
-            db, page=page, per_page=_SCAN_PAGE_SIZE, customer=customer, factory='湖北',
-            product_kw=product,
-        )
-        page_items = _detach_page_items(page_data['items'])
-        items.extend(page_items)
-        # 短页说明已到末页；total 判定兜底防止短页提前终止
-        if len(page_items) < _SCAN_PAGE_SIZE or page * _SCAN_PAGE_SIZE >= page_data['total']:
-            break
-        page += 1
-    # 进度聚合只做一次：原实现每页 2 条聚合 SQL，10k 订单 = 40+ 次多余往返
-    await _attach_progress_to_orders(db, items)
-    return items
+    shipped = func.coalesce(OrderOutsourceProcess.shipped_quantity, 0)
+    received = func.coalesce(OrderOutsourceProcess.received_quantity, 0)
+    fully_received = and_(received > 0, received >= shipped)
+    total = func.count()
+    completed = func.sum(case((fully_received, 1), else_=0))
+    started = func.sum(case((shipped > 0, 1), else_=0))
+
+    subquery = select(OrderOutsourceProcess.order_id).group_by(
+        OrderOutsourceProcess.order_id,
+    )
+    if status == OutsourceOrderViewStatus.PENDING:
+        subquery = subquery.having(started == 0)
+    elif status == OutsourceOrderViewStatus.IN_PROGRESS:
+        subquery = subquery.having(and_(started > 0, completed < total))
+    elif status == OutsourceOrderViewStatus.COMPLETED:
+        subquery = subquery.having(completed == total)
+    return Order.id.in_(subquery)
 
 
 async def list_outsource_orders(
@@ -128,29 +122,26 @@ async def list_outsource_orders(
     直接展示进度条，无需再单独打开看板。
 
     process_status：按订单外发工序整体状态过滤（pending/in_progress/completed），
-    需跨页统计，故先取全量合并列表附加进度后过滤再分页；未配置工序的订单
-    不属于任何状态（未配置是独立状态，仅在无状态筛选时展示）。
-    进度统计本身由数据库聚合完成（数据库聚合 JOIN + GROUP BY，见 _common）。
+    条件已下推到 Order 分支 SQL（HAVING），不再跨页拉全量后内存过滤；
+    备货行不属于任何工序状态，状态筛选时一并排除（与 _matches_process_status 一致）。
+    进度统计由数据库聚合完成（见 _common）。
     """
     from fastapi_app.services.order_crud import get_beile_orders_with_stockins
     if process_status:
-        all_items = await _scan_beile_items_with_progress(db, customer, product)
-        filtered = [
-            row for row in all_items
-            if _matches_process_status(row, process_status)
-        ]
-        total = len(filtered)
-        start = (page - 1) * per_page
-        return {
-            'items': filtered[start:start + per_page],
-            'total': total,
-            'page': page,
-            'per_page': per_page,
-        }
+        data = await get_beile_orders_with_stockins(
+            db, page=page, per_page=per_page, customer=customer, factory='湖北',
+            product_kw=product, skip_po_maps=True,
+            order_filter=_process_status_order_filter(process_status),
+            include_stockins=False,
+            cache_variant=f'process_status:{process_status}',
+        )
+        items = _detach_page_items(data['items'])
+        await _attach_progress_to_orders(db, items)
+        return {**data, 'items': items}
 
     data = await get_beile_orders_with_stockins(
         db, page=page, per_page=per_page, customer=customer, factory='湖北',
-        product_kw=product,
+        product_kw=product, skip_po_maps=True,
     )
     items = _detach_page_items(data['items'])
     await _attach_progress_to_orders(db, items)

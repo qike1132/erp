@@ -159,7 +159,13 @@ _DOMAIN_PATTERN_MAP: dict[CacheDomain, tuple[str, ...]] = {
     # 与同响应里的库存行自相矛盾（2026-11-16 上线前审计 A-26）。
     CacheDomain.INVENTORY: ("inventory:*", "stock:stats*", PRODUCT_LIST_CACHE_PATTERN, "customers:*"),
     CacheDomain.STOCKIN: ("stockins:*",),
-    CacheDomain.PRODUCT: ("products:*",),
+    # PRODUCT 域覆盖真实键空间：products:*（products:all / products:staging_map）、
+    # product:list/search、采购中心选品缓存 purchase:products:*。旧映射只有
+    # products:*，漏掉后三组，导致 BOM/产品写路径对采购选品缓存失效落空。
+    # 域级失效在提交前广覆盖；product:list/search 另有 post-commit 回调做竞态兜底。
+    CacheDomain.PRODUCT: (
+        "products:*", "product:list:*", "product:search:*", "purchase:products:*",
+    ),
     CacheDomain.CUSTOMER: ("customers:*",),
     CacheDomain.SEARCH: ("search:*",),
     CacheDomain.STOCKOUT: ("stockouts:*",),

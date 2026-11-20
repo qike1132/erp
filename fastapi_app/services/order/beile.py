@@ -43,11 +43,16 @@ def _fmt_beile_time(dt: datetime | None) -> str:
     return format_local_time(dt, '%Y-%m-%d %H:%M') or ''
 
 
-def _build_beile_unified_query(confirmed: bool | None, customer, factory, product_kw=None):
+def _build_beile_unified_query(
+    confirmed: bool | None, customer, factory, product_kw=None, *,
+    order_filter=None, include_stockins: bool = True,
+):
     """构建 Order+StockIn 的 UNION ALL 子查询。
 
     confirmed: None=不过滤确认状态；False=仅未确认；True=仅已确认。
     订单与备货均按各自表的 confirmed_at 过滤。
+    order_filter: 只作用于 Order 分支的 SQL 条件（如外发工序状态 EXISTS/IN 下推）。
+    include_stockins=False: 只返回订单分支（外发状态筛选时备货不属于任何工序状态）。
     """
     # ---- 构建 UNION ALL 子查询 ----
     # Order 部分：未删除订单，通过 order_item.product.factory 筛选
@@ -78,6 +83,8 @@ def _build_beile_unified_query(confirmed: bool | None, customer, factory, produc
                 or_(OrderItem.product_name.ilike(kw), OrderItem.product_barcode.ilike(kw)),
             ))
         )
+    if order_filter is not None:
+        order_part = order_part.where(order_filter)
 
     # StockIn 部分：通过 product.factory 筛选（备货同样参与确认状态筛选）
     stockin_part = select(
@@ -102,7 +109,7 @@ def _build_beile_unified_query(confirmed: bool | None, customer, factory, produc
             StockIn.product.has(or_(Product.name.ilike(kw), Product.barcode.ilike(kw)))
         )
 
-    parts = [order_part, stockin_part]
+    parts = [order_part, stockin_part] if include_stockins else [order_part]
     return union_all(*parts).subquery()
 
 
@@ -391,17 +398,37 @@ async def get_beile_unconfirmed_count(db: AsyncSession, factory: str = '湖北')
     return (unconfirmed_orders_result.scalar() or 0) + (unconfirmed_stockins_result.scalar() or 0)
 
 
+def _beile_list_cache_key(*_args, **kwargs) -> str:
+    """湖北列表缓存键：必须区分完整/轻量查询（H-1）。
+
+    `skip_po_maps=True`（外发列表）不注入 is_ordered/purchase_order_qty；
+    若与完整查询共用键，轻量响应会污染湖北订单页最长 60s。
+    """
+    return (
+        f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:"
+        f"c{kwargs.get('customer', '')}:f{kwargs.get('factory', '')}:"
+        f"cs{kwargs.get('confirm_status', '')}:pk{kwargs.get('product_kw', '')}:"
+        f"sp{int(bool(kwargs.get('skip_po_maps', False)))}:"
+        f"is{int(bool(kwargs.get('include_stockins', True)))}:"
+        f"v{kwargs.get('cache_variant', '')}"
+    )
+
+
 @cache_result(
     key_prefix="orders:beile:list",
     ttl=60,
     local_ttl=0,
-    key_builder=lambda *args, **kwargs: f"p{kwargs.get('page', 1)}:pp{kwargs.get('per_page', 50)}:c{kwargs.get('customer', '')}:f{kwargs.get('factory', '')}:cs{kwargs.get('confirm_status', '')}:pk{kwargs.get('product_kw', '')}",
+    key_builder=_beile_list_cache_key,
 )
 async def get_beile_orders_with_stockins(
     db: AsyncSession, *, page: int = 1, per_page: int = 50,
     customer: str | None = None, factory: str = '湖北',
     confirm_status: str | None = None,
     product_kw: str | None = None,
+    skip_po_maps: bool = False,
+    order_filter=None,
+    include_stockins: bool = True,
+    cache_variant: str = '',
 ) -> dict:
     """获取湖北工厂订单+备货合并列表。
 
@@ -424,24 +451,45 @@ async def get_beile_orders_with_stockins(
 
     local_ttl=0：禁用 L1 以支持多 worker 下「写入即失效」（见 get_beile_unconfirmed_count）。
 
+    skip_po_maps：外发列表不消费 `is_ordered`/`purchase_order_qty`，传 True 跳过
+    completed 采购单与逐 SKU 快照注入（审计 M-05）；beile-order 页面保持 False。
+
+    order_filter / include_stockins / cache_variant：外发状态筛选把工序状态条件下推到
+    Order 分支（`include_stockins=False`，备货不属于任何工序状态），并通过
+    cache_variant 区分不同筛选的缓存键（审计 M-05 / 评审 M-1）。
+
     参考 purchase_order_query.get_unprocessed_orders 的实现方案。
     """
+    # order_filter 是 SQL 表达式、无法进缓存键；要求调用方给出唯一 cache_variant，
+    # 否则不同筛选会共用同一缓存键（评审 L-12）。
+    if order_filter is not None and not cache_variant:
+        raise ValueError('order_filter 必须同时提供 cache_variant，避免缓存键串用')
+
     confirmed: bool | None = None
     if confirm_status == 'unconfirmed':
         confirmed = False
     elif confirm_status == 'confirmed':
         confirmed = True
 
-    unified = _build_beile_unified_query(confirmed, customer, factory, product_kw)
+    unified = _build_beile_unified_query(
+        confirmed, customer, factory, product_kw,
+        order_filter=order_filter, include_stockins=include_stockins,
+    )
 
     # ---- 1. 未确认湖北记录总数（全局量，独立缓存） ----
     unconfirmed_count = await get_beile_unconfirmed_count(db, factory)
 
     # ---- 2. completed 采购单映射（一次查询，供行级注入，无 N+1） ----
-    by_order_id, by_customer_product, po_by_id = await _fetch_completed_po_maps(db)
-
-    # ---- 2b. 逐 SKU 快照映射（方案 C；表缺失时优雅降级为空映射） ----
-    sku_by_source, _sku_by_po = await _fetch_po_sku_maps(db)
+    if skip_po_maps:
+        by_order_id: dict[int, list] = {}
+        by_customer_product: dict[tuple[str, str], list] = {}
+        po_by_id: dict[int, object] = {}
+        sku_by_source: dict = {}
+        _sku_by_po: dict = {}
+    else:
+        by_order_id, by_customer_product, po_by_id = await _fetch_completed_po_maps(db)
+        # ---- 2b. 逐 SKU 快照映射（方案 C；表缺失时优雅降级为空映射） ----
+        sku_by_source, _sku_by_po = await _fetch_po_sku_maps(db)
 
     # ---- 3. 分页查询当前页（窗口列一并取 total，UNION 只执行一次） ----
     offset = (page - 1) * per_page
@@ -661,24 +709,15 @@ def _build_beile_stockin_record(
 
 
 async def _order_has_completed_po(db: AsyncSession, order_id: int) -> bool:
-    """该客户订单是否已存在 completed 关联采购单（source_order_ids 精确元素匹配，非 LIKE）。"""
-    source_ids_list = (await db.execute(
-        select(PurchaseOrder.source_order_ids).where(
-            PurchaseOrder.status == PurchaseOrderStatus.COMPLETED
-        )
-    )).scalars().all()
-    return any(order_id in parse_source_order_ids(s) for s in source_ids_list)
+    """该客户订单是否已存在 completed 关联采购单（复用统一映射，source_ids 精确匹配）。"""
+    by_order_id, _by_customer_product, _po_by_id = await _fetch_completed_po_maps(db)
+    return order_id in by_order_id
 
 
 async def _stockin_has_completed_po(db: AsyncSession, customer: str | None, product_name: str | None) -> bool:
-    """该备货是否已存在 (customer, product_name) 匹配的 completed 采购单（近似匹配）。"""
-    rows = (await db.execute(
-        select(PurchaseOrder.customer_name, PurchaseOrder.product_name).where(
-            PurchaseOrder.status == PurchaseOrderStatus.COMPLETED
-        )
-    )).all()
-    target = (customer or '', product_name or '')
-    return any((r.customer_name or '', r.product_name or '') == target for r in rows)
+    """该备货是否已存在 (customer, product_name) 匹配的 completed 采购单（复用统一映射）。"""
+    _by_order_id, by_customer_product, _po_by_id = await _fetch_completed_po_maps(db)
+    return (customer or '', product_name or '') in by_customer_product
 
 
 async def confirm_beile_order(db: AsyncSession, order_id: int, current_user: User) -> dict:
