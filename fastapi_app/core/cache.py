@@ -592,14 +592,3 @@ async def stop_l1_broadcast_listener() -> None:
 def _match_pattern(key: str, pattern: str) -> bool:
     import fnmatch
     return fnmatch.fnmatch(key, pattern)
-
-
-async def invalidate_dashboard_cache():
-    """失效 dashboard 相关缓存，确保数据同步"""
-    try:
-        await invalidate_cache('dashboard:*')
-        await invalidate_cache('dashboard:stats')
-        await invalidate_cache('dashboard:activities')
-        logger.info("Dashboard 缓存已失效")
-    except _CACHE_INFRA_EXCEPTIONS as e:
-        logger.warning(f"失效 Dashboard 缓存失败: {e}")

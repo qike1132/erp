@@ -5,7 +5,6 @@ Redis 缓存管理器 - 全异步版本
 消除 FastAPI 异步事件循环中的阻塞调用。
 """
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -454,47 +453,6 @@ class RedisCacheManager:
 
         return deleted_count
 
-    async def exists(self, key: str) -> bool:
-        full_key = self._make_key(key)
-
-        client = self.ensure_client()
-        if client:
-            try:
-                found = bool(await client.exists(full_key))
-                self.note_command_success()
-                return found
-            except Exception as e:
-                logger.warning("Redis async exists error: %s", e)
-                self.note_command_failure(e)
-
-        async with self._lock:
-            expires_at = self._fallback_timestamps.get(full_key)
-            if expires_at is not None and time.time() > expires_at:
-                self._fallback_cache.pop(full_key, None)
-                del self._fallback_timestamps[full_key]
-                return False
-            return full_key in self._fallback_cache
-
-    async def incr(self, key: str) -> int:
-        full_key = self._make_key(key)
-
-        client = self.ensure_client()
-        if client:
-            try:
-                value = await client.incr(full_key)
-                self.note_command_success()
-                return value
-            except Exception as e:
-                logger.warning("Redis async incr error: %s", e)
-                self.note_command_failure(e)
-
-        async with self._lock:
-            current = self._fallback_cache.get(full_key, 0)
-            new_value = current + 1
-            self._fallback_cache[full_key] = new_value
-            self._fallback_timestamps[full_key] = time.time() + self.default_timeout
-            return new_value
-
     async def get_stats(self) -> dict:
         # 值异构（str/bool/int），显式放宽，避免 mypy 从首两条推断窄类型后报 assignment
         stats: dict[str, Any] = {
@@ -537,40 +495,12 @@ class RedisCacheManager:
 redis_cache = RedisCacheManager()
 
 
-def _generate_cache_key(f, key_prefix: str, args: tuple, kwargs: dict) -> str:
-    if key_prefix is None:
-        key_prefix = f.__name__
-    args_str = _hash_args(args, kwargs)
-    return f"{key_prefix}:{args_str}"
-
-
-def _hash_args(args: tuple, kwargs: dict) -> str:
-    try:
-        args_json = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True)
-        return hashlib.sha256(args_json.encode()).hexdigest()[:16]
-    except Exception:
-        raw = str(args) + str(kwargs)
-        return hashlib.md5(raw.encode()).hexdigest()[:16]
-
-
-class CacheConfig:
-    PRODUCT_LIST = ('product:list', 600)
-    PRODUCT_DETAIL = ('product:detail', 1800)
-    PRODUCT_SEARCH = ('product:search', 300)
-    INVENTORY_STATS = ('inventory:stats', 300)
-    STOCK_LIST = ('stock:list', 600)
-    ORDER_LIST = ('order:list', 300)
-    ORDER_STATS = ('order:stats', 300)
-    USER_PERMISSIONS = ('user:permissions', 3600)
-    USER_PROFILE = ('user:profile', 1800)
-    REPORT_DATA = ('report:data', 600)
-    DASHBOARD_STATS = ('dashboard:stats', 120)
-    DAILY_PRODUCTION = ('daily:production', 300)
-    PURCHASE_PLAN = ('purchase:plan', 300)
-    APPROVAL_PENDING = ('approval:pending', 60)
-
-
-# warmup_cache 已于 2026-10-15 迁至 fastapi_app/core/cache_warmup.py：
-# 它需要 import fastapi_app.core.database 与 fastapi_app.shared_models，留在本模块
-# 会构成「utils → fastapi_app」与「fastapi_app → utils」的包级循环（此前双向都靠
-# 函数内延迟 import 才不炸）。迁移后本模块是纯 Redis 客户端，零 fastapi_app 依赖。
+# 键生成唯一真相源 = fastapi_app/core/cache_keys.py（build_cache_key）；TTL 真相源
+# 同在各端点/服务调用处。本模块不再提供 CacheConfig/_generate_cache_key（2026-11-21
+# 死代码清理删除：零调用方，且其 TTL 表与 cache_keys.py 已漂移）。
+#
+# 预热逻辑也不得住在本模块：它需要 import fastapi_app.core.database 与
+# fastapi_app.shared_models，留在本模块会构成「utils → fastapi_app」与
+# 「fastapi_app → utils」的包级循环。曾经的 warmup_cache 2026-10-15 迁至
+# core/cache_warmup.py，2026-11-21 随死代码清理整体删除（唯一键 product:list:count
+# 全仓零读者）；启动预热唯一真相源 = main._warm_inventory_cache。
