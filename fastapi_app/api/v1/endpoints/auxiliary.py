@@ -256,7 +256,10 @@ async def available_stockins(
         'product_name': s.product.name if s.product else '',
         'quantity': s.quantity, 'customer': s.customer,
         'stockin_date': fmt_business(s.stockin_date, '%Y-%m-%d') if s.stockin_date else '',
-        'available': s.quantity - sum(st.quantity for st in s.stockin_stockouts) if s.stockin_stockouts else s.quantity,
+        # 可抵扣量按净量口径：抵扣出货的消耗 = quantity - returned_quantity（部分退货要补回）。
+        # 与 stock_inventory_service.py get_stockins 的 deducted 子查询、
+        # shared/report_data_service.py 备货导出 remaining 两处权威口径一致（审计 data-H-1）。
+        'available': s.quantity - sum(st.quantity - (st.returned_quantity or 0) for st in s.stockin_stockouts) if s.stockin_stockouts else s.quantity,
     } for s in stockins]
 
 
