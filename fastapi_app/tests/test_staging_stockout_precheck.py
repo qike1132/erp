@@ -68,6 +68,36 @@ class TestExcelImportPrecheck:
         assert entity.stock_check_message == '库存充足（备货口径预检，确认按结余）'
 
 
+class TestBatchPrecheck:
+    async def test_recalc_uses_single_batch_query(self, monkeypatch):
+        """N 行预检只允许一次批量结余查询（审计 M-04 的 N+1 回归）。"""
+        from fastapi_app.services import stock_inventory_service
+
+        rows = [
+            SimpleNamespace(product_id=1, quantity=8),
+            SimpleNamespace(product_id=2, quantity=5),
+            SimpleNamespace(product_id=1, quantity=9),
+        ]
+        db = AsyncMock()
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = rows
+        db.execute = AsyncMock(return_value=result)
+
+        batch = AsyncMock(return_value={1: (10, -2), 2: (0, -5)})
+        monkeypatch.setattr(
+            stock_inventory_service, 'get_inventory_balance_detail_batch', batch,
+        )
+
+        await staging_stockout._recalc_stock_check_by_balance(db, SESSION_ID)
+
+        batch.assert_awaited_once()
+        assert set(batch.await_args.args[1]) == {1, 2}, '同一产品只需查一次'
+        assert rows[0].stock_check_passed is True   # 8 <= 10 - 2
+        assert rows[1].stock_check_passed is False  # 5 > 0 - 5
+        assert rows[2].stock_check_passed is False  # 9 > 10 - 2
+        assert '结余 8' in rows[2].stock_check_message
+
+
 class TestEditPrecheck:
     async def test_edit_quantity_recomputes_precheck(self, monkeypatch):
         """编辑数量后预检必须重算（B1-04 起按结余口径，与确认闸门同源）"""

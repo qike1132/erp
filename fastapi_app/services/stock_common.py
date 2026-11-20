@@ -6,10 +6,40 @@
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.services.numbering_sequence import _BUSINESS_TZ
-from fastapi_app.shared_models import StockOut, StockReturn
+from fastapi_app.shared_models import InventoryLog, StockOut, StockReturn
+
+IDEMPOTENCY_CONSTRAINT = 'uq_inventory_log_idem'
+
+
+async def assert_request_not_processed(
+    db: AsyncSession, request_id: str, message: str,
+) -> None:
+    """请求级幂等预检：同一 request_id 已有库存流水即拒绝（409）。
+
+    预检只能覆盖「先提交、后到达」的顺序重复；并发窗口里两个事务会同时通过
+    预检，后提交者由 ``raise_if_idempotency_conflict`` 在唯一索引处兜底。
+    """
+    duplicate = (await db.execute(
+        select(InventoryLog.id).where(InventoryLog.idem_key == request_id)
+    )).first()
+    if duplicate:
+        raise ConflictError(message)
+
+
+def raise_if_idempotency_conflict(exc: IntegrityError, message: str) -> None:
+    """把 ``uq_inventory_log_idem`` 冲突转成 409；其它约束冲突原样返回。
+
+    调用方在 ``except IntegrityError`` 中调用，未命中时需接着 ``raise`` 原异常。
+    幂等键冲突意味着另一并发事务已经完成了同一请求，数据已安全回滚，只是
+    错误形态需要从 500 改成可读的 409。
+    """
+    if IDEMPOTENCY_CONSTRAINT in str(exc):
+        raise ConflictError(message) from exc
 
 
 async def guard_stockout_deletion(db: AsyncSession, stockout: StockOut) -> None:

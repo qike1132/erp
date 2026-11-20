@@ -12,13 +12,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fastapi_app.core.exceptions import ConflictError, db_transaction
-from fastapi_app.services import stock_out_service, stock_return_service
+from fastapi_app.services import stock_in_service, stock_out_service, stock_return_service, stock_service
 from fastapi_app.services.stock_out_service import batch_create_stockouts
 from fastapi_app.shared_models import (
     DailyProductionRecord,
     InventoryLog,
     Order,
     Product,
+    StockIn,
     StockOut,
     StockReturn,
 )
@@ -212,3 +213,163 @@ async def test_concurrent_cancel_same_return_applies_only_once(
     assert net_log == -10
     assert product.current_stock == 20 + net_log
     assert order.status == "已出货"
+
+
+def _install_precheck_barrier(monkeypatch, service_module) -> None:
+    """让两路并发都完成幂等预检后，再同时进入库存写入。
+
+    预检只能拦住「先提交、后到达」；栅栏确保两路都看到「尚未登记」，随后由
+    Product 行锁自然串行化：先提交者成功，后提交者撞 uq_inventory_log_idem。
+    这样并发窗口不依赖调度运气，也不会像「持锁方在应用层等待」那样制造死锁。
+    """
+    barrier = asyncio.Barrier(2)
+
+    async def synchronized(_db, _request_id, _message):
+        await asyncio.wait_for(barrier.wait(), timeout=10)
+
+    monkeypatch.setattr(service_module, 'assert_request_not_processed', synchronized)
+
+
+async def _seed_stockin_product(db: AsyncSession) -> tuple[int, str]:
+    tag = uuid4().hex[:10]
+    customer = f"并发入库客户-{tag}"
+    product = Product(
+        name=f"并发入库产品-{tag}",
+        barcode=f"RACE-IN-{tag}",
+        current_stock=0,
+        initial_stock=0,
+    )
+    db.add(product)
+    await db.flush()
+    await db.commit()
+    return product.id, customer
+
+
+async def _stockin_status(factory, product_id: int, customer: str, token: str) -> int:
+    async with factory() as session:
+        try:
+            async with db_transaction(session):
+                await stock_in_service.create_stockin_core(
+                    session, product_id, 5, customer, datetime.now(UTC), '',
+                    request_id=token,
+                )
+            return 200
+        except HTTPException as exc:
+            return exc.status_code
+
+
+async def _stockout_status(factory, product_id: int, customer: str, token: str) -> int:
+    async with factory() as session:
+        try:
+            async with db_transaction(session):
+                await stock_out_service.create_stockout_core(
+                    session, product_id, 10, customer, datetime.now(UTC), '',
+                    request_id=token,
+                )
+            return 200
+        except HTTPException as exc:
+            return exc.status_code
+
+
+async def test_concurrent_same_request_id_stockin_returns_409(
+    async_db_session, test_engine, monkeypatch,
+):
+    """L-1：同 request_id 的并发入库必须一成一 409，且只留一条记录/流水。
+
+    两路各用不同产品：既排除「同一产品 FOR UPDATE + FK KEY SHARE」的既有
+    死锁形态，又能让两事务真正同时通过预检、同时写同一个 idem_key。
+    """
+    product_a, customer_a = await _seed_stockin_product(async_db_session)
+    product_b, customer_b = await _seed_stockin_product(async_db_session)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    _install_precheck_barrier(monkeypatch, stock_in_service)
+    counter = 0
+    tag = uuid4().hex[:8]
+
+    async def gen(_db):
+        nonlocal counter
+        counter += 1
+        return f'BH-{tag}-{counter:03d}'
+
+    monkeypatch.setattr(stock_service, 'generate_stockin_number', gen)
+    token = f'race-in-{uuid4().hex}'  # secret-scan:allow（并发测试用随机幂等令牌，非凭据）
+
+    statuses = await asyncio.gather(
+        _stockin_status(factory, product_a, customer_a, token),
+        _stockin_status(factory, product_b, customer_b, token),
+    )
+
+    assert sorted(statuses) == [200, 409], f"并发重复入库必须一成一 409：{statuses=}"
+    async with factory() as check:
+        total_stock = await check.scalar(
+            select(func.coalesce(func.sum(Product.current_stock), 0)).where(
+                Product.id.in_([product_a, product_b])
+            )
+        )
+        stockins = await check.scalar(
+            select(func.count()).select_from(StockIn).where(
+                StockIn.product_id.in_([product_a, product_b])
+            )
+        )
+        logs = await check.scalar(
+            select(func.count()).select_from(InventoryLog).where(InventoryLog.idem_key == token)
+        )
+    assert total_stock == 5
+    assert stockins == 1
+    assert logs == 1
+
+
+async def test_concurrent_same_request_id_stockout_returns_409(
+    async_db_session, test_engine, monkeypatch,
+):
+    """L-1：同 request_id 的并发出库必须一成一 409，且只扣一次库存。"""
+    product_a, order_a, customer_a = await _seed_competition(
+        async_db_session, stock=100, order_qty=50,
+    )
+    product_b, order_b, customer_b = await _seed_competition(
+        async_db_session, stock=100, order_qty=50,
+    )
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    _install_precheck_barrier(monkeypatch, stock_out_service)
+    counter = 0
+    tag = uuid4().hex[:8]
+
+    async def gen(_db):
+        nonlocal counter
+        counter += 1
+        return f'SO-{tag}-{counter:03d}'
+
+    monkeypatch.setattr(stock_service, 'generate_stockout_number', gen)
+    token = f'race-out-{uuid4().hex}'  # secret-scan:allow（并发测试用随机幂等令牌，非凭据）
+
+    statuses = await asyncio.gather(
+        _stockout_status(factory, product_a, customer_a, token),
+        _stockout_status(factory, product_b, customer_b, token),
+    )
+
+    assert sorted(statuses) == [200, 409], f"并发重复出库必须一成一 409：{statuses=}"
+    async with factory() as check:
+        total_stock = await check.scalar(
+            select(func.coalesce(func.sum(Product.current_stock), 0)).where(
+                Product.id.in_([product_a, product_b])
+            )
+        )
+        stockouts = await check.scalar(
+            select(func.count()).select_from(StockOut).where(
+                StockOut.product_id.in_([product_a, product_b])
+            )
+        )
+        logs = await check.scalar(
+            select(func.count()).select_from(InventoryLog).where(InventoryLog.idem_key == token)
+        )
+        orders = list((await check.execute(
+            select(Order).where(Order.id.in_([order_a, order_b]))
+        )).scalars().all())
+    assert total_stock == 190
+    assert stockouts == 1
+    assert logs == 1
+    assert len(orders) == 2

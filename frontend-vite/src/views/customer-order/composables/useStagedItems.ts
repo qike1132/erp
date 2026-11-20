@@ -10,6 +10,7 @@ import { stockApi, type BatchSubmitResponse } from '@/api'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { getErrorMessage } from '@/types/errors'
+import { createBatchRequestId } from '@/utils/batchRequestId'
 import { invalidateOrderDerivedQueries } from '@/utils/queryKeys'
 import type { StagedItem } from './types'
 
@@ -87,12 +88,14 @@ export function useStagedItems() {
   }
 
   function buildStockinPayload() {
-    return stagedStockins.value.map((i) => ({
+    const nextRequestId = createBatchRequestId('stockin')
+    return stagedStockins.value.map((i, index) => ({
       product_id: i.productId,
       customer: i.customer,
       quantity: i.quantity,
       note: i.note || '',
       stockin_date: i.date || '',
+      request_id: nextRequestId(index),
     }))
   }
 

@@ -18,17 +18,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, schedule_post_commit_domain_event
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.services.business_time import fmt_business
 from fastapi_app.services.notification_service import schedule_stock_changed
 from fastapi_app.services.stock_common import (
     _BUSINESS_TZ,
     _parse_date_preserve_time,
+    assert_request_not_processed,
     guard_stockout_deletion,
+    raise_if_idempotency_conflict,
 )
 from fastapi_app.services.stock_event_service import (
     _publish_shipment_completed_events,
@@ -76,10 +79,64 @@ async def _assert_inventory_balance(
         )
 
 
-async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None, batch_no: str | None = None) -> list[StockOut]:
+async def _allocate_stockouts_fifo(
+    db: AsyncSession, *, product_id: int, customer: str, note: str,
+    stockout_date: datetime, quantity: int, orders: list,
+    batch_no: str | None, flush: bool,
+) -> list[StockOut]:
+    """按 FIFO 把出货数量分摊到订单行并创建 StockOut（单条/批量唯一实现）。
+
+    `flush=False` 供单条路径：它需要在库存扣减之后再 flush，保持「先 UPDATE
+    product、再 INSERT stock_out」的既有顺序；批量路径传 True。
+    """
+    remaining_qty = quantity
+    created_stockouts: list[StockOut] = []
+    for order_detail in orders:
+        if remaining_qty <= 0:
+            break
+        if order_detail['available'] <= 0:
+            continue
+        ship_qty = min(remaining_qty, order_detail['available'])
+        stockout = StockOut(
+            stockout_no=await stock_service.generate_stockout_number(db),
+            product_id=product_id, quantity=ship_qty, stockout_date=stockout_date,
+            customer=customer, order_id=order_detail['order_id'], note=note,
+            batch_no=batch_no or None,
+        )
+        db.add(stockout)
+        created_stockouts.append(stockout)
+        remaining_qty -= ship_qty
+    if flush and created_stockouts:
+        await db.flush()
+    return created_stockouts
+
+
+def _log_stockout_change(
+    db: AsyncSession, *, product_id: int, quantity: int,
+    created_stockouts: list[StockOut], updated, idem_key: str | None,
+    operator_id: int | None,
+) -> None:
+    """单条/批量路径共用的出库流水写入（前后库存由锁内写入口返回值推导）。"""
+    before, after = inventory_balance_bounds(updated.current_stock, -quantity)
+    stock_service.log_inventory_change(
+        db, product_id=product_id, change_type='出库', change_quantity=-quantity,
+        related_id=','.join(str(stock_out.id) for stock_out in created_stockouts) if created_stockouts else '',
+        note=f'出库数量：{quantity}', idem_key=idem_key,
+        quantity_before=before, quantity_after=after,
+        product_name=updated.name, operator_id=operator_id,
+    )
+
+
+async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None, batch_no: str | None = None, request_id: str | None = None) -> list[StockOut]:
     # 批次串归一化：与批量路径 _process_single_stockout 同口径（schema 未做 strip，
     # 直连 API 时可带前后空白；生产记录里的批次已被 strip 过，不归一化会匹配不到 → 误报不足）。
     batch_no = (batch_no or '').strip() or None
+    # 幂等检查放在任何锁/闸门之前：重试请求即使库存已被首单扣减，也应明确返回
+    # 「重复提交」而不是一条误导性的库存不足。
+    if request_id:
+        await assert_request_not_processed(
+            db, request_id, '请勿重复提交：该请求已登记过出库',
+        )
     product = await stock_service.get_product_for_update(db, product_id)
     # 闸门口径与批量路径（_process_single_stockout）统一：库存结余 + 订单余量。
     # 产品级 current_stock 前置断言已移除（2026-10-06 批量路径同款裁定，2026-10-07
@@ -97,29 +154,29 @@ async def create_stockout_core(db: AsyncSession, product_id: int, quantity: int,
         raise ValueError('该客户没有可用的订单支持出货！请先创建订单。')
     if quantity > shipment_info['available_quantity']:
         raise ValueError(f"出货数量超过可出货量！订单总量：{shipment_info['order_quantity']}，已出货：{shipment_info['shipped_quantity']}，可出货：{shipment_info['available_quantity']}")
-    remaining_qty = quantity
-    created_stockouts: list[StockOut] = []
     async with db.begin_nested():
-        for order_detail in shipment_info['orders']:
-            if remaining_qty <= 0:
-                break
-            if order_detail['available'] <= 0:
-                continue
-            ship_qty = min(remaining_qty, order_detail['available'])
-            stockout = StockOut(stockout_no=await stock_service.generate_stockout_number(db), product_id=product_id, quantity=ship_qty, stockout_date=stockout_date, customer=customer, order_id=order_detail['order_id'], note=note, batch_no=batch_no or None)
-            db.add(stockout)
-            created_stockouts.append(stockout)
-            remaining_qty -= ship_qty
+        created_stockouts = await _allocate_stockouts_fifo(
+            db, product_id=product_id, customer=customer, note=note,
+            stockout_date=stockout_date, quantity=quantity,
+            orders=shipment_info['orders'], batch_no=batch_no, flush=False,
+        )
         # 库存扣减统一走乐观锁入口（WHERE version=旧值），不再直写 current_stock
         updated = await update_stock_with_optimistic_lock(db, product_id, -quantity)
         # 第一次 flush：批量写入所有 StockOut INSERT 并填充 stockout.id（库存在上一行已 UPDATE）
         # 原 N 次 flush（N=FIFO订单数）合并为 1 次，减少数据库往返
         await db.flush()
-        before, after = inventory_balance_bounds(updated.current_stock, -quantity)
-        stock_service.log_inventory_change(db, product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(stock_out.id) for stock_out in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
+        _log_stockout_change(
+            db, product_id=product_id, quantity=quantity,
+            created_stockouts=created_stockouts, updated=updated,
+            idem_key=request_id, operator_id=operator_id,
+        )
         # 第二次 flush：提前暴露 InventoryLog 写入错误（约束违反等），而非依赖 SAVEPOINT 退出时自动 flush
         # 保留原因：错误早暴露便于定位；移除则错误会延迟到 begin_nested 退出时才触发
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            raise_if_idempotency_conflict(exc, '请勿重复提交：该请求已登记过出库')
+            raise
     return created_stockouts
 
 
@@ -236,10 +293,10 @@ async def delete_stockout_core(db: AsyncSession, stockout: StockOut, operator_id
     await db.flush()
 
 
-async def create_stockout(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date_str: str, note: str, operator_id: int | None = None, batch_no: str | None = None) -> dict:
+async def create_stockout(db: AsyncSession, product_id: int, quantity: int, customer: str, stockout_date_str: str, note: str, operator_id: int | None = None, batch_no: str | None = None, request_id: str | None = None) -> dict:
     """创建出库记录"""
     stockout_date = _parse_date_preserve_time(stockout_date_str)
-    created_stockouts = await stock_service.create_stockout_core(db, product_id, quantity, customer, stockout_date, note, operator_id=operator_id, batch_no=batch_no)
+    created_stockouts = await stock_service.create_stockout_core(db, product_id, quantity, customer, stockout_date, note, operator_id=operator_id, batch_no=batch_no, request_id=request_id)
     shipment_completed_orders = await _recalc_shipment_order_statuses(db, created_stockouts)
 
     await db.flush()
@@ -411,34 +468,16 @@ def _resolve_stockout_datetime(date_str: str) -> datetime:
 async def _create_stockout_records(db: AsyncSession, product_id: int, customer: str,
                                    note: str, stockout_date: datetime, quantity: int,
                                    orders: list, batch_no: str | None = None) -> list[StockOut]:
-    """按 FIFO 分配订单，创建出库记录。
+    """按 FIFO 分配订单，创建出库记录（兼容入口，委托共享核心）。
 
     batch_no 非空时写到该次产生的**每一张** stock_out（FIFO 拆多行时全写）——
     语义 = 这批货都出自该批次，供成品库存批次级扣减聚合。
     """
-    remaining_qty = quantity
-    created_stockouts: list[StockOut] = []
-    for order_detail in orders:
-        if remaining_qty <= 0:
-            break
-        if order_detail['available'] <= 0:
-            continue
-        ship_qty = min(remaining_qty, order_detail['available'])
-        stockout_no = await stock_service.generate_stockout_number(db)
-        stockout = StockOut(
-            stockout_no=stockout_no, product_id=product_id, quantity=ship_qty,
-            stockout_date=stockout_date,
-            customer=customer, order_id=order_detail['order_id'], note=note,
-            batch_no=batch_no or None,
-        )
-        db.add(stockout)
-        created_stockouts.append(stockout)
-        remaining_qty -= ship_qty
-    # 单次 flush：批量写入所有 StockOut INSERT 并填充 id，供调用方构建 related_id
-    # 原 N 次 flush（N=FIFO订单数）合并为 1 次
-    if created_stockouts:
-        await db.flush()
-    return created_stockouts
+    return await _allocate_stockouts_fifo(
+        db, product_id=product_id, customer=customer, note=note,
+        stockout_date=stockout_date, quantity=quantity, orders=orders,
+        batch_no=batch_no, flush=True,
+    )
 
 
 async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: int | None = None) -> dict:
@@ -449,8 +488,16 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
     note = item.get('note', '')
     stockout_date_str = item.get('stockout_date') or ''
     batch_no = str(item.get('batch_no') or '').strip()
+    request_id = str(item.get('request_id') or '').strip() or None
     item_id = item.get('id', '未知')
     try:
+        if request_id:
+            try:
+                await assert_request_not_processed(
+                    db, request_id, '请勿重复提交：该请求已登记过出库',
+                )
+            except ConflictError:
+                return {'success': False, 'error': '请勿重复提交：该请求已登记过出库', 'id': item_id}
         # P2-A2 类型收窄：_validate_stockout_batch 已过滤缺 product_id 的项；
         # None 时抛出的文案与 get_product_for_update 内部逐字一致，且同样由下方 except ValueError 捕获
         if product_id is None:
@@ -495,9 +542,18 @@ async def _process_single_stockout(db: AsyncSession, item: dict, operator_id: in
             # 与历史「库存不足，当前库存: X」同形态返回，避免前端单条错误解析变化
             return {'success': False, 'error': str(stock_denied), 'id': item_id}
         created_stockouts = await _create_stockout_records(db, product_id, customer, note, resolved_stockout_date, quantity, shipment_info['orders'], batch_no=batch_no or None)
-        before, after = inventory_balance_bounds(updated.current_stock, -quantity)
-        stock_service.log_inventory_change(db, product_id=product_id, change_type='出库', change_quantity=-quantity, related_id=','.join(str(stockout.id) for stockout in created_stockouts) if created_stockouts else '', note=f'出库数量：{quantity}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
-        await db.flush()
+        _log_stockout_change(
+            db, product_id=product_id, quantity=quantity,
+            created_stockouts=created_stockouts, updated=updated,
+            idem_key=request_id, operator_id=operator_id,
+        )
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            # 批量路径无逐行 SAVEPOINT，冲突无法行级隔离；转 409 让整批回滚，
+            # 而不是把约束原文以 500 抛给前端。
+            raise_if_idempotency_conflict(exc, '请勿重复提交：该请求已登记过出库')
+            raise
 
         stockout_nos = [stockout.stockout_no for stockout in created_stockouts] if created_stockouts else []
         return {

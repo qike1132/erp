@@ -470,8 +470,8 @@ async def test_recalc_stock_check_flags_insufficient_balance(monkeypatch):
     db = AsyncMock()
     db.execute = AsyncMock(return_value=result_mock)
     monkeypatch.setattr(
-        'fastapi_app.services.stock_inventory_service.get_inventory_balance',
-        AsyncMock(return_value=70),
+        'fastapi_app.services.stock_inventory_service.get_inventory_balance_detail_batch',
+        AsyncMock(return_value={5: (100, -30)}),  # 结余 = 100 - 30 = 70
     )
 
     await so._recalc_stock_check_by_balance(db, 'sess-1')

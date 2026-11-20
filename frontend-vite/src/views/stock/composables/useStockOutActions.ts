@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import { stockApi } from '@/api'
 import { showToast } from '@/composables/useToast'
+import { createBatchRequestId } from '@/utils/batchRequestId'
 import type { ApiResponse, StagedStockout } from '@/types'
 
 /**
@@ -60,13 +61,15 @@ export function useStockOutActions(
         return
       }
 
-      const stockoutsForApi = snapshot.map(stockout => ({
+      const nextRequestId = createBatchRequestId('stockout')
+      const stockoutsForApi = snapshot.map((stockout, index) => ({
         product_id: Number(stockout.product_id),
         customer: stockout.customer,
         quantity: stockout.quantity,
         stockout_date: stockout.date,
         note: stockout.note,
         batch_no: stockout.batch_no || null,
+        request_id: nextRequestId(index),
       }))
 
       const result = await stockApi.batchSubmitStockouts(stockoutsForApi) as ApiResponse & { results?: Array<{ success: boolean; error?: string }> }

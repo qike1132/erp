@@ -445,7 +445,10 @@ async def get_stockreturn_records(
     return data
 
 
-@cache_result(key_prefix='inventory', ttl=60, local_ttl=30, key_builder=lambda *args, **kwargs: f"c{kwargs.get('search_customer', '')}:p{kwargs.get('search_product', '')}")
+# 与 get_inventory_paginated 同口径关闭 L1（审计 M-15）：多 worker +
+# CACHE_L1_BROADCAST_ENABLED=false 时，失效只清当前 worker 的 L1，其余 worker
+# 会在 local_ttl 内继续返回旧结余；计划页（production/purchase_plan）走本入口。
+@cache_result(key_prefix='inventory', ttl=60, local_ttl=0, key_builder=lambda *args, **kwargs: f"c{kwargs.get('search_customer', '')}:p{kwargs.get('search_product', '')}")
 async def get_inventory(db: AsyncSession, search_customer: str='', search_product: str='') -> dict:
     """全量库存视图（兼容入口）。
 
@@ -594,6 +597,43 @@ async def get_inventory_balance_detail(db: AsyncSession, product_id: int) -> tup
         )
     )).scalar() or 0
     return int(packaging_qty), int(shipped_net)
+
+
+async def get_inventory_balance_detail_batch(
+    db: AsyncSession, product_ids: list[int],
+) -> dict[int, tuple[int, int]]:
+    """批量版 `get_inventory_balance_detail`：两条 GROUP BY 覆盖全部产品。
+
+    口径与单产品函数逐字一致（包装部入库 − 出货净额），只把逐产品循环
+    压成一次 IN 聚合。未出现的产品返回 (0, 0)。供暂存出货导入预检等
+    N 行场景使用，避免 N 行 × 2 条全表聚合（审计 M-04）。
+    """
+    ids = list(dict.fromkeys(product_ids))
+    if not ids:
+        return {}
+    packaging_rows = (await db.execute(
+        select(
+            DailyProductionRecord.product_id,
+            func.coalesce(func.sum(DailyProductionRecord.quantity), 0),
+        ).where(
+            DailyProductionRecord.department == 'packaging',
+            DailyProductionRecord.product_id.in_(ids),
+        ).group_by(DailyProductionRecord.product_id)
+    )).all()
+    shipped_rows = (await db.execute(
+        select(
+            InventoryLog.product_id,
+            func.coalesce(func.sum(InventoryLog.change_quantity), 0),
+        ).where(
+            InventoryLog.change_type.in_(
+                ('出库', '出库修改', '出库删除',
+                 '退货', '退货取消')),
+            InventoryLog.product_id.in_(ids),
+        ).group_by(InventoryLog.product_id)
+    )).all()
+    packaging = {pid: int(qty or 0) for pid, qty in packaging_rows}
+    shipped = {pid: int(qty or 0) for pid, qty in shipped_rows}
+    return {pid: (packaging.get(pid, 0), shipped.get(pid, 0)) for pid in ids}
 
 
 def _build_inventory_filter_params(search_product: str, search_customer: str,

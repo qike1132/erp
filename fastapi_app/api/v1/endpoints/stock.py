@@ -128,7 +128,7 @@ async def create_stockin(
         await stock_service.create_stockin(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockin_date_str=data.stockin_date,
-            note=data.note or '', operator_id=_user.id,
+            note=data.note or '', operator_id=_user.id, request_id=data.request_id,
         )
     return StockActionResponse(success=True, message='入库添加成功！')
 
@@ -272,6 +272,7 @@ async def create_stockout(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, stockout_date_str=data.stockout_date,
             note=data.note or '', operator_id=_user.id, batch_no=data.batch_no,
+            request_id=data.request_id,
         )
     return StockActionResponse(success=True, message='出库添加成功！')
 

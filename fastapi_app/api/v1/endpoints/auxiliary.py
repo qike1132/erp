@@ -420,6 +420,10 @@ class BatchStockInItem(BaseModel):
     quantity: int = Field(..., gt=0, le=9999999)
     note: str = ""
     stockin_date: str | None = None
+    request_id: str | None = Field(
+        None, max_length=128,
+        description="行级幂等令牌（前端每次批量提交生成，网络重试去重）",
+    )
 
 class BatchStockOutItem(BaseModel):
     product_id: int = Field(..., gt=0)
@@ -428,6 +432,10 @@ class BatchStockOutItem(BaseModel):
     note: str = ""
     stockout_date: str | None = None
     batch_no: str | None = Field(None, max_length=100, description="批次号（指定则按该批次扣减成品库存）")
+    request_id: str | None = Field(
+        None, max_length=128,
+        description="行级幂等令牌（前端每次批量提交生成，网络重试去重）",
+    )
 
 class BatchOrderRequest(BaseModel):
     orders: list[BatchOrderItem]

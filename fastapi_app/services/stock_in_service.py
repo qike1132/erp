@@ -13,13 +13,19 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.business_rules import MAX_QUANTITY
 from fastapi_app.core.cache_invalidation import cache_mgr, schedule_post_commit_invalidation
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.services.notification_service import schedule_stock_changed
-from fastapi_app.services.stock_common import _parse_date_preserve_time
+from fastapi_app.services.stock_common import (
+    _parse_date_preserve_time,
+    assert_request_not_processed,
+    raise_if_idempotency_conflict,
+)
 from fastapi_app.shared.stock_concurrency import apply_stock_delta_locked, assert_stock_available
 from fastapi_app.shared_models import Product, StockIn
 from fastapi_app.utils import inventory_balance_bounds
@@ -29,11 +35,15 @@ logger = logging.getLogger(__name__)
 MAX_STOCK_QUANTITY = MAX_QUANTITY  # 库存数量上限，超过此值拒绝操作（值统一由 business_rules 管理）
 
 
-async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str, operator_id: int | None = None) -> StockIn:
+async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date: datetime, note: str, operator_id: int | None = None, request_id: str | None = None) -> StockIn:
     if quantity <= 0:
         raise ValueError('入库数量必须大于 0')
     if quantity > MAX_STOCK_QUANTITY:
         raise ValueError(f'入库数量不能超过 {MAX_STOCK_QUANTITY}')
+    if request_id:
+        await assert_request_not_processed(
+            db, request_id, '请勿重复提交：该请求已登记过入库',
+        )
     stockin = StockIn(stockin_no=await stock_service.generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note)
     db.add(stockin)
     product = await stock_service.get_product_for_update(db, product_id)
@@ -44,8 +54,14 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
     await db.flush()  # 单次 flush：同时写入 StockIn INSERT + Product UPDATE，并填充 stockin.id
     # 结存由锁内写入口返回值反推（禁止另行 SELECT：并发下会写出自相矛盾的流水）
     before, after = inventory_balance_bounds(updated.current_stock, quantity)
-    stock_service.log_inventory_change(db, product_id=product_id, change_type='入库', change_quantity=quantity, related_id=str(stockin.id), note=f'入库ID：{stockin.id}', quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
-    return stockin  # 日志条目由调用方的 flush/commit 写入
+    stock_service.log_inventory_change(db, product_id=product_id, change_type='入库', change_quantity=quantity, related_id=str(stockin.id), note=f'入库ID：{stockin.id}', idem_key=request_id, quantity_before=before, quantity_after=after, product_name=updated.name, operator_id=operator_id)
+    # 立即 flush：幂等键要在同一事务内对后续重复提交可见（且唯一索引冲突早暴露）
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        raise_if_idempotency_conflict(exc, '请勿重复提交：该请求已登记过入库')
+        raise
+    return stockin  # 流水已 flush，调用方负责 commit
 
 
 async def update_stockin_core(db: AsyncSession, stockin: StockIn, quantity: int, customer: str, stockin_date: datetime, note: str, operator_id: int | None = None) -> StockIn:
@@ -119,10 +135,10 @@ async def delete_stockin_core(db: AsyncSession, stockin: StockIn, operator_id: i
     await db.flush()
 
 
-async def create_stockin(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date_str: str, note: str, operator_id: int | None = None) -> dict:
+async def create_stockin(db: AsyncSession, product_id: int, quantity: int, customer: str, stockin_date_str: str, note: str, operator_id: int | None = None, request_id: str | None = None) -> dict:
     """创建入库记录"""
     stockin_date = _parse_date_preserve_time(stockin_date_str)
-    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note, operator_id=operator_id)
+    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note, operator_id=operator_id, request_id=request_id)
     await db.flush()
     await cache_mgr.invalidate_stock_and_order()
     schedule_post_commit_invalidation(db, cache_mgr.invalidate_stock_and_order)
@@ -242,9 +258,15 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list, operator_
             stockin_date = _parse_date_preserve_time(stockin_date_str) if stockin_date_str else datetime.now(UTC)
             try:
                 async with db.begin_nested():
-                    stockin = await stock_service.create_stockin_core(db, product_id, quantity, customer, stockin_date, note, operator_id=operator_id)
+                    stockin = await stock_service.create_stockin_core(
+                        db, product_id, quantity, customer, stockin_date, note,
+                        operator_id=operator_id, request_id=item.get('request_id'),
+                    )
                 results[orig_idx] = {'success': True, 'stockin_no': stockin.stockin_no, 'id': stockin.id}
             except ValueError as e:
+                results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
+            except ConflictError as e:
+                # 幂等冲突按行失败处理（begin_nested 已回滚该行），不影响同批其它行
                 results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
             except (TypeError, OSError) as e:
                 logger.error(f'批量入库单项失败: {e}', exc_info=True)

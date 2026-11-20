@@ -24,6 +24,10 @@ class StockInCreate(BaseModel):
     customer: str = Field(..., min_length=1, max_length=100, description="客户名称")
     stockin_date: str = Field(..., description="入库日期 (YYYY-MM-DD)")
     note: str | None = Field(None, max_length=500, description="备注")
+    request_id: str | None = Field(
+        None, max_length=64, min_length=8,
+        description="幂等令牌（前端每次打开弹窗生成的 UUID）；同令牌重复提交返回 400",
+    )
 
     @field_validator('stockin_date')
     @classmethod
@@ -54,6 +58,10 @@ class StockOutCreate(BaseModel):
     stockout_date: str = Field(..., description="出库日期 (YYYY-MM-DD)")
     note: str | None = Field(None, max_length=500, description="备注")
     batch_no: str | None = Field(None, max_length=100, description="批次号（指定则按该批次扣减成品库存）")
+    request_id: str | None = Field(
+        None, max_length=64, min_length=8,
+        description="幂等令牌（前端每次打开弹窗生成的 UUID）；同令牌重复提交返回 400",
+    )
 
     @field_validator('stockout_date')
     @classmethod

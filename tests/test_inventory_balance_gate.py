@@ -82,6 +82,33 @@ async def test_inventory_balance_matches_stock_page_column(db, seeded, monkeypat
     assert rows[0]['inventory_balance'] == await svc.get_inventory_balance(db, seeded.id)
 
 
+async def test_batch_detail_matches_single_product(db, seeded):
+    """批量结余必须与逐产品查询逐位一致，未知产品返回 (0, 0)。"""
+    other = Product(
+        name='结余闸门批量产品', barcode='INV-BAL-BATCH', current_stock=0, initial_stock=0,
+    )
+    db.add(other)
+    await db.flush()
+    db.add(DailyProductionRecord(
+        department='packaging', product_id=other.id,
+        product_name=other.name, barcode='INV-BAL-BATCH',
+        quantity=40, production_date=datetime.now(UTC).date(),
+    ))
+    db.add(InventoryLog(
+        product_id=other.id, product_name=other.name, product_barcode='INV-BAL-BATCH',
+        change_type='出库', change_quantity=-10,
+    ))
+    await db.flush()
+
+    batch = await svc.get_inventory_balance_detail_batch(
+        db, [seeded.id, other.id, 10**9],
+    )
+
+    assert batch[seeded.id] == await svc.get_inventory_balance_detail(db, seeded.id) == (100, -30)
+    assert batch[other.id] == (40, -10)
+    assert batch[10**9] == (0, 0)
+
+
 async def test_inventory_balance_zero_when_never_packaged(db, monkeypatch):
     """从未包装入库的产品：结余为 0（闸门据此拒绝出货）。"""
     product = Product(name='未包装产品-结余', barcode='INV-BAL-002', current_stock=0, initial_stock=0)

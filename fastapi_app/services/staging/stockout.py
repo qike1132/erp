@@ -439,8 +439,13 @@ async def _recalc_stock_check_by_balance(db: AsyncSession, session_id: str) -> N
 
     与 confirm 环节的 _confirm_one_staging_stockout 闸门（get_inventory_balance）
     同口径；失败行的文案与确认拒绝文案一致，用户在弹窗里看到的即最终判定。
+
+    同一产品只查一次：N 行走两条 GROUP BY 批量聚合，而不是逐行 2 条全表 SUM
+    （审计 M-04）。
     """
-    from fastapi_app.services.stock_inventory_service import get_inventory_balance
+    from fastapi_app.services.stock_inventory_service import (
+        get_inventory_balance_detail_batch,
+    )
 
     result = await db.execute(
         select(StagingStockOut).where(
@@ -449,11 +454,16 @@ async def _recalc_stock_check_by_balance(db: AsyncSession, session_id: str) -> N
             StagingStockOut.product_id.isnot(None),
         )
     )
-    for row in result.scalars().all():
+    rows = result.scalars().all()
+    balances = await get_inventory_balance_detail_batch(
+        db, [row.product_id for row in rows if row.product_id is not None],
+    )
+    for row in rows:
         qty = int(row.quantity)
         if qty <= 0 or row.product_id is None:
             continue
-        balance = await get_inventory_balance(db, row.product_id)
+        packaging_qty, shipped_net = balances.get(row.product_id, (0, 0))
+        balance = packaging_qty + shipped_net
         if qty > balance:
             row.stock_check_passed = False
             row.stock_check_message = f'库存不足（结余 {balance}，本次 {qty}）'
