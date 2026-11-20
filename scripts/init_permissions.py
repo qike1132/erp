@@ -70,6 +70,12 @@ PERMISSIONS_CONFIG = {
         # （对齐 useReportConfig.TAB_CONFIG.label；改这里要同步迁移
         #  pg_standalone_091_report_row_action_per_tab，反之亦然）。
         'children': [
+            # report_view：report.py 6 端点 + dashboard.py 2 端点的授权码
+            # （require_permission('report_view')）。持 report_manage 经
+            # User.has_permission 的 manage→view 命名派生即可放行（不依赖本行），
+            # 但登记行之后管理员才能在 /user 把「只看报表」作为独立粒度勾选
+            # （与 backup_read 的细粒度先例同型）。2026-11-20 审计。
+            {'code': 'report_view', 'name': '查看报表流水'},
             {'code': 'order_edit', 'name': '编辑订单流水'},
             {'code': 'order_delete', 'name': '删除订单流水'},
             {'code': 'stockin_edit', 'name': '编辑备货流水'},
@@ -120,6 +126,23 @@ PERMISSIONS_CONFIG = {
             {'code': 'backup_create', 'name': '创建备份'},
             {'code': 'backup_restore', 'name': '恢复备份'},
             {'code': 'backup_delete', 'name': '删除备份'},
+        ]
+    },
+    # 湖北订单（beile）细粒度码。历史来源是迁移 pg_standalone_044/048 的
+    # INSERT..SELECT（依赖父码 beile_order_view，而父码只由 seed_nav 种）——
+    # 空库重建链上迁移静默零行、三码永久缺失：confirm 端点（order.py:163/182）
+    # 对非超管全员 403，导出/打印按钮（useBeileOrders.ts 三码门控）恒灰
+    # （2026-11-20 审计 M-8，与 2026-10-09 High-2 的 report 子码缺失同型）。
+    # 挂在 beile_order_view 之下与迁移意图一致（持父码经 children 派生放行）；
+    # 改这里要同步迁移 pg_standalone_044/048，反之亦然。
+    'beile': {
+        'module_name': '湖北订单',
+        'icon': 'fa-industry',
+        'parent': {'code': 'beile_order_view', 'name': '湖北订单'},
+        'children': [
+            {'code': 'beile_order_confirm', 'name': '确认湖北订单'},
+            {'code': 'beile_order_export', 'name': '导出湖北订单'},
+            {'code': 'beile_order_print', 'name': '打印湖北订单'},
         ]
     },
 }
