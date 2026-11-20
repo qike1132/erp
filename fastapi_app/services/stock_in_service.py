@@ -44,9 +44,14 @@ async def create_stockin_core(db: AsyncSession, product_id: int, quantity: int, 
         await assert_request_not_processed(
             db, request_id, '请勿重复提交：该请求已登记过入库',
         )
-    stockin = StockIn(stockin_no=await stock_service.generate_stockin_number(db), product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note)
-    db.add(stockin)
+    stockin_no = await stock_service.generate_stockin_number(db)
+    # 锁序：必须先锁 Product，再创建/挂起 StockIn。StockIn.product_id 是 FK，
+    # INSERT 会对 Product 行取 FOR KEY SHARE；子行若先于父行锁落库（autoflush=True
+    # 会话或调用方在锁前 flush），两路同产品并发会各自持 KEY SHARE 再抢 FOR UPDATE，
+    # 形成锁升级环 → PostgreSQL 40P01 死锁（经 db_transaction 变 500）。
     product = await stock_service.get_product_for_update(db, product_id)
+    stockin = StockIn(stockin_no=stockin_no, product_id=product_id, quantity=quantity, customer=customer, stockin_date=stockin_date, note=note)
+    db.add(stockin)
     # 统一写入口：持锁路径也要带 version 守卫并递增 version。
     # 直接 `product.current_stock += quantity` 不会 bump version（Product 无 version_id_col），
     # 与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。

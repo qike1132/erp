@@ -977,6 +977,10 @@ async def import_stockins_from_data(
 
         stockin_date = parse_date_value(stockin_date_val) or datetime.now(UTC)  # aware UTC：stockin_date 列为 timestamptz
         stockin_no = await deps.generate_stockin_number(db)
+        # 锁序：先锁 Product 再挂 StockIn。StockIn.product_id 是 FK，INSERT 会对
+        # Product 取 FOR KEY SHARE；子行先落库（autoflush=True 或锁前 flush）再抢
+        # FOR UPDATE 会与同产品并发形成 40P01 死锁（同 create_stockin_core）。
+        locked_product = await deps.get_product_for_update(db, product_id)
         stockin = StockIn(
             stockin_no=stockin_no,
             stockin_date=stockin_date,
@@ -987,8 +991,6 @@ async def import_stockins_from_data(
         )
         db.add(stockin)
 
-        # 使用悲观锁更新产品库存，防止并发修改
-        locked_product = await deps.get_product_for_update(db, product_id)
         # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `locked_product.current_stock += qty` 直写
         # （不递增 version，并发丢失更新），改走统一写入口。
         await apply_stock_delta_locked(db, locked_product, qty)
@@ -1059,7 +1061,11 @@ async def _resolve_stockout_inputs(
     db: AsyncSession, deps: ImportDeps, row_data: dict, idx: int,
     debug_messages: list, scoped_factory: str | None,
 ):
-    """校验并解析一条出货导入行；失败时写 debug_messages 并返回 None。"""
+    """校验并解析一条出货导入行；失败时写 debug_messages 并返回 None。
+
+    通过前置校验后会先取 Product 行锁，再做结余闸门与可出货量计算（后者默认
+    锁 Order 行）——与手工/批量出货保持 Product → Order 的统一锁序。
+    """
     product_identifier = row_data.get('产品名称') or row_data.get('产品') or row_data.get('69码') or row_data.get('条码')
     quantity = row_data.get('数量') or row_data.get('出货数量')
     customer = row_data.get('客户名称') or row_data.get('客户')
@@ -1110,15 +1116,6 @@ async def _resolve_stockout_inputs(
         debug_messages.append(f'行{idx}: 出库数量必须是整数')
         return None
 
-    # 锁序（Product → Order）：先锁 Product，再算可出货量。calculate_available_
-    # shipment_quantity 默认对 Order 行 FOR UPDATE；手工单条（create_stockout_core）
-    # 与批量（_process_single_stockout）都是先锁 Product —— 本路径此前先锁 Order、
-    # 后锁 Product，同产品同客户并发时两路互等对方持有的行 → PostgreSQL 40P01。
-    # 位置在本地校验（产品/工厂/数量）之后、DB 闸门之前：后续闸门拒绝该行时
-    # 不会写入任何数据，但 PostgreSQL 行锁不随 SAVEPOINT 释放——产品锁会持有到
-    # 外层事务提交（导入整批共用一个事务），这是预期语义。
-    product = await deps.get_product_for_update(db, product.id)
-
     # 负库存判定统一走统一入口（P1-2b）；策略拒绝时按原行为跳过该行
     if (reason := check_stock_available(
         product.current_stock, -qty,
@@ -1126,6 +1123,12 @@ async def _resolve_stockout_inputs(
     )) is not None:
         debug_messages.append(f'行{idx}: {reason}')
         return None
+
+    # 锁序：先锁 Product，再做结余闸门与可出货量计算（后者默认 lock_orders=True，
+    # 会对 Order 行取 FOR UPDATE）。手工/批量出货都是 Product → Order；此处原先
+    # 先锁 Order、后锁 Product，同产品同客户并发会互相等锁 → 40P01 死锁。
+    # 注意：本行被后续闸门拒绝时，产品锁仍持有到本事务提交（与成功行一致）。
+    product = await deps.get_product_for_update(db, product.id)
 
     # 结余闸门（AUD-01，2026-10-24 审计）：口径与报错构成同手工出货
     # （stock_out_service._assert_inventory_balance）。current_stock 是备货口径、
@@ -1173,14 +1176,14 @@ async def import_stockouts_from_data(
             return False
         product, customer, qty, stockout_date, note, shipment_info = resolved
 
+        # Product 行锁已在 _resolve_stockout_inputs 取得（早于 Order 行锁与子行
+        # StockOut 的 FK FOR KEY SHARE），这里只做 FIFO 分配与库存扣减。
         await _allocate_and_write_stockout_rows(
             db, deps, product=product, customer=customer, qty=qty,
             stockout_date=stockout_date, note=note, shipment_info=shipment_info,
         )
 
-        # 产品行锁已在 _resolve_stockout_inputs 解析时按 P→O 取得，
-        # 这里沿用同一个已加锁的 Product 对象写入，不再重复查询。
-        # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `locked_product.current_stock -= qty` 直写，改走统一写入口。
+        # 2026-10-17 审计 F-BE-SVC-STOCK-01：原为 `product.current_stock -= qty` 直写，改走统一写入口。
         await apply_stock_delta_locked(db, product, -qty)
 
         log = InventoryLog(

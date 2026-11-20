@@ -21,6 +21,7 @@ from fastapi_app.services import (
 )
 from fastapi_app.services.stock_out_service import batch_create_stockouts
 from fastapi_app.shared_models import (
+    Customer,
     DailyProductionRecord,
     InventoryLog,
     Order,
@@ -381,6 +382,187 @@ async def test_concurrent_same_request_id_stockout_returns_409(
     assert len(orders) == 2
 
 
+def _fast_number_gen(prefix: str):
+    """并发用例的编号桩：避开 numbering_counter 与进程内 asyncio.Lock 的串行化。"""
+    counter = 0
+    tag = uuid4().hex[:8]
+
+    async def gen(_db):
+        nonlocal counter
+        counter += 1
+        return f'{prefix}-{tag}-{counter:03d}'
+
+    return gen
+
+
+async def _same_product_stockin_race(
+    factory, monkeypatch, product_id: int, customer: str, tokens: tuple[str, str],
+    *,
+    flush_before_lock: bool,
+) -> list[int]:
+    """两路并发入库同一产品；可选在取 Product 行锁前显式 flush 挂起的 StockIn。
+
+    ``flush_before_lock=True`` 精确复现 autoflush=True 会话的语句顺序：子行
+    StockIn INSERT（对 Product 取 FK FOR KEY SHARE）先落库，父行 FOR UPDATE 后到。
+    """
+    _install_precheck_barrier(monkeypatch, stock_in_service)
+    real_lock = stock_service.get_product_for_update
+    barrier = asyncio.Barrier(2)
+
+    async def race_lock(db, pid):
+        if flush_before_lock:
+            await db.flush()
+        await asyncio.wait_for(barrier.wait(), timeout=10)
+        return await real_lock(db, pid)
+
+    monkeypatch.setattr(stock_service, 'get_product_for_update', race_lock)
+    return await asyncio.gather(
+        _stockin_status(factory, product_id, customer, tokens[0]),
+        _stockin_status(factory, product_id, customer, tokens[1]),
+    )
+
+
+@pytest.mark.parametrize(
+    ('autoflush', 'flush_before_lock'),
+    [
+        pytest.param(True, False, id='autoflush-session'),
+        pytest.param(False, True, id='explicit-flush-before-lock'),
+    ],
+)
+async def test_concurrent_same_product_stockin_no_deadlock(
+    async_db_session, test_engine, monkeypatch, autoflush, flush_before_lock,
+):
+    """同一产品、不同 request_id 的并发入库不得死锁（并发死锁回归）。
+
+    修复前：StockIn 的 FK 对 Product 先取 FOR KEY SHARE，随后两路各自请求
+    FOR UPDATE，互相等待对方事务 → PostgreSQL 40P01，一路经 db_transaction
+    转成 500。两种参数覆盖「子行先于父行锁落库」的两个成因：会话
+    autoflush=True（SQLAlchemy 默认值）与调用方在锁前显式 flush。
+    """
+    product_id, customer = await _seed_stockin_product(async_db_session)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=autoflush,
+    )
+    monkeypatch.setattr(stock_service, 'generate_stockin_number', _fast_number_gen('BH'))
+    tokens = (f'race-in-a-{uuid4().hex}', f'race-in-b-{uuid4().hex}')
+
+    statuses = await _same_product_stockin_race(
+        factory, monkeypatch, product_id, customer, tokens,
+        flush_before_lock=flush_before_lock,
+    )
+
+    assert statuses == [200, 200], f"同产品并发入库不得死锁/失败：{statuses=}"
+    async with factory() as check:
+        product = await check.get(Product, product_id)
+        stockins = await check.scalar(
+            select(func.count()).select_from(StockIn).where(StockIn.product_id == product_id)
+        )
+    assert product.current_stock == 10
+    assert stockins == 2
+
+
+async def test_concurrent_same_product_same_request_id_stockin_returns_409(
+    async_db_session, test_engine, monkeypatch,
+):
+    """同一产品 + 同一 request_id：并发入库必须一成一 409，且只入库一次。
+
+    预检栅栏让两路都通过幂等预检（并发窗口），后提交者由 uq_inventory_log_idem
+    兜底；若行锁晚于子行 INSERT 取得，这里会先以 40P01 失败而不是 409。
+    """
+    product_id, customer = await _seed_stockin_product(async_db_session)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    monkeypatch.setattr(stock_service, 'generate_stockin_number', _fast_number_gen('BH'))
+    token = f'race-in-same-{uuid4().hex}'  # secret-scan:allow（并发测试用随机幂等令牌，非凭据）
+
+    statuses = await _same_product_stockin_race(
+        factory, monkeypatch, product_id, customer, (token, token),
+        flush_before_lock=True,
+    )
+
+    assert sorted(statuses) == [200, 409], f"同产品并发重复入库必须一成一 409：{statuses=}"
+    async with factory() as check:
+        product = await check.get(Product, product_id)
+        stockins = await check.scalar(
+            select(func.count()).select_from(StockIn).where(StockIn.product_id == product_id)
+        )
+        logs = await check.scalar(
+            select(func.count()).select_from(InventoryLog).where(InventoryLog.idem_key == token)
+        )
+    assert product.current_stock == 5
+    assert stockins == 1
+    assert logs == 1
+
+
+async def test_concurrent_same_product_stockout_no_deadlock(
+    async_db_session, test_engine, monkeypatch,
+):
+    """同一产品、不同 request_id 的并发出库不得死锁。
+
+    出库路径先 get_product_for_update 再 INSERT StockOut，FK 的 FOR KEY SHARE
+    发生在父行锁之后（自兼容），两路在行锁处串行化。
+    """
+    product_id, _order_id, customer = await _seed_competition(
+        async_db_session, stock=100, order_qty=50,
+    )
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    _install_precheck_barrier(monkeypatch, stock_out_service)
+    monkeypatch.setattr(stock_service, 'generate_stockout_number', _fast_number_gen('SO'))
+
+    statuses = await asyncio.gather(
+        _stockout_status(factory, product_id, customer, f'race-out-a-{uuid4().hex}'),
+        _stockout_status(factory, product_id, customer, f'race-out-b-{uuid4().hex}'),
+    )
+
+    assert statuses == [200, 200], f"同产品并发出库不得死锁/失败：{statuses=}"
+    async with factory() as check:
+        product = await check.get(Product, product_id)
+        stockouts = await check.scalar(
+            select(func.count()).select_from(StockOut).where(StockOut.product_id == product_id)
+        )
+    assert product.current_stock == 80
+    assert stockouts == 2
+
+
+def _import_race_lock(*, flush_before_lock: bool):
+    """综合导入路径的共享取锁包装：锁前可选显式 flush + Barrier。
+
+    ``flush_before_lock=True`` 复现「子行先落库、父行锁后到」的语句顺序：
+    导入行处理器把 StockIn/StockOut 挂进会话后，flush 会先写出子行并对
+    Product 取 FK FOR KEY SHARE；两路同产品并发再各自请求 FOR UPDATE 即死锁。
+    """
+    real_lock = batch_import_core.get_product_for_update
+    barrier = asyncio.Barrier(2)
+
+    async def race_lock(db, product_id):
+        if flush_before_lock:
+            await db.flush()
+        await asyncio.wait_for(barrier.wait(), timeout=10)
+        return await real_lock(db, product_id)
+
+    return race_lock
+
+
+async def _import_stockin_count(
+    factory, deps, product_name: str, customer: str, qty: int,
+) -> int:
+    async with factory() as session:
+        try:
+            async with db_transaction(session):
+                count, _messages = await batch_import_core.import_stockins_from_data(
+                    session,
+                    [{'客户名称': customer, '产品名称': product_name, '数量': qty}],
+                    deps=deps,
+                )
+            return count
+        except HTTPException:
+            await session.rollback()
+            return -1
+
+
 async def _import_stockout_count(
     factory, deps, product_name: str, customer: str, qty: int,
 ) -> int:
@@ -398,21 +580,127 @@ async def _import_stockout_count(
             return -1
 
 
-async def test_manual_and_import_stockout_lock_order_no_deadlock(
+async def test_concurrent_same_product_import_stockin_no_deadlock(
+    async_db_session, test_engine,
+):
+    """综合导入备货：同产品两路并发不得因 FK 先于父行锁而死锁。
+
+    修复前：行处理器 `db.add(StockIn)` 后 `get_product_for_update`；锁前 flush
+    让 INSERT 先取 Product 的 FOR KEY SHARE，两路再抢 FOR UPDATE → 40P01，
+    其中一行被 `_run_import_row` 吞成「跳过」（count=0）。
+    """
+    tag = uuid4().hex[:8]
+    customer = f'导入并发客户-{tag}'
+    product = Product(
+        name=f'导入并发产品-{tag}',
+        barcode=f'IMP-IN-{tag}',
+        current_stock=0,
+        initial_stock=0,
+    )
+    async_db_session.add(product)
+    async_db_session.add(Customer(name=customer))
+    await async_db_session.commit()
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    deps = batch_import_core.ImportDeps(
+        generate_stockin_number=_fast_number_gen('BH'),
+        get_product_for_update=_import_race_lock(flush_before_lock=True),
+    )
+
+    counts = await asyncio.gather(
+        _import_stockin_count(factory, deps, product.name, customer, 5),
+        _import_stockin_count(factory, deps, product.name, customer, 6),
+    )
+
+    assert counts == [1, 1], f'同产品并发导入备货不得死锁/跳过：{counts=}'
+    async with factory() as check:
+        product_row = await check.get(Product, product.id)
+        stockins = await check.scalar(
+            select(func.count()).select_from(StockIn).where(StockIn.product_id == product.id)
+        )
+    assert product_row.current_stock == 11
+    assert stockins == 2
+
+
+async def _seed_import_stockout_same_product(db: AsyncSession) -> tuple[int, list[str]]:
+    """同产品、两个不同客户的订单：避开订单行锁（calculate_available… 会锁单）的串行化。"""
+    tag = uuid4().hex[:10]
+    product = Product(
+        name=f'导入出货产品-{tag}',
+        barcode=f'IMP-OUT-{tag}',
+        current_stock=100,
+        initial_stock=100,
+    )
+    db.add(product)
+    await db.flush()
+    db.add(DailyProductionRecord(
+        department="packaging",
+        product_id=product.id,
+        product_name=product.name,
+        barcode=product.barcode,
+        quantity=100,
+        production_date=datetime.now(UTC).date(),
+    ))
+    customers = [f'导入出货客户A-{tag}', f'导入出货客户B-{tag}']
+    for i, customer in enumerate(customers):
+        db.add(Order(
+            order_no=f'IMP-OUT-{tag}-{i}',
+            customer=customer,
+            product_id=product.id,
+            quantity=50,
+            status='待备货',
+            order_date=datetime.now(UTC),
+        ))
+    await db.commit()
+    return product.id, customers
+
+
+async def test_concurrent_same_product_import_stockout_no_deadlock(
+    async_db_session, test_engine,
+):
+    """综合导入出货：同产品两路并发不得因 FK 先于父行锁而死锁。
+
+    修复前：`_allocate_and_write_stockout_rows` 先 add StockOut，随后
+    `get_product_for_update`；锁前 flush 让 FK 先取 KEY SHARE，两路再抢
+    FOR UPDATE → 40P01，其中一行被吞成「跳过」（count=0）。
+    两路用不同客户/订单，避免 `calculate_available_shipment_quantity` 的
+    订单行锁先把两路串行化（那样根本到不了产品锁）。
+    """
+    product_id, customers = await _seed_import_stockout_same_product(async_db_session)
+    product = await async_db_session.get(Product, product_id)
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False,
+    )
+    deps = batch_import_core.ImportDeps(
+        generate_stockout_number=_fast_number_gen('SO'),
+        get_product_for_update=_import_race_lock(flush_before_lock=True),
+    )
+
+    counts = await asyncio.gather(
+        _import_stockout_count(factory, deps, product.name, customers[0], 10),
+        _import_stockout_count(factory, deps, product.name, customers[1], 11),
+    )
+
+    assert counts == [1, 1], f'同产品并发导入出货不得死锁/跳过：{counts=}'
+    async with factory() as check:
+        product_row = await check.get(Product, product_id)
+        stockouts = await check.scalar(
+            select(func.count()).select_from(StockOut).where(StockOut.product_id == product_id)
+        )
+    assert product_row.current_stock == 79
+    assert stockouts == 2
+
+
+async def test_concurrent_manual_and_import_stockout_no_deadlock(
     async_db_session, test_engine, monkeypatch,
 ):
-    """手工出货（Product→Order）与综合导入出货（修复前 Order→Product）并发不得死锁。
+    """手工出货（Product→Order）与导入出货（原 Order→Product）并发不得死锁。
 
-    栅栏让两路同时停在「下一步就要锁对方持有的行」的瞬间：
-    - 手工路（create_stockout_core）已持 Product 行锁，正等 calculate_available…
-      去锁 Order；
-    - 导入路（import_stockouts_from_data）修复前已由 calculate_available… 锁住
-      Order，正等 get_product_for_update 去锁 Product。
-    两路互等各自持有的行 → PostgreSQL 40P01，手工路被 db_transaction 转成 500、
-    导入行被 _run_import_row 吞成跳过（count=0）。
-
-    修复后导入路在算可出货量之前先锁 Product（与手工/批量路径统一 P→O），
-    两路在 Product 行锁处自然串行，最终都成功且库存/流水一致。
+    栅栏让手工路持 Product 后、锁 Order 前停住；导入路（修复前）持 Order 后、
+    锁 Product 前停住 → 双方互相等待对方事务，PostgreSQL 40P01。修复后导入路
+    先锁 Product，两路统一 Product→Order，串行完成后都成功。
     """
     product_id, _order_id, customer = await _seed_competition(
         async_db_session, stock=100, order_qty=50,
@@ -423,7 +711,7 @@ async def test_manual_and_import_stockout_lock_order_no_deadlock(
     )
     barrier = asyncio.Barrier(2)
 
-    # 手工路：已持 Product 行锁，在 calculate_available… 锁 Order 行之前停住
+    # 手工路：已持 Product 行锁，在锁 Order 行（calculate_available… 内部）之前停住
     real_available = stock_service.calculate_available_shipment_quantity
 
     async def manual_available(db, pid, cust, **kwargs):
@@ -433,6 +721,7 @@ async def test_manual_and_import_stockout_lock_order_no_deadlock(
     monkeypatch.setattr(
         stock_service, 'calculate_available_shipment_quantity', manual_available,
     )
+    monkeypatch.setattr(stock_service, 'generate_stockout_number', _fast_number_gen('SO'))
 
     # 导入路：在请求 Product 行锁之前停住（修复前它此时已持 Order 行锁）
     real_lock = batch_import_core.get_product_for_update
@@ -441,17 +730,8 @@ async def test_manual_and_import_stockout_lock_order_no_deadlock(
         await asyncio.wait_for(barrier.wait(), timeout=10)
         return await real_lock(db, pid)
 
-    counter = 0
-    tag = uuid4().hex[:8]
-
-    async def gen(_db):
-        nonlocal counter
-        counter += 1
-        return f'SO-{tag}-{counter:03d}'
-
-    monkeypatch.setattr(stock_service, 'generate_stockout_number', gen)
     deps = batch_import_core.ImportDeps(
-        generate_stockout_number=gen,
+        generate_stockout_number=_fast_number_gen('SO'),
         get_product_for_update=import_lock,
     )
 
