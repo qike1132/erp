@@ -116,37 +116,34 @@ async def _restore_lock_guard(owner: str):
         ) from None
 
 
-async def _sniff_server_backup_format(content: bytes, safe_name: str, decrypt_password: str | None) -> tuple[bytes, bool]:
-    """从服务器恢复：识别（必要时先解密）备份格式，返回 (明文内容, is_zip)。
+async def _decode_backup_payload(
+    content: bytes, name: str, decrypt_password: str | None, *,
+    encrypted_hint: str, is_enc: bool,
+) -> tuple[bytes, bool]:
+    """识别（必要时先解密/解压）备份内容，返回 (明文内容, is_zip)。
 
-    2026-10-18 OCR 评审（AUD-07 只改了一半）：`.json.enc` 的解密此前只加在
-    **上传**路径 `_read_backup_file`，「从服务器恢复」的两个端点
-    （`/restore-by-name`、`/async-restore-by-name`）仍是裸 `json.loads(content)`
-    —— 加密 JSON 备份从服务器还原时必定 400「格式无效」，且报错指向 JSON 而
-    非加密，排查时完全看不出是漏了解密。
+    上传导入与「从服务器恢复」共用同一套判定顺序（zip → json → gz → .enc
+    先解密再判），避免两条路径对同一份文件给出不同答案。解压在此收口，
+    调用方拿到的 content 已可直接 `json.loads`。
 
-    这里与上传路径保持同一套判定顺序（zip → json → gz → .enc 解密后再判），
-    避免两条路径对同一格式给出不同答案。解压也在此收口（上传路径同样会解），
-    故调用方拿到的 content 已是可直接 `json.loads` 的明文。
+    两入口的差异只在**错误文案**（请求体 password vs 仅请求头），
+    由 `encrypted_hint` 参数保留，不复制判定逻辑。
     """
-    is_zip = safe_name.endswith('.zip') or safe_name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
-    is_json = safe_name.endswith('.json') or (content[:1] == b'{' and content.strip().endswith(b'}'))
-    is_gz = safe_name.endswith('.gz') or (content[:2] == b'\x1f\x8b')
-    if not is_zip and not is_json and not is_gz and safe_name.endswith('.enc'):
+    is_zip = name.endswith('.zip') or name.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
+    is_json = name.endswith('.json') or (content[:1] == b'{' and content.strip().endswith(b'}'))
+    is_gz = name.endswith('.gz') or (content[:2] == b'\x1f\x8b')
+    if not is_zip and not is_json and not is_gz and is_enc:
         # 加密的非 ZIP 备份（.json.enc 等）：先解密再识别格式
         if not decrypt_password:
-            raise HTTPException(
-                status_code=400,
-                detail='该备份已加密，请通过请求体 password 或 X-Backup-Password 请求头提供解密密码',
-            )
+            raise HTTPException(status_code=400, detail=encrypted_hint)
         try:
             from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_auto
 
-            def _decrypt_server(data: bytes, pwd: str) -> bytes:
+            def _decrypt(data: bytes, pwd: str) -> bytes:
                 plaintext, _meta = decrypt_backup_auto(data, pwd)
                 return plaintext
 
-            content = await asyncio.to_thread(_decrypt_server, content, decrypt_password)
+            content = await asyncio.to_thread(_decrypt, content, decrypt_password)
         except (BackupFileError, ValueError, OSError) as e:
             raise HTTPException(
                 status_code=400, detail=_sanitize_error(f'加密备份解密失败: {e}'),
@@ -167,6 +164,24 @@ async def _sniff_server_backup_format(content: bytes, safe_name: str, decrypt_pa
             raise HTTPException(status_code=400, detail=_sanitize_error(f'gzip 备份文件无法解压: {e}')) from e
         is_json = True
     return content, is_zip
+
+
+async def _sniff_server_backup_format(content: bytes, safe_name: str, decrypt_password: str | None) -> tuple[bytes, bool]:
+    """从服务器恢复：识别（必要时先解密）备份格式，返回 (明文内容, is_zip)。
+
+    2026-10-18 OCR 评审（AUD-07 只改了一半）：`.json.enc` 的解密此前只加在
+    **上传**路径 `_read_backup_file`，「从服务器恢复」的两个端点
+    （`/restore-by-name`、`/async-restore-by-name`）仍是裸 `json.loads(content)`
+    —— 加密 JSON 备份从服务器还原时必定 400「格式无效」，且报错指向 JSON 而
+    非加密，排查时完全看不出是漏了解密。
+
+    这里与上传路径共用 `_decode_backup_payload`，避免两条路径再次分叉。
+    """
+    return await _decode_backup_payload(
+        content, safe_name, decrypt_password,
+        encrypted_hint='该备份已加密，请通过请求体 password 或 X-Backup-Password 请求头提供解密密码',
+        is_enc=safe_name.endswith('.enc'),
+    )
 
 
 async def _read_backup_file(
@@ -201,42 +216,11 @@ async def _read_backup_file(
         raise HTTPException(status_code=400, detail=_sanitize_error(f'读取文件失败: {e}')) from e
     if not content:
         raise HTTPException(status_code=400, detail='备份文件内容为空')
-    is_zip = filename.endswith('.zip') or filename.endswith('.zip.enc') or content[:4] == b'PK\x03\x04'
-    is_json = filename.endswith('.json') or (content[:1] == b'{' and content.strip().endswith(b'}'))
-    is_gz = filename.endswith('.gz') or (content[:2] == b'\x1f\x8b')
-    if not is_zip and not is_json and not is_gz and ext == '.enc':
-        # 加密的非 ZIP 备份（如 .json.enc）：先解密再做格式识别
-        if not decrypt_password:
-            raise HTTPException(
-                status_code=400,
-                detail='该备份已加密，请通过 X-Backup-Password 请求头提供解密密码',
-            )
-        try:
-            from fastapi_app.core.backup_encryption import BackupFileError, decrypt_backup_auto
-
-            def _decrypt_upload(data: bytes, pwd: str) -> bytes:
-                plaintext, _meta = decrypt_backup_auto(data, pwd)
-                return plaintext
-
-            content = await asyncio.to_thread(_decrypt_upload, content, decrypt_password)
-        except (BackupFileError, ValueError, OSError) as e:
-            raise HTTPException(
-                status_code=400, detail=_sanitize_error(f'加密备份解密失败: {e}'),
-            ) from e
-        is_zip = content[:4] == b'PK\x03\x04'
-        is_json = content[:1] == b'{' and content.strip().endswith(b'}')
-        is_gz = content[:2] == b'\x1f\x8b'
-    if not is_zip and not is_json and not is_gz:
-        raise HTTPException(status_code=400, detail='无法识别的备份文件格式')
-    if is_gz:
-        try:
-            content = await asyncio.to_thread(
-                _decompress_gzip_bounded, content, backup_service.MAX_BACKUP_FILE_SIZE,
-            )
-        except (OSError, EOFError, ValueError, zlib.error) as e:
-            # BadGzipFile 是 OSError 子类；截断的 gz 抛 EOFError；坏块抛 zlib.error
-            raise HTTPException(status_code=400, detail=_sanitize_error(f'gzip 备份文件无法解压: {e}')) from e
-        is_json = True
+    content, is_zip = await _decode_backup_payload(
+        content, filename, decrypt_password,
+        encrypted_hint='该备份已加密，请通过 X-Backup-Password 请求头提供解密密码',
+        is_enc=(ext == '.enc'),
+    )
     return content, is_zip, filename
 
 

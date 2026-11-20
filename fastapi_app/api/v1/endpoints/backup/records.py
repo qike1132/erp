@@ -10,6 +10,7 @@
 - GET    /schedule                   定时任务配置（ARQ cron_jobs）
 - POST   /schedule/trigger           手动触发定时任务（通过 ARQ 入队）
 """
+import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -91,7 +92,8 @@ async def list_backup_tables(
 @router.get('/list', response_model=BackupListResponse)
 async def list_server_backups(user: User = Depends(require_backup_permission('list_server_backups'))):
     """列出服务器默认路径上的所有备份文件"""
-    backups = backup_service.list_backup_files()
+    # 逐 zip 读 manifest / 逐 json 解析是同步 IO，必须离开事件循环（审计 M-07）
+    backups = await asyncio.to_thread(backup_service.list_backup_files)
     return {'success': True, 'backups': backups, 'total': len(backups)}
 
 
@@ -143,7 +145,7 @@ async def delete_server_backup(
 @router.get('/status', response_model=BackupStatusOut)
 async def backup_status(user: User = Depends(require_backup_permission('backup_status'))):
     """获取备份系统状态概览"""
-    return backup_service.get_backup_status()
+    return await asyncio.to_thread(backup_service.get_backup_status)
 
 
 # ---------------------------------------------------------------------------

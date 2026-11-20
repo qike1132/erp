@@ -8,6 +8,7 @@
 所有函数均接收调用方传入的同一 AsyncSession（除连通性探测自建会话外），
 事务边界保持在端点请求事务内，不自行 commit/rollback。
 """
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime
@@ -164,7 +165,7 @@ async def get_merged_backup_records(
     # 延迟导入避免循环依赖：backup.__init__ → json_backup → verify → query_service
     from fastapi_app.services.backup import list_backup_files
 
-    fs_entries = list_backup_files()
+    fs_entries = await asyncio.to_thread(list_backup_files)
     filenames = [e.get('filename') for e in fs_entries if e.get('filename')]
 
     # 2) 批量查询数据库匹配记录，构建 filename → BackupRecord 映射（避免 N+1）

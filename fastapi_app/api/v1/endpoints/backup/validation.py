@@ -333,10 +333,10 @@ async def health_check(
     checks['redis'], redis_issues = await _check_redis()
     issues.extend(redis_issues)
 
-    checks['last_backup'], backup_issues = _check_last_backup()
+    checks['last_backup'], backup_issues = await asyncio.to_thread(_check_last_backup)
     issues.extend(backup_issues)
 
-    checks['backup_integrity'], integrity_issues = _check_backup_integrity()
+    checks['backup_integrity'], integrity_issues = await asyncio.to_thread(_check_backup_integrity)
     issues.extend(integrity_issues)
 
     checks['disk_space'], disk_issues = _check_disk_space()
@@ -680,7 +680,8 @@ async def validate_backup_integrity(
     支持缓存避免重复验证
     """
     try:
-        backup_files = backup_service.list_backup_files()
+        # 备份目录全量扫描是同步 IO，离开事件循环（审计 M-07）
+        backup_files = await asyncio.to_thread(backup_service.list_backup_files)
         if not backup_files:
             return {
                 'success': True,
@@ -865,7 +866,7 @@ async def get_backup_statistics(
 
     try:
         # 1. 获取备份文件列表
-        backup_files = backup_service.list_backup_files()
+        backup_files = await asyncio.to_thread(backup_service.list_backup_files)
 
         # 2. 计算基本统计
         total_backups = len(backup_files)

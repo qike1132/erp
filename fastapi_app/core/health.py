@@ -129,7 +129,7 @@ async def _backup_signal() -> dict:
     """
     from fastapi_app.services.backup.freshness import backup_freshness
 
-    fresh = backup_freshness()  # 绝不抛
+    fresh = await asyncio.to_thread(backup_freshness)  # 同步扫描逐 zip 读 manifest，必须离事件循环
     arq_ok = False
     try:
         from fastapi_app.core.arq_app import probe_worker_health_isolated
