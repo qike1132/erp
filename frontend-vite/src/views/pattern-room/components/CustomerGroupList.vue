@@ -118,6 +118,11 @@ const {
   projectDisplayNumbers,
 } = useProjectGrouping(groupsRef, selectedProjectIdRef)
 
+// 编号算法只有 useProjectGrouping 这一处实现（M-6 单一真相源）：打印弹窗的宿主
+// PatternRoomView 经模板 ref 读取同一份 projectDisplayNumbers 下发给 PrintDialog，
+// 使打印件编号与卡片一致，避免出现「日期+恒 01」的第二实现。
+defineExpose({ projectDisplayNumbers })
+
 const previewImage = ref<string | null>(null)
 
 /** 是否处于关键词搜索态（空态文案据此分流，见模板注释） */

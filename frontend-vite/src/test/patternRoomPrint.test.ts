@@ -4,7 +4,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import PrintDialog from '@/views/pattern-room/components/PrintDialog.vue'
 // 样式断言需要源码文本：jsdom 不实现 object-fit 的计算样式
 import printDialogSource from '@/views/pattern-room/components/PrintDialog.vue?raw'
-import type { PartDetail, ProjectDetailResponse, RoleBrief } from '@/api/patternRoom'
+import type { PartDetail, PatternMakerGroup, ProjectDetailResponse, RoleBrief } from '@/api/patternRoom'
 
 /**
  * 打样单打印回归测试（PrintDialog 渲染 + usePatternRoomPrint 取数）
@@ -20,6 +20,7 @@ const { getPartsByVersion } = vi.hoisted(() => ({ getPartsByVersion: vi.fn() }))
 vi.mock('@/api/patternRoom', () => ({ patternRoomApi: { getPartsByVersion } }))
 
 import { usePatternRoomPrint } from '@/views/pattern-room/composables/usePatternRoomPrint'
+import { useProjectGrouping } from '@/views/pattern-room/composables/useProjectGrouping'
 import { PART_EDIT_FIELDS } from '@/views/pattern-room/composables/usePartInlineEdit'
 
 function makeRole(id: number, roleName: string, currentVersion = 'T1'): RoleBrief {
@@ -234,6 +235,55 @@ describe('PrintDialog 部位名称列对齐', () => {
 
     expect(rule).toContain('.pd-td-part')
     expect(rule).toContain('text-align: left')
+  })
+})
+
+// ==================== PrintDialog 编号（M-6 单一真相源） ====================
+
+describe('PrintDialog 编号（与卡片 projectDisplayNumbers 同源）', () => {
+  /** 取打样单表头「编号」元信息的值 */
+  function numberValue(): string {
+    const items = [...document.querySelectorAll('.pd-meta-item')]
+    const item = items.find(
+      (el) => el.querySelector('.pd-meta-label')?.textContent?.trim() === '编号',
+    )
+    return item?.querySelector('.pd-meta-value')?.textContent?.trim() ?? ''
+  }
+
+  it('宿主未下发 displayNumber 时回退旧算法（日期+01），打印件不断号', () => {
+    mountSheet([makeRole(1, '默认')], [makePart(1, '主料')])
+
+    expect(numberValue()).toBe('2026092401')
+  })
+
+  it('宿主下发卡片编号：同天第二个项目打印件编号带正确序号 02（旧实现恒拼 01）', () => {
+    // 编号唯一实现在卡片的 useProjectGrouping（日期+当天序号，按 updated_at 递增）：
+    // 宿主把 projectDisplayNumbers.get(project.id) 经 displayNumber prop 下发，
+    // PrintDialog 不再本地重算。同一天的两个项目，第二张卡片是 …02，打印件必须也是 …02。
+    const group = {
+      pattern_maker_id: 1,
+      pattern_maker_name: '陈姐',
+      project_count: 2,
+      latest_update_time: '2026-09-24 05:00:00',
+      projects: [
+        { id: 5028, sequence_no: 'CS-20260924-0001', product_name: '甲', current_version: 'T1', updated_at: '2026-09-24 04:00:00' },
+        { id: 5029, sequence_no: 'CS-20260924-0002', product_name: '乙', current_version: 'T1', updated_at: '2026-09-24 04:13:00' },
+      ],
+    } as unknown as PatternMakerGroup
+    const { projectDisplayNumbers } = useProjectGrouping(ref([group]), ref(5029))
+
+    wrapper = mount(PrintDialog, {
+      props: {
+        project: PROJECT,
+        parts: [makePart(1, '主料')],
+        roles: [makeRole(1, '默认')],
+        // 与 PatternRoomView 宿主同款下发方式：直接取同一份 Map 的值
+        displayNumber: projectDisplayNumbers.value.get(5029),
+      },
+      attachTo: document.body,
+    })
+
+    expect(numberValue()).toBe('2026092402')
   })
 })
 
