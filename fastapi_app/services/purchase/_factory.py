@@ -12,6 +12,7 @@ from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.purchase._common import _parse_source_order_ids
 from fastapi_app.services.purchase._list import _is_filling_category
 from fastapi_app.services.purchase_order_sku import merge_sku_lines
+from fastapi_app.services.purchase_utils import role_sentinel
 from fastapi_app.shared_models import Product, ProductRole
 from fastapi_app.shared_models.order import Order
 from fastapi_app.utils.scope_quantities import HIDDEN_ROLE_NAME, allocate_scope_quantities
@@ -312,10 +313,8 @@ def _role_sort_key(role_id) -> tuple[int, int]:
     """
     return (0, 0) if role_id is None else (1, int(role_id))
 
-
-def _role_sentinel(role_id) -> int:
-    """role 归一哨兵：NULL（默认 BOM/历史/手工）→ 0。键比较用，与 _supplier 同口径。"""
-    return int(role_id) if role_id is not None else 0
+# role 归一哨兵用 purchase_utils.role_sentinel（审计 L-1：三份逐字相同副本 → 单一实现；
+# 原本模块内的 _role_sentinel 已删，键定位/明细匹配直接用共享实现）。
 
 
 def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: str = ''):
@@ -342,7 +341,7 @@ def _ensure_fabric_row(group, po, bom, *, split_parts, accumulate, role_name: st
     part_key = bom_part if split_parts else ''
     # 2026-11-11 口径：键加入 role（哨兵 0 = NULL/默认 BOM/历史）——同物料不同角色
     # 各自成行（数量/损耗率/编辑互不串行）；无角色时键退化历史口径，普通 SKU 零变化。
-    role_key = _role_sentinel(bom.get('role_id'))
+    role_key = role_sentinel(bom.get('role_id'))
     fkey = (role_key, bom['material_name'], bom['specification'], bom['unit'], part_key)
 
     existing = fabric_map.get(fkey)
@@ -389,7 +388,7 @@ def _matching_po_items(po, bom, items_map, items_map_by_part, *, split_parts, pa
     默认 BOM / 无角色 BOM 行匹配；角色行匹配不到时走 BOM 回退（数量=用量×订单量），
     等下次 BOM 保存同步落 role（用户口径：历史 pending 单不批量回填）。
     """
-    role = _role_sentinel(bom.get('role_id'))
+    role = role_sentinel(bom.get('role_id'))
     if split_parts:
         return (items_map_by_part or {}).get(
             (po.id, bom['material_name'], bom['specification'], bom['unit'], part_key, role), [],
@@ -401,7 +400,7 @@ def _matching_po_items(po, bom, items_map, items_map_by_part, *, split_parts, pa
         it for it in items_map.get(
             (po.id, bom['material_name'], bom['specification'], bom['unit']), [],
         )
-        if _role_sentinel(getattr(it, 'role_id', None)) == role
+        if role_sentinel(getattr(it, 'role_id', None)) == role
     ]
 
 
@@ -750,7 +749,7 @@ def _accumulate_po_bom_rows(group, po, pids, bom_data, items_map, order_qty, *,
             # 2026-11-11：跨 SKU 去重键含 role（与 _ensure_fabric_row 的 fkey 同口径）——
             # 同物料在角色 A 已计数的行不再挡住角色 B 的行。
             skey = (
-                _role_sentinel(bom.get('role_id')),
+                role_sentinel(bom.get('role_id')),
                 bom['supplier_name'] or po.supplier_name or '未指定供应商',
                 bom['material_name'], bom['specification'], bom['unit'], part_key,
             )

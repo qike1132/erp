@@ -2,7 +2,8 @@
 BOM 配置·角色字段测试
 
 覆盖：get_bom 返回角色列表；save_bom 角色增删改 + 按角色归属物料；
-copy_bom / preview_bom 角色复制；删除角色级联清理物料；无角色默认 BOM 不受影响。
+copy_bom 角色复制；删除角色级联清理物料；无角色默认 BOM 不受影响。
+（审计 M-15：preview_bom 死副本及其用例已随 bom_service 的删除一并移除。）
 """
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
@@ -710,48 +711,3 @@ class TestCopyBom:
         assert fabrics and all(f.role_id == 21 for f in fabrics)
         assert all(a.role_id == 21 for a in accessories)
         assert result['target_role']['id'] == 21
-
-
-class TestPreviewBom:
-    """preview_bom 返回角色与物料计数"""
-
-    async def test_preview_returns_roles_and_counts(self, mock_db):
-        role_a = _mock_role(11, '白雪公主')
-        role_b = _mock_role(12, '灰姑娘')
-
-        fabric_a = MagicMock()
-        fabric_a.role_id = 11
-        fabric_a.to_dict = MagicMock(return_value={'name': '裙面料'})
-        fabric_default = MagicMock()
-        fabric_default.role_id = None
-        fabric_default.to_dict = MagicMock(return_value={'name': '默认面料'})
-
-        material_b = MagicMock()
-        material_b.role_id = 12
-
-        material_default = MagicMock()
-        material_default.role_id = None
-        material_default.cotton_usage = 50
-
-        src = _mock_product(roles=[role_a, role_b], has_bom=True)
-        src.fabrics = [fabric_a, fabric_default]
-        src.accessories = []
-        src.material = material_default
-        src.create_time = None
-
-        product_result = MagicMock()
-        product_result.scalar_one_or_none.return_value = src
-        mat_result = MagicMock()
-        mat_result.scalars.return_value.all.return_value = [material_default, material_b]
-
-        calls = iter([product_result, mat_result])
-        mock_db.execute = AsyncMock(side_effect=lambda *a, **k: next(calls))
-
-        result = await bom_service.preview_bom(mock_db, 1)
-
-        assert result['role_count'] == 2
-        assert result['bom']['roles'][0]['name'] == '白雪公主'
-        assert result['bom']['roles'][0]['fabric_count'] == 1
-        assert result['bom']['roles'][1]['filling_count'] == 1
-        # 默认面料 + 产品级填充 + 各角色物料
-        assert result['material_count'] == 1 + 1 + (1 + 1)

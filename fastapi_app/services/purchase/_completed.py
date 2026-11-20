@@ -4,13 +4,18 @@
 """
 import logging
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.business_time import business_day_bounds_utc_naive, fmt_business, fmt_business_naive_utc
+from fastapi_app.core.business_time import (
+    business_day_bounds_utc_naive,
+    business_today,
+    fmt_business,
+    fmt_business_naive_utc,
+)
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.services.purchase._list import _serialize_po_item
 from fastapi_app.services.purchase_utils import (
@@ -120,7 +125,12 @@ def _apply_completed_quick_filter(query, count_query, quick_filter):
     days = _QUICK_FILTER_DAYS.get(quick_filter)
     if days is None:
         return query, count_query
-    threshold = datetime.now(UTC).replace(tzinfo=None).date() - timedelta(days=days)
+    # AUD-02 收口（审计 M-16，2026-11-21）：「今天/近7天/近30天」阈值必须与徽标计数
+    # 端点 get_completed_order_quick_filters（purchase_order_query.py）**同源**——
+    # business_day_bounds_utc_naive 按北京日界换算 naive-UTC。原先
+    # datetime.now(UTC).date() 是 UTC 日界：北京 00:00–07:59 完成的单计入「今天」
+    # 徽标却不出现在列表（week/month 边界同样偏 8 小时）。
+    threshold = business_day_bounds_utc_naive(business_today() - timedelta(days=days))[0]
     query = query.where(PurchaseOrder.completed_at >= threshold)
     count_query = count_query.where(PurchaseOrder.completed_at >= threshold)
     return query, count_query

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.services.purchase._common import _parse_source_order_ids
 from fastapi_app.services.purchase._factory import _factory_sku_allocation
 from fastapi_app.services.purchase._list import _is_filling_category
+from fastapi_app.services.purchase_utils import role_sentinel
 from fastapi_app.shared_models import PurchaseOrderItem
 from fastapi_app.shared_models.order import Order
 
@@ -40,15 +41,11 @@ def _build_po_items_map_by_part(all_items) -> dict[tuple, list]:
     for item in all_items:
         ikey = (
             item.order_id, item.material_name, item.specification or '', item.unit or '',
-            (item.part_name or '').strip(), _role_sentinel(getattr(item, 'role_id', None)),
+            (item.part_name or '').strip(), role_sentinel(getattr(item, 'role_id', None)),
         )
         items_map.setdefault(ikey, []).append(item)
     return items_map
 
-
-def _role_sentinel(role_id) -> int:
-    """role 归一哨兵：NULL（默认 BOM/历史/手工）→ 0，与 bom_sync._norm_role 同口径。"""
-    return int(role_id) if role_id is not None else 0
 
 def _build_po_items_by_order(all_items) -> dict[int, list]:
     """按 order_id 分组 PO 明细，用于 BOM 不可用时的回退。"""

@@ -158,6 +158,46 @@ class TestPurchaseCenterService:
         assert 'month' in result
 
     @pytest.mark.asyncio
+    async def test_quick_filter_today_uses_beijing_day_boundary(self):
+        """快捷筛选阈值必须与徽标计数端点同源（北京日界，审计 M-16 / AUD-02 收口）。
+
+        北京今天 07:59 完成 = naive-UTC **前一天** 23:59。旧实现用 UTC 日界
+        （``datetime.now(UTC).date()``，绑定 UTC 今天 00:00），该单恒被列表排除，
+        而徽标计数（get_completed_order_quick_filters，北京日界）却计入它；
+        修法：阈值改用 ``business_day_bounds_utc_naive(business_today())[0]``。
+        断言从 business_today() 推导，与服务器本地时区/运行时刻无关（旧实现绑定
+        UTC date，与 naive-UTC datetime 恒不相等 → 任意时刻先红）。
+        """
+        from datetime import UTC, datetime, timedelta, timezone
+
+        from sqlalchemy import func, select
+
+        from fastapi_app.core.business_time import business_day_bounds_utc_naive, business_today
+        from fastapi_app.services.purchase._completed import _apply_completed_quick_filter
+        from fastapi_app.shared_models import PurchaseOrder
+
+        query, count_query = _apply_completed_quick_filter(
+            select(PurchaseOrder.id),
+            select(func.count()).select_from(PurchaseOrder),
+            'today',
+        )
+        beijing_today = business_today()
+        # 阈值与徽标计数端点同源：北京今天 00:00 换算成 naive-UTC（= 前一天 16:00）
+        expected_bound = business_day_bounds_utc_naive(beijing_today)[0]
+        list_params = list(query.compile().params.values())
+        count_params = list(count_query.compile().params.values())
+        assert list_params == [expected_bound]
+        assert count_params == [expected_bound]
+        # 北京今天 07:59 完成（naive-UTC 前一天 23:59）必须落在「今天」列表内
+        beijing_tz = timezone(timedelta(hours=8))
+        completed_at_beijing_0759 = datetime(
+            beijing_today.year, beijing_today.month, beijing_today.day,
+            7, 59, tzinfo=beijing_tz,
+        ).astimezone(UTC).replace(tzinfo=None)
+        assert completed_at_beijing_0759 == expected_bound + timedelta(hours=7, minutes=59)
+        assert completed_at_beijing_0759 >= expected_bound
+
+    @pytest.mark.asyncio
     async def test_get_completed_order_suggestions_empty(self):
         from fastapi_app.services.purchase_center_service import get_completed_order_suggestions
         result = await get_completed_order_suggestions(MagicMock(), '')
