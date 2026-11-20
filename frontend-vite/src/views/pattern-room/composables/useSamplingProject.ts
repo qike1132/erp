@@ -172,9 +172,12 @@ export function useSamplingProject() {
     error.value = null
     try {
       const res = await patternRoomApi.uploadProjectImage(id, file, currentProject.value?.version)
-      // 服务端上传后自增了 version：本地同步 +1，否则紧接着的保存会因版本过期被 409
-      if (res?.success && currentProject.value?.id === id) {
-        currentProject.value.version = (currentProject.value.version ?? 0) + 1
+      // 服务端上传后自增了 version：直接回写响应返回的服务端真相，不能用「本地 +1」——
+      // 并发 fetchDetail（其 version 已含上传自增）先落地时本地会双算，
+      // 下一次保存必吃假 409（审计 L-7）。响应缺 version 时保持现值：
+      // 写 undefined 会让下一次保存跳过后端乐观锁校验。
+      if (res?.success && currentProject.value?.id === id && res.version != null) {
+        currentProject.value.version = res.version
       }
       return res
     } catch (e) {

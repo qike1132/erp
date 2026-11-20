@@ -18,9 +18,10 @@ function makeFile(name = 'pasted.png'): File {
 }
 
 /** 以最小桩对象驱动 CRUD 编排 Hook，只关心后台图片上传的反馈分支 */
-function buildActions() {
+function buildActions(onSelectProjectImpl: (id: number) => void = () => undefined) {
   const currentProject = ref({
     id: 7,
+    version: 1,
     product_image_url: '',
     product_image_thumbnail_url: null,
     product_image_file_id: null,
@@ -48,7 +49,7 @@ function buildActions() {
     isNarrow: ref(false),
     drawerOpen: ref(false),
     formPatternMakerId: ref<number | null>(null),
-    onSelectProject: vi.fn(),
+    onSelectProject: vi.fn(onSelectProjectImpl),
   }
   const actions = usePatternRoomProjectActions(
     options as unknown as Parameters<typeof usePatternRoomProjectActions>[0],
@@ -101,5 +102,31 @@ describe('打样项目图片后台上传的反馈', () => {
     await vi.waitFor(() => {
       expect(showToast).toHaveBeenCalledWith('图片上传失败，请重试', 'error')
     })
+  })
+
+  it('上传回写用响应的 version，而非本地 +1（新建竞态下防双算吃假 409）', async () => {
+    // 复现审计 L-7 的新建竞态：onProjectSubmitCreate → onSelectProject 触发的
+    // fetchDetail 先落地（其 version=4 已含上传自增），上传响应后到。
+    // 旧实现「本地 +1」会把已含自增的 4 再加成 5；正确值是回写响应的 version=4。
+    let resolveUpload!: (value: { success: boolean; url: string; version: number }) => void
+    uploadProjectImage.mockImplementation(
+      () => new Promise((resolve) => { resolveUpload = resolve }),
+    )
+    let currentProjectRef: ReturnType<typeof buildActions>['currentProject'] | null = null
+    // 模拟 fetchDetail：详情响应携带已含上传自增的 version
+    const { actions, currentProject } = buildActions(() => {
+      if (currentProjectRef) currentProjectRef.value = { ...currentProjectRef.value, version: 4 }
+    })
+    currentProjectRef = currentProject
+
+    actions.onProjectUploadImage(makeFile())
+    await actions.onProjectSubmitCreate({ product_name: '小熊毛绒玩具', remark: '' } as never)
+
+    resolveUpload({ success: true, url: '/static/uploads/new.png', version: 4 })
+    await vi.waitFor(() => {
+      expect(showToast).toHaveBeenCalledWith('图片上传成功', 'success')
+    })
+
+    expect(currentProject.value.version).toBe(4)
   })
 })
