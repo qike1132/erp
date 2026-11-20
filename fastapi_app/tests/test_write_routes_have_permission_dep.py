@@ -57,9 +57,9 @@ REQUIRED_AUTH_MECHANISM: dict[tuple[str, str], str] = {
     ('DELETE', '/api/v1/daily-production/records/{record_id}'): 'resolve_production_write_scope',
 }
 
-#: 带权限码的写路由数量下限（2026-11-19 实测 192，全量写路由 203）。只允许上升：
-#: 低于它说明「反射不到依赖」或「大量路由被摘掉了权限码」，两种都必须当场看见。
-MIN_WRITE_ROUTES_WITH_CODES = 190
+#: 带权限码的写路由数量下限（2026-11-19 删除 4 个死端点后实测 188，全量写路由 199）。
+#: 只允许上升：低于它说明「反射不到依赖」或「大量路由被摘掉了权限码」，两种都必须当场看见。
+MIN_WRITE_ROUTES_WITH_CODES = 188
 
 
 def test_every_write_route_has_an_authorization_mechanism():

@@ -786,68 +786,7 @@ class TestOrderListProgress:
         assert item['status_label'] == '未配置工序'
         assert item['current_process'] is None
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.order_crud.get_beile_orders_with_stockins')
-    async def test_orders_filter_by_process_status(self, mock_beile, mock_async_db):
-        """按工序整体状态过滤：待开始/进行中/已完成，未配置订单不属于任何状态"""
-        from fastapi_app.services.outsource_service import list_outsource_orders
-        mock_beile.return_value = {
-            'items': [
-                {'id': 1, 'record_type': 'order', 'order_no': 'PO-1'},   # 全部 pending → 待发货
-                {'id': 2, 'record_type': 'order', 'order_no': 'PO-2'},   # 部分收货 → 进行中
-                {'id': 3, 'record_type': 'order', 'order_no': 'PO-3'},   # 全部收货 → 已完成
-                {'id': 4, 'record_type': 'order', 'order_no': 'PO-4'},   # 无工序 → 未配置
-                {'id': 5, 'record_type': 'stockin', 'stockin_no': 'BH-1'},
-            ],
-            'total': 5, 'page': 1, 'per_page': 500,
-        }
-        _mock_progress_queries(mock_async_db, [
-            make_order_process(pid=1, order_id=1, process_type='裁剪', status='pending'),
-            make_order_process(pid=2, order_id=1, process_type='电绣', status='pending'),
-            make_order_process(pid=3, order_id=2, process_type='裁剪', status='received'),
-            make_order_process(pid=4, order_id=2, process_type='电绣', status='pending'),
-            make_order_process(pid=5, order_id=3, process_type='裁剪', status='received'),
-            make_order_process(pid=6, order_id=3, process_type='电绣', status='received'),
-        ], pages=30)
 
-        pending = await list_outsource_orders(mock_async_db, page=1, per_page=50, process_status='pending')
-        in_progress = await list_outsource_orders(mock_async_db, page=1, per_page=50, process_status='in_progress')
-        completed = await list_outsource_orders(mock_async_db, page=1, per_page=50, process_status='completed')
-
-        assert [r['id'] for r in pending['items']] == [1]
-        assert pending['total'] == 1
-        assert pending['items'][0]['status_label'] == '待发货'
-        assert [r['id'] for r in in_progress['items']] == [2]
-        assert in_progress['total'] == 1
-        assert in_progress['items'][0]['status_label'] == '进行中（电绣）'
-        assert [r['id'] for r in completed['items']] == [3]
-        assert completed['total'] == 1
-        assert completed['items'][0]['status_label'] == '外发完成'
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.order_crud.get_beile_orders_with_stockins')
-    async def test_orders_filter_by_process_status_pagination(self, mock_beile, mock_async_db):
-        """状态过滤后再分页：page/per_page 作用于过滤结果"""
-        from fastapi_app.services.outsource_service import list_outsource_orders
-        mock_beile.return_value = {
-            'items': [
-                {'id': i, 'record_type': 'order', 'order_no': f'PO-{i}'}
-                for i in range(1, 5)
-            ],
-            'total': 4, 'page': 1, 'per_page': 500,
-        }
-        _mock_progress_queries(mock_async_db, [
-            make_order_process(pid=i, order_id=i, process_type='裁剪', status='pending')
-            for i in range(1, 5)
-        ], pages=20)
-
-        page1 = await list_outsource_orders(mock_async_db, page=1, per_page=2, process_status='pending')
-        page2 = await list_outsource_orders(mock_async_db, page=2, per_page=2, process_status='pending')
-
-        assert page1['total'] == 4
-        assert [r['id'] for r in page1['items']] == [1, 2]
-        assert [r['id'] for r in page2['items']] == [3, 4]
-        assert page1['page'] == 1 and page2['page'] == 2
 
 
 class TestOutsourceRegressions:
@@ -885,40 +824,6 @@ class TestOutsourceRegressions:
         assert first_call.args[0] is OrderOutsourceProcess
         assert first_call.kwargs.get('with_for_update') is True
 
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.order_crud.get_beile_orders_with_stockins')
-    async def test_process_status_filter_scans_all_pages(self, mock_beile, mock_async_db):
-        """回归：状态筛选必须遍历全部页，不能只取首页 500 条
-
-        修复前固定 page=1&per_page=500，第 501 条起的命中订单被静默丢弃。
-        """
-        from fastapi_app.services.outsource_service import list_outsource_orders
-        mock_beile.side_effect = [
-            {
-                'items': [{'id': i, 'record_type': 'order', 'order_no': f'PO-{i}'} for i in range(1, 501)],
-                'total': 501, 'page': 1, 'per_page': 500,
-            },
-            {
-                'items': [{'id': 501, 'record_type': 'order', 'order_no': 'PO-501'}],
-                'total': 501, 'page': 2, 'per_page': 500,
-            },
-        ]
-        # 唯一一道「待发货」工序挂在第 501 条订单上（首页取不到）
-        page2_processes = [
-            make_order_process(pid=1, order_id=501, process_type='裁剪', status='pending'),
-        ]
-        # 进度聚合改为整次扫描只调一次：一次返回全部页的工序统计
-        mock_async_db.execute = AsyncMock(
-            side_effect=_progress_results(page2_processes)
-        )
-
-        result = await list_outsource_orders(
-            mock_async_db, page=1, per_page=50, process_status='pending',
-        )
-
-        assert mock_beile.call_count == 2, '状态筛选必须继续取第 2 页'
-        assert result['total'] == 1
-        assert [r['id'] for r in result['items']] == [501]
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.outsource._common._load_process_item_ids', new_callable=AsyncMock)

@@ -394,25 +394,6 @@ async def ship_order_processes_batch(
     return results
 
 
-async def ship_processes_multi(
-    db: AsyncSession, items: list[tuple[int, int]], username: str | None = None,
-) -> list[dict]:
-    """跨订单批量发货（单事务、原子）。
-
-    与 ship_order_processes_batch 的区别：不限定同一订单（批量发货面板跨订单/SKU）。
-    逐条复用 ship_order_process（含行锁、数量校验、流水），任一条失败即抛错，
-    由外层 db_transaction 回滚整批。
-    """
-    results: list[dict] = []
-    for process_id, quantity in items:
-        try:
-            item = await ship_order_process(db, process_id, quantity, username)
-        except ValueError as e:
-            raise ValueError(f'外发工序 {process_id}：{e}') from e
-        results.append(item)
-    return results
-
-
 async def receive_order_processes_batch(
     db: AsyncSession, order_id: int, items: list[tuple[int, int | None]], username: str | None = None,
 ) -> list[dict]:

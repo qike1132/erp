@@ -6,7 +6,7 @@
 - product_routes.py → 产品/BOM 相关路由
 - customer_routes.py → 客户管理相关路由
 - order_routes.py    → 采购订单 CRUD 路由
-- print_routes.py    → 汇总打印 / Excel 导出路由
+- print_routes.py    → 供应商汇总 Excel 导出路由（旧打印端点已下线）
 - misc_routes.py     → 修改日志/保存查询/状态日志等辅助路由
 - export_utils.py    → Excel 导出工具函数
 

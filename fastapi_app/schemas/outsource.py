@@ -95,17 +95,6 @@ class OrderProcessReceiveBatch(BaseModel):
     items: list[OrderProcessReceiveItem] = Field(..., min_length=1, max_length=200)
 
 
-class ShipProcessMultiItem(BaseModel):
-    """跨订单批量发货单条明细"""
-    process_id: int = Field(..., gt=0, description="工序ID")
-    quantity: int = Field(..., gt=0, le=9999999, description="本批发货数量")
-
-
-class ShipProcessMulti(BaseModel):
-    """跨订单批量发货请求（单事务原子）：一次请求完成多道工序发货"""
-    items: list[ShipProcessMultiItem] = Field(..., min_length=1, max_length=200)
-
-
 class ShippableProcessItem(BaseModel):
     """待发货工序（批量发货面板数据源）"""
     process_id: int
@@ -242,28 +231,9 @@ class ShipmentReceiveResponse(BaseModel):
     already_received: bool = False
 
 
-class ShipmentBatchOrder(BaseModel):
-    """批量发货：单个订单的发货明细"""
-    order_id: int = Field(..., gt=0, description="来源订单ID")
-    items: list[ShipmentShipItem] = Field(..., min_length=1, max_length=200, description="该订单的发货明细")
-
-
-class ShipmentBatchCreate(BaseModel):
-    """批量发货请求：一次对多个订单生成发货单（每订单一张发货单，单事务原子）"""
-    orders: list[ShipmentBatchOrder] = Field(..., min_length=1, max_length=100, description="按订单分组的发货明细")
-
-
 class ShipmentMergeCreate(BaseModel):
     """合并发货请求：把跨订单/跨客户的多道工序合并生成一张发货单（单事务原子）"""
     items: list[ShipmentShipItem] = Field(..., min_length=1, max_length=200, description="合并发货明细（跨订单/跨客户）")
-
-
-class ShipmentBatchResponse(BaseModel):
-    """批量发货响应（data 为本次生成的各订单发货单）"""
-    success: bool = True
-    data: list[ShipmentResponse] = []
-    total: int = 0
-    message: str = ''
 
 
 

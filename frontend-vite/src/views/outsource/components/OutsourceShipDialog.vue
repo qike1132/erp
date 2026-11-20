@@ -124,7 +124,7 @@
  * 底栏实时合计与提交（按订单分组 payload）在此编排。
  * 数据源 GET /outsource/processes/shippable；提交 POST /outsource/processes/ship
  * （合并单张发货单，整批原子回滚）——F1a-10（2026-10-24 审计）：原注释写的是
- * 已废弃的 ship-multi 每订单一张，与实现（createMergedShipment）漂移。
+ * 合并发货（createMergedShipment）已取代旧「每订单一张」的批量发货实现。
  */
 import { computed, ref, watch } from 'vue'
 import { outsourceApi, type ShippableProcessItem } from '@/api/outsource'

@@ -487,92 +487,6 @@ async def get_factory_order_summary(
     }
 
 
-async def build_bom_display_maps(
-    db: AsyncSession, orders,
-) -> tuple[dict[tuple[str, str, str, str], list[str]], dict[tuple[str, str, str, str], str]]:
-    """打印件用的 BOM 展示映射：**一次取数**同时产出「产品部位」与「角色名称」。
-
-    两张映射同键 ``(产品名, 物料, 规格, 单位)``：打印件只拿采购明细，而部位与角色
-    都来自 BOM（明细没有角色列），故必须在这里补齐，避免「屏幕有、打印空/错位」。
-
-    角色名取**当前 BOM**（与屏幕按 SKU 推算同源）：BOM 事后改角色会让历史单的打印件
-    跟着变——这与屏幕口径一致，属于既有取舍（差异对照块同样用当前 BOM 推算）。
-
-    Returns:
-        ``(part_map, role_map)``：``part_map`` 为 ``{key: [部位, ...]}``（去重保序、
-        跳过填充物与无部位行）；``role_map`` 为 ``{key: '角色A/角色B'}``（同一物料被
-        多个角色共用时并列，与屏幕 `role_display` 同分隔符）。
-    """
-    from fastapi_app.services.purchase._common import (
-        _resolve_pids_from_sku_lines,
-        fetch_po_sku_pids_map,
-    )
-    from fastapi_app.services.purchase._factory import ROLE_DISPLAY_SEP, _fetch_prod_name_and_ratio
-    from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
-
-    po_ids = [o.id for o in orders]
-    if not po_ids:
-        return {}, {}
-
-    pids_map = await fetch_po_sku_pids_map(db, orders)
-    # 与工厂汇总 / 撤销路径同款：备货来源的采购单主表没有 source_order_ids，
-    # 必须用快照产品名反查，否则这类单的 BOM 拿不到（部位会退回空白）。
-    await _resolve_pids_from_sku_lines(db, pids_map, await fetch_po_sku_map(db, po_ids))
-    product_ids = list({pid for pids in pids_map.values() for pid in pids if pid})
-    if not product_ids:
-        return {}, {}
-
-    # 产品名 + 角色名同一次 LEFT JOIN 取回（不额外增加打印路径的查询数）
-    prod_name_map, _blind_ctx, roles_by_pid, _hidden_by_pid = await _fetch_prod_name_and_ratio(
-        db, product_ids,
-    )
-    bom_data = await _fetch_bom_data(db, product_ids, prod_name_map)
-
-    part_map: dict[tuple[str, str, str, str], list[str]] = {}
-    role_map: dict[tuple[str, str, str, str], str] = {}
-    for product_id, boms in bom_data.items():
-        product_name = prod_name_map.get(product_id) or ''
-        roles = roles_by_pid.get(product_id) or {}
-        for bom in boms:
-            if _is_filling_category(bom.get('category')):
-                continue
-            key = (product_name, bom['material_name'], bom['specification'], bom['unit'])
-            part = (bom.get('part_name') or '').strip()
-            if part:
-                parts = part_map.setdefault(key, [])
-                if part not in parts:
-                    parts.append(part)
-            role_id = bom.get('role_id')
-            role_name = (roles.get(role_id) if isinstance(role_id, int) else '') or ''
-            if role_name:
-                existing_roles = [r for r in role_map.get(key, '').split(ROLE_DISPLAY_SEP) if r]
-                if role_name not in existing_roles:
-                    existing_roles.append(role_name)
-                    role_map[key] = ROLE_DISPLAY_SEP.join(existing_roles)
-    return part_map, role_map
-
-
-async def build_bom_part_display_map(db: AsyncSession, orders) -> dict[tuple[str, str, str, str], list[str]]:
-    """「产品部位」映射（向后兼容入口，内部委托 :func:`build_bom_display_maps`）。
-
-    **为什么打印件需要它**：后端打印只拿采购明细（``purchase_order_item``），而部位在
-    合并模式下来自 BOM —— 明细的 ``part_name`` 为空时，光凭明细只能印空白，出现
-    「屏幕有部位、打印空」的不一致（2026-11-07 评审 Low-1）。本函数按
-    ``(产品名, 物料, 规格, 单位)`` 把 BOM 侧的部位备好，由
-    ``export_utils.generate_factory_summary_print`` 逐行取用。键带产品名是为了不把
-    不同产品的同物料部位混在一起（打印分组本身就是按 (客户, 产品) 分的）。
-
-    产品解析与工厂汇总**同一套链路**（``fetch_po_sku_pids_map`` → 快照反查），
-    所以「备货来源、主表无 source_order_ids」的采购单也能取到 BOM。
-
-    Returns:
-        ``{(product_name, material_name, specification, unit): [部位, ...]}``，
-        部位去重保序（BOM 行顺序）、跳过填充物；无部位的行不进映射（不知道就不编造）。
-    """
-    parts, _roles = await build_bom_display_maps(db, orders)
-    return parts
-
-
 async def export_completed_orders(
     db: AsyncSession, *, supplier_id: int | None = None,
     date_from: str = '', date_to: str = '',
@@ -941,35 +855,6 @@ async def get_completed_order_quick_filters(db: AsyncSession) -> dict:
         'week': row.week or 0,
         'month': row.month or 0,
     }
-
-
-async def query_supplier_groups(db: AsyncSession, keyword: str = '') -> list:
-    """查询供应商分组列表"""
-    query = select(
-        PurchaseOrder.supplier_name,
-        PurchaseOrder.supplier_id,
-        func.count(PurchaseOrder.id).label('order_count'),
-        func.sum(PurchaseOrder.total_amount).label('total_amount'),
-    ).where(PurchaseOrder.status == PurchaseOrderStatus.COMPLETED)
-
-    if keyword:
-        like_pattern = f'%{escape_like(keyword)}%'
-        query = query.where(PurchaseOrder.supplier_name.ilike(like_pattern))
-
-    query = query.group_by(PurchaseOrder.supplier_name, PurchaseOrder.supplier_id)
-    query = query.order_by(func.sum(PurchaseOrder.total_amount).desc())
-    result = await db.execute(query)
-    rows = result.all()
-
-    return [
-        {
-            'supplier_name': r.supplier_name,
-            'supplier_id': r.supplier_id,
-            'order_count': r.order_count,
-            'total_amount': float(r.total_amount or 0),
-        }
-        for r in rows
-    ]
 
 
 # ===== 兼容 re-export：辅助函数与常量已迁移至 purchase_order_query_helpers.py =====

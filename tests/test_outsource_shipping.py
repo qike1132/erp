@@ -4,7 +4,6 @@
 ``pyproject.toml`` 的 ``max_file_size=1600``，CI 的文件规模门禁要求改动的超限
 文件先拆分。**纯搬移**，断言与用例未改。
 """
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -144,39 +143,3 @@ class TestListShippableProcesses:
             assert rows == []
         finally:
             await engine.dispose()
-
-
-class TestShipProcessesMulti:
-    """跨订单批量发货：逐条复用 ship_order_process，失败包装错误"""
-
-    @pytest.mark.asyncio
-    async def test_ship_cross_orders(self, mock_async_db):
-        from fastapi_app.services import outsource_service
-        from fastapi_app.services.outsource import _order_processes as mod
-
-        mock_ship = AsyncMock(side_effect=[
-            {'id': 1, 'order_id': 100},
-            {'id': 2, 'order_id': 200},
-        ])
-        with patch.object(mod, 'ship_order_process', new=mock_ship):
-            items = await outsource_service.ship_processes_multi(
-                mock_async_db, [(1, 10), (2, 20)], username='admin',
-            )
-
-        assert len(items) == 2
-        assert items[0]['order_id'] == 100
-        assert items[1]['order_id'] == 200
-        assert mock_ship.await_count == 2
-
-    @pytest.mark.asyncio
-    async def test_ship_failure_wraps_error(self, mock_async_db):
-        from fastapi_app.services import outsource_service
-        from fastapi_app.services.outsource import _order_processes as mod
-
-        with patch.object(mod, 'ship_order_process', new=AsyncMock(
-            side_effect=ValueError('发货数量超过剩余数量（剩余 5）'),
-        )):
-            with pytest.raises(ValueError, match='外发工序 1：发货数量超过剩余数量'):
-                await outsource_service.ship_processes_multi(
-                    mock_async_db, [(1, 100)], username='admin',
-                )

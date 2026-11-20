@@ -2108,89 +2108,6 @@
         }
       }
     },
-    "/api/v1/purchase-center/orders/supplier-summary-by-vendor": {
-      "post": {
-        "tags": [
-          "采购中心"
-        ],
-        "summary": "Api Get Supplier Summary By Vendor",
-        "description": "按供应商汇总订单。\n\nArgs:\n    data: 汇总请求，包含订单 ID 列表。\n    db: 异步数据库会话。\n    _current_user: 当前登录用户（权限校验依赖）。\n\nReturns:\n    dict[str, Any]: 包含 success 标志、供应商列表及计数的字典。\n\nRaises:\n    HTTPException 500: 操作失败。",
-        "operationId": "api_get_supplier_summary_by_vendor_api_v1_purchase_center_orders_supplier_summary_by_vendor_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrderIdsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupplierSummaryResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/purchase-center/orders/summary-print": {
-      "post": {
-        "tags": [
-          "采购中心"
-        ],
-        "summary": "Api Summary Print",
-        "operationId": "api_summary_print_api_v1_purchase_center_orders_summary_print_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SummaryPrintRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupplierSummaryResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/purchase-center/orders/supplier-summary-export": {
       "post": {
         "tags": [
@@ -6168,48 +6085,6 @@
         }
       }
     },
-    "/api/v1/outsource/processes/ship-multi": {
-      "post": {
-        "tags": [
-          "湖北外发"
-        ],
-        "summary": "Ship Processes Multi",
-        "description": "跨订单批量发货（单事务原子）：一次请求完成多道工序发货，任一条失败整批回滚。",
-        "operationId": "ship_processes_multi_api_v1_outsource_processes_ship_multi_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ShipProcessMulti"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrderProcessListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/outsource/orders/{order_id}/processes/receive-batch": {
       "post": {
         "tags": [
@@ -6466,48 +6341,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShipmentListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/outsource/shipments/batch": {
-      "post": {
-        "tags": [
-          "湖北外发"
-        ],
-        "summary": "Create Shipments Batch",
-        "description": "批量发货（多订单一次性）：每个订单生成一张发货单，单事务原子。\n\norders: [{order_id, items:[{process_id, quantity}]}, ...]。\n任一订单发货失败整批回滚。每订单发货单独立、customer 独立，确认收货仍按单张发货单闭环。",
-        "operationId": "create_shipments_batch_api_v1_outsource_shipments_batch_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ShipmentBatchCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ShipmentBatchResponse"
                 }
               }
             }
@@ -23540,6 +23373,19 @@
               }
             ],
             "title": "Stockin Date"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "行级幂等令牌（前端每次批量提交生成，网络重试去重）"
           }
         },
         "type": "object",
@@ -23611,6 +23457,19 @@
             ],
             "title": "Batch No",
             "description": "批次号（指定则按该批次扣减成品库存）"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "行级幂等令牌（前端每次批量提交生成，网络重试去重）"
           }
         },
         "type": "object",
@@ -34733,126 +34592,6 @@
         "type": "object",
         "title": "SearchSuggestionResponse"
       },
-      "ShipProcessMulti": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ShipProcessMultiItem"
-            },
-            "type": "array",
-            "maxItems": 200,
-            "minItems": 1,
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "title": "ShipProcessMulti",
-        "description": "跨订单批量发货请求（单事务原子）：一次请求完成多道工序发货"
-      },
-      "ShipProcessMultiItem": {
-        "properties": {
-          "process_id": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Process Id",
-            "description": "工序ID"
-          },
-          "quantity": {
-            "type": "integer",
-            "maximum": 9999999.0,
-            "exclusiveMinimum": 0.0,
-            "title": "Quantity",
-            "description": "本批发货数量"
-          }
-        },
-        "type": "object",
-        "required": [
-          "process_id",
-          "quantity"
-        ],
-        "title": "ShipProcessMultiItem",
-        "description": "跨订单批量发货单条明细"
-      },
-      "ShipmentBatchCreate": {
-        "properties": {
-          "orders": {
-            "items": {
-              "$ref": "#/components/schemas/ShipmentBatchOrder"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Orders",
-            "description": "按订单分组的发货明细"
-          }
-        },
-        "type": "object",
-        "required": [
-          "orders"
-        ],
-        "title": "ShipmentBatchCreate",
-        "description": "批量发货请求：一次对多个订单生成发货单（每订单一张发货单，单事务原子）"
-      },
-      "ShipmentBatchOrder": {
-        "properties": {
-          "order_id": {
-            "type": "integer",
-            "exclusiveMinimum": 0.0,
-            "title": "Order Id",
-            "description": "来源订单ID"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ShipmentShipItem"
-            },
-            "type": "array",
-            "maxItems": 200,
-            "minItems": 1,
-            "title": "Items",
-            "description": "该订单的发货明细"
-          }
-        },
-        "type": "object",
-        "required": [
-          "order_id",
-          "items"
-        ],
-        "title": "ShipmentBatchOrder",
-        "description": "批量发货：单个订单的发货明细"
-      },
-      "ShipmentBatchResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/ShipmentResponse"
-            },
-            "type": "array",
-            "title": "Data",
-            "default": []
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "default": 0
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "title": "ShipmentBatchResponse",
-        "description": "批量发货响应（data 为本次生成的各订单发货单）"
-      },
       "ShipmentCreate": {
         "properties": {
           "order_id": {
@@ -36226,6 +35965,20 @@
             ],
             "title": "Note",
             "description": "备注"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "幂等令牌（前端每次打开弹窗生成的 UUID）；同令牌重复提交返回 400"
           }
         },
         "type": "object",
@@ -36388,6 +36141,20 @@
             ],
             "title": "Batch No",
             "description": "批次号（指定则按该批次扣减成品库存）"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "幂等令牌（前端每次打开弹窗生成的 UUID）；同令牌重复提交返回 400"
           }
         },
         "type": "object",
@@ -36712,31 +36479,6 @@
         },
         "type": "object",
         "title": "SuggestionsResponse"
-      },
-      "SummaryPrintRequest": {
-        "properties": {
-          "ids": {
-            "items": {
-              "type": "integer"
-            },
-            "type": "array",
-            "maxItems": 500,
-            "minItems": 1,
-            "title": "Ids",
-            "description": "订单ID列表"
-          },
-          "format": {
-            "type": "string",
-            "title": "Format",
-            "default": "print"
-          }
-        },
-        "type": "object",
-        "required": [
-          "ids"
-        ],
-        "title": "SummaryPrintRequest",
-        "description": "汇总打印请求"
       },
       "SupplierActionResponse": {
         "properties": {
@@ -37247,51 +36989,6 @@
         ],
         "title": "SupplierResponse"
       },
-      "SupplierSummary": {
-        "properties": {
-          "supplier_name": {
-            "type": "string",
-            "title": "Supplier Name"
-          },
-          "supplier_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Supplier Id"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/SupplierSummaryItem"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "orders": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Orders"
-          },
-          "order_count": {
-            "type": "integer",
-            "title": "Order Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "supplier_name",
-          "items",
-          "orders",
-          "order_count"
-        ],
-        "title": "SupplierSummary"
-      },
       "SupplierSummaryExportRequest": {
         "properties": {
           "ids": {
@@ -37320,134 +37017,6 @@
         ],
         "title": "SupplierSummaryExportRequest",
         "description": "供应商汇总导出请求。\n\n``supplier_quantities`` 携带页面「供应商采购订单」各行的展示数量（含损耗率加放与取整），\n后端据此**重建**导出内容 —— 行集、行序、数量都取页面，使 Excel 与页面严格一致\n（页面不展示的填充物等明细不再导出）；缺省（旧客户端）时保持原有\n「明细行集 + 明细原始数量」口径（向后兼容）。"
-      },
-      "SupplierSummaryItem": {
-        "properties": {
-          "material_name": {
-            "type": "string",
-            "title": "Material Name"
-          },
-          "specification": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Specification",
-            "default": ""
-          },
-          "unit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unit",
-            "default": ""
-          },
-          "quantity": {
-            "type": "number",
-            "title": "Quantity"
-          },
-          "material_category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Material Category",
-            "default": ""
-          },
-          "order_count": {
-            "type": "integer",
-            "title": "Order Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "material_name",
-          "quantity",
-          "order_count"
-        ],
-        "title": "SupplierSummaryItem"
-      },
-      "SupplierSummaryResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "suppliers": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/SupplierSummary"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Suppliers"
-          },
-          "supplier_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Supplier Count"
-          },
-          "order_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Order Count"
-          },
-          "html": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Html"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "title": "SupplierSummaryResponse"
       },
       "SupplierToggleResponse": {
         "properties": {

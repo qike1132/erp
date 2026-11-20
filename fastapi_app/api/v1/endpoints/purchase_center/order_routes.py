@@ -36,7 +36,6 @@ from fastapi_app.schemas.purchase_center import (
     QuickFilterResponse,
     SuggestionResponse,
     SupplierOrderSummaryResponse,
-    SupplierSummaryResponse,
     UnprocessedOrdersResponse,
 )
 from fastapi_app.services import purchase_center_service as svc
@@ -657,38 +656,4 @@ async def api_get_supplier_order_summary(
         return success_response(**result)
     except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
         logger.exception('获取供应商订单汇总失败')
-        raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
-
-
-@router.post('/orders/supplier-summary-by-vendor', response_model=SupplierSummaryResponse)
-async def api_get_supplier_summary_by_vendor(
-    data: OrderIdsRequest,
-    db: AsyncSession = Depends(get_db),
-    _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
-) -> dict[str, Any]:
-    """按供应商汇总订单。
-
-    Args:
-        data: 汇总请求，包含订单 ID 列表。
-        db: 异步数据库会话。
-        _current_user: 当前登录用户（权限校验依赖）。
-
-    Returns:
-        dict[str, Any]: 包含 success 标志、供应商列表及计数的字典。
-
-    Raises:
-        HTTPException 500: 操作失败。
-    """
-    try:
-        # 用明细级归并（items/orders/order_count）而不是 query_supplier_groups 的
-        # 纯金额聚合；后者字段与 SupplierSummary 不匹配，响应模型校验必 500（A-M2）。
-        orders = await svc.get_purchase_orders_with_items(db, data.ids)
-        sorted_suppliers = await svc.build_supplier_export_groups(db, orders)
-        return success_response(
-            suppliers=sorted_suppliers,
-            supplier_count=len(sorted_suppliers),
-            order_count=len(data.ids),
-        )
-    except (OperationalError, DisconnectionError, ValueError, RuntimeError) as e:
-        logger.exception('按供应商汇总失败')
         raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e

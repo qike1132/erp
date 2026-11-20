@@ -1,10 +1,9 @@
 """供应商汇总归并结构回归（2026-10-30 审计 A-M2）。
 
-背景：`/purchase-center/orders/supplier-summary` 与 `summary-print?format=supplier`
-原先调用 `query_supplier_groups`（只有金额聚合）并塞进 `SupplierSummaryResponse`，
-字段与响应模型不匹配 → 校验 500；打印路径还会因 `group['items']` KeyError 500。
+背景：供应商汇总的旧实现原先调用只有金额聚合的 helper，字段与响应模型不匹配
+→ 校验 500；旧打印路径还会因 `group['items']` KeyError 500（该打印端点已下线）。
 
-修复后两个端点统一走 `build_supplier_export_groups`（明细级归并）。本文件锁定：
+修复后供应商汇总统一走 `build_supplier_export_groups`（明细级归并）。本文件锁定：
 
 1. 每项 item 带 ``order_count``（该物料出现在几张采购单）；
 2. 每组带 ``orders``（去重订单号，升序）与 ``order_count``；

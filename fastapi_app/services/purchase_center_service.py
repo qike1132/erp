@@ -67,7 +67,6 @@ from fastapi_app.services.purchase_order_query import (  # noqa: F401
     get_purchase_orders,
     get_supplier_order_summary,
     get_unprocessed_orders,
-    query_supplier_groups,
 )
 from fastapi_app.services.purchase_product_service import (  # noqa: F401
     calculate_material,

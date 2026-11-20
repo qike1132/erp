@@ -1,5 +1,5 @@
 {
   "_comment": "api.d.ts 变更后必须同步 bump main.ts 的 buster；由 check-query-cache-buster.mjs 维护",
-  "buster": "binfa-erp-v17",
-  "apiTypesSha256": "cf450a5b2614bba8f6807290f8db1bc763f2b61e8dcf9e9d228e7ec4beef943e"
+  "buster": "binfa-erp-v20",
+  "apiTypesSha256": "9468f3bfd25b591613353a192ce1d49b28e7dd6093f61bddee31d754d8d1cb2d"
 }

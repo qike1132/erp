@@ -18,7 +18,6 @@ import pytest
 
 from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
     create_supplier_workbook,
-    generate_supplier_summary_print,
 )
 from fastapi_app.api.v1.endpoints.purchase_center.print_routes import rebuild_supplier_groups_from_page
 from fastapi_app.api.v1.endpoints.purchase_center.schemas import (
@@ -286,7 +285,7 @@ class TestRebuildFromPageKeepsBreakdown:
         ]
 
 
-class TestSupplierPrintAndExcelShowBreakdown:
+class TestSupplierExcelShowBreakdown:
     def _groups(self):
         return [{
             'supplier_name': '供应商1',
@@ -301,12 +300,6 @@ class TestSupplierPrintAndExcelShowBreakdown:
                 ],
             }],
         }]
-
-    def test_print_shows_each_order_and_quantity(self):
-        page = generate_supplier_summary_print(self._groups(), [])
-
-        assert 'PO-001×10' in page
-        assert 'PO-002×5' in page
 
     def test_excel_note_column_contains_breakdown(self):
         wb = create_supplier_workbook(self._groups()[0])

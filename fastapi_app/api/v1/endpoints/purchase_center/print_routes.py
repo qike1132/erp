@@ -1,5 +1,5 @@
 """
-采购中心 — 汇总打印 / Excel 导出路由
+采购中心 — 供应商汇总 Excel 导出路由（旧后端打印端点已下线）
 """
 import asyncio
 import io
@@ -9,81 +9,16 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.api.v1.endpoints.purchase_center.export_utils import (
-    create_supplier_workbook,
-    generate_factory_summary_print,
-    generate_normal_summary_print,
-    generate_supplier_summary_print,
-)
-from fastapi_app.api.v1.endpoints.purchase_center.schemas import SummaryPrintRequest, SupplierSummaryExportRequest
+from fastapi_app.api.v1.endpoints.purchase_center.export_utils import create_supplier_workbook
+from fastapi_app.api.v1.endpoints.purchase_center.schemas import SupplierSummaryExportRequest
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.deps import require_any_permission
 from fastapi_app.core.logger import logger
-from fastapi_app.core.response import success_response
-from fastapi_app.schemas.purchase_center import SupplierSummaryResponse
 from fastapi_app.services import purchase_center_service as svc
-from fastapi_app.shared_models import PurchaseOrderItem, PurchaseOrderStatus
 
 router = APIRouter()
-
-@router.post('/orders/summary-print', response_model=SupplierSummaryResponse)
-async def api_summary_print(data: SummaryPrintRequest, db: AsyncSession=Depends(get_db), _user=Depends(require_any_permission('product_manage', 'purchase_center_manage'))):
-    ids = data.ids
-    format_type = data.format
-    try:
-        orders = await svc.get_purchase_orders_with_items(db, ids)
-
-        if format_type in ['factory', 'supplier']:
-            source_order_ids = list({o.source_order_id for o in orders if o.source_order_id})
-            if source_order_ids:
-                # 只并**未完成**的同源采购单：已完成的是历史单，并进来会把数量/金额翻倍。
-                # 「未完成」= pending + confirmed（confirmed 是历史遗留但仍在用的状态，
-                # complete_purchase_order 也接受它，漏掉会让兄弟单被静默丢弃 → 少算）。
-                related = await svc.get_purchase_orders_by_source_ids(
-                    db, source_order_ids,
-                    statuses=[PurchaseOrderStatus.PENDING, PurchaseOrderStatus.CONFIRMED],
-                )
-                all_order_ids = list(set(ids) | {o.id for o in related})
-            else:
-                all_order_ids = list(ids)
-            if len(all_order_ids) != len(ids):
-                orders = await svc.get_purchase_orders_with_items(db, all_order_ids)
-                ids = all_order_ids
-
-        items = await svc.get_purchase_order_items_by_order_ids(db, ids)
-        order_items_map: dict[int, list[PurchaseOrderItem]] = {}
-        for item in items:
-            order_items_map.setdefault(item.order_id, []).append(item)
-
-        if format_type == 'factory':
-            source_order_ids = [o.source_order_id for o in orders if o.source_order_id]
-            source_orders = None
-            if source_order_ids:
-                source_orders = await svc.get_system_orders_by_ids(db, source_order_ids)
-            # 「产品部位」「角色名称」在合并模式下来自 BOM（采购明细没有这两个字段），
-            # 光凭明细打印件只能印空白 → 与屏幕同源补齐，避免「屏幕有、打印空」。
-            from fastapi_app.services.purchase_order_query import build_bom_display_maps
-
-            bom_part_map, bom_role_map = await build_bom_display_maps(db, orders)
-            html = generate_factory_summary_print(
-                orders, order_items_map, source_orders, bom_part_map, bom_role_map,
-            )
-            return success_response(html=html, order_count=len(orders))
-        elif format_type == 'supplier':
-            # 与导出同一份明细级归并；query_supplier_groups 只有金额聚合，
-            # generate_supplier_summary_print 取 items/orders 会 KeyError（A-M2）。
-            sorted_suppliers = await svc.build_supplier_export_groups(db, orders)
-            html = generate_supplier_summary_print(sorted_suppliers, orders)
-            return success_response(html=html, supplier_count=len(sorted_suppliers), order_count=len(orders))
-        else:
-            html = generate_normal_summary_print(orders, order_items_map)
-            return success_response(html=html, order_count=len(orders))
-    except (OperationalError, DisconnectionError, SQLAlchemyError, ValueError, RuntimeError) as e:
-        logger.exception(f'汇总打印失败: {e!s}')
-        raise HTTPException(status_code=500, detail='操作失败，请稍后重试') from e
 
 def _normalize_supplier_name(name: str | None) -> str:
     """供应商名称归一化：空值统一为「未指定供应商」（与汇总 / 页面口径一致）。"""

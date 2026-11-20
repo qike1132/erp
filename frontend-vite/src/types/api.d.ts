@@ -525,6 +525,7 @@ export interface BatchStockInItem {
   quantity: number
   note?: string
   stockin_date?: string | null
+  request_id?: string | null
 }
 
 export interface BatchStockInRequest {
@@ -538,6 +539,7 @@ export interface BatchStockOutItem {
   note?: string
   stockout_date?: string | null
   batch_no?: string | null
+  request_id?: string | null
 }
 
 export interface BatchStockOutRequest {
@@ -2583,31 +2585,6 @@ export interface SearchSuggestionResponse {
   suggestions?: Array<SearchSuggestionItem>
 }
 
-export interface ShipProcessMulti {
-  items: Array<ShipProcessMultiItem>
-}
-
-export interface ShipProcessMultiItem {
-  process_id: number
-  quantity: number
-}
-
-export interface ShipmentBatchCreate {
-  orders: Array<ShipmentBatchOrder>
-}
-
-export interface ShipmentBatchOrder {
-  order_id: number
-  items: Array<ShipmentShipItem>
-}
-
-export interface ShipmentBatchResponse {
-  success?: boolean
-  data?: Array<ShipmentResponse>
-  total?: number
-  message?: string
-}
-
 export interface ShipmentCreate {
   order_id: number
   items: Array<ShipmentShipItem>
@@ -2865,6 +2842,7 @@ export interface StockInCreate {
   customer: string
   stockin_date: string
   note?: string | null
+  request_id?: string | null
 }
 
 export interface StockInUpdate {
@@ -2889,6 +2867,7 @@ export interface StockOutCreate {
   stockout_date: string
   note?: string | null
   batch_no?: string | null
+  request_id?: string | null
 }
 
 export interface StockOutUpdate {
@@ -2942,11 +2921,6 @@ export interface SuggestionResponse {
 export interface SuggestionsResponse {
   success?: boolean
   suggestions?: Array<string>
-}
-
-export interface SummaryPrintRequest {
-  ids: Array<number>
-  format?: string
 }
 
 export interface SupplierActionResponse {
@@ -3044,35 +3018,9 @@ export interface SupplierResponse {
   created_at?: string | null
 }
 
-export interface SupplierSummary {
-  supplier_name: string
-  supplier_id?: number | null
-  items: Array<SupplierSummaryItem>
-  orders: Array<string>
-  order_count: number
-}
-
 export interface SupplierSummaryExportRequest {
   ids: Array<number>
   supplier_quantities?: Array<SupplierExportQuantityItem>
-}
-
-export interface SupplierSummaryItem {
-  material_name: string
-  specification?: string | null
-  unit?: string | null
-  quantity: number
-  material_category?: string | null
-  order_count: number
-}
-
-export interface SupplierSummaryResponse {
-  success?: boolean
-  suppliers?: Array<SupplierSummary> | null
-  supplier_count?: number | null
-  order_count?: number | null
-  html?: string | null
-  message?: string | null
 }
 
 export interface SupplierToggleResponse {

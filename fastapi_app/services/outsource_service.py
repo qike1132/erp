@@ -27,7 +27,6 @@ from fastapi_app.services.outsource._order_processes import (  # noqa: F401
     receive_order_processes_batch,
     ship_order_process,
     ship_order_processes_batch,
-    ship_processes_multi,
     sync_orders_for_product,
     sync_outsource_processes_for_order,
     update_order_process,
@@ -52,7 +51,6 @@ from fastapi_app.services.outsource._queries import (  # noqa: F401
 from fastapi_app.services.outsource._shipments import (  # noqa: F401
     create_merged_shipment,
     create_shipment,
-    create_shipments_batch,
     get_shipment,
     list_shipments,
     receive_shipment,

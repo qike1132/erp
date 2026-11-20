@@ -20,7 +20,6 @@ from fastapi_app.services.outsource._order_processes import receive_order_proces
 from fastapi_app.services.outsource._shipments import (
     create_merged_shipment,
     create_shipment,
-    create_shipments_batch,
     get_shipment,
     list_shipments,
     receive_shipment,
@@ -260,38 +259,6 @@ async def test_create_shipment_multiple_processes_one_call(db):
     p2 = await db.get(OrderOutsourceProcess, process2.id)
     assert p1.shipped_quantity == 5
     assert p2.shipped_quantity == 3
-
-
-async def test_create_shipments_batch_multiple_orders(db):
-    """回归：批量发货一次对多订单生成发货单——每订单一张发货单，编号互异、customer 独立。"""
-    order, process = await _seed(db)
-    # 第二个订单（不同客户）
-    order2 = Order(id=2, order_no='PO-20260919-0002', customer='客户B', order_date=datetime(2026, 9, 19, 11, 0),
-                   product_id=1, quantity=20)
-    item2 = OrderItem(id=2, order_id=2, product_id=1, product_name='电绣品', product_barcode='B1', quantity=20)
-    process2 = OrderOutsourceProcess(id=2, order_id=2, order_item_id=2, product_id=1,
-                                     product_name='电绣品', process_type='电绣', sort_order=0, status='pending')
-    db.add_all([order2, item2, process2])
-    await db.commit()
-
-    results = await create_shipments_batch(
-        db,
-        [(order.id, [(process.id, 5)]), (order2.id, [(process2.id, 8)])],
-        username='shipper',
-    )
-
-    assert len(results) == 2
-    assert results[0]['order_id'] == 1
-    assert results[1]['order_id'] == 2
-    assert results[0]['customer'] == '贝乐客户'
-    assert results[1]['customer'] == '客户B'
-    assert results[0]['shipment_no'] != results[1]['shipment_no']
-
-    # 两订单各自工序已发货
-    p1 = await db.get(OrderOutsourceProcess, process.id)
-    p2 = await db.get(OrderOutsourceProcess, process2.id)
-    assert p1.shipped_quantity == 5
-    assert p2.shipped_quantity == 8
 
 
 async def test_list_shipments_response_schema_mapping(db):

@@ -1,7 +1,7 @@
 import { get, post, put, del, postDownload } from './request'
 import type { MaterialCalcRow as GenMaterialCalcRow, SearchSuggestionResponse as GenSearchSuggestionResponse } from '@/types/api'
 import type {
-  Product, PurchaseOrder, UnprocessedOrder, QueryParams, ExportResponse,
+  Product, PurchaseOrder, UnprocessedOrder, QueryParams,
   WithItems, WithRequired, OneClickGenerateRequest, OneClickGenerateResponse,
 } from '@/types'
 
@@ -196,7 +196,6 @@ export const purchaseApi = {
         ? { items_versions: itemsVersions }
         : {}),
     }),
-  summaryPrint: (ids: number[], format: string) => post<ExportResponse>('/purchase-center/orders/summary-print', { ids, format }),
   /**
    * 导出供应商采购订单汇总 Excel。
    * `quantities` 携带页面「供应商采购订单」各行的展示数量（含损耗率加放），

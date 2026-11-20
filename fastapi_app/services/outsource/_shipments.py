@@ -342,26 +342,6 @@ async def receive_shipment(db: AsyncSession, shipment_id: int, username: str | N
     return {'success': True, 'message': '确认收货成功', 'already_received': False}
 
 
-async def create_shipments_batch(
-    db: AsyncSession, orders: list[tuple[int, list[tuple[int, int]]]], username: str | None = None,
-) -> list[dict]:
-    """批量发货（多订单一次性）：每个订单生成一张发货单，单事务原子。
-
-    orders: [(order_id, [(process_id, quantity), ...]), ...]。
-    逐订单复用 create_shipment（含行锁/数量校验/流水/通知），任一订单失败由外层
-    db_transaction 回滚整批。每订单发货单独立、customer 独立，确认收货仍按单张发货单闭环。
-    """
-    results: list[dict] = []
-    for order_id, items in orders:
-        if not items:
-            continue
-        try:
-            results.append(await create_shipment(db, order_id, items, username))
-        except ValueError as e:
-            raise ValueError(f'订单 {order_id}：{e}') from e
-    return results
-
-
 async def create_merged_shipment(
     db: AsyncSession, items: list[tuple[int, int]], username: str | None = None,
 ) -> dict:

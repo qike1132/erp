@@ -970,16 +970,6 @@ class TestPurchaseCenterEndpoints:
         assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
-    async def test_supplier_summary_by_vendor_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/orders/supplier-summary-by-vendor", json={})
-        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
-
-    @pytest.mark.asyncio
-    async def test_summary_print_empty(self, client):
-        resp = await client.post("/api/v1/purchase-center/orders/summary-print", json={})
-        assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"
-
-    @pytest.mark.asyncio
     async def test_get_purchase_orders_default(self, client):
         with patch('fastapi_app.services.purchase_center_service.get_purchase_orders') as mock_svc:
             mock_svc.return_value = {'orders': [], 'total': 0, 'pages': 0, 'current_page': 1}

@@ -1,7 +1,7 @@
 import { get, post, del } from './request'
 import type { QueryParams, WithRequired, WithItems } from '@/types'
 import type { OrderListApiResponse } from './order'
-import type { GenerateProcessResponse as GenGenerateProcessResponse, ShipmentReceiveResponse as GenShipmentReceiveResponse, HubeiProductSearchItem as GenHubeiProductSearchItem, ShippableProcessItem as GenShippableProcessItem, UnshippedProcessItem as GenUnshippedProcessItem, OrderProcessListResponse as GenOrderProcessListResponse, ProcessTypeListResponse as GenProcessTypeListResponse, ShipmentBatchOrder as GenShipmentBatchOrder, ShipmentBatchResponse as GenShipmentBatchResponse, ShipmentListResponse as GenShipmentListResponse } from '@/types/api'
+import type { GenerateProcessResponse as GenGenerateProcessResponse, ShipmentReceiveResponse as GenShipmentReceiveResponse, HubeiProductSearchItem as GenHubeiProductSearchItem, ShippableProcessItem as GenShippableProcessItem, UnshippedProcessItem as GenUnshippedProcessItem, OrderProcessListResponse as GenOrderProcessListResponse, ProcessTypeListResponse as GenProcessTypeListResponse, ShipmentListResponse as GenShipmentListResponse } from '@/types/api'
 
 /** SKU 外发工序预设 */
 export interface OutsourceProcessType {
@@ -108,11 +108,6 @@ export type ShipmentListResponse = WithItems<Required<GenShipmentListResponse>, 
 
 export type ShipmentReceiveResponse = Required<GenShipmentReceiveResponse>
 
-/** 批量发货：单个订单的发货明细 */
-export type ShipmentBatchOrder = GenShipmentBatchOrder
-
-export type ShipmentBatchResponse = WithItems<Required<GenShipmentBatchResponse>, 'data', Shipment>
-
 export const outsourceApi = {
   /** 湖北工厂订单列表（强制 factory=湖北，含备货） */
   orders: (params?: QueryParams) => get<OrderListApiResponse>('/outsource/orders', params),
@@ -138,9 +133,6 @@ export const outsourceApi = {
     post<OrderProcessListResponse>(`/outsource/orders/${orderId}/processes/ship-batch`, { items }),
   /** 跨全部湖北订单聚合待发货工序（批量发货面板数据源） */
   shippable: () => get<ShippableProcessItem[]>('/outsource/processes/shippable'),
-  /** 跨订单批量发货（单事务原子） */
-  shipMulti: (items: { process_id: number; quantity: number }[]) =>
-    post<OrderProcessListResponse>('/outsource/processes/ship-multi', { items }),
   /** 批量收货（单事务原子）：quantity 缺省时后端按剩余待收数量收货 */
   receiveProcessesBatch: (orderId: number, items: { process_id: number; quantity?: number }[]) =>
     post<OrderProcessListResponse>(`/outsource/orders/${orderId}/processes/receive-batch`, { items }),
@@ -150,9 +142,6 @@ export const outsourceApi = {
   /** 一键发货：按订单生成发货单并逐工序发货 */
   createShipment: (orderId: number, items: { process_id: number; quantity: number }[]) =>
     post<Shipment>('/outsource/shipments', { order_id: orderId, items }),
-  /** 批量发货（多订单一次性）：每订单生成一张发货单，单事务原子 */
-  createShipmentsBatch: (orders: ShipmentBatchOrder[]) =>
-    post<ShipmentBatchResponse>('/outsource/shipments/batch', { orders }),
   /** 合并发货（跨订单/跨客户生成一张发货单） */
   createMergedShipment: (items: { process_id: number; quantity: number }[]) =>
     post<Shipment>('/outsource/shipments/merged', { items }),

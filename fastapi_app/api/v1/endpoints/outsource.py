@@ -53,15 +53,12 @@ from fastapi_app.schemas.outsource import (
     ProcessTypeListResponse,
     ProcessTypeResponse,
     ProcessTypeUpdate,
-    ShipmentBatchCreate,
-    ShipmentBatchResponse,
     ShipmentCreate,
     ShipmentListResponse,
     ShipmentMergeCreate,
     ShipmentReceiveResponse,
     ShipmentResponse,
     ShippableProcessItem,
-    ShipProcessMulti,
     UnshippedProcessItem,
 )
 from fastapi_app.services import outsource_service
@@ -335,20 +332,6 @@ async def list_shippable_processes(
     return [ShippableProcessItem(**it) for it in items]
 
 
-@router.post("/processes/ship-multi", response_model=OrderProcessListResponse)
-async def ship_processes_multi(
-    data: ShipProcessMulti,
-    db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("outsource_ship")),
-) -> OrderProcessListResponse:
-    """跨订单批量发货（单事务原子）：一次请求完成多道工序发货，任一条失败整批回滚。"""
-    async with db_transaction(db):
-        items = await outsource_service.ship_processes_multi(
-            db, [(i.process_id, i.quantity) for i in data.items], username=user.username,
-        )
-    return OrderProcessListResponse(data=items, total=len(items))
-
-
 @router.post("/orders/{order_id}/processes/receive-batch", response_model=OrderProcessListResponse)
 async def receive_order_processes_batch(
     order_id: int,
@@ -439,31 +422,6 @@ async def create_shipment(
             username=user.username,
         )
     return ShipmentResponse(**result)
-
-
-@router.post("/shipments/batch", response_model=ShipmentBatchResponse)
-async def create_shipments_batch(
-    data: ShipmentBatchCreate,
-    db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("outsource_ship")),
-) -> ShipmentBatchResponse:
-    """批量发货（多订单一次性）：每个订单生成一张发货单，单事务原子。
-
-    orders: [{order_id, items:[{process_id, quantity}]}, ...]。
-    任一订单发货失败整批回滚。每订单发货单独立、customer 独立，确认收货仍按单张发货单闭环。
-    """
-    async with db_transaction(db):
-        results = await outsource_service.create_shipments_batch(
-            db,
-            [(o.order_id, [(i.process_id, i.quantity) for i in o.items]) for o in data.orders],
-            username=user.username,
-        )
-    return ShipmentBatchResponse(
-        success=True,
-        data=[ShipmentResponse.model_validate(r) for r in results],
-        total=len(results),
-        message=f'已生成 {len(results)} 张发货单',
-    )
 
 
 @router.post("/shipments/merged", response_model=ShipmentResponse)
