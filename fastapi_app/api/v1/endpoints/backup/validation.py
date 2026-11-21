@@ -803,8 +803,6 @@ async def validate_backup_integrity(
                         # 放行，否则损坏的 legacy 加密备份被巡检判有效，灾难时才暴露。
                         valid = False
                         message = '加密格式未识别（legacy 裸信封？），未验证，需人工确认'
-
-                    if filename.endswith('.enc') and not encrypted:
                         status = 'unverified'
                     else:
                         status = 'valid' if valid else 'invalid'

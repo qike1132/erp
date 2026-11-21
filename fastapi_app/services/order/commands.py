@@ -275,6 +275,8 @@ async def update_order_item(db: AsyncSession, item_id: int, quantity: int | None
         validate_quantity_range(quantity, '订单数量')
         # M-2：明细改量同样守「不得低于该明细已抵扣量」（deduction.py:303 同款；
         # 出库按订单级计量无法按明细归属，明细级下限只取已抵扣）。
+        # TODO(multi-sku-order)：评审 L 指出明细可改到低于其分摊出库量——
+        # 整单改量入口的 floor 兜底了订单级口径，明细级待多 SKU 改造一并补。
         if quantity < (item.deduct_quantity or 0):
             raise ValueError(
                 f'明细数量不得低于已抵扣量 {item.deduct_quantity or 0}（请求 {quantity}），'

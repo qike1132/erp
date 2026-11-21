@@ -974,8 +974,27 @@
           "采购中心"
         ],
         "summary": "Api Create Purchase Order",
-        "description": "创建采购订单。\n\nArgs:\n    data: 采购订单创建请求数据。\n    db: 异步数据库会话。\n    _current_user: 当前登录用户（权限校验依赖）。\n\nReturns:\n    dict[str, Any]: 包含 success 标志和订单数据的字典。\n\nRaises:\n    HTTPException 500: 创建订单失败。",
+        "description": "创建采购订单。\n\nM-28（2026-11-21 审计）：可选 X-Idempotency-Key，成功结果按当前用户与键持久化\n重放（与一键生成共用 PurchaseOrderGenerateAttempt 登记），双击/重试不再产生\n重复 pending 采购单。业务校验失败改为 400（此前裸 ValueError 落 500）。\n\nRaises:\n    HTTPException 400: 业务校验失败。\n    HTTPException 409: 幂等键与首次请求内容不一致。\n    HTTPException 500: 创建订单失败。",
         "operationId": "api_create_purchase_order_api_v1_purchase_center_orders_post",
+        "parameters": [
+          {
+            "name": "X-Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -9177,6 +9196,12 @@
             "in": "query",
             "required": false,
             "schema": {
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "all"
+              ],
               "type": "string",
               "description": "状态筛选: pending/approved/rejected/all",
               "default": "pending",
@@ -22956,6 +22981,7 @@
               "$ref": "#/components/schemas/BatchOrderItem"
             },
             "type": "array",
+            "maxItems": 200,
             "title": "Orders"
           }
         },
@@ -23403,6 +23429,7 @@
               "$ref": "#/components/schemas/BatchStockInItem"
             },
             "type": "array",
+            "maxItems": 200,
             "title": "Stockins"
           }
         },
@@ -23487,6 +23514,7 @@
               "$ref": "#/components/schemas/BatchStockOutItem"
             },
             "type": "array",
+            "maxItems": 200,
             "title": "Stockouts"
           }
         },
@@ -32067,7 +32095,12 @@
           "status": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "confirmed",
+                  "completed"
+                ]
               },
               {
                 "type": "null"
@@ -32171,8 +32204,16 @@
             "default": ""
           },
           "unit_price": {
-            "type": "number",
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
             "title": "Unit Price",
             "description": "单价",
             "default": 0
@@ -32375,6 +32416,10 @@
               {
                 "type": "number",
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -33797,7 +33842,13 @@
           "status": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "confirmed",
+                  "completed",
+                  "cancelled"
+                ]
               },
               {
                 "type": "null"
@@ -38447,6 +38498,17 @@
           "message": {
             "type": "string",
             "title": "Message"
+          },
+          "order_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order No"
           }
         },
         "type": "object",

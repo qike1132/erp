@@ -2136,7 +2136,7 @@ export interface ProductionPlanUpdate {
   barcode?: string | null
   quantity?: number | null
   plan_date?: string | null
-  status?: string | null
+  status?: "pending" | "confirmed" | "completed" | null
   remark?: string | null
 }
 
@@ -2152,7 +2152,7 @@ export interface ProductionRecordCreate {
   customer_id?: number | null
   product_name: string
   barcode?: string
-  unit_price?: number
+  unit_price?: number | string
   quantity: number
   production_date: string
   remark?: string | null
@@ -2177,7 +2177,7 @@ export interface ProductionRecordUpdate {
   customer_id?: number | null
   product_name?: string | null
   barcode?: string | null
-  unit_price?: number | null
+  unit_price?: number | string | null
   quantity?: number | null
   production_date?: string | null
   remark?: string | null
@@ -2420,7 +2420,7 @@ export interface PurchasePlanStagingValidateResponse {
 }
 
 export interface PurchasePlanUpdate {
-  status?: string | null
+  status?: "pending" | "confirmed" | "completed" | "cancelled" | null
   remark?: string | null
 }
 
@@ -3305,6 +3305,7 @@ export interface order_ApprovalListResponse {
 export interface order_OrderActionResponse {
   success: boolean
   message: string
+  order_no?: string | null
 }
 
 export interface order_batch_BatchCompleteRequest {
