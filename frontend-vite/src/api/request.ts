@@ -143,6 +143,10 @@ service.interceptors.response.use(
     if (error.response?.status === 403) {
       const detail = (error.response?.data as { detail?: string })?.detail || '权限不足'
       console.warn('[API 403]', detail)
+      // M-38（2026-11-21 审计）：请求级静默豁免——轮询/预取类调用方在 config
+      // 声明 silent403，避免每 30s 一次的权限弹窗风暴（3s 去重窗只防并发不防周期）。
+      const cfg = error.config as (typeof error.config & { silent403?: boolean }) | undefined
+      if (cfg?.silent403) return Promise.reject(error)
       if (!isShowing403) {
         isShowing403 = true
         try {
@@ -206,7 +210,7 @@ function _dedupeKey(url: string, params?: Record<string, unknown>, routeCancel =
 export function get<T>(
   url: string,
   params?: Record<string, unknown>,
-  options?: { signal?: AbortSignal; routeCancel?: boolean },
+  options?: { signal?: AbortSignal; routeCancel?: boolean; silent403?: boolean },
 ): Promise<T> {
   const routeCancel = options?.routeCancel !== false
   const key = _dedupeKey(url, params, routeCancel)
@@ -370,6 +374,16 @@ export function resolveStaticUrl(url: string | null | undefined): string {
 
   // 3) SSR / 测试环境兜底
   return url
+}
+
+/**
+ * M-37（2026-11-21 审计）：401 刷新被限流/瞬态失败时拦截器打的标记——
+ * 会话仍有效，调用方应按「稍后重试」处理而不是渲染错误态/登出。
+ * 下沉到共享层：此前全站只有 useDashboardStats 一个消费方，其余列表页
+ * 一律当普通失败渲染。
+ */
+export function isAuthRefreshDeferred(e: unknown): boolean {
+  return Boolean((e as { __authRefreshDeferred?: boolean } | null)?.__authRefreshDeferred)
 }
 
 export default service

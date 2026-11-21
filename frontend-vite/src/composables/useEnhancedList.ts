@@ -1,7 +1,7 @@
 import { ref, computed, watch, readonly } from 'vue'
 import { refDebounced } from '@vueuse/core'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { get } from '@/api/request'
+import { get, isAuthRefreshDeferred } from '@/api/request'
 import type { PaginatedResponse } from '@/types'
 
 interface Options {
@@ -70,7 +70,17 @@ export function useEnhancedList<T>(opts: Options) {
       // M-39（2026-11-21 审计）：total 写共享 ref 需代际守卫——快速翻页/切筛选时
       // 旧 key 响应后到会把新页 total 覆盖成旧值（items 与「共 N 条」错页）。
       const seq = ++latestQuerySeq
-      const r = await get<PaginatedResponse<T>>(url, qp.value, { routeCancel: false })
+      const fetchOnce = () => get<PaginatedResponse<T>>(url, qp.value, { routeCancel: false })
+      let r: PaginatedResponse<T>
+      try {
+        r = await fetchOnce()
+      } catch (e) {
+        // M-37（2026-11-21 审计）：401 刷新被限流/瞬态失败 ≠ 会话失效——
+        // 延迟重试一次而非渲染错误态（placeholderData 期间旧数据仍在展示）。
+        if (!isAuthRefreshDeferred(e)) throw e
+        await new Promise((res) => setTimeout(res, 3000))
+        r = await fetchOnce()
+      }
       if (seq === latestQuerySeq) total.value = r.total ?? 0
       return r
     },

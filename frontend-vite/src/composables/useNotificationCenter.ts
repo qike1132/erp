@@ -5,6 +5,7 @@
  * 与 useNotifications 分离以保持未读数轮询的轻量。
  */
 import { ref, readonly, computed } from 'vue'
+import { isAuthRefreshDeferred } from '@/api/request'
 import { notificationApi, type Notification, type NotificationListParams } from '@/api/notification'
 import {
   clearNotificationMemoryCache,
@@ -74,6 +75,12 @@ export function useNotificationCenter() {
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[notification-center] list failed', e)
       if (requestId !== loadRequestId || silent) return
+      // M-37：会话刷新受限（限流/瞬态）——保留旧列表 + 软提示，延迟重试一次
+      if (isAuthRefreshDeferred(e)) {
+        listError.value = '登录状态刷新受限，正在自动重试…'
+        setTimeout(() => { void fetchList(true) }, 3000)
+        return
+      }
       // M-33（2026-11-21 审计）：失败不得渲染成「暂无通知」——置错误态保留既有
       // 数据，由视图提供重试入口（与 beile-order A-M32 同口径）。
       listError.value = e instanceof Error ? e.message : String(e ?? '通知加载失败')

@@ -7,6 +7,7 @@ import { usePatternRoomStore } from './patternRoom'
 import { queryClient, queryPersister } from '@/utils/queryClient'
 import { clearNotificationMemoryCache } from '@/composables/notificationMemoryCache'
 import { purgeApiCaches } from '@/utils/swCache'
+import { removeAccessToken } from '@/utils/secureStorage'
 
 /**
  * 用户信息会话快照：登录成功后写入 sessionStorage（仅当前标签页，关闭即失效），
@@ -240,6 +241,11 @@ export const useAuthStore = defineStore('auth', () => {
     clearCsrfCache()
     try {
       sessionStorage.removeItem(USER_SNAPSHOT_KEY)
+    } catch { /* 静默 */ }
+    // M-40（2026-11-21 审计）：Capacitor 链路登录写 SecureStorage，登出不清理
+    // 会让共用设备上 token 残留（当前 Capacitor 休眠，启用前必须闭环）。
+    try {
+      removeAccessToken()
     } catch { /* 静默 */ }
     clearUserCaches()
     // 纵深防御：清掉 Service Worker 的 api-* 运行时缓存（残留旧 SW 或将来再启用
