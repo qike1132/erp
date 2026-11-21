@@ -183,7 +183,7 @@ def validate_record_data(
     department: str,
     product_name: str,
     quantity: int,
-    unit_price: float = 0,
+    unit_price: float | Decimal = 0,
 ) -> None:
     """校验生产记录数据"""
     if department not in DEPARTMENT_LABELS:
@@ -497,7 +497,7 @@ async def create_record(
     product_name: str,
     customer_id: int | None = None,
     barcode: str,
-    unit_price: float,
+    unit_price: float | Decimal,
     quantity: int,
     production_date_str: str,
     remark: str = '',

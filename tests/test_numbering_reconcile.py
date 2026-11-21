@@ -107,6 +107,12 @@ async def test_reconcile_raises_when_counter_behind_data(db):
     与 ``tests/test_numbering_audit.py`` 同一纪律，任何墙钟日期运行都成立。
     """
     segment = business_period_str()
+    # CI 教训：同测试库的其他用例（M-28 手工建单/writeback 等走 generate_order_number）
+    # 会先写 (PO, 本segment) 计数器行，本用例再 add 同键行即撞 numbering_counter_pkey——
+    # Linux 次序与本地不同才暴露。本会话内先删该键（回滚安全），从干净水位起步。
+    from sqlalchemy import delete as sa_delete
+    await db.execute(sa_delete(NumberingCounter).where(
+        NumberingCounter.prefix == 'PO', NumberingCounter.number_date == segment))
     db.add(NumberingCounter(prefix='PO', number_date=segment, last_seq=3))
     for seq in (5, 6, 7):  # 数据 max = 7 > 水位 3
         db.add(Order(order_no=f'PO-{segment}-{seq:04d}', customer='c', quantity=1,

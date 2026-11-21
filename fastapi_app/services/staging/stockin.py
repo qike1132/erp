@@ -143,10 +143,13 @@ async def _write_confirmed_stockin(
     # M-14 回归修复：测试替身的 product 可能无 current_stock 属性——
     # 统一入口返回的对象缺字段时前后结存记 None（历史行允许 NULL），
     # 不让对账增强反过来打断确认主流程。
+    before_stock: int | None
+    after_stock: int | None
     try:
         before_stock = updated.current_stock - staging.quantity
         after_stock = updated.current_stock
     except AttributeError:
+        # 测试替身缺 current_stock：结存记 None（历史行允许 NULL），不打断主流程
         before_stock = after_stock = None
 
     log = InventoryLog(

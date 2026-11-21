@@ -39,7 +39,10 @@ async def test_deduct_quantity_writeback_clamped_to_available(app_on_test_db, as
     }])
     assert result['success'] is True, result
 
-    item = (await db.execute(select(OrderItem))).scalars().first()
+    # CI 教训：全量跑时其他测试会留 OrderItem 行（次序与本地不同）——按本单产品过滤
+    item = (await db.execute(
+        select(OrderItem).where(OrderItem.product_id == product.id)
+    )).scalars().first()
     assert item is not None
     assert item.deduct_quantity == 2, (
         '落库抵扣量应按实扣收口为 2（修复前落意愿值 5，M-1 分叉复现）')

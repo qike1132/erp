@@ -34,10 +34,12 @@ async def test_case_movements_export_rejects_over_limit(app_on_test_db, async_db
         ))
     await db.flush()
 
+    # CI 教训：不带 case_id 是全表口径，会数进其他测试留下的流水（全量跑次序
+    # 与本地不同）——限额与行数断言都按 case_id 过滤，与生产导出用法一致。
     with pytest.raises(ValueError, match='超过单次导出上限'):
-        await fetch_movements_for_export(db, limit=2)
+        await fetch_movements_for_export(db, case_id=case.id, limit=2)
     # 未超限时正常返回（防修复误伤）
-    rows = await fetch_movements_for_export(db, limit=10)
+    rows = await fetch_movements_for_export(db, case_id=case.id, limit=10)
     assert len(rows) == 3
 
 
