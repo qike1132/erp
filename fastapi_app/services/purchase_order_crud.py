@@ -1061,6 +1061,24 @@ async def _build_order_summary(db: AsyncSession, order) -> dict:
     }
 
 
+def _json_contains_trusted(jsonb_col, sid: int):
+    """JSON 数组兜底的单 id 匹配条件（M-4，2026-11-21 审计）。
+
+    id 同存于 order 与 stockin 两表时视为歧义不采信——存量无 SKU 快照的
+    pending 单把备货 id 存进了数组，删同号客户订单时会误删备货来源单
+    （与 c 路径裸 id 兜底的歧义守卫同口径）。判定内联进同一查询，
+    不增加 execute 次数。sqlalchemy 操作符在函数内导入（与 cleanup 内
+    既有局部导入同风格，避免模块级循环依赖）。
+    """
+    from sqlalchemy import and_, exists, literal, not_
+
+    ambiguous = and_(
+        exists(select(literal('1')).select_from(Order).where(Order.id == sid)),
+        exists(select(literal('1')).select_from(StockIn).where(StockIn.id == sid)),
+    )
+    return and_(jsonb_col.contains([sid]), not_(ambiguous))
+
+
 async def cleanup_orphan_pending_purchase_orders(
     db: AsyncSession, order_ids: list[int] | None = None,
     stockin_ids: list[int] | None = None,
@@ -1068,18 +1086,13 @@ async def cleanup_orphan_pending_purchase_orders(
 ) -> int:
     """清理关联指定客户订单 / 备货记录的 pending 采购订单。
 
-    同时处理 source_order_id（单 ID 列）和 source_order_ids（JSON 数组）两个字段。
-    返回被删除的采购订单数量，供调用方判断是否触发了清理。
+    同时处理 source_order_id（单列）与 source_order_ids（JSON 数组）；返回删除数。
 
-    P0（2026-10-24）：来源 id 必须带类型匹配。`order.id` 与 `stockin.id` 是两套自增
-    序列、必然撞号；原先两类 id 合并成无类型数组去命中 source_order_id(s)，删订单 N
-    会连带删掉「由备货 N 生成」的 pending 单（含已录单价与全部明细）。
-
-    匹配全部下推到 SQL（不新增 round-trip，便于既有 mock 测试与性能）：
-      a. purchase_order_sku 的 (source_record_type, source_order_id) —— 权威；
-      b. source_order_ids JSON 数组 —— 老数据兜底；
-      c. source_order_id 单列 —— 老数据兜底，但**仅当该 id 不同时存在于 order 与
-         stockin 两表**（否则裸 id 无法判类型，宁可漏删不可错删）。
+    P0（2026-10-24）：来源 id 必须带类型匹配——`order.id` 与 `stockin.id` 是两套
+    自增序列必然撞号，无类型数组会误删。匹配全部下推到 SQL（不新增 round-trip）：
+    a. purchase_order_sku 的 (source_record_type, source_order_id) —— 权威；
+    b/c. 老数据兜底，且单列与数组路径均不采信「同存于 order 与 stockin 两表」的
+    歧义 id（宁可漏删不可错删，见 _json_contains_trusted）。
     """
     source_ids: list[int] = []
     if order_ids:
@@ -1113,9 +1126,10 @@ async def cleanup_orphan_pending_purchase_orders(
         )
     ) if typed_pairs else None
 
-    # b) JSON 数组兜底（先取候选 id，沿用既有查询）
+    # b) JSON 数组兜底，歧义守卫见 _json_contains_trusted（M-4）。
     jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
-    contain_conds = [jsonb_col.contains([sid]) for sid in sorted({int(i) for i in source_ids})]
+    contain_conds = [_json_contains_trusted(jsonb_col, sid)
+                     for sid in sorted({int(i) for i in source_ids})]
     result2 = await db.execute(
         select(PurchaseOrder.id).where(
             PurchaseOrder.source_order_ids.isnot(None),
