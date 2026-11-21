@@ -338,18 +338,22 @@ async def create_order(
                 return OrderActionResponse(**replay)
         # 工厂隔离：创建与编辑/删除同口径，厂绑定用户不得跨厂下单
         await assert_product_factory_scoped(db, data.product_id, user, what="产品")
-        await order_service.create_order(
+        created = await order_service.create_order(
             db, product_id=data.product_id, quantity=data.quantity,
             customer=data.customer, note=data.note or '', current_user=user,
         )
         if key:
-            # 与订单写入同一事务登记：订单回滚则登记一起消失
+            # 与订单写入同一事务登记：订单回滚则登记一起消失。
+            # L-14（2026-11-21 审计）：response_body 存 create_order 的 to_dict——
+            # 只存 {success,message} 的话，重放响应缺 order_no，客户端重试成功后
+            # 无从知道建了哪张单
             await order_idempotency.save_result(db, user.id, key, fingerprint, {
-                'success': True, 'message': '订单添加成功！',
+                'success': True, 'message': '订单添加成功！', **created,
             })
     # 事务提交后再失效缓存，避免并发请求用旧数据回填缓存
     await cache_mgr.invalidate_dashboard()
-    return OrderActionResponse(success=True, message="订单添加成功！")
+    return OrderActionResponse(success=True, message="订单添加成功！",
+                               order_no=created.get('order_no'))
 
 
 @router.put("/edit/{order_id}", response_model=OrderActionResponse)

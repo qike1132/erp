@@ -80,6 +80,11 @@ def write_backup_meta_file(filepath, manifest: dict, *, record_type: str = 'full
         meta = {
             # 本地 naive：_read_backup_timestamp 用 strptime 解析并与本地保留期比较，
             # 改 UTC 会让存量 sidecar 解析失败/保留期偏移；刻意保持。
+            # L-33/N-55（2026-11-21 审计）：本字段是备份域「三种时间口径」之一，
+            # **刻意不**并入 isoformat_business 统一——'%Y-%m-%d %H:%M:%S' 是与
+            # _backup_created_time 的 strptime 读写契约，改格式 = 存量 sidecar
+            # 全部解析失败回退 mtime，反而丢掉权威时间。机器可读对外口径的统一
+            # 在 validation.py / restore.py 响应层完成（见 core/business_time.isoformat_business）。
             'created_at': manifest.get('exported_at') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             # 增量基准（snapshot 一致性起点）随 sidecar 落盘：加密包读不到 manifest，
             # _read_backup_timestamp 对 .enc 只能查这里。缺了它加密路径回退 created_at，

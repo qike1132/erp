@@ -10,6 +10,9 @@ from sqlalchemy.orm import selectinload
 from fastapi_app.core.business_time import fmt_business
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import invalidate_user_permission_cache, require_superuser
+
+# N-3（2026-11-21 审计）：post-commit 挂载收编到 canonical 单实现
+from fastapi_app.core.domain_events import schedule_post_commit_callback
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.schemas.user import (
     PermissionResponse,
@@ -82,7 +85,8 @@ def _schedule_permission_cache_invalidation(db: AsyncSession, user_id: int) -> N
             payload={'user_id': user_id},
         ))
 
-    db.info.setdefault('post_commit_callbacks', []).append(_invalidate)
+    # N-3（2026-11-21 审计）：内联挂载收编到 canonical（schedule_post_commit_callback）
+    schedule_post_commit_callback(db, _invalidate)
 
 
 @router.get('/list', response_model=UserListResponse)

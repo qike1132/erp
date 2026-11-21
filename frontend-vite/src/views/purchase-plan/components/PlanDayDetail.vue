@@ -34,6 +34,7 @@
 // 右栏的当日明细 —— 客户分组 + 全部产品，不截断，超出滚动。
 // 条目按产品行展示的是「该客户该产品当日」的出货状态，与后端 getShipmentStatus 同口径。
 import type { PlanDayCustomerGroup } from './types'
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 defineProps<{
   title: string
@@ -55,9 +56,6 @@ function statusOf(s: string): { cls: string; lbl: string } {
   return STATUS[s] ?? PENDING
 }
 
-function fmt(n: number): string {
-  return Number(n || 0).toLocaleString('zh-CN')
-}
 </script>
 
 <style scoped lang="scss">

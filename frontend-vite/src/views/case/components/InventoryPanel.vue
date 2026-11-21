@@ -44,6 +44,11 @@
       <div v-if="invIsLoading && !inventoryList.length" class="ip-empty">
         <UiLoadingIcon :loading="true" icon="spinner" size="lg" /><span>加载中…</span>
       </div>
+      <div v-else-if="invIsError && !inventoryList.length" class="ip-empty" role="alert">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        <span>库存数据加载失败，请检查网络后重试</span>
+        <button class="ip-btn ip-btn-ghost" @click="invRefetch()">重试</button>
+      </div>
       <div v-else-if="!inventoryList.length" class="ip-empty">
         <FontAwesomeIcon icon="warehouse" aria-hidden="true" /><span>暂无库存数据</span>
       </div>
@@ -128,6 +133,7 @@ const {
   invPerPage,
   invIsLoading,
   invIsFetching,
+  invIsError,
   invRefetch,
   inventoryList,
   invTotal,

@@ -2,8 +2,10 @@
   <div class="sk-toolbar">
     <InventoryStatRow v-if="hasData" :orders="orders" :stockin="stockin" />
 
-    <SearchBox
+    <UiSearchInput
+      class="sk-search"
       :model-value="search"
+      placeholder="输入产品名称或 69 码"
       @update:model-value="emit('update:search', $event)"
       @search="emit('search')"
     />
@@ -21,11 +23,12 @@
  * 布局（2026-10-07 调整）：三格汇总靠左，搜索框 + 导出按钮靠右。
  * 原「库存查询」标题与仓库图标已按业务要求移除（该页现为库存汇总，
  * 「库存查询」已并入本页的「库存」列）。
- * 搜索框已抽为共享组件 SearchBox。
+ * 搜索框已收编到 Ui* 系共享组件 UiSearchInput（L-10，2026-11-21 审计：
+ * 删除重复的 SearchBox，唯一消费方迁移；aria-label 由 placeholder 提供）。
  * 纯受控组件：搜索词由父级持有（父级另有防抖副本驱动查询），本组件不存状态。
  * 无数据时汇总与导出一并隐藏（一排 0 与空导出没有意义）。
  */
-import SearchBox from '@/components/ui/SearchBox.vue'
+import UiSearchInput from '@/components/ui/UiSearchInput.vue'
 import InventoryStatRow from './InventoryStatRow.vue'
 
 defineProps<{
@@ -57,9 +60,12 @@ const emit = defineEmits<{
   flex-shrink: 0;
 }
 /* 汇总靠左；搜索 + 导出靠右（margin-left:auto 把这一组推到右侧）。
-   搜索框是子组件，其根节点带父级 scope 属性，故可在此命中。 */
-.sk-toolbar > .sb-search {
+   UiSearchInput 根节点是 inline-flex，加 sk-search 类（父级 scope 可命中）定位。 */
+.sk-toolbar > .sk-search {
   margin-left: auto;
+  width: 230px;
+  max-width: none;
+  flex-shrink: 0;
 }
 .sk-export-btn {
   display: inline-flex;

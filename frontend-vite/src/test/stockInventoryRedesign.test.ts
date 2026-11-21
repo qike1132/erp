@@ -206,19 +206,19 @@ describe('InventoryToolbar —— 单行工具条', () => {
 
     expect(w.find('h1').exists()).toBe(false)
     expect(w.find('.sk-title').exists()).toBe(false)
-    expect(w.find('.sb-search-input').attributes('placeholder')).toContain('69 码')
+    expect(w.find('input').attributes('placeholder')).toContain('69 码')
   })
 
   it('DOM 顺序为 汇总 → 搜索 → 导出（搜索已从左侧移到右侧）', () => {
     const w = mountToolbar()
     const order = w.findAll('.sk-toolbar > *').map((el) => el.classes()[0])
 
-    expect(order).toEqual(['sk-stat-row', 'sb-search', 'sk-export-btn'])
+    expect(order).toEqual(['sk-stat-row', 'ui-search-input', 'sk-export-btn'])
   })
 
   it('搜索框输入上抛 update:search（受控组件，不自己存状态）', async () => {
     const w = mountToolbar()
-    const input = w.find('.sb-search-input')
+    const input = w.find('input')
 
     await input.setValue('珍珠')
 
@@ -228,7 +228,7 @@ describe('InventoryToolbar —— 单行工具条', () => {
   it('回车触发 search，不依赖查询按钮', async () => {
     const w = mountToolbar({ search: '珍珠' })
 
-    await w.find('.sb-search-input').trigger('keyup.enter')
+    await w.find('input').trigger('keydown', { key: 'Enter' })
 
     expect(w.emitted('search')).toHaveLength(1)
   })

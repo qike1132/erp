@@ -209,8 +209,9 @@ async def _batch_item_factories(db: AsyncSession, order_ids: list[int]) -> dict[
             grouped.setdefault(order_id, set()).add(factory)
     return {oid: sorted(names) for oid, names in grouped.items()}
 
-def _serialize_orders(orders: list, deduct_map: dict, factory_map: dict | None = None) -> list:
-    """序列化订单列表。"""
+def _serialize_orders(orders: list, deduct_map: dict, factory_map: dict | None = None,
+                      factory: str | None = None) -> list:
+    """序列化订单列表（factory 非空时 factories 字段只回本厂，见 order_serializer H-2）。"""
     factories = factory_map or {}
     return [
         OrderSerializer.serialize(
@@ -218,6 +219,7 @@ def _serialize_orders(orders: list, deduct_map: dict, factory_map: dict | None =
             OrderSerializer.LIST_CONFIG,
             deduct_quantity=deduct_map.get(order.id, 0),
             item_factories=factories.get(order.id, []),
+            factory=factory,
         )
         for order in orders
     ]
@@ -287,7 +289,7 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     deduct_map = await _batch_deduct_quantities(db, order_ids)
     factory_map = await _batch_item_factories(db, order_ids)
 
-    orders_data = _serialize_orders(orders, deduct_map, factory_map)
+    orders_data = _serialize_orders(orders, deduct_map, factory_map, factory=factory)
     return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
 
 async def get_my_approvals(db: AsyncSession, current_user: User) -> list[dict]:

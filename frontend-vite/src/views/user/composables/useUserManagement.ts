@@ -174,7 +174,7 @@ export function useUserManagement() {
   const perPage = ref(15)
 
   /** 用户列表查询 */
-  const { data: result, isLoading } = useQuery({
+  const { data: result, isLoading, isError, refetch } = useQuery({
     queryKey: ['users-list', () => currentPage.value, () => perPage.value],
     queryFn: () => userApi.list({ page: currentPage.value, per_page: perPage.value }),
     staleTime: 30_000,
@@ -365,6 +365,9 @@ export function useUserManagement() {
     confirmDialog,
     perPage,
     isLoading,
+    // M-33（2026-11-21 审计）：查询失败与「暂无用户」必须分开渲染
+    isError,
+    refetch,
     users,
     totalItems,
     onPageChange,

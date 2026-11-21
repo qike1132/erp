@@ -79,6 +79,27 @@ async def bump_token_version(db: AsyncSession, user: User) -> None:
         await invalidate_user_active_cache(user.id)
     except Exception as e:  # defensive: 缓存失效失败不应阻断业务写入
         logging.getLogger(__name__).warning('失效认证缓存失败: %s', e)
+    # M-23（2026-11-21 审计）：跨 worker 广播——其他 uvicorn worker 的
+    # _USER_ACTIVE_CACHE（TTL 10s）在本进程失效后仍按旧 token_version 放行被吊销
+    # 会话。复用权限缓存的 USER_PERMISSION_CHANGED 事件链：订阅器（deps.py
+    # register_permission_event_subscriber）会同时清权限与活跃两个缓存；发布
+    # worker 由进程内派发覆盖，其余 worker 走 Redis 广播。post-commit 发布，
+    # 失败退化为旧行为（10s 有界窗口）。
+    from fastapi_app.core.domain_events import (
+        DomainEvent,
+        DomainEventType,
+        schedule_post_commit_callback,
+    )
+
+    async def _broadcast() -> None:
+        from fastapi_app.core.domain_events import publish
+        await publish(DomainEvent(
+            event_type=DomainEventType.USER_PERMISSION_CHANGED,
+            domain='user',
+            payload={'user_id': user.id},
+        ))
+
+    schedule_post_commit_callback(db, _broadcast)
 
 
 async def update_user(

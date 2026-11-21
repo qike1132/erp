@@ -458,7 +458,16 @@ async function onUploadRestore(e: Event) {
   taskKind.value = '还原'
   try {
     const res = await backupApi.asyncImport(fd, { confirm: true })
-    activeTaskId.value = res.task_id ?? null
+    if (!res.task_id) {
+      // M-34（2026-11-21 审计）：后端 success 但缺 task_id 时轮询无从发起，
+      // busy/uploadRestoring 永久 true 全页禁用须刷新（executeRestore 有同款兜底）。
+      uploadRestoring.value = false
+      busy.value = false
+      taskKind.value = '备份'
+      toast.error('还原任务未返回任务号，请刷新后在任务列表查看状态')
+      return
+    }
+    activeTaskId.value = res.task_id
   } catch (err) {
     uploadRestoring.value = false
     busy.value = false

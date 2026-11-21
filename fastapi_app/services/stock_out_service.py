@@ -198,6 +198,13 @@ async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantit
     # 独立出货（stockin_id IS NULL）与备货抵扣（stockin_id 非空）都走这里：
     # 抵扣行的客户/产品由订单与备货带出（客户不可改），数量变更需保证不超过所属备货可用量。
     is_deduction = stockout.stockin_id is not None
+    if not is_deduction:
+        # L-5（2026-11-21 审计）：空白串客户（如 "   "）能过 schema min_length=1，
+        # 却在下方 `customer and customer.strip()` 处绕过余量校验，并在行尾原样
+        # 覆写 stockout.customer。strip 后判空拒绝，与建单口径（客户必填）一致。
+        customer = (customer or '').strip()
+        if not customer:
+            raise ValueError('客户名称不能为空')
     if new_quantity < stockout.returned_quantity:
         raise ValueError(f'出货数量不能小于已退货数量({stockout.returned_quantity})')
     old_quantity = stockout.quantity

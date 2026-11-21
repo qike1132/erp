@@ -15,6 +15,8 @@
           <UserTable
             :users="users"
             :is-loading="isLoading"
+            :is-error="isError"
+            @retry="refetch()"
             :per-page="perPage"
             :total-items="totalItems"
             :action-id="actionId"
@@ -85,6 +87,8 @@ const {
   confirmDialog,
   perPage,
   isLoading,
+  isError,
+  refetch,
   users,
   totalItems,
   onPageChange,

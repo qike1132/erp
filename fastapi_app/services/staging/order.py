@@ -127,16 +127,20 @@ async def update_staging_order(db: AsyncSession, order_id: int, data: dict,
     )
 
 async def _purge_rejected_rows(db: AsyncSession, session_id: str) -> None:
-    """删除本次确认中被拒的暂存行。
+    """删除本次确认中已了结的暂存行（rejected 被拒 + approved 已确认）。
+
+    M-13（2026-11-21 审计）：此前只清 REJECTED——APPROVED 行确认后永久留存，
+    三张 staging 表随日常确认无界增长。幂等防重由 inventory_log.uq_inventory_log_idem
+    承担，删行不丢审计。
 
     DELETE 前必须 flush：session 为 autoflush=False，上面改的 status 尚未落库，
-    Core DELETE 不会触发 autoflush → WHERE status='rejected' 匹配 0 行（被拒行永留表里）。
+    Core DELETE 不会触发 autoflush → WHERE status 匹配 0 行（了结行永留表里）。
     """
     await db.flush()
     await db.execute(
         delete(StagingOrder).where(
             StagingOrder.session_id == session_id,
-            StagingOrder.status == StagingStatus.REJECTED,
+            StagingOrder.status.in_([StagingStatus.REJECTED, StagingStatus.APPROVED]),
         )
     )
     await db.flush()

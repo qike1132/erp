@@ -22,6 +22,7 @@
 // 切换后整页（KPI / 日历 / 当日明细 / SKU 表）跟着收敛到所选工厂。
 import { computed } from 'vue';
 import { orderFactories, factoryTone } from './factoryMeta';
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 const props = defineProps<{
   modelValue: string;
@@ -40,9 +41,6 @@ const options = computed(() =>
   orderFactories(props.factories).map(f => ({ value: f, label: f, count: props.totals[f] ?? 0 })),
 );
 
-function fmt(n: number): string {
-  return Number(n || 0).toLocaleString('zh-CN');
-}
 </script>
 
 <style scoped lang="scss">

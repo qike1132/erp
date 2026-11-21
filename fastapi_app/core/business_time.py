@@ -16,6 +16,9 @@ from zoneinfo import ZoneInfo
 
 _BUSINESS_TZ = ZoneInfo('Asia/Shanghai')
 
+#: SQL 显式时区转换用（与 _BUSINESS_TZ 单源；M-41 分桶 timezone(BUSINESS_TZ_NAME, col)）
+BUSINESS_TZ_NAME = 'Asia/Shanghai'
+
 
 def business_today() -> date:
     """业务时区（Asia/Shanghai）的「今天」。
@@ -50,6 +53,28 @@ def fmt_business(dt: datetime | None, fmt: str = '%Y-%m-%d %H:%M') -> str:
     if dt is None:
         return ''
     return dt.astimezone(_BUSINESS_TZ).strftime(fmt)
+
+
+def isoformat_business(dt: datetime | None) -> str:
+    """统一渲染为**北京显式偏移**的 ISO-8601（L-33/N-55，2026-11-21 审计）。
+
+    此前备份域三种时间口径并存（naive ``isoformat()`` / ``'%Y-%m-%d %H:%M:%S'``
+    / 裸 mtime ``isoformat()``），消费方无法判断时区。本函数统一输出形如
+    ``2026-11-21T14:30:00+08:00``：
+
+    - aware 输入：转业务时区后 ``isoformat()``（偏移显式随行）；
+    - naive 输入（``datetime.now()``、``datetime.fromtimestamp(mtime)`` 等本地
+      墙钟来源）：按系统本地时区解释后转业务时区——墙面时刻与旧口径渲染一致，
+      只是补上了偏移标记；
+    - ``None`` → ``''``。
+
+    注意：``.meta`` sidecar 的 ``created_at`` 仍保持 ``'%Y-%m-%d %H:%M:%S'`` naive
+    （records.write_backup_meta_file）——那是与 ``_backup_created_time`` 的 strptime
+    读写契约，改动会让存量 sidecar 解析失败，不属本统一范围。
+    """
+    if dt is None:
+        return ''
+    return dt.astimezone(_BUSINESS_TZ).isoformat()
 
 
 def fmt_business_naive_utc(dt: datetime | None, fmt: str = '%Y-%m-%d %H:%M') -> str:

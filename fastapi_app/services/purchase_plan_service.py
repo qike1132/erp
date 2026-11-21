@@ -173,11 +173,15 @@ def _make_stock_handler(event_name: str, *, need_recalc_create: bool=False, need
                     )
             if plan_month:
                 await _invalidate_plan_caches(plan_month)
-        except Exception as e:  # defensive: 单个事件处理失败不影响其他事件
+        except Exception as e:  # defensive: 记录后重抛——dispatcher 落 stage=handler 死信
+            # M-5（2026-11-21 审计）：此前吞成一行 ERROR 不冒泡，dispatcher 永远
+            # 不知道 handler 失败，计划 shipped_qty 静默停留旧值（本函数 docstring
+            # 自记 2026-09-10 生产事故）。与 V-27 修掉的撤销链同口径（AGENTS §6.1-9）。
             logger.error(
                 '%s 处理失败: customer=%s product=%s error=%s',
                 event_name, customer_name, product_name, e, exc_info=True,
             )
+            raise
     return handler
 
 

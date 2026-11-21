@@ -36,6 +36,7 @@ from fastapi_app.services.batch_import_core import (
     _backfill_empty_product_fields,
     _fmt_money,
     _import_idem_key,
+    _parse_positive_quantity,
     _parse_product_price,
     _resolve_import_customer_id,
     _row_factory_rejected,
@@ -194,9 +195,16 @@ validate_customer_name = _shared_validate_customer_name
 # ==================== 订单/备货导入（ARQ/Celery 通用） ====================
 
 async def process_order_import(
-    db: AsyncSession, file_path: str, original_filename: str, user_id: int
+    db: AsyncSession, file_path: str, original_filename: str, user_id: int,
+    scoped_factory: str | None = None,
 ) -> dict:
-    """处理订单批量导入（ARQ/Celery 通用）"""
+    """处理订单批量导入（ARQ/Celery 通用）。
+
+    L-4（2026-11-21 审计）：本函数是异步任务队列入口，当前全仓无调用方
+    （batch_service.py 仅 re-export）。复接时**必须**把厂绑定用户的
+    ``scoped_factory`` 闸门传进来——不传等价于绕过 H1 工厂闸门，厂绑定用户
+    可经此入口给他厂产品建单（与综合导入 :331 修的是同一类洞）。
+    """
     result_logger = logging.getLogger(f"{__name__}.order_import")
     result_logger.info(f"订单批量导入开始: {original_filename}, user_id={user_id}")
 
@@ -207,7 +215,7 @@ async def process_order_import(
     if not data_list:
         return {"success": True, "imported": 0, "skipped": 0, "message": "没有有效数据行"}
 
-    imported, errors = await import_orders_from_data(db, data_list)
+    imported, errors = await import_orders_from_data(db, data_list, scoped_factory=scoped_factory)
     return {
         "success": True,
         "total_imported": imported,
@@ -218,9 +226,14 @@ async def process_order_import(
 
 
 async def process_stockin_import(
-    db: AsyncSession, file_path: str, original_filename: str, user_id: int
+    db: AsyncSession, file_path: str, original_filename: str, user_id: int,
+    scoped_factory: str | None = None,
 ) -> dict:
-    """处理备货批量导入（ARQ/Celery 通用）"""
+    """处理备货批量导入（ARQ/Celery 通用）。
+
+    L-4（2026-11-21 审计）：同 process_order_import——复接时必须透传
+    ``scoped_factory`` 工厂闸门，否则厂绑定用户可经此入口给他厂产品备货。
+    """
     result_logger = logging.getLogger(f"{__name__}.stockin_import")
     result_logger.info(f"备货批量导入开始: {original_filename}, user_id={user_id}")
 
@@ -231,7 +244,7 @@ async def process_stockin_import(
     if not data_list:
         return {"success": True, "imported": 0, "skipped": 0, "message": "没有有效数据行"}
 
-    imported, errors = await import_stockins_from_data(db, data_list)
+    imported, errors = await import_stockins_from_data(db, data_list, scoped_factory=scoped_factory)
     return {
         "success": True,
         "total_imported": imported,
@@ -506,12 +519,11 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                 return False, None
             product_identifier = str(product_identifier).strip()
             customer = str(customer).strip() if customer else ''
-            try:
-                qty = int(quantity)
-                if qty <= 0:
-                    return False, '出库数量必须大于0'
-            except ValueError:
-                return False, '出库数量必须是整数'
+            # 数量解析走唯一实现（H-1，2026-11-21 审计）：小数一律拒绝，不得静默截断。
+            qty = _parse_positive_quantity(
+                quantity, 0, label='皮套出库', product_name=product_identifier, customer=customer)
+            if qty is None:
+                return False, '出库数量必须大于0（须为整数，小数一律拒绝）'
             case, case_err = await find_case_locked(db, product_identifier)
             if case_err:
                 return False, case_err
@@ -570,12 +582,11 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                 return False, None
             product_identifier = str(product_identifier).strip()
             customer = str(customer).strip() if customer else ''
-            try:
-                qty = int(quantity)
-                if qty <= 0:
-                    return False, '入库数量必须大于0'
-            except ValueError:
-                return False, '入库数量必须是整数'
+            # 数量解析走唯一实现（H-1，2026-11-21 审计）：小数一律拒绝，不得静默截断。
+            qty = _parse_positive_quantity(
+                quantity, 0, label='皮套入库', product_name=product_identifier, customer=customer)
+            if qty is None:
+                return False, '入库数量必须大于0（须为整数，小数一律拒绝）'
             case, case_err = await find_case_locked(db, product_identifier)
             if case_err:
                 return False, case_err
@@ -715,12 +726,11 @@ async def import_stockouts_service(
             if _row_factory_rejected(scoped_factory, product.factory):
                 return False, '产品不在你的工厂范围，已拒绝该条'
             product = await get_product_for_update(db, product.id)
-            try:
-                qty = int(quantity)
-                if qty <= 0:
-                    return False, '出库数量必须大于0'
-            except ValueError:
-                return False, '出库数量必须是整数'
+            # 数量解析走唯一实现（H-1，2026-11-21 审计）：小数一律拒绝，不得静默截断。
+            qty = _parse_positive_quantity(
+                quantity, 0, label='出库', product_name=product_identifier, customer=customer)
+            if qty is None:
+                return False, '出库数量必须大于0（须为整数，小数一律拒绝）'
             # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
             if reason := check_stock_available(
                 product.current_stock, -qty,

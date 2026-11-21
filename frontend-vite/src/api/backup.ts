@@ -96,19 +96,11 @@ export const backupApi = {
   tables: () => get<{ success: boolean; tables: { name: string; rows: number }[]; total: number }>('/backup/tables'),
   exportBackup: (remark: string, format: string = 'zip') =>
     download('/backup/export', `erp_backup_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.${format === 'zip' ? 'zip' : 'json'}`, { remark, format }),
-  validateFile: (formData: FormData) => upload<{ success: boolean; summary: unknown }>('/backup/validate', formData),
-  importBackup: (formData: FormData) => {
-    return upload('/backup/import?confirm=true', formData)
-  },
+  // L-7（2026-11-21 审计）：同步版 validateFile / importBackup / restoreServerBackup
+  // 全仓（含测试）零调用，且经 15s 全局超时的 upload/post，对大备份是假超时——
+  // 已删除；恢复/导入一律走 asyncImport / asyncRestoreByName 异步任务链。
   saveToServer: (remark: string) => post<BackupSaveResult>(`/backup/save?remark=${encodeURIComponent(remark)}`),
   listServerBackups: () => get<{ success: boolean; backups: { filename: string; size: number; created_at: string }[]; total: number }>('/backup/list'),
-  restoreServerBackup: (filename: string, opts?: RestoreOptions) => {
-    const q = new URLSearchParams({ confirm: 'true' })
-    if (opts?.confirmSensitive) q.set('confirm_sensitive', 'true')
-    // H3：密码经 JSON body 传递，不再进 URL（避免进入访问日志/浏览器历史）
-    const body = opts?.password ? { password: opts.password } : undefined  // secret-scan:allow 右值为属性读取，非字面凭据
-    return post(`/backup/restore-by-name/${encodeURIComponent(filename)}?${q.toString()}`, body)
-  },
   downloadByName: (filename: string) => download(`/backup/download/${encodeURIComponent(filename)}`, filename),
   deleteServerBackup: (filename: string) => del(`/backup/delete-by-name/${encodeURIComponent(filename)}`),
   asyncImport: (formData: FormData, opts?: RestoreOptions & { confirm?: boolean }) => {

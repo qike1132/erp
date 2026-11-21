@@ -17,6 +17,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.atomic_write import atomic_output
+
 from .._constants import (
     _CHECKSUM_EXCLUDE_TABLES,
     BACKUP_FORMAT_VERSION,
@@ -808,6 +810,10 @@ async def _do_create_full_backup(
 
         # Z05-R10：GB 级备份同步读取会阻塞事件循环，下沉线程池
         zip_bytes = await asyncio.to_thread(zip_path.read_bytes)
+        # N-50（2026-11-21 审计）：zip_size 记录的是**明文** zip 的大小；加密包
+        # 落盘后的密文体积会更大（AES 封装 + base64 头），列表页若用 zip_size
+        # 展示密文体积需要对 .enc 文件重新 stat。已知取舍：manifest 在加密前
+        # 固化，密文大小以文件系统为准。
         manifest['zip_size'] = len(zip_bytes)
         if progress_cb:
             await progress_cb('generate_checksum', 1.0, '校验和已生成')
@@ -835,12 +841,16 @@ async def create_full_backup_to_file(
 
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(zip_bytes)
+        # M-21（2026-11-21 审计）：备份产物原子落盘——半截包按 _counts_as_restorable
+        # （只看 size>0）可充当「最后一份可还原」，原子写消除该窗口。
+        with atomic_output(output_path) as fh:
+            fh.write(zip_bytes)
         return output_path, manifest
     else:
         fd, tmp_file = tempfile.mkstemp(suffix='.zip', prefix='erp_backup_')
         os.close(fd)
-        Path(tmp_file).write_bytes(zip_bytes)
+        with atomic_output(Path(tmp_file)) as fh:
+            fh.write(zip_bytes)
         return Path(tmp_file), manifest
 
 
@@ -873,7 +883,8 @@ async def create_pre_restore_backup(db: AsyncSession, skip_restore_check: bool =
         _encrypted = bool(_manifest.get('encrypted'))
         filename = f'pre_restore_{timestamp}.zip.enc' if _encrypted else f'pre_restore_{timestamp}.zip'
         filepath = PRE_RESTORE_DIR / filename
-        filepath.write_bytes(zip_bytes)
+        with atomic_output(filepath) as fh:  # M-21：回滚点半截包同样致命，同口径原子落盘
+            fh.write(zip_bytes)
         cleanup_pre_restore_backups()
         return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes), 'encrypted': _encrypted}
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断

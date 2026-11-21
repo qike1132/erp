@@ -32,6 +32,7 @@
 // KPI 四格 —— 从 PurchasePlanView 抽出。
 // 只做展示：数值由父级传入，判定与聚合仍在原处，避免两处各算一遍。
 import { computed } from 'vue'
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 const props = defineProps<{
   planQty: number
@@ -46,9 +47,6 @@ const props = defineProps<{
 }>()
 
 /** 千分位：几十万位的计划量不分组的话，量级要靠数位数才看得出来 */
-function fmt(n: number): string {
-  return Number(n || 0).toLocaleString('zh-CN')
-}
 
 const meterCls = computed(() => {
   if (props.pct <= 0) return 'sp-meter-r'

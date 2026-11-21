@@ -74,6 +74,12 @@ async def _query_today_yesterday_base(db: AsyncSession, today_start: datetime, t
     ).where(StockOut.stockout_date >= yesterday_start, StockOut.stockout_date < today_end)
 
     if factory:
+        # L-16（2026-11-21 审计）：**业务裁定：订单级口径**——订单按「任一明细行
+        # 属本厂 SKU 即整单计入」收窄（any()），而入库/出库按单行产品收窄，两种
+        # 口径并存是有意为之：订单是业务单据粒度，混厂订单的「归属」由任一本厂
+        # 行判定；库存事件按实际产品行归属。混厂订单会同时计入两厂（整单重复），
+        # 若 owner 未来裁定按行收窄，把 any() 改为 OrderItem.product.has(...) 的
+        # 行级 join 聚合即可——改动前先对齐 beile/order_batch 的可见性口径。
         order_stmt = order_stmt.where(
             Order.items.any(OrderItem.product.has(Product.factory == factory))
         )
@@ -175,6 +181,8 @@ async def _query_production_stats(db: AsyncSession, today_start: datetime) -> di
             "production_completion_rate": round_qty(completed_plans / total_plans, precision_digits=2) if total_plans > 0 else 0.0,
             "pending_shipments": total_plans - completed_plans,
         }
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503，不得吞成 0 值统计
     except Exception:  # defensive: 仪表盘某个统计项失败时不影响整体返回
         logger.warning("生产排产统计查询失败", exc_info=True)
         return {"production_completion_rate": 0.0, "pending_shipments": 0}

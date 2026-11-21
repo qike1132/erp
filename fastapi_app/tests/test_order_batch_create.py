@@ -160,7 +160,8 @@ class TestBatchCreateOrdersAggregation:
         with patch("fastapi_app.services.numbering.generate_order_number",
                    new_callable=AsyncMock, return_value="PO-TEST-0001"), \
              patch("fastapi_app.services.order_batch_create.process_order_deduction",
-                   new_callable=AsyncMock) as mock_deduct:
+                   # M-1：返回 (实扣量, 明细) 元组——端点解包回写 deduct_quantity
+                   new_callable=AsyncMock, return_value=(5, [])) as mock_deduct:
             result = await batch_create_orders(db, orders_data)
 
         assert mock_deduct.call_count == 2

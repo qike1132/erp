@@ -14,7 +14,7 @@ import { abortPendingRequests } from '@/api/request'
  *
  * 修法：给 get() 增加 routeCancel 选项，让「归缓存/单飞所有」的请求不注册到
  * _pendingControllers（同时保留 GET 去重），并在 useEnhancedList /
- * useVirtualScrollList 这两个列表地基上默认启用，一次覆盖所有下游页面。
+ * 这类列表地基上默认启用，一次覆盖所有下游页面。
  *
  * 场景（纯导航时序，不依赖登录）：
  *   1. 列表查询发起 GET（useQuery → get()）
@@ -45,7 +45,7 @@ describe('页面级查询：导航离开再返回', () => {
     const qc = new QueryClient()
 
     // 1) 进入 /product：组件挂载，useQuery 发起查询
-    // 列表页的真实调用形态：useEnhancedList / useVirtualScrollList 的 queryFn
+    // 列表页的真实调用形态：useEnhancedList 这类列表地基的 queryFn
     const listQueryFn = () => get('/product/list', undefined, { routeCancel: false })
 
     void qc.prefetchQuery({ queryKey: ['product', 'list'], queryFn: listQueryFn })

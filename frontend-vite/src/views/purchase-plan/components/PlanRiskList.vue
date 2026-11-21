@@ -22,6 +22,7 @@
 // 风险清单 —— 从 PurchasePlanDailyTab 的内联标记抽出。
 // 条目本身就是「跳到那天」的入口，故用 button 而非 div+click（可键盘触发、可被读屏识别）。
 import type { RiskItem } from './types'
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 defineProps<{
   items: RiskItem[]
@@ -36,9 +37,6 @@ function short(date: string): string {
   return date.slice(5).replace('-', '/')
 }
 
-function fmt(n: number): string {
-  return Number(n || 0).toLocaleString('zh-CN')
-}
 </script>
 
 <style scoped lang="scss">

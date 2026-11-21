@@ -7,6 +7,7 @@ import { usePatternRoomStore } from './patternRoom'
 import { queryClient, queryPersister } from '@/utils/queryClient'
 import { clearNotificationMemoryCache } from '@/composables/notificationMemoryCache'
 import { purgeApiCaches } from '@/utils/swCache'
+import { removeAccessToken } from '@/utils/secureStorage'
 
 /**
  * 用户信息会话快照：登录成功后写入 sessionStorage（仅当前标签页，关闭即失效），
@@ -14,6 +15,10 @@ import { purgeApiCaches } from '@/utils/swCache'
  * 再后台静默刷新校验权限；登出时清除，不影响安全。
  */
 const USER_SNAPSHOT_KEY = 'fb_auth_user_snapshot_v1'
+/** L-21（2026-11-21 审计）：登出跨 Tab 同步信标。logout() 写时间戳到 localStorage，
+ *  其余标签页的 storage 事件监听读到即本地下线——localStorage 事件只在**其他**标签页
+ *  触发（写者自身不触发），正好做成跨 Tab 广播；sessionStorage 做不了这件事。 */
+const LOGOUT_SIGNAL_KEY = 'fb_auth_logout_signal_v1'
 
 function readUserSnapshot(): User | null {
   try {
@@ -48,6 +53,8 @@ export const useAuthStore = defineStore('auth', () => {
   let _initPromise: Promise<void> | null = null
   // 防止登出/切换账号后，旧的用户信息或导航请求回写当前 store。
   let authGeneration = 0
+  /** L-21：跨 Tab 登出信标监听只绑一次（init 可被重复调用） */
+  let _logoutSignalBound = false
 
   const isLoggedIn = computed(() => !!user.value)
   const permissionSet = computed(() => new Set(user.value?.permissions ?? []))
@@ -161,6 +168,18 @@ export const useAuthStore = defineStore('auth', () => {
     // 防止并发调用：多个导航同时触发时复用同一个 Promise
     if (_initPromise && !force) return _initPromise
 
+    // L-21（2026-11-21 审计）：监听其它标签页的登出信标（storage 事件只在**其他**
+    // 标签页触发，写者自身不触发）。收到即走与 auth:expired 相同的本地下线：
+    // 清 store/缓存但不跳转——由当前页的路由守卫发现未登录后自行导向登录页。
+    // 幂等绑定（init 可被 force 重复调用），登出后信标值被复用读也只多清一次空状态。
+    if (typeof window !== 'undefined' && !_logoutSignalBound) {
+      _logoutSignalBound = true
+      window.addEventListener('storage', (e) => {
+        if (e.key !== LOGOUT_SIGNAL_KEY || !e.newValue) return
+        if (user.value) logout()
+      })
+    }
+
     _initPromise = (async () => {
       try {
         if (!user.value) {
@@ -240,6 +259,14 @@ export const useAuthStore = defineStore('auth', () => {
     clearCsrfCache()
     try {
       sessionStorage.removeItem(USER_SNAPSHOT_KEY)
+      // L-21（2026-11-21 审计）：写跨 Tab 登出信标——其余标签页通过 storage 事件
+      // 收到后同样本地下线（时间戳只是让每次写入必为新值，保证事件必触发）
+      localStorage.setItem(LOGOUT_SIGNAL_KEY, String(Date.now()))
+    } catch { /* 静默 */ }
+    // M-40（2026-11-21 审计）：Capacitor 链路登录写 SecureStorage，登出不清理
+    // 会让共用设备上 token 残留（当前 Capacitor 休眠，启用前必须闭环）。
+    try {
+      removeAccessToken()
     } catch { /* 静默 */ }
     clearUserCaches()
     // 纵深防御：清掉 Service Worker 的 api-* 运行时缓存（残留旧 SW 或将来再启用

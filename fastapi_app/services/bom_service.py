@@ -270,18 +270,21 @@ async def _save_material_bom_items(
         if item_id:
             existing = existing_map.get(item_id)
             if existing and existing.product_id == product_id:
+                # M-7（2026-11-21 审计）：行内字段「键存在才写」——部分保存
+                # 不再静默清空未传字段（此前 get(f,'') 会抹掉物料/供应商归属）。
                 old_val = getattr(existing, name_field)
-                setattr(existing, name_field, item_data.get(name_field, ''))
-                existing.role_id = role_id  # 归属可迁移（角色变更时挂到新角色）
-                existing.part_name = _clean_part_name(item_data.get('part_name'))
-                existing.specification = item_data.get('specification', '')
-                existing.unit = item_data.get('unit', '')
-                existing.quantity = _non_negative_decimal(item_data.get('quantity', 0), '物料数量')
-                existing.supplier_id = item_data.get('supplier_id')
-                existing.supplier_name = item_data.get('supplier_name', '')
-                existing.remark = item_data.get('remark', '')
-                new_val = getattr(existing, name_field)
-                if old_val != new_val:
+                if name_field in item_data:
+                    setattr(existing, name_field, item_data[name_field])
+                if 'role_key' in item_data or 'role_id' in item_data:
+                    existing.role_id = role_id  # 归属可迁移（角色变更时挂到新角色）
+                for f in ('specification', 'unit', 'supplier_id', 'supplier_name', 'remark'):
+                    if f in item_data:
+                        setattr(existing, f, item_data[f])
+                if 'part_name' in item_data:
+                    existing.part_name = _clean_part_name(item_data['part_name'])
+                if 'quantity' in item_data:
+                    existing.quantity = _non_negative_decimal(item_data['quantity'], '物料数量')
+                if old_val != (new_val := getattr(existing, name_field)):
                     db.add(ModificationLog(
                         target_type=log_type, target_id=existing.id,
                         field_name=name_field, old_value=old_val,

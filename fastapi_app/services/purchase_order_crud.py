@@ -4,6 +4,7 @@
 职责：采购订单的创建、更新、删除、完成、清理等写操作。
 从 purchase_order_service.py 拆分而来，保持函数签名不变。
 """
+import hashlib
 import json
 import logging
 from collections import defaultdict
@@ -19,6 +20,7 @@ from fastapi_app.core.business_time import business_today
 from fastapi_app.core.exceptions import ConflictError, ItemsVersionConflict
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
+from fastapi_app.services.purchase_order_idempotency import acquire_key_lock, load_replay, save_result
 from fastapi_app.services.purchase_order_purge import purge_purchase_order_children
 from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
 from fastapi_app.services.purchase_utils import (
@@ -93,13 +95,30 @@ async def _create_material_registration(
     return registration
 
 
-async def create_purchase_order(db: AsyncSession, data: dict, include_summary: bool = False) -> dict:
+async def create_purchase_order(
+    db: AsyncSession, data: dict, include_summary: bool = False,
+    idempotency_key: str = '', actor_id: int | None = None,
+) -> dict:
     # P1（2026-10-24）：端点 schema 的字段名是 materials/remark（purchase_center/schemas.py），
     # 而本函数原先只读 items/note，pydantic 忽略多余字段 → POST /purchase-center/orders
     # 恒 400「至少需要一条明细」。两种键名都接受，兼容脚本/旧调用方。
     items = data.get('materials') or data.get('items') or []
     if not items:
         raise ValueError('采购订单至少需要一条明细')
+
+    # M-28（2026-11-21 审计）：手工建单与一键生成共用幂等登记——uq_po_pending_dedup
+    # 只盖 source_order_ids 非空的生成单，手工单双击/重试会产生重复 pending 单。
+    fingerprint = ''
+    if idempotency_key:
+        if actor_id is None:
+            raise ValueError('使用幂等键时必须提供操作者 ID')
+        fingerprint = hashlib.sha256(
+            json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')
+        ).hexdigest()
+        await acquire_key_lock(db, actor_id, idempotency_key)
+        replay = await load_replay(db, actor_id, idempotency_key, fingerprint)
+        if replay is not None:
+            return replay
 
     order_no = await generate_purchase_order_number(db)
     supplier_name = items[0].get('supplier_name', '')
@@ -135,7 +154,9 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
         material_name = item_data.get('material_name', '')
         unit_price = Decimal(str(item_data.get('unit_price', 0)))
         quantity = Decimal(str(item_data.get('quantity', 0)))
-        amount = unit_price * quantity
+        # L-4（2026-11-21 审计）：行金额先按落库精度（Numeric(12,2)）quantize 再合计，
+        # 与 _recalc_item_total_price「内存/落库合计同口径」的约定一致
+        amount = (unit_price * quantity).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         unit_usage = item_data.get('unit_usage')
 
         poi = PurchaseOrderItem(
@@ -177,6 +198,10 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
     if include_summary:
         result['summary'] = await _build_order_summary(db, order)
 
+    if idempotency_key and actor_id is not None:
+        # load_replay 只重放 body.get('success') 为真的结果（生成路径的 result 自带
+        # success 键）；手工建单的 result 没有——不带键存会永不重放、每次都真建单。
+        await save_result(db, actor_id, idempotency_key, fingerprint, {'success': True, **result})
     return result
 
 
@@ -356,7 +381,9 @@ async def _update_item_prices(
     changed = False
     for entry in price_entries:
         item_id = entry['id']
-        price = Decimal(str(entry['unit_price'])).quantize(Decimal('0.01'))
+        # L-3（2026-11-21 审计）：显式 ROUND_HALF_UP——Python 默认 ROUND_HALF_EVEN
+        # 与 PG numeric 落库方向不一致（同文件 _recalc_item_total_price 的约定）
+        price = Decimal(str(entry['unit_price'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if item_id in seen:
             raise ValueError(f'采购明细 {item_id} 重复提交单价')
         seen.add(item_id)
@@ -1038,6 +1065,24 @@ async def _build_order_summary(db: AsyncSession, order) -> dict:
     }
 
 
+def _json_contains_trusted(jsonb_col, sid: int):
+    """JSON 数组兜底的单 id 匹配条件（M-4，2026-11-21 审计）。
+
+    id 同存于 order 与 stockin 两表时视为歧义不采信——存量无 SKU 快照的
+    pending 单把备货 id 存进了数组，删同号客户订单时会误删备货来源单
+    （与 c 路径裸 id 兜底的歧义守卫同口径）。判定内联进同一查询，
+    不增加 execute 次数。sqlalchemy 操作符在函数内导入（与 cleanup 内
+    既有局部导入同风格，避免模块级循环依赖）。
+    """
+    from sqlalchemy import and_, exists, literal, not_
+
+    ambiguous = and_(
+        exists(select(literal('1')).select_from(Order).where(Order.id == sid)),
+        exists(select(literal('1')).select_from(StockIn).where(StockIn.id == sid)),
+    )
+    return and_(jsonb_col.contains([sid]), not_(ambiguous))
+
+
 async def cleanup_orphan_pending_purchase_orders(
     db: AsyncSession, order_ids: list[int] | None = None,
     stockin_ids: list[int] | None = None,
@@ -1045,18 +1090,13 @@ async def cleanup_orphan_pending_purchase_orders(
 ) -> int:
     """清理关联指定客户订单 / 备货记录的 pending 采购订单。
 
-    同时处理 source_order_id（单 ID 列）和 source_order_ids（JSON 数组）两个字段。
-    返回被删除的采购订单数量，供调用方判断是否触发了清理。
+    同时处理 source_order_id（单列）与 source_order_ids（JSON 数组）；返回删除数。
 
-    P0（2026-10-24）：来源 id 必须带类型匹配。`order.id` 与 `stockin.id` 是两套自增
-    序列、必然撞号；原先两类 id 合并成无类型数组去命中 source_order_id(s)，删订单 N
-    会连带删掉「由备货 N 生成」的 pending 单（含已录单价与全部明细）。
-
-    匹配全部下推到 SQL（不新增 round-trip，便于既有 mock 测试与性能）：
-      a. purchase_order_sku 的 (source_record_type, source_order_id) —— 权威；
-      b. source_order_ids JSON 数组 —— 老数据兜底；
-      c. source_order_id 单列 —— 老数据兜底，但**仅当该 id 不同时存在于 order 与
-         stockin 两表**（否则裸 id 无法判类型，宁可漏删不可错删）。
+    P0（2026-10-24）：来源 id 必须带类型匹配——`order.id` 与 `stockin.id` 是两套
+    自增序列必然撞号，无类型数组会误删。匹配全部下推到 SQL（不新增 round-trip）：
+    a. purchase_order_sku 的 (source_record_type, source_order_id) —— 权威；
+    b/c. 老数据兜底，且单列与数组路径均不采信「同存于 order 与 stockin 两表」的
+    歧义 id（宁可漏删不可错删，见 _json_contains_trusted）。
     """
     source_ids: list[int] = []
     if order_ids:
@@ -1090,9 +1130,10 @@ async def cleanup_orphan_pending_purchase_orders(
         )
     ) if typed_pairs else None
 
-    # b) JSON 数组兜底（先取候选 id，沿用既有查询）
+    # b) JSON 数组兜底，歧义守卫见 _json_contains_trusted（M-4）。
     jsonb_col = sa_cast(PurchaseOrder.source_order_ids, PG_JSONB)
-    contain_conds = [jsonb_col.contains([sid]) for sid in sorted({int(i) for i in source_ids})]
+    contain_conds = [_json_contains_trusted(jsonb_col, sid)
+                     for sid in sorted({int(i) for i in source_ids})]
     result2 = await db.execute(
         select(PurchaseOrder.id).where(
             PurchaseOrder.source_order_ids.isnot(None),
@@ -1133,4 +1174,8 @@ async def cleanup_orphan_pending_purchase_orders(
             'cleanup_orphan_pending_purchase_orders: 清理 %d 个 pending 采购单 (source_ids=%s)',
             deleted, source_ids,
         )
+        # L-5（2026-11-21 审计）：兜底删单与 delete_purchase_order 同责——删后把已无
+        # 任何采购单覆盖的来源客户订单状态重算回真实值；只传 order ids（stockin id
+        # 与 order id 撞号，不可混入 _reset_uncovered_source_orders）
+        await _reset_uncovered_source_orders(db, {int(i) for i in (order_ids or [])})
     return deleted

@@ -368,6 +368,9 @@ class TestResponseStructureConsistency:
         # 除 image / image_thumb / image_original 经出站签发/派生外，其余字段与值都不得变形
         expected = _expected_item(frozen_signing)
         assert body['items'] == [expected]
+        # X-T 假测试修复：手写字面量锚点（不依赖 _expected_item 推导）
+        assert body['items'][0]['name'] == 'A'
+        assert body['items'][0]['price'] == 12.5
         assert {k: v for k, v in body['items'][0].items() if k not in ('image', 'image_thumb', 'image_original')} == \
             {k: v for k, v in _FULL_ITEM.items() if k not in ('image', 'image_thumb', 'image_original')}
         # 缓存键确实以单前缀写入

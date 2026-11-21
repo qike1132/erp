@@ -93,8 +93,11 @@ async def test_generate_number_async_batch_unique_and_continuous(db_and_factory)
         for _ in range(5)
     ]
     suffixes = [int(n.rsplit('-', 1)[1]) for n in numbers]
-    # 批内不重复且严格递增（同日同前缀、种子为 0 时即 1..5）
+    # 批内不重复且严格递增（同日同前缀）。
+    # CI 教训：起点不锁 1——_clear_counter 走独立 factory 会话，与本会话外层
+    # 事务无隔离可见性保证，全量跑时同前缀计数器可能已被并发残留抬过（Linux
+    # 次序与本地不同才暴露）。本测试承诺的性质是 unique + continuous，起点无关。
     assert len(set(numbers)) == 5
     assert suffixes == sorted(suffixes)
-    assert suffixes == list(range(1, 6))
+    assert suffixes[-1] - suffixes[0] == 4
     assert all(n.startswith(f'{prefix}-{date_str}-') for n in numbers)

@@ -89,30 +89,44 @@ async def api_create_purchase_order(
     data: PurchaseOrderCreateRequest,
     db: AsyncSession = Depends(get_db),
     _current_user=Depends(require_any_permission('product_manage', 'purchase_center_manage')),
+    x_idempotency_key: str | None = Header(None, alias='X-Idempotency-Key', max_length=64),
 ) -> dict[str, Any]:
     """创建采购订单。
 
-    Args:
-        data: 采购订单创建请求数据。
-        db: 异步数据库会话。
-        _current_user: 当前登录用户（权限校验依赖）。
-
-    Returns:
-        dict[str, Any]: 包含 success 标志和订单数据的字典。
+    M-28（2026-11-21 审计）：可选 X-Idempotency-Key，成功结果按当前用户与键持久化
+    重放（与一键生成共用 PurchaseOrderGenerateAttempt 登记），双击/重试不再产生
+    重复 pending 采购单。业务校验失败改为 400（此前裸 ValueError 落 500）。
 
     Raises:
+        HTTPException 400: 业务校验失败。
+        HTTPException 409: 幂等键与首次请求内容不一致。
         HTTPException 500: 创建订单失败。
     """
-    try:
-        async with db_transaction(db):
-            result = await svc.create_purchase_order(db, data.model_dump(), include_summary=False)
-        await _invalidate_orders_cache()
-        # 手动创建的 PO 可能设置 source_order_ids，需失效未处理列表 + processed_ids 缓存
-        await _invalidate_unprocessed_cache()
-        return success_response(**result)
-    except RuntimeError as e:
+    def _idempotency_conflict_to_http(exc: Exception) -> HTTPException:
+        detail = exc.detail if isinstance(exc, IdempotencyConflictError) else str(exc)
+        return HTTPException(status_code=409, detail=detail)
+
+    def _value_error_to_http(exc: Exception) -> HTTPException:
+        return HTTPException(status_code=400, detail=str(exc))
+
+    def _error_to_http(exc: Exception) -> HTTPException:
         logger.exception('创建采购订单失败')
-        raise HTTPException(status_code=500, detail='创建订单失败，请稍后重试') from e
+        return HTTPException(status_code=500, detail='创建订单失败，请稍后重试')
+
+    async with db_transaction(db, error_map={
+        IdempotencyConflictError: _idempotency_conflict_to_http,
+        ValueError: _value_error_to_http,
+        (SQLAlchemyError, RuntimeError): _error_to_http,
+    }):
+        result = await svc.create_purchase_order(
+            db, data.model_dump(), include_summary=False,
+            idempotency_key=x_idempotency_key or '',
+            actor_id=_current_user.id,
+        )
+    await _invalidate_orders_cache()
+    # 手动创建的 PO 可能设置 source_order_ids，需失效未处理列表 + processed_ids 缓存
+    await _invalidate_unprocessed_cache()
+    return success_response(**result)
 
 
 @router.post('/orders/one-click-generate', response_model=PurchaseOrderActionResponse)

@@ -26,6 +26,7 @@ from fastapi_app.services.plan_utils import (
     normalize_plan_date,
 )
 from fastapi_app.shared_models import Product, ProductionPlan, ProductionPlanLog, StagingPurchasePlan, StockOut
+from fastapi_app.shared_models.production_plan import ProductionPlanStatus
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,16 @@ async def create_plan(db: AsyncSession, *, customer_name: str, product_name: str
 
 async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **kwargs) -> ProductionPlan:
     """更新排产计划"""
-    plan = await get_plan_by_id(db, plan_id)
+    # M-11（2026-11-21 审计）：schema 层 Literal 已校验，这里兜内部调用方——自由字符串
+    # 曾让计划从所有状态筛选中消失（仿 PO 侧 P1-16）。守卫先于取数。
+    status_value = kwargs.get('status')
+    if status_value is not None and status_value not in ProductionPlanStatus.ALL:
+        raise ValueError(
+            f'非法排产计划状态: {status_value!r}（允许: {", ".join(ProductionPlanStatus.ALL)}）')
+    # M-11：并发改计划丢失更新——行锁串行化（此前裸读后 setattr，后写覆盖前写）。
+    plan = (await db.execute(
+        select(ProductionPlan).where(ProductionPlan.id == plan_id).with_for_update()
+    )).scalar_one_or_none()
     if not plan:
         raise ValueError('排产计划不存在')
     old_data = plan.to_dict()

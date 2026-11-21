@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from fastapi_app.services.batch_import_parser import (
-    _bad_xlsx_message,
     parse_excel_file_async,
     read_excel_sheets_async,
 )
@@ -29,7 +28,8 @@ async def test_fake_xlsx_is_rejected_before_parser(tmp_path: Path, func) -> None
 
     assert ok is False
     assert data == []
-    assert err == _bad_xlsx_message()
+    # X-T 假测试修复：期望文案改字面量（此前 import 自被测模块，文案变异恒绿）
+    assert err == '文件无法解析，请确认是有效的 .xlsx 文件（可重新下载模板填写）'
 
 
 @pytest.mark.parametrize('func', [parse_excel_file_async, read_excel_sheets_async])

@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
@@ -115,7 +116,13 @@ async def create_role(
         current_version='T1',
     )
     db.add(role)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        # L-2（2026-11-21 审计）：check-then-insert 竞态——应用层查重通过后，
+        # 并发请求仍可抢先插入同名角色触发 DB 唯一约束，未捕获会 500。
+        # 对齐 product_service/purchase_supplier_service 的 IntegrityError→409 口径。
+        raise ConflictError(f'角色名 "{role_name}" 在该项目中已存在') from e
 
     # 写审计日志
     operator_name = await _get_user_name(db, user_id)

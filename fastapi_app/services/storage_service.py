@@ -379,6 +379,25 @@ _UPLOAD_URL_PREFIX = '/static/uploads/'
 _ORIGINAL_IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif')
 
 
+def _is_safe_upload_rel(rel: str) -> bool:
+    """L-8（2026-11-21 审计【门禁盲区】）：DB 存量 key 拼盘上路径前校验不越出上传根。
+
+    key 最终来自 DB（可能被历史数据或绕过校验的写入污染，含 ``..`` / 盘符 /
+    绝对路径），``LOCAL_UPLOAD_DIR / rel`` 可指向上传根之外的任意文件——探测
+    会泄露文件存在性，删除会误删根外文件。用 ``resolve().relative_to`` 对白名单
+    根判定：越界一律拒绝（探测返回 None、补偿删除跳过并告警）。
+    """
+    if not rel:
+        return False
+    root = LOCAL_UPLOAD_DIR.resolve()
+    candidate = (root / rel).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
 def find_original_key(storage_key: str) -> str | None:
     """给定压缩主图 key（.webp），返回同目录同名的原始 png/jpg 兄弟 key；无则 None。
 
@@ -390,7 +409,11 @@ def find_original_key(storage_key: str) -> str | None:
     stem = storage_key[: -len('.webp')]
     rel = stem[len(_UPLOAD_URL_PREFIX):]
     for ext in _ORIGINAL_IMAGE_EXTS:
-        if (LOCAL_UPLOAD_DIR / f'{rel}{ext}').is_file():
+        candidate = f'{rel}{ext}'
+        if not _is_safe_upload_rel(candidate):
+            logger.warning('find_original_key 拒绝越界 key: %s', candidate)
+            continue
+        if (LOCAL_UPLOAD_DIR / candidate).is_file():
             return f'{stem}{ext}'
     return None
 
@@ -563,6 +586,12 @@ async def delete_storage_keys(storage_keys: list[str]) -> None:
     storage = get_storage()
     for key in storage_keys:
         raw_key = normalize_storage_key(key)
+        # L-8（2026-11-21 审计）：LocalStorageBackend.delete 是 `base_dir / key`，
+        # key 含 `..`/绝对路径时会把删除打出上传根。越界 key 整体跳过（含变体），
+        # 只告警不中断主流程——宁可留孤儿也不误删根外文件。
+        if not _is_safe_upload_rel(raw_key):
+            logger.warning('补偿删除跳过越界 storage key: %s', raw_key)
+            continue
         for variant in (raw_key, get_thumbnail_key(raw_key), get_blur_key(raw_key)):
             try:
                 await storage.delete(variant)

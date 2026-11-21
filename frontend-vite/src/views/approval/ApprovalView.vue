@@ -12,7 +12,8 @@
       <ApprovalTable
         :items="items"
         :is-loading="isLoading"
-        :action-id="actionId"
+        :is-error="isError"
+        :action-ids="actionIds"
         :total-items="totalItems"
         :per-page="perPage"
         :current-page="currentPage"
@@ -21,6 +22,7 @@
         :status-label="statusLabel"
         @approve="handleApprove"
         @reject="openRejectDialog"
+        @retry="refetch()"
         @page="goPage"
       />
     </div>
@@ -50,7 +52,7 @@ import RejectDialog from './components/RejectDialog.vue'
 import { useApproval } from './composables/useApproval'
 
 const {
-  actionId,
+  actionIds,
   searchTerm,
   statusFilter,
   currentPage,
@@ -59,6 +61,8 @@ const {
   onSearchInput,
   clearSearch,
   isLoading,
+  isError,
+  refetch,
   items,
   totalItems,
   totalPages,

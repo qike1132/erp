@@ -57,6 +57,8 @@ class TestOrderCreateBoundaryApi:
             patch(
                 "fastapi_app.api.v1.endpoints.order.order_service.create_order",
                 new_callable=AsyncMock,
+                # L-14：端点从返回 dict 取 order_no 组响应（幂等登记用），mock 给真形状
+                return_value={"order_no": "SO-BOUNDARY-1", "id": 1},
             ) as create,
         ):
             response = await client.post("/api/v1/orders/create", json=payload)
@@ -78,6 +80,8 @@ class TestOrderCreateBoundaryApi:
             patch(
                 "fastapi_app.api.v1.endpoints.order.order_service.create_order",
                 new_callable=AsyncMock,
+                # L-14：端点从返回 dict 取 order_no 组响应（幂等登记用），mock 给真形状
+                return_value={"order_no": "SO-BOUNDARY-1", "id": 1},
             ) as create,
             patch(
                 "fastapi_app.api.v1.endpoints.order.cache_mgr.invalidate_dashboard",
@@ -90,7 +94,9 @@ class TestOrderCreateBoundaryApi:
             )
 
         assert response.status_code == 200, response.text
-        assert response.json() == {"success": True, "message": "订单添加成功！"}
+        # L-14：响应多带 order_no（幂等登记存 to_dict 后端点回传建单号）
+        assert response.json() == {"success": True, "message": "订单添加成功！",
+                                   "order_no": "SO-BOUNDARY-1"}
         assert create.await_args.kwargs["product_id"] == 7
         assert create.await_args.kwargs["quantity"] == 9_999_999
         assert create.await_args.kwargs["customer"] == "边界客户"

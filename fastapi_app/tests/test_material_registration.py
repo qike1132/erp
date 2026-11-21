@@ -118,7 +118,11 @@ class TestMaterialRegistrationService:
     async def test_delete_registration_success(self, mock_db):
         from fastapi_app.services.material_registration_service import delete_registration
         mock_reg = MagicMock()
-        mock_db.get = AsyncMock(return_value=mock_reg)
+        mock_reg.items = []  # M-12：无收货行才允许删除
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_reg
+        # M-12 改造：delete_registration 走 execute(selectinload) 取登记
+        mock_db.execute = AsyncMock(return_value=mock_result)
 
         result = await delete_registration(mock_db, 1)
         assert mock_db.delete.called

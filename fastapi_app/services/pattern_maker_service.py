@@ -9,9 +9,10 @@ from __future__ import annotations
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.exceptions import BusinessError, NotFoundError
+from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
 from fastapi_app.shared_models import PatternMaker
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,12 @@ async def create_pattern_maker(db: AsyncSession, name: str) -> dict:
 
     maker = PatternMaker(name=name)
     db.add(maker)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        # L-2（2026-11-21 审计）：check-then-insert 竞态——查重通过后并发请求
+        # 抢先插入同名版师触发 DB 唯一约束会 500；对齐 IntegrityError→409 口径。
+        raise ConflictError(f'版师 "{name}" 已存在') from e
 
     logger.info('新增版师: id=%s, name=%s', maker.id, name)
     return {'id': maker.id}

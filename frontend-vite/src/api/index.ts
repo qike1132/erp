@@ -55,6 +55,21 @@ export { patternMakerApi } from './patternMaker'
 
 // 向后兼容：productApi 合并核心方法 + BOM 方法（BOM 实际属于采购中心域）
 // 新代码应分别使用 productApi（核心）和 bomApi（BOM 相关）
+// L-6 / N-31（2026-11-21 审计）：原 `{ ...core, ...bomApi }` 展开合并遇重名键会
+// **静默覆盖**（后者胜出，编译期不报错）；改显式转发，键名冲突时 TS 直接报重复键。
 import { productApi as _core } from './product'
 import { bomApi } from './purchase'
-export const productApi = { ..._core, ...bomApi }
+export const productApi = {
+  list: _core.list,
+  detail: _core.detail,
+  create: _core.create,
+  update: _core.update,
+  delete: _core.delete,
+  search: _core.search,
+  bom: _core.bom,
+  loadBom: bomApi.loadBom,
+  saveBom: bomApi.saveBom,
+  searchProductsForBom: bomApi.searchProductsForBom,
+  bomPreview: bomApi.bomPreview,
+  copyBom: bomApi.copyBom,
+}

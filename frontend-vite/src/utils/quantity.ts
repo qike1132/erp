@@ -48,3 +48,19 @@ export function formatQuantity(value: unknown): string {
   // maximumFractionDigits 同时解决 Math.round 的二进制舍入（1.005 → 1）。
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
+
+/**
+ * 生产记录数量的校验文案（L-18，2026-11-21 审计）。
+ *
+ * 镜像后端 schema `quantity: int, gt=0, le=999999`（schemas/daily_production.py）——
+ * 小数会被 pydantic 拒收（422），前端先拦住并说人话，而不是让整批提交到一半才报错。
+ * 返回空串 = 合法。
+ */
+export function productionQtyError(value: unknown): string {
+  const n = Number(value)
+  if (!Number.isInteger(n) || n <= 0) {
+    return Number.isInteger(n) ? '生产数量必须大于 0' : '生产数量必须是整数'
+  }
+  if (n > 999_999) return '生产数量不能超过 999999'
+  return ''
+}

@@ -45,7 +45,10 @@ async def _recalc_shipment_order_statuses(db: AsyncSession, created_stockouts: l
     """重算受影响订单的状态，返回变为'已出货'的订单信息列表"""
     if not created_stockouts:
         return []
-    from fastapi_app.services.order_utils import compute_order_status_from_db
+    # 性能（2026-11-21 审计）：循环内逐单调 compute_order_status_from_db（每单 2 条
+    # SQL）改批量版——隔壁 compute_order_statuses_batch 与此同口径，N 次 IN 查询
+    # 压成 2 次聚合（阶段2基准：单查 0.102ms，N=200 时 20.3ms vs 1.13ms）。
+    from fastapi_app.services.order_utils import compute_order_statuses_batch
     from fastapi_app.shared_models import Order
     affected_order_ids: set[int] = {stock_out.order_id for stock_out in created_stockouts if stock_out.order_id}
     if not affected_order_ids:
@@ -53,12 +56,13 @@ async def _recalc_shipment_order_statuses(db: AsyncSession, created_stockouts: l
     order_result = await db.execute(select(Order).where(Order.id.in_(affected_order_ids)))
     order_map = {order.id: order for order in order_result.scalars().all()}
     shipment_completed_orders = []
+    new_statuses = await compute_order_statuses_batch(db, list(order_map.values()))
     for oid in affected_order_ids:
         order = order_map.get(oid)
         if not order or order.status == ORDER_STATUS_SHIPPED:
             continue
         old_status = order.status
-        new_status = await compute_order_status_from_db(db, order)
+        new_status = new_statuses.get(oid, old_status)
         if new_status != old_status:
             order.status = new_status
         if new_status == ORDER_STATUS_SHIPPED and old_status != ORDER_STATUS_SHIPPED:

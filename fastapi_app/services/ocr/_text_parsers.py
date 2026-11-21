@@ -292,7 +292,9 @@ def _parse_line_by_line(lines: list[str]) -> list[dict]:
         match = re.search('([\\u4e00-\\u9fa5a-zA-Z0-9][\\u4e00-\\u9fa5a-zA-Z0-9\\s\\-]*[\\u4e00-\\u9fa5a-zA-Z0-9])\\s+(\\d+)\\s*$', line)
         if match:
             product_name = match.group(1).strip()
-            quantity = int(match.group(2))
+            # M-25：走封顶解析——裸 int() 可产出 10^400 级 int 通过 >0 校验，
+            # flush 时 DataError 同样 500
+            quantity = _parse_quantity(match.group(2))
             if quantity > 0 and len(product_name) >= 2:
                 items.append({'customer': customer, 'product_name': product_name, 'quantity': quantity, 'note': ''})
                 continue
@@ -301,7 +303,7 @@ def _parse_line_by_line(lines: list[str]) -> list[dict]:
             product_name = parts[0].strip()
             qty_match = re.search('(\\d+)', parts[1])
             if qty_match and len(product_name) >= 2:
-                quantity = int(qty_match.group(1))
+                quantity = _parse_quantity(qty_match.group(1))
                 if quantity > 0:
                     note = parts[2].strip() if len(parts) > 2 else ''
                     items.append({'customer': customer, 'product_name': product_name, 'quantity': quantity, 'note': note})
@@ -342,10 +344,21 @@ def _extract_customer_from_header(lines: list[str]) -> str:
     return ''
 
 def _parse_quantity(value: str) -> int:
-    """解析数量字符串"""
-    cleaned = re.sub('[^\\d.]', '', str(value))
+    """解析数量字符串。
+
+    M-25（2026-11-21 审计）：超长数字串 ``float()``→``inf``→``int(inf)`` 抛
+    OverflowError，上层 except 不拦 → 整次导入 500。输入截到 12 位、结果封顶
+    9 位（9.99 亿，出货单不存在更大量纲）；越界/不可解析返回 0 由调用方按
+    「数量非正」跳过该行。
+    小数**四舍五入**而非拒绝：OCR 单据里「保温杯 1.5个」是合法读数（暂存行
+    还要人工确认），整行丢弃会让用户以为识别漏行——导入 Excel 路径（H-1）
+    才用「小数一律拒绝」口径，两条路径语义不同。
+    """
+    cleaned = re.sub('[^\\d.]', '', str(value))[:12]
     try:
-        qty = int(float(cleaned))
-        return qty
-    except (ValueError, TypeError):
+        qty = float(cleaned)
+    except (ValueError, TypeError, OverflowError):
         return 0
+    if not 0 < qty <= 999_999_999:
+        return 0
+    return round(qty)

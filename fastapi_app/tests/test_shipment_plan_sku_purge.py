@@ -116,6 +116,7 @@ def _item(pid=5, qty=100):
     i.id = 11
     i.product_id = pid
     i.quantity = qty
+    i.deduct_quantity = 0  # M-2：明细下限守卫读真实 int（MagicMock 与 int 比较会炸）
     r.scalar_one_or_none.return_value = i
     return r
 

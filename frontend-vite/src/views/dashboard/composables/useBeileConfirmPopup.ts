@@ -16,6 +16,9 @@ export function useBeileConfirmPopup() {
   async function checkBeileConfirmPopup() {
     try {
       if (authStore.user?.factory !== '湖北') return
+      // M-35（2026-11-21 审计）：后端 /beile-list 依赖 beile_order_view 权限——
+      // 未配权限的湖北账号此前每次挂载都发注定 403 的请求并反复弹「权限不足」。
+      if (!authStore.hasPermission('beile_order_view')) return
       if (sessionStorage.getItem(BEILE_POPUP_KEY)) return
 
       const resp = await orderApi.beileList({ page: 1, per_page: 1 })

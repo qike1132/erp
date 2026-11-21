@@ -12,6 +12,7 @@ import { useApiMutation } from '@/composables/useApiMutation'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import type { Supplier } from '@/types'
+import { PHONE_RE, PHONE_INVALID_MSG } from '@/utils/validators' // L-16（2026-11-21 审计）：手机号正则提为共享常量，删除与 useCustomer 的重复
 
 /** 供应商表单数据（编辑模式含 id） */
 export interface SupplierFormData {
@@ -25,7 +26,7 @@ export interface SupplierFormData {
 
 function validateSupplierForm(name: string, phone: string): string | null {
   if (!name?.trim()) return '供应商名称不能为空'
-  if (phone && !/^[\d\-+\s()]{6,20}$/.test(phone)) return '联系电话格式不正确'
+  if (phone && !PHONE_RE.test(phone)) return PHONE_INVALID_MSG
   return null
 }
 

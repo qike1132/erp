@@ -27,6 +27,11 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     require_backup_permission,
 )
 from fastapi_app.core.backup_progress import _sanitize_error
+
+# L-33/N-55（2026-11-21 审计）：响应内机器可读时间统一北京显式偏移 isoformat
+# （原 naive isoformat 无时区标记，与 .meta 的 '%Y-%m-%d %H:%M:%S'、
+# restore.py 的 strftime 三种口径并存）。
+from fastapi_app.core.business_time import isoformat_business
 from fastapi_app.core.database import get_async_read_db
 from fastapi_app.core.validators import require_upload_magic
 from fastapi_app.schemas.backup import (
@@ -202,7 +207,7 @@ def _check_last_backup() -> tuple[dict, list[str]]:  # log-context: internal hel
             return {
                 'status': 'healthy' if hours_since <= 24 else 'warning',
                 'message': f'最近备份时间: {latest_time.strftime("%Y-%m-%d %H:%M:%S")}',
-                'latest_backup_time': latest_time.isoformat(),
+                'latest_backup_time': isoformat_business(latest_time),
                 'hours_since_last_backup': round(hours_since, 2),
                 'within_24h': hours_since <= 24,
             }, issues
@@ -349,7 +354,7 @@ async def health_check(
 
     return {
         'status': overall_status,
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': isoformat_business(datetime.now()),
         'checks': checks,
         'issues': issues,
     }
@@ -685,7 +690,7 @@ async def validate_backup_integrity(
         if not backup_files:
             return {
                 'success': True,
-                'checked_at': datetime.now().isoformat(),
+                'checked_at': isoformat_business(datetime.now()),
                 'total_files': 0,
                 'valid_files': 0,
                 'invalid_files': 0,
@@ -792,9 +797,18 @@ async def validate_backup_integrity(
                             message = f'JSON格式错误: {e!s}'
                             corrupted_files.append(filename)
 
+                    elif filename.endswith('.enc') and not encrypted:
+                        # M-29（2026-11-21 审计）：内容头探测不出加密的 legacy 裸信封
+                        # （_is_encrypted_data 不猜测）落入此分支——不能按「验证通过」
+                        # 放行，否则损坏的 legacy 加密备份被巡检判有效，灾难时才暴露。
+                        valid = False
+                        message = '加密格式未识别（legacy 裸信封？），未验证，需人工确认'
+                        status = 'unverified'
+                    else:
+                        status = 'valid' if valid else 'invalid'
                     details.append({
                         'filename': filename,
-                        'status': 'valid' if valid else 'invalid',
+                        'status': status,
                         'message': message,
                         'size': file_size,
                         'encrypted': encrypted,
@@ -821,15 +835,18 @@ async def validate_backup_integrity(
 
         # Z05-R9：只把 status=valid 计入有效；加密文件未做深度验证，单列为 unverified，
         # 不再用「总数 - 损坏 - 缺失」把 encrypted/error 混进 valid。
+        # M-29：legacy 裸信封（未识别加密）也计 unverified——不是损坏，也不是有效。
         valid_files = sum(1 for d in details if d.get('status') == 'valid')
-        unverified_files = sum(1 for d in details if d.get('status') == 'encrypted')
+        unverified_files = sum(
+            1 for d in details if d.get('status') in ('encrypted', 'unverified')
+        )
         invalid_files = sum(
             1 for d in details if d.get('status') in ('invalid', 'corrupted', 'missing', 'error')
         )
 
         result = {
             'success': True,
-            'checked_at': datetime.now().isoformat(),
+            'checked_at': isoformat_business(datetime.now()),
             'total_files': len(backup_files),
             'valid_files': valid_files,
             'invalid_files': invalid_files,
@@ -876,7 +893,7 @@ async def get_backup_statistics(
         last_backup_time = None
         if backup_files:
             latest_backup = max(backup_files, key=lambda x: x.get('mtime', 0))
-            last_backup_time = datetime.fromtimestamp(latest_backup.get('mtime', 0)).isoformat()
+            last_backup_time = isoformat_business(datetime.fromtimestamp(latest_backup.get('mtime', 0)))
 
         # 4. 计算备份成功率（从备份记录中获取）
         from fastapi_app.services.backup.verify import query_service as backup_query_service
@@ -917,7 +934,7 @@ async def get_backup_statistics(
                 recent_backups.append({
                     'filename': backup.get('filename', ''),
                     'size_bytes': backup.get('size', 0),
-                    'modified_time': datetime.fromtimestamp(backup.get('mtime', 0)).isoformat(),
+                    'modified_time': isoformat_business(datetime.fromtimestamp(backup.get('mtime', 0))),
                     # Z05-R9：与 /records 共用 query_service 的前缀推断（erp_backup_/erp_auto_ → full）
                     'type': _infer_type_from_filename(backup.get('filename', '')),
                     'encrypted': backup.get('filename', '').endswith('.enc'),
@@ -944,7 +961,7 @@ async def get_backup_statistics(
 
         return {
             'success': True,
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': isoformat_business(datetime.now()),
             'total_backups': total_backups,
             'total_size_bytes': total_size_bytes,
             'last_backup_time': last_backup_time,

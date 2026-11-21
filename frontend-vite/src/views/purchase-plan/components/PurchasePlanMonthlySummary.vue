@@ -69,6 +69,7 @@ import SkuSummaryTable from './SkuSummaryTable.vue'
 import CustomerDistPanel from './CustomerDistPanel.vue'
 import FactorySummaryCard from './FactorySummaryCard.vue'
 import type { CustSumItem, SkuRow } from './types'
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 const props = defineProps<{
   loading: boolean
@@ -99,9 +100,6 @@ const totalPlanQty = computed(
   () => props.customers.reduce((n, c) => n + Number(c.plan_qty || 0), 0),
 )
 
-function fmt(n: number): string {
-  return Number(n || 0).toLocaleString('zh-CN')
-}
 </script>
 
 <style scoped lang="scss">

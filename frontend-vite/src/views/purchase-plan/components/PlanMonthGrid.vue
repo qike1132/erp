@@ -37,6 +37,7 @@
 import { computed } from 'vue'
 import { buildMonthCells, dayMarkFor, startOfToday, todayIso } from './dayStatus'
 import type { Row } from './types'
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 const props = defineProps<{
   y: number
@@ -65,9 +66,6 @@ function weekdayOf(date: string): string {
   return WDS_MON_FIRST[(new Date(date + 'T00:00:00').getDay() + 6) % 7] ?? ''
 }
 
-function fmt(n: number): string {
-  return Number(n || 0).toLocaleString('zh-CN')
-}
 
 const cells = computed(() =>
   buildMonthCells(props.y, props.m, props.rows).map(c => ({

@@ -52,6 +52,21 @@ from utils.report_exporter import _sanitize_excel_value
 
 logger = logging.getLogger(__name__)
 
+
+def _effective_unit_price(r: 'DailyProductionRecord', price_fallback: dict) -> Decimal:
+    """单价的唯一实现（M-17，2026-11-21 审计）：record 单价优先，无单价回退产品档案价。
+
+    此前列表路径与 Excel 导出路径各持一份实现（Decimal/float 各一），口径漂移面；
+    统一为 Decimal 计算，仅展示层按需转 float。
+    """
+    up = r.unit_price if r.unit_price is not None else Decimal('0')
+    if up > 0:
+        return up
+    if r.product_id and r.product_id in price_fallback:
+        return price_fallback[r.product_id]
+    return Decimal('0')
+
+
 DEPARTMENT_LABELS = {
     'filling': '充棉部',
     'handcraft': '手工部',
@@ -168,7 +183,7 @@ def validate_record_data(
     department: str,
     product_name: str,
     quantity: int,
-    unit_price: float = 0,
+    unit_price: float | Decimal = 0,
 ) -> None:
     """校验生产记录数据"""
     if department not in DEPARTMENT_LABELS:
@@ -482,7 +497,7 @@ async def create_record(
     product_name: str,
     customer_id: int | None = None,
     barcode: str,
-    unit_price: float,
+    unit_price: float | Decimal,
     quantity: int,
     production_date_str: str,
     remark: str = '',
@@ -592,10 +607,13 @@ async def update_record(
         raise ValueError('记录不存在')
 
     # 校验更新数据
-    dept = kwargs.get('department', record.department)
-    name = kwargs.get('product_name', record.product_name)
-    qty = kwargs.get('quantity', record.quantity)
-    price = kwargs.get('unit_price', record.unit_price)
+    # M-10（2026-11-21 审计）：schema 允许显式传 null，dict.get(key, 默认) 对
+    # 「键存在且为 None」会返回 None——None 进 validate 的 <= 0 比较抛 TypeError
+    # 未捕获 → 500。显式 None 一律归并为「不修改」（与下方 setattr 层同语义）。
+    dept = kwargs.get('department') or record.department
+    name = kwargs.get('product_name') or record.product_name
+    qty = kwargs['quantity'] if kwargs.get('quantity') is not None else record.quantity
+    price = kwargs['unit_price'] if kwargs.get('unit_price') is not None else record.unit_price
     validate_record_data(dept, name, qty, price)
 
     # 库存联动基线（2026-10-06 生产即入库）：变更前快照
@@ -733,12 +751,8 @@ async def get_daily_summary(
     price_fallback = await _build_product_price_fallback(db, records)
 
     def effective_unit_price(r: DailyProductionRecord) -> Decimal:
-        up = r.unit_price if r.unit_price is not None else Decimal('0')
-        if up > 0:
-            return up
-        if r.product_id and r.product_id in price_fallback:
-            return price_fallback[r.product_id]
-        return Decimal('0')
+        # M-17（2026-11-21 审计）：与导出路径共用模块级唯一实现，消除双版漂移
+        return _effective_unit_price(r, price_fallback)
 
     dept_data: dict[str, dict[str, Any]] = {}
     for r in records:
@@ -1097,14 +1111,8 @@ async def export_records(
     price_fallback = await _build_product_price_fallback(db, records)
 
     def effective_unit_price(r: DailyProductionRecord) -> float:
-        up = float(r.unit_price or 0)
-        if up > 0:
-            return up
-        if r.product_id and r.product_id in price_fallback:
-            # price_fallback 值为 Decimal（_build_product_price_fallback），统一转 float
-            # 与上方 r.unit_price 分支对齐（本函数仅用于 Excel 导出展示，无精度风险）
-            return float(price_fallback[r.product_id])
-        return 0.0
+        # M-17：Decimal 单源计算，仅 Excel 展示层转 float（此前与列表路径各持一份实现）
+        return float(_effective_unit_price(r, price_fallback))
 
     def _render_workbook() -> bytes:
         wb = openpyxl.Workbook()

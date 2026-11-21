@@ -12,6 +12,7 @@ import { useApiMutation } from '@/composables/useApiMutation'
 import { useDebouncedSearch } from '@/composables/useDebouncedSearch'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import type { Customer } from '@/types'
+import { PHONE_RE, PHONE_INVALID_MSG } from '@/utils/validators' // L-16（2026-11-21 审计）：手机号正则提为共享常量，删除与 useSupplier 的重复
 
 /** 客户表单数据 */
 export interface CustomerFormData {
@@ -25,7 +26,6 @@ export interface CustomerFormData {
 
 export function useCustomer() {
   const searchTerm = ref('')
-  const statusFilter = ref<'all' | 'active' | 'inactive'>('all')
   const currentPage = ref(1)
   const perPage = 15
 
@@ -39,14 +39,16 @@ export function useCustomer() {
     })
   }
 
+  // L-14 / N-35（2026-11-21 审计）：删除死状态 statusFilter——
+  // 页面无任何状态筛选 UI（CustomerView 未解构），恒为 'all' 的 ref 只会在
+  // queryKey 里制造假依赖、白白干扰缓存命中。
   const { data: result, isLoading, isFetching } = useQuery({
-    queryKey: ['customers-list', () => debouncedSearch.value, () => statusFilter.value, () => currentPage.value],
+    queryKey: ['customers-list', () => debouncedSearch.value, () => currentPage.value],
     queryFn: () =>
       customerApi.list({
         per_page: perPage,
         page: currentPage.value,
         search: debouncedSearch.value || undefined,
-        status: statusFilter.value !== 'all' ? statusFilter.value : undefined,
       }),
     staleTime: 30_000,
     gcTime: 60_000,
@@ -113,8 +115,8 @@ export function useCustomer() {
       showToast('客户名称不能为空', 'warning')
       return
     }
-    if (form.phone && !/^[\d\-+\s()]{6,20}$/.test(form.phone)) {
-      showToast('联系电话格式不正确', 'warning')
+    if (form.phone && !PHONE_RE.test(form.phone)) {
+      showToast(PHONE_INVALID_MSG, 'warning')
       return
     }
     submitting.value = true
@@ -154,7 +156,6 @@ export function useCustomer() {
 
   return {
     searchTerm,
-    statusFilter,
     currentPage,
     perPage,
     onSearchInput,

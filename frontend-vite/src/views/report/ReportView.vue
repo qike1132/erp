@@ -34,7 +34,7 @@
       />
 
       <ReportTable
-        :logs="sortedLogs"
+        :logs="logs"
         :columns="reportColumns"
         :is-loading="isLoading"
         :is-fetching="isFetching"
@@ -44,7 +44,6 @@
         :active-tab="activeTab"
         :can-edit="canEditRowActions"
         :can-delete="canDeleteRowActions"
-        @sort="onSort"
         @page="onPageChange"
         @row-edit="onRowEdit"
         @row-delete="onRowDelete"
@@ -128,8 +127,6 @@ const page = ref(1)
 // 「每页<空>条」，且一旦动过下拉就再也回不到 15。改初值对齐默认选项比给 ReportTable
 // 传特例 page-size-options 更省事（/stock 的 InventoryTab 也是同一修法）。
 const perPage = ref(20)
-/** 当前排序（服务端分页不变，这是当前页内的客户端排序） */
-const sort = ref<{ field: string; order: number } | null>(null)
 
 const filters = reactive({ customer: '', product: '' })
 /**
@@ -230,22 +227,12 @@ const reportErrorMessage = computed(() => {
 const logs = computed(() => reportData.value?.logs ?? [])
 const pagination = computed(() => reportData.value?.pagination)
 
-/** 排序取值：非数值列按 0，避免 NaN 让整列排序失效 */
-function sortValue(row: Record<string, unknown>, field: string): number {
-  const n = Number(row[field])
-  return Number.isFinite(n) ? n : 0
-}
-
-const sortedLogs = computed(() => {
-  const s = sort.value
-  if (!s) return logs.value
-  return [...logs.value].sort((a, b) => (sortValue(a, s.field) - sortValue(b, s.field)) * s.order)
-})
-
-/** PrimeVue 排序事件：order 为 1 升序 / -1 降序 / 0 取消 */
-function onSort(event: { field: string; order: number }) {
-  sort.value = event.order ? { field: event.field, order: event.order } : null
-}
+/**
+ * M-36（2026-11-21 审计）：列头排序此前只对「当前页已分页的 20 条」做客户端
+ * 重排——点「数量」显示本页内有序、跨页整体无序，翻页后顺序又变，是误导性
+ * 交互。服务端未提供排序参数，移除列头排序与 @sort 接线，保留分页语义的诚实性；
+ * 服务端排序参数就绪后再恢复（透传 sort 即可跨页有序）。
+ */
 
 /**
  * 触发一次查询刷新，并就地消化 rejection（R22-L1 防御契约）。

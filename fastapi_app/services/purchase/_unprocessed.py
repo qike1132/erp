@@ -337,7 +337,10 @@ def _order_has_bom(record: dict, bom_product_ids: set) -> bool:
         # 兼容无 items 的旧记录：按顶层 product_id 判断
         return record.get('product_id') in bom_product_ids if record.get('product_id') else False
     # 多 SKU：所有 SKU 均需配置 BOM，否则该单无法审核
-    return all(item['product_id'] in bom_product_ids for item in items if item.get('product_id'))
+    # L-7（2026-11-21 审计）：items 全部 product_id 为空时 all() 对空真值返回 True
+    # → 无产品单被判「可审核」，空集回退 False
+    pids = [item['product_id'] for item in items if item.get('product_id')]
+    return bool(pids) and all(pid in bom_product_ids for pid in pids)
 
 
 async def list_auto_generate_candidates(db: AsyncSession) -> list[dict]:

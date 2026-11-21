@@ -9,7 +9,7 @@ import io
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -240,7 +240,11 @@ async def export_cases(scope: str = Query('movements', description='movements/in
         content = await asyncio.to_thread(inventory_to_xlsx, rows)
         filename = '皮套库存汇总.xlsx'
     else:
-        rows = await fetch_movements_for_export(db, case_id, direction, customer, start_date, end_date)
+        try:
+            rows = await fetch_movements_for_export(db, case_id, direction, customer, start_date, end_date)
+        except ValueError as e:
+            # M-9（2026-11-21 审计）：超限显式 413（A-M24 口径），不静默截断
+            raise HTTPException(status_code=413, detail=str(e)) from None
         content = await asyncio.to_thread(movements_to_xlsx, rows)
         filename = '皮套出入库流水.xlsx'
     headers = {'Content-Disposition': f"attachment; filename*=UTF-8''{quote(filename)}"}

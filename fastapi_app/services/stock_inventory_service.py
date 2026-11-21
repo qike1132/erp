@@ -464,17 +464,19 @@ async def get_stockreturn_records(
 # 与 get_inventory_paginated 同口径关闭 L1（审计 M-15）：多 worker +
 # CACHE_L1_BROADCAST_ENABLED=false 时，失效只清当前 worker 的 L1，其余 worker
 # 会在 local_ttl 内继续返回旧结余；计划页（production/purchase_plan）走本入口。
-@cache_result(key_prefix='inventory', ttl=60, local_ttl=0, key_builder=lambda *args, **kwargs: f"c{kwargs.get('search_customer', '')}:p{kwargs.get('search_product', '')}")
-async def get_inventory(db: AsyncSession, search_customer: str='', search_product: str='') -> dict:
+@cache_result(key_prefix='inventory', ttl=60, local_ttl=0, key_builder=lambda *args, **kwargs: f"c{kwargs.get('search_customer', '')}:p{kwargs.get('search_product', '')}:f{kwargs.get('factory', '') or ''}")
+async def get_inventory(db: AsyncSession, search_customer: str='', search_product: str='', factory: str='') -> dict:
     """全量库存视图（兼容入口）。
 
     Z03-R1：旧版 `_fetch_inventory` 三表 Python 合并实现已删除——它与
     `get_inventory_paginated` 的 CTE 口径已分叉（软删订单过滤/结余列）。本函数
     现在只是分页版的“取全量”薄包装，两处调用方共用同一查询内核。
+    L-6（2026-11-21 审计）：补 ``factory`` 透传（分页版本就有），并把它纳入
+    缓存键——否则厂窄化结果会串厂污染缓存。
     """
     result = await get_inventory_paginated(
         db, search_customer=search_customer, search_product=search_product,
-        page=1, per_page=100_000,
+        page=1, per_page=100_000, factory=factory,
     )
     return {
         'inventory_data': result['inventory_data'],

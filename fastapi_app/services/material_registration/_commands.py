@@ -190,9 +190,18 @@ async def update_registration(db, reg_id: int, status: str | None = None,
 
 async def delete_registration(db, reg_id: int) -> dict:
     """删除来料登记"""
-    reg = await db.get(MaterialRegistration, reg_id)
+    # M-12（2026-11-21 审计）：已收货登记此前可无痕删除——收货台账无痕消失、
+    # 采购进度归零可重复收货（对照 delete_case_item 对有流水的 SKU 明确禁止）。
+    # items 显式加载：异步会话里裸访问 reg.items 会 MissingGreenlet。
+    reg = (await db.execute(
+        select(MaterialRegistration)
+        .options(selectinload(MaterialRegistration.items))
+        .where(MaterialRegistration.id == reg_id)
+    )).scalar_one_or_none()
     if not reg:
         raise ValueError("来料登记不存在")
+    if any((item.received_quantity or 0) > 0 for item in reg.items):
+        raise ValueError('该登记已有收货记录，禁止删除；如需调整请走收货修改/冲销流程')
     await db.delete(reg)
     await db.flush()
     return {'success': True, 'message': '删除成功'}

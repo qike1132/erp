@@ -69,6 +69,7 @@
 import UiPagination from '@/components/ui/UiPagination.vue'
 import { factoryTone } from './factoryMeta'
 import type { SkuRow } from './types'
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 defineProps<{
   rows: SkuRow[]
@@ -92,9 +93,6 @@ const SORT_COLS = [
   { key: 'remain', label: '待生产' },
 ] as const
 
-function fmt(n: number): string {
-  return Number(n || 0).toLocaleString('zh-CN')
-}
 
 /** 一件未生产点红、产完点绿、产了部分点琥珀 —— 只判「是否为 0」会把「只产了一点点」也显示成完成 */
 function producedCls(s: SkuRow): string {

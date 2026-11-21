@@ -154,16 +154,22 @@ export function useStockReturn() {
   const searchKeyword = ref('')
   const shipments = ref<ShipmentOption[]>([])
   const loadingShipments = ref(false)
+  // L-13（2026-11-21 审计）：无请求序号——连发两次搜索时先发的慢响应会覆盖后发结果
+  let searchShipmentsSeq = 0
 
   /** 按产品名搜可退出货明细（空关键词 = 最近可退明细） */
   async function searchShipments() {
+    const seq = ++searchShipmentsSeq
     loadingShipments.value = true
     try {
-      shipments.value = await stockReturnApi.shipmentOptions(searchKeyword.value.trim())
+      const res = await stockReturnApi.shipmentOptions(searchKeyword.value.trim())
+      if (seq !== searchShipmentsSeq) return // 旧响应后到，丢弃
+      shipments.value = res
     } catch {
+      if (seq !== searchShipmentsSeq) return
       showToast('出货明细搜索失败', 'warning')
     } finally {
-      loadingShipments.value = false
+      if (seq === searchShipmentsSeq) loadingShipments.value = false
     }
   }
 

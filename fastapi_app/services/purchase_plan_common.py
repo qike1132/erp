@@ -11,12 +11,20 @@
 """
 import json
 import logging
-from collections.abc import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import invalidate_local_cache
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
+
+# N-3（2026-11-21 审计）：_schedule_post_commit 副本收编——canonical 是
+# core.domain_events.schedule_post_commit_callback（post-commit 调度唯一实现）。
+# 以原别名 re-export：既有调用方（purchase_plan_crud_ops/shipment_plan_sync）与
+# 测试 patch 点（purchase_plan_common._schedule_post_commit）不变。本文件不直接
+# 调用，纯转发（F401 豁免挂 import 行）。
+from fastapi_app.core.domain_events import (  # noqa: F401
+    schedule_post_commit_callback as _schedule_post_commit,
+)
 from fastapi_app.services.fifo_allocation import (
     _invalidate_fifo_cache,
     _invalidate_production_fifo_cache,
@@ -25,16 +33,6 @@ from fastapi_app.shared_models import ProductionPlanLog, PurchasePlan
 
 # 与原 purchase_plan_crud 模块共享同一 logger 实例，保持日志行为不变
 logger = logging.getLogger('fastapi_app.services.purchase_plan_crud')
-
-
-def _schedule_post_commit(db: AsyncSession, callback: Callable[[], Awaitable[None]]) -> None:
-    """注册事务提交成功后执行的异步回调。
-
-    回调会在 db_transaction 上下文管理器成功 commit 后按注册顺序执行；
-    若事务回滚则不会执行，避免缓存失效/事件发布发生在持久化失败时。
-    """
-    callbacks = db.info.setdefault('post_commit_callbacks', [])
-    callbacks.append(callback)
 
 
 async def _invalidate_plan_caches(plan_month: str = '') -> None:

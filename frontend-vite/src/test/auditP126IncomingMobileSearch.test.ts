@@ -134,5 +134,7 @@ describe('P1-26/P1-30 来料移动端搜索与分页', () => {
     const wrapper = await mountOnRecordsTab()
 
     expect(wrapper.text()).toContain('无查看权限')
+    // L-11（2026-11-21 审计）：403 对齐 MStockView 口径——重试只会再吃一次 403，不显示重试按钮
+    expect(wrapper.find('.m-retry-btn').exists()).toBe(false)
   })
 })

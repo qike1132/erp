@@ -7,6 +7,11 @@
       <MSearchBar v-model="keyword" placeholder="搜索订单号/产品/客户..." @search="onSearch" />
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
+      <MEmpty v-else-if="loadError" :title="loadError">
+        <template #action>
+          <button type="button" class="m-empty-retry" @click="handleSearch()">重试</button>
+        </template>
+      </MEmpty>
       <MEmpty v-else-if="!orders.length" title="暂无订单" subtitle="输入关键词搜索" />
       <MList v-else>
         <MListItem v-for="o in orders" :key="o.id" :title="`#${o.order_no || o.id} ${o.product?.name || ''}`" :subtitle="`${o.customer || '—'} · ${o.quantity || 0}件 · ${o.order_date || ''}`">
@@ -67,6 +72,8 @@ const keyword = ref('')
 type OrderListResponse = Awaited<ReturnType<typeof orderApi.list>>
 const orders = ref<OrderListResponse['data']>([])
 const loading = ref(false)
+// M-33（2026-11-21 审计）：失败与「暂无订单」分开渲染（对齐 MStockView loadError）
+const loadError = ref('')
 const page = ref(1)
 const perPage = 20
 const total = ref(0)
@@ -85,12 +92,17 @@ async function handleSearch() {
     orders.value = res?.data || []
     total.value = res?.total || 0
     loadedPage = page.value
+    loadError.value = ''
   } catch (e) {
     if (seq !== loadSeq) return
     // 路由切换会 abort 在途 GET（router/guards 的 beforeEach → abortPendingRequests）：
     // 那是我们主动取消，不是后端失败；弹了还会挂到用户刚跳过去的新页面上
     // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
     if (isCanceledError(e)) return
+    // M-33：持久错误态——此前清空列表渲染「暂无订单」，把故障当业务事实
+    loadError.value = getErrorStatus(e) === 403
+      ? '没有订单查看权限，请联系管理员授权'
+      : '订单查询失败'
     // 此前无 catch：请求失败时列表静默保持旧数据（或空白），用户零感知。
     // 2026-10-18 OCR 评审：保留 total（分页器不消失），仅清空列表并提示。
     orders.value = []
@@ -148,4 +160,13 @@ function orderLabel(s: string | undefined) {
 .m-center { display: flex; justify-content: center; padding: 48px 0; }
 .m-icon-bg { width: 100%; height: 100%; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
 .m-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+.m-empty-retry {
+  margin-top: 12px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--m-border, #dbe3ef);
+  background: var(--m-bg, #fff);
+  font: inherit;
+  color: var(--m-accent, #2563eb);
+}
 </style>

@@ -17,7 +17,7 @@
 
 <script setup lang="ts">
 import { computed, useSlots } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 
 defineProps<{
   title: string
@@ -27,8 +27,8 @@ defineProps<{
 }>()
 
 const router = useRouter()
-const route = useRoute()
-void route
+// L-25（2026-11-21 审计）：删除死代码 `const route = useRoute(); void route`——
+// route 从未被使用，`void route` 只是压制 lint 的空操作
 
 // 全局通知铃铛是 fixed 悬浮在右上角（z-index 60，高于导航栏的 50），
 // 会盖住右侧插槽里的操作按钮导致点不到；有插槽内容时预留其占位宽度。

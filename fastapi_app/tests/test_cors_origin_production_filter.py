@@ -87,6 +87,12 @@ def test_real_settings_filter_applies_consistently() -> None:
         assert (entry in settings.BACKEND_CORS_ORIGINS) is expected, (
             f"{entry!r} 入选结果与规则不一致（is_production={is_prod}）"
         )
+    # X-T 假测试修复：独立期望锚点——同源规则自比恒绿，规则本体需手写用例锁定
+    # （规则：https 一律放行；明文 http 仅放行 localhost/内网 IP 字面量）
+    if is_prod:
+        assert _is_production_allowed_origin('http://192.168.0.95:3000') is True
+        assert _is_production_allowed_origin('https://erp.example.com') is True
+        assert _is_production_allowed_origin('http://erp.example.com') is False
 
 
 def test_deployment_env_declares_lan_origin() -> None:

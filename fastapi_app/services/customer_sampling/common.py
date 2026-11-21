@@ -11,6 +11,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
+
+# L-1（2026-11-21 审计）：_escape_like 与 core/sanitizer.escape_like 逐字重复，
+# 单源收口到 core/sanitizer（语义一致：`\` → `\\`、`%` → `\%`、`_` → `\_`，
+# 配 ESCAPE '\' 子句）。保留 `_escape_like` 别名供包内既有引用（projects.py）。
+from fastapi_app.core.sanitizer import escape_like as _escape_like
 from fastapi_app.shared_models import (
     CustomerSamplingChangeLog,
     CustomerSamplingPart,
@@ -29,14 +34,6 @@ _SNAPSHOT_FIELDS = (
     'supplier_id', 'supplier_name', 'contact_person', 'contact_phone',
     'unit_price', 'delivery_days', 'remark',
 )
-
-
-def _escape_like(keyword: str) -> str:
-    r"""转义 LIKE/ILIKE 通配符（% _ \），使关键词按字面匹配。
-
-    使用 ESCAPE '\' 子句；keyword 中的 % 不会被误当作"任意字符串"导致全量匹配。
-    """
-    return keyword.replace('\\', '\\\\').replace('%', r'\%').replace('_', r'\_')
 
 
 def version_order_key(version_no: str | None) -> tuple[int, str]:

@@ -34,6 +34,24 @@ logger = logging.getLogger(__name__)
 # 已于 2026-10-15 随验证族一起迁至 drill_validator.py（纯搬移）。
 
 
+def _sql_dump_decompressed_size(data_path_sql_gz) -> int:
+    """流式统计 SQL dump 解压后字节数（M-19，2026-11-21 审计）。
+
+    整份解压读进内存只为算 size，GB 级 dump 演练内存峰值 ≈2×解压体积可 OOM；
+    psql 导入本就不依赖这份内容，逐 MB 计数即可。
+    """
+    import gzip as gzip_mod
+
+    sql_size = 0
+    with gzip_mod.open(data_path_sql_gz, 'rt', encoding='utf-8') as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            sql_size += len(chunk)
+    return sql_size
+
+
 class DisasterRecoveryTestService:
     """灾难恢复测试服务类"""
 
@@ -511,13 +529,12 @@ class DisasterRecoveryTestService:
                     with open(data_path_json, encoding='utf-8') as f:
                         backup_data = json.load(f)
                 elif data_path_sql_gz.exists():
-                    # SQL dump 格式，无法直接解析为 JSON，记录基本信息
-                    import gzip as gzip_mod
-                    with gzip_mod.open(data_path_sql_gz, 'rt', encoding='utf-8') as f:
-                        sql_content = f.read()
+                    # SQL dump 无法解析为 JSON，只记解压后字节数。
+                    # M-19（2026-11-21 审计）：整份解压读进内存只为算 size 会 OOM，
+                    # 流式计数（psql 导入本就不依赖这份内容）。
                     backup_data = {
                         'format': 'sql',
-                        'sql_size': len(sql_content),
+                        'sql_size': _sql_dump_decompressed_size(data_path_sql_gz),
                         'tables': manifest.get('tables', {})
                     }
                 else:
@@ -534,7 +551,12 @@ class DisasterRecoveryTestService:
 
                 if data_path_sql_gz.exists():
                     # F5: SQL 物理备份走 psql 真实导入（与生产还原同参数）
-                    import_result = await self._psql_import(test_env, data_path_sql_gz)
+                    # L-13（2026-11-21 审计）：导入超时与 test_timeout_minutes 挂钩，
+                    # 不再用写死的 600s（配置 30 分钟时 600s 先到，大库演练被误杀）。
+                    import_result = await self._psql_import(
+                        test_env, data_path_sql_gz,
+                        timeout_seconds=int(test_env.get('test_timeout_minutes', 30)) * 60,
+                    )
                     import_result['format'] = 'sql'
                     if not import_result.get('success'):
                         # 导入失败即整体失败，跳过后续验证（测试库无有效数据）
@@ -583,10 +605,15 @@ class DisasterRecoveryTestService:
                 'recovery_duration_seconds': round((datetime.now() - recovery_start_time).total_seconds(), 2)
             }
 
-    async def _psql_import(self, test_env: dict[str, Any], sql_gz_path: Path) -> dict[str, Any]:
+    async def _psql_import(
+        self, test_env: dict[str, Any], sql_gz_path: Path,
+        *, timeout_seconds: int = 600,
+    ) -> dict[str, Any]:
         """把 dump.sql.gz 通过 psql 导入测试数据库（B5 修复）。
 
         与生产还原同参数：--single-transaction + ON_ERROR_STOP=1。
+        timeout_seconds 由调用方按 ``test_timeout_minutes * 60`` 换算传入
+        （L-13，2026-11-21 审计：原先写死 600s，与 test_timeout_minutes 脱钩）。
         返回 {'success', 'imported_rows', 'error'}，异常转为失败结果而非向上抛。
         """
         import gzip as gzip_mod
@@ -620,7 +647,8 @@ class DisasterRecoveryTestService:
                 '-f', sql_path,
             ]
             # run_proc 内部用线程池包装 subprocess，兼容 SelectorEventLoop
-            proc = await run_proc(psql_args, env=env, timeout=600)
+            # L-13（2026-11-21 审计）：timeout 由 test_timeout_minutes 换算传入，不再写死。
+            proc = await run_proc(psql_args, env=env, timeout=timeout_seconds)
             if proc.returncode != 0:
                 stderr = (proc.stderr or b'').decode(errors='replace')[:500]
                 logger.error(f"psql 演练导入失败 (rc={proc.returncode}): {stderr}")

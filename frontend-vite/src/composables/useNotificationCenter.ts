@@ -5,6 +5,7 @@
  * 与 useNotifications 分离以保持未读数轮询的轻量。
  */
 import { ref, readonly, computed } from 'vue'
+import { isAuthRefreshDeferred } from '@/api/request'
 import { notificationApi, type Notification, type NotificationListParams } from '@/api/notification'
 import {
   clearNotificationMemoryCache,
@@ -18,6 +19,10 @@ export function useNotificationCenter() {
   // 数据状态
   const list = ref<Notification[]>([])
   const total = ref(0)
+  /** M-33：列表加载失败态（null=正常），视图据此渲染错误横幅而非「暂无通知」 */
+  const listError = ref<string | null>(null)
+  /** M-37（评审 L）：deferred 重试计数——成功即清零，上限 3 次防轮询环 */
+  let deferredRetries = 0
   const page = ref(1)
   const pageSize = ref(DEFAULT_PAGE_SIZE)
   const loading = ref(false)
@@ -46,6 +51,8 @@ export function useNotificationCenter() {
   ) {
     list.value = response.data ?? []
     total.value = response.total ?? 0
+    listError.value = null
+    deferredRetries = 0
     if (resetSelection) {
       selectedIds.value = new Set()
     } else {
@@ -71,8 +78,19 @@ export function useNotificationCenter() {
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[notification-center] list failed', e)
       if (requestId !== loadRequestId || silent) return
-      list.value = []
-      total.value = 0
+      // M-37：会话刷新受限（限流/瞬态）——保留旧列表 + 软提示，延迟重试；
+      // 上限 3 次（评审 L）：无限重试会在限流窗口期间形成 3s 间隔轮询环
+      if (isAuthRefreshDeferred(e)) {
+        deferredRetries += 1
+        if (deferredRetries <= 3) {
+          listError.value = '登录状态刷新受限，正在自动重试…'
+          setTimeout(() => { void fetchList(true) }, 3000)
+          return
+        }
+      }
+      // M-33（2026-11-21 审计）：失败不得渲染成「暂无通知」——置错误态保留既有
+      // 数据，由视图提供重试入口（与 beile-order A-M32 同口径）。
+      listError.value = e instanceof Error ? e.message : String(e ?? '通知加载失败')
     }
   }
 
@@ -256,6 +274,8 @@ export function useNotificationCenter() {
     // 数据
     list: readonly(list),
     total: readonly(total),
+    // M-33：列表加载失败态，视图据此渲染错误横幅而非「暂无通知」
+    listError: readonly(listError),
     page: readonly(page),
     pageSize: readonly(pageSize),
     totalPages: readonly(totalPages),

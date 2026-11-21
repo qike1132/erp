@@ -1,6 +1,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { dashboardApi } from '@/api'
+import { formatNumber } from '@/utils/format'
 import type { MobileDashboardData } from '@/api/dashboard'
+import { getErrorMessage } from '@/types/errors'
 
 /** 移动端仪表盘数据加载与状态管理 */
 export function useDashboardMobileData() {
@@ -41,15 +43,16 @@ export function useDashboardMobileData() {
     return idx < 3 ? (['#1', '#2', '#3'][idx] ?? '') : '#' + (idx + 1)
   }
 
+  /** L-22（2026-11-21 审计）：fmtNum/fmtMoney 原先自造口径（toString / ≥1万截断小数），
+   *  改走 utils/format 单一真源：千分位 + 最多两位小数；空值仍显示「—」 */
   function fmtNum(n: number | null | undefined): string {
     if (n === null || n === undefined) return '—'
-    return n.toString()
+    return formatNumber(n)
   }
 
   function fmtMoney(n: number | null | undefined): string {
     if (n === null || n === undefined) return '—'
-    if (n >= 10000) return '¥' + Math.floor(n).toString()
-    return '¥' + n.toFixed(2)
+    return '¥' + formatNumber(n)
   }
 
   function triggerReveal() {
@@ -78,7 +81,9 @@ export function useDashboardMobileData() {
       lastRefreshTime.value = Date.now()
     } catch (e: unknown) {
       if (seq !== loadSeq) return
-      error.value = e instanceof Error ? e.message : '网络请求失败'
+      // L-22（2026-11-21 审计）：hero 区 axios 英文 message 直出（如 "Network Error"）→
+      // 走 getErrorMessage 统一映射中文；非 Error 抛出物回退通用文案
+      error.value = e instanceof Error ? getErrorMessage(e) : '网络请求失败'
       console.warn('[DashboardMobile] load error:', e)
     } finally {
       if (seq === loadSeq) {

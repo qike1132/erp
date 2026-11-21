@@ -17,6 +17,7 @@ approval_manage 产生假入口。该导航项已在 `core/nav_context.py` 的
 但不会再出现「勾了却点开全 403」。
 """
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +49,9 @@ _PENDING_COUNT_LOCAL_TTL = 10
 
 @router.get("/list", response_model=ApprovalListResponse)
 async def approval_list(
-    status: str = Query('pending', description="状态筛选: pending/approved/rejected/all"),
+    # L（2026-11-21 审计）：自由字符串在 service 里静默空列表；Literal 让非法值 422。
+    status: Literal['pending', 'approved', 'rejected', 'all'] = Query(
+        'pending', description="状态筛选: pending/approved/rejected/all"),
     search: str = Query('', description="搜索关键词"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),

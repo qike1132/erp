@@ -41,6 +41,7 @@ from fastapi_app.schemas.backup import (
 )
 from fastapi_app.services import backup as backup_service
 from fastapi_app.services.backup import BackupError
+from fastapi_app.services.backup.restore import is_restore_in_progress
 from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,11 @@ async def _export_backup_to_response(
     effective_encrypt, encryption_password = _resolve_encryption(encrypt, password, x_backup_password)
 
     if format == 'json':
+        # M-27（2026-11-21 审计）：JSON 导出走 execute_legacy_backup_to_bytes，此前
+        # 绕过备份/还原互斥——还原（DROP/重建）期间导出会产出部分表缺失的损坏包。
+        # 与 create_full_backup（ZIP 路径）的互斥口径对齐。
+        if await is_restore_in_progress():
+            raise HTTPException(status_code=409, detail='还原进行中，暂不能导出备份')
         try:
             json_bytes = await backup_service.execute_legacy_backup_to_bytes(user, remark, db)
         except Exception as e:  # broad-except: 端点层兜底捕获所有异常并转为 HTTP 响应

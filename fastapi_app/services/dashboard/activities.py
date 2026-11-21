@@ -66,6 +66,7 @@ async def fetch_dashboard_activities(db: AsyncSession) -> list[Activity]:
         activities = activities[:8]
         await _set_cached_activities(activities)
         return [Activity(**a) for a in activities]
-    except (OperationalError, DisconnectionError) as e:
-        logger.warning("仪表盘异步活动加载失败: %s [%s]", e, type(e).__name__)
-        return []
+    except (OperationalError, DisconnectionError):
+        # M-16 族（2026-11-21 审计）：连接类异常交全局 503 处理器，不得吞成空活动列表。
+        logger.warning("仪表盘活动加载失败（连接类，转 503）", exc_info=True)
+        raise

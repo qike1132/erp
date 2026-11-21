@@ -50,6 +50,7 @@ def _item(pid=5, qty=100):
     i.id = 11
     i.product_id = pid
     i.quantity = qty
+    i.deduct_quantity = 0  # M-2：明细下限守卫读真实 int（MagicMock 与 int 比较会炸）
     i.note = ''
     r.scalar_one_or_none.return_value = i
     return r
@@ -148,9 +149,12 @@ async def test_update_order_admin_direct_path_invalidates_and_publishes():
 
     db = MagicMock()
     # update_order 的 execute 序：product_id 预读 → 锁 Order（直改分支内再锁产品）
+    # + M-2 的 _order_quantity_floor：Σdeduct + Σshipped 两次标量
+    _zero = MagicMock(scalar_one=lambda: 0)
     db.execute = AsyncMock(side_effect=[
         MagicMock(scalar_one_or_none=lambda: 5),  # 预读 product_id
         _order(),                                 # 锁单
+        _zero, _zero,                             # M-2 floor：deduct=0 / shipped=0
     ])
     db.add = MagicMock()
     db.flush = AsyncMock()

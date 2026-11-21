@@ -202,9 +202,13 @@ export function useOutsourceProcess(detailDataProp: Ref<OutsourceOrderRow | null
       })),
   )
 
+  // N-28（2026-11-21 审计）：原实现 progress>0 与 progress==0 两分支同为 'warning'
+  //（疑似本意 >0 应为 'primary' 进行中色），但 UiProgressBar 默认就是 warning、
+  // OutsourceProcessDialog 全程只有这一个进度条，改色会牵动既有视觉口径——
+  // 按「两分支同值即恒为 warning」的实际语义收拢为单返回值并留此注释，
+  // 待 owner 裁决进行中是否要换 primary 再改。
   function progressVariant(progress: number): 'primary' | 'success' | 'warning' | 'danger' {
     if (progress === 100) return 'success'
-    if (progress > 0) return 'warning'
     return 'warning'
   }
 

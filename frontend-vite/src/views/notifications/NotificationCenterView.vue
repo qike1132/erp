@@ -37,6 +37,16 @@
         <p class="nc-state-text">加载通知中...</p>
       </div>
 
+      <!-- M-33：加载失败——空列表时整块错误态；有旧数据时横幅+列表并存 -->
+      <div v-else-if="listError && list.length === 0" class="nc-state" role="alert">
+        <div class="nc-state-icon nc-state-icon--empty">
+          <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        </div>
+        <p class="nc-state-text">通知加载失败</p>
+        <p class="nc-state-hint">{{ listError }}</p>
+        <button class="nc-btn nc-btn--ghost-sm" @click="fetchList(true)">重试</button>
+      </div>
+
       <!-- 空状态 -->
       <div v-else-if="list.length === 0" class="nc-state">
         <div class="nc-state-icon nc-state-icon--empty">
@@ -48,6 +58,11 @@
 
       <!-- 列表 -->
       <div v-else class="nc-list-container">
+        <div v-if="listError" class="nc-error-banner" role="alert">
+          <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+          <span>通知加载失败：{{ listError }}，正在展示上次内容</span>
+          <button class="nc-btn nc-btn--ghost-sm" @click="fetchList(true)">重试</button>
+        </div>
         <!-- 全选栏 -->
         <div class="nc-select-bar">
           <label class="nc-checkbox-label">
@@ -104,6 +119,7 @@ import { useNotificationCenterPage } from '@/views/notifications/composables/use
 const {
   list,
   total,
+  listError,
   page,
   totalPages,
   loading,
@@ -122,6 +138,7 @@ const {
   handleBatchMarkRead,
   handleMarkAll,
   clearSelection,
+  fetchList,
 } = useNotificationCenterPage()
 </script>
 

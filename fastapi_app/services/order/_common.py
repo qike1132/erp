@@ -7,6 +7,7 @@
 import asyncio
 import logging
 
+from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.domain_events import DomainEvent, DomainEventType, publish_with_retry
 from fastapi_app.core.exception_handler import RUNTIME_INFRA_EXCEPTIONS
@@ -46,6 +47,18 @@ async def _safe_publish_event(event_type: str, data: dict) -> None:
 async def _safe_invalidate_purchase_cache():
     """安全清除采购中心缓存，失败仅记录警告"""
     await cache_mgr.invalidate(InvalidationStrategy.PURCHASE)
+
+
+async def _invalidate_order_domains() -> None:
+    """失效订单/库存与报表域缓存（供 post-commit 兜底回调复用）。
+
+    L-10（2026-11-21 审计）：原 commands.py / deduction.py 各持一份逐字重复实现，
+    收敛到本模块单源（§9 对账单 #3 归一位置）。
+    """
+    await cache_mgr.invalidate(
+        InvalidationStrategy.DOMAIN,
+        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
+    )
 
 
 def schedule_post_commit_event(session, event_type: str, data: dict) -> None:

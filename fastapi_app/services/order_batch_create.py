@@ -210,12 +210,19 @@ async def _create_order_header(db: AsyncSession, customer: str, validated_items:
     first_item = validated_items[0]
     total_quantity = sum(it['quantity'] for it in validated_items)
     order_no = await generate_order_number(db)
+    # L-12（2026-11-21 审计）：合并订单此前只取首个 SKU 的 order_date，组内其余 SKU
+    # 选的日期被静默丢弃——取组内**最早**值（下单日期语义），不一致时留日志可追溯
+    item_dates = [_resolve_order_date(it.get('order_date')) for it in validated_items]
+    order_date = min(item_dates)
+    if len({d.date() for d in item_dates}) > 1:
+        logger.info('合并订单 %s 组内 SKU 下单日期不一致，取最早: %s', customer, sorted(item_dates))
     order = Order(
         order_no=order_no,
         product_id=first_item['product_id'],  # NOT NULL 兼容，新代码应读 order.items
         customer=customer,
         quantity=total_quantity,  # 兼容旧代码读取 order.quantity
-        order_date=_resolve_order_date(first_item.get('order_date')),  # 用户选择的下单日期；未选时回退当前时刻。aware UTC：order_date 列为 timestamptz（pg_standalone_013），naive 值会被按本地时区解释致早 8h
+        # aware UTC：order_date 列为 timestamptz（pg_standalone_013），naive 值会被按本地时区解释致早 8h
+        order_date=order_date,
         status=ORDER_STATUS_PENDING_STOCK,
         note='',  # 主订单级 note 留空，SKU 级 note 在 OrderItem
     )
@@ -293,16 +300,22 @@ async def _apply_deductions(
         if deduct_qty <= 0:
             continue
         try:
-            await process_order_deduction(
+            deducted_amount, _ded_details = await process_order_deduction(
                 db, order, it['product_id'], it['quantity'],
                 deduct_stock=True,
                 custom_deduct_quantity=deduct_qty,
                 product=it['product'],
             )
+            # M-1（2026-11-21 审计）：落库的 deduct_quantity 此前只按订单量收口，
+            # 备货不足时实扣更少（order_deduction_service 再按 available 收口），而
+            # purchase/_unprocessed.py 把该列当「已抵扣」展示——口径分叉。以实扣回写。
+            _order_item.deduct_quantity = int(deducted_amount)
         except (ValueError, TypeError, RuntimeError, OSError) as ded_err:
             logger.error(f"订单抵扣处理失败: {ded_err}", exc_info=True)
             results.append({
-                'success': False, 'error': '抵扣处理失败，请稍后重试',
+                # N-8（2026-11-21 审计）：把真实失败原因带出，不再吞成固定文案
+                'success': False,
+                'error': f'抵扣处理失败：{str(ded_err) or "请稍后重试"}',
                 'customer': customer,
             })
             raise _SavepointRollbackSignalError() from ded_err

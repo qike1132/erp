@@ -9,6 +9,7 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.domain_events import schedule_post_commit_callback
 from fastapi_app.core.exceptions import BusinessError, ConflictError, NotFoundError
 from fastapi_app.shared_models import (
     CustomerSamplingProject,
@@ -119,8 +120,8 @@ async def _register_project_image_cleanup(db: AsyncSession, file_id: int | None)
     # 迁移到 SQLAlchemy event.listen(session, 'after_commit', ...) 需同步改造
     # purchase_plan_common.py 等所有调用方，且 AsyncSession 的 after_commit
     # 事件回调为同步执行，无法直接处理 async 回调，暂保留现有机制。
-    callbacks = db.info.setdefault('post_commit_callbacks', [])
-    callbacks.append(_delete_storage_objects)
+    # N-3（2026-11-21 审计）：内联挂载收编到 canonical（schedule_post_commit_callback）
+    schedule_post_commit_callback(db, _delete_storage_objects)
 
 
 async def upload_project_image(

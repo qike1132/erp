@@ -4,7 +4,6 @@
 核心业务逻辑，异步 SQLAlchemy 实现。
 """
 import logging
-from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 from sqlalchemy import and_, delete, func, or_, select, update
@@ -14,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.cache_keys import PRODUCT_LIST_CACHE_PATTERN
+
+# N-3（2026-11-21 审计）：_schedule_post_commit 副本收编——canonical 是
+# core.domain_events.schedule_post_commit_callback（post-commit 调度唯一实现）。
+# 以原别名导入，既有调用点与测试 patch 点（product_service._schedule_post_commit）不变。
+from fastapi_app.core.domain_events import schedule_post_commit_callback as _schedule_post_commit
 from fastapi_app.core.redis_wrapper import safe_delete_pattern
 from fastapi_app.core.sanitizer import escape_like
 from fastapi_app.core.validators import validate_not_empty
@@ -37,19 +41,6 @@ from fastapi_app.shared_models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _schedule_post_commit(db: AsyncSession, callback: Callable[[], Awaitable[None]]) -> None:
-    """注册事务提交成功后执行的异步回调（商品列表缓存失效专用）。
-
-    回调会在 db_transaction 成功 commit 后按注册顺序执行；事务回滚则不执行。
-    采用 post-commit 时机是为了消除竞态：若在提交前失效，并发请求可能在提交前
-    读到旧数据并回写缓存，而提交后不再失效，脏数据将留存至 TTL 到期。
-
-    复制自 services/purchase_plan_common.py 的同名模式（避免跨域 import 耦合）。
-    """
-    callbacks = db.info.setdefault('post_commit_callbacks', [])
-    callbacks.append(callback)
 
 
 async def _invalidate_product_list_cache() -> None:

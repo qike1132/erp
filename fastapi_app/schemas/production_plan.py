@@ -4,6 +4,8 @@
 用于排产计划管理的请求/响应模型，包含库存对比和出货进度字段。
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 # ==================== 请求模型 ====================
@@ -25,7 +27,9 @@ class ProductionPlanUpdate(BaseModel):
     barcode: str | None = Field(None, min_length=1, max_length=50, description="69码")
     quantity: int | None = Field(None, gt=0, le=999999, description="排产计划数量")
     plan_date: str | None = Field(None, description="计划日期 (YYYY-MM-DD)")
-    status: str | None = Field(None, description="状态: pending/confirmed/completed")
+    # M-11（2026-11-21 审计）：自由字符串曾让计划从所有状态筛选中消失。
+    status: Literal['pending', 'confirmed', 'completed'] | None = Field(
+        None, description="状态: pending/confirmed/completed")
     remark: str | None = Field(None, max_length=500, description="备注")
     # shipped_qty 是出货链派生字段，不属于更新白名单（API 直改会破坏与出货流水的一致性）
 

@@ -49,7 +49,9 @@ export const notificationApi = {
   // 通知中心跨路由存活（不是任何路由的从属数据）：必须 routeCancel:false，
   // 否则切路由 abort 后 _silenceCanceled 让 Promise 永不 settle，
   // notificationMemoryCache 的 inflight 死条目永不清理（P1-09）。
-  unreadCount: () => get<{ count: number }>('/notifications/unread-count', undefined, { routeCancel: false }),
+  // M-38（2026-11-21 审计）：30s 轮询声明 silent403——权限不符时不再每 30s 弹一次
+  // 「权限不足」（403 风暴残留面）；未读数静默降级，不打扰用户。
+  unreadCount: () => get<{ count: number }>('/notifications/unread-count', undefined, { routeCancel: false, silent403: true }),
   list: (params?: NotificationListParams) => get<NotificationListResponse>('/notifications', params, { routeCancel: false }),
   markAsRead: (id: number) => post<{ success: boolean; message: string }>(`/notifications/${id}/read`),
   /**

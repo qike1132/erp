@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.pool import QueuePool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -448,6 +449,33 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "timestamp": current_iso_timestamp(),
         },
         status_code=exc.status_code,
+    )
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(DisconnectionError)
+async def db_connection_error_handler(request: Request, exc: OperationalError | DisconnectionError):
+    """数据库连接类异常统一 503（M-16 族，2026-11-21 审计）。
+
+    此前 dashboard 的 customer/todos/activities/mobile/stats 各自把连接类异常
+    吞成 success=True 空数据返回 200——DB 抖动被渲染成「没数据」且无告警。
+    service 层停吞后，任何端点漏网的连接类异常在此统一 503，与 /stats 既有
+    口径一致，触发监控告警与前端降级提示。
+    """
+    request_id = getattr(request.state, 'request_id', None) or new_request_id()
+    logger.error(
+        "数据库连接类异常: status=503 request_id=%s path=%s exc=%s [%s]",
+        request_id, request.url.path, exc, type(exc).__name__,
+    )
+    return MsgspecResponse(
+        content={
+            "success": False,
+            "detail": "数据库暂不可用，请稍后重试",
+            "status_code": 503,
+            "request_id": request_id,
+            "timestamp": current_iso_timestamp(),
+        },
+        status_code=503,
     )
 
 

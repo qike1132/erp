@@ -96,7 +96,7 @@
 import { computed } from 'vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
-import { formatNumber } from '@/utils/format'
+import { formatQtyBlank as fmtQty } from '@/utils/formatQty' // L-1（2026-11-21 审计）：改走共享「0 留白」口径，删除本地逐字复制
 import type { TabConfig, TabType } from '../composables/useReportConfig'
 
 const props = defineProps<{
@@ -166,16 +166,11 @@ const rows = computed<Record<string, unknown>[]>(() =>
   }),
 )
 
-/** 文本列：缺失即留白（后端可能给 null / 空串，不做占位符） */
-function cellText(v: unknown): string {
+/** 文本列：缺失即留白（后端可能给 null / 空串，不做占位符） */function cellText(v: unknown): string {
   return v == null || v === '' ? '' : String(v)
 }
 
-/** 数量列：有值走千分位，0 与空值留白 */
-function fmtQty(v: unknown): string {
-  const n = Number(v)
-  return Number.isFinite(n) && n !== 0 ? formatNumber(n) : ''
-}
+/** 数量列：缺失即留白（共享口径见 utils/formatQty.formatQtyBlank） */
 </script>
 
 <style scoped>

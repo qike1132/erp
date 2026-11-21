@@ -580,12 +580,21 @@ class TestStagingServiceLogic:
 
     @pytest.mark.asyncio
     async def test_clear_staging_stockins(self):
-        """测试清空暂存备货"""
+        """测试清空暂存备货（X-T 假测试修复：断言 DELETE 行为而非仅 flush——
+        此前把 execute 行删掉本测试仍绿）"""
+        from sqlalchemy import Delete as SaDelete
+
         from fastapi_app.services.staging_service import clear_staging_stockins
+        from fastapi_app.shared_models import StagingStockIn
 
         mock_db = AsyncMock()
         await clear_staging_stockins(mock_db, "session-123")
-        mock_db.flush.assert_called_once()
+        executed = mock_db.execute.await_args_list[0].args[0]
+        assert isinstance(executed, SaDelete)
+        assert executed.table.name == StagingStockIn.__tablename__
+        # WHERE 必须绑定 session 过滤（清空只能清本会话，不能全表）
+        assert 'session-123' in list(executed.compile().params.values())
+        mock_db.flush.assert_awaited()
 
 
 class TestConfirmStagingStockoutsQuantityGuard:

@@ -33,8 +33,9 @@ import { patternRoomApi } from '@/api/patternRoom'
 describe('全局数据不走路由取消', () => {
   it('通知未读数与列表固定 routeCancel:false', () => {
     notificationApi.unreadCount()
+    // M-38：30s 轮询声明 silent403（权限不符不弹窗），routeCancel:false 语义不变
     expect(mocks.get).toHaveBeenLastCalledWith(
-      '/notifications/unread-count', undefined, { routeCancel: false },
+      '/notifications/unread-count', undefined, { routeCancel: false, silent403: true },
     )
     notificationApi.list({ page: 1 })
     expect(mocks.get).toHaveBeenLastCalledWith(

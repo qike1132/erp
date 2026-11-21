@@ -378,14 +378,7 @@ async def _load_source_records(
     return cust_orders, stockins
 
 
-def _assert_orders_generatable(cust_orders: list) -> None:
-    """仅「待入库」状态的订单可审核生成采购单。"""
-    invalid_orders = [o for o in cust_orders if o.status != ORDER_STATUS_PENDING_STOCK]
-    if invalid_orders:
-        raise ValueError(
-            f'订单 {invalid_orders[0].order_no} 当前状态为"{invalid_orders[0].status}"，'
-            f'仅"{ORDER_STATUS_PENDING_STOCK}"状态可审核'
-        )
+# N-1（2026-11-21 审计）：_assert_orders_generatable 已删——全仓 grep 零调用的死代码
 
 
 def _collect_product_ids(records: list) -> list[int]:
@@ -778,18 +771,8 @@ async def fetch_existing_pending_for_composite_ids(
     if not composite_ids:
         return []
 
-    order_ids: list[int] = []
-    stockin_ids: list[int] = []
-    for cid in composite_ids:
-        if ':' in cid:
-            rtype, rid_str = cid.split(':', 1)
-            rid = int(rid_str)
-            if rtype == 'stockin':
-                stockin_ids.append(rid)
-            else:
-                order_ids.append(rid)
-        else:
-            order_ids.append(int(cid))
+    # N-2（2026-11-21 审计）：内联重抄改为调用 _split_composite_ids（单源，防口径漂移）
+    order_ids, stockin_ids = _split_composite_ids(composite_ids)
 
     source_ids = order_ids + stockin_ids
     if not source_ids:

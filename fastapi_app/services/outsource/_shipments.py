@@ -319,7 +319,10 @@ async def receive_shipment(db: AsyncSession, shipment_id: int, username: str | N
     if shipment.status != SHIPMENT_STATUS_SHIPPED:
         raise ValueError(f'发货单状态异常（{shipment.status}），无法确认收货')
 
-    for item in shipment.items or []:
+    # L-6（2026-11-21 审计）：receive_order_process 对工序行加 FOR UPDATE，
+    # 按明细顺序逐行加锁时两张发货单明细顺序相反会形成 AB-BA 死锁；
+    # 统一按 process_id 升序取锁（None=工序已删、不加锁，排最后）
+    for item in sorted(shipment.items or [], key=lambda it: (it.process_id is None, it.process_id or 0)):
         # 复用既有收货逻辑（行锁 + 数量校验 + 流水）；按**本发货单明细**的发货数量收货。
         # 第八轮审计：原传 received_quantity=None → receive_order_process 取「整道工序剩余量」
         # → 分批发货时收发货单 A 会把整道工序一次收满，随后收 B 命中 _is_fully_received 报"已收货"。
