@@ -13,6 +13,7 @@ import { ref, computed, watch, nextTick, onUnmounted, type WritableComputedRef }
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { customerApi, dailyProductionApi, productApi } from '@/api'
 import { showToast } from '@/composables/useToast'
+import { productionQtyError } from '@/utils/quantity'
 import type { Product, ProductionDepartment, RecordsQuery } from '@/types'
 
 /** 「最近客户添加」一次拉取的行数（后端 per_page 上限就是 200，再多要翻页） */
@@ -180,12 +181,12 @@ export function useProductionEntry(
     () =>
       customerId.value != null // 客户必填：没选客户就不给提交
       && rows.value.length > 0
-      && rows.value.every((r) => Number(r.quantity) > 0)
+      && rows.value.every((r) => !productionQtyError(r.quantity))
       && pendingPrice.value === 0
       && !isSubmitting.value,
   )
 
-  const todayCount = ref(0)
+  const todayCount = ref<number | null>(0)
   const currentDept = computed(
     () => PRODUCTION_DEPARTMENTS.find((d) => d.value === formDept.value) ?? PRODUCTION_DEPARTMENTS[0]!,
   )
@@ -535,7 +536,7 @@ export function useProductionEntry(
       const res = await dailyProductionApi.records({ year, month, production_date: selectedDateModel.value })
       todayCount.value = res?.total ?? 0
     } catch {
-      todayCount.value = 0
+      todayCount.value = null // L-18（2026-11-21 审计）：null = 「不知道」→ UI 显示「—」，不冒充「0 条」
     }
   }
 
@@ -551,15 +552,9 @@ export function useProductionEntry(
     }
     let ok = true
     rows.value.forEach((r) => {
-      r.error = ''
-      const qty = Number(r.quantity)
-      if (!qty || qty <= 0) {
-        r.error = '生产数量必须大于 0'
-        ok = false
-      } else if (qty > 999999) {
-        r.error = '生产数量不能超过 999999'
-        ok = false
-      }
+      // L-18（2026-11-21 审计）：校验文案下沉 utils/quantity.productionQtyError（镜像后端 schema）
+      r.error = productionQtyError(r.quantity)
+      if (r.error) ok = false
     })
     if (!ok) showToast('有 SKU 未通过校验，按行内红字修正后再提交', 'error')
     return ok
@@ -574,7 +569,9 @@ export function useProductionEntry(
       barcode: row.barcode,
       unit_price: row.unit_price || 0,
       quantity: row.quantity,
-      production_value: Number((row.quantity || 0) * (row.unit_price || 0)),
+      // L-18（2026-11-21 审计）：quantity×unit_price 的浮点尾巴（如 12.3×3=36.899999…）
+      // 会原样进 Decimal 列——保留两位小数消除尾差
+      production_value: Math.round((row.quantity || 0) * (row.unit_price || 0) * 100) / 100,
       production_date: context.date,
       remark: row.remark,
       // batch_no 后端不限部门存储，客户要求时其它部门也要带上；

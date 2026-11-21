@@ -75,20 +75,23 @@ describe('AUD-11 useApproval.handleApprove 失败复位', () => {
     useQueryClient: () => ({ invalidateQueries: invalidateMock }),
   }))
 
-  it('approve 抛错后 actionId 复位为 0（按钮不得永久卡「处理中…」）', async () => {
+  it('approve 抛错后 actionIds 移除该行（按钮不得永久卡「处理中…」）', async () => {
     approveMock.mockRejectedValue({ response: { data: { detail: '网络错误' } } })
     const { useApproval } = await import('../views/approval/composables/useApproval')
-    const { handleApprove, actionId } = useApproval()
+    const { handleApprove, actionIds } = useApproval()
     await handleApprove({ id: 42 } as never)
-    expect(actionId.value).toBe(0)
+    // L-19（2026-11-21 审计）：actionId 单值改 Set，复位 = 从集合删除该行 id
+    expect(actionIds.value.has(42)).toBe(false)
+    expect(actionIds.value.size).toBe(0)
   })
 
   it('approve 成功路径同样复位', async () => {
     approveMock.mockResolvedValue({ success: true })
     const { useApproval } = await import('../views/approval/composables/useApproval')
-    const { handleApprove, actionId } = useApproval()
+    const { handleApprove, actionIds } = useApproval()
     await handleApprove({ id: 43 } as never)
-    expect(actionId.value).toBe(0)
+    expect(actionIds.value.has(43)).toBe(false)
+    expect(actionIds.value.size).toBe(0)
   })
 })
 

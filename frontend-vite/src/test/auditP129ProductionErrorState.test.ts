@@ -93,7 +93,8 @@ describe('P1-29 生产报表错误态与过期响应', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('无查看权限')
-    expect(wrapper.find('.m-retry-btn').exists()).toBe(true)
+    // L-11（2026-11-21 审计）：403 对齐 MStockView 口径——重试只会再吃一次 403，不显示重试按钮
+    expect(wrapper.find('.m-retry-btn').exists()).toBe(false)
   })
 
   it('快速切日期时旧响应晚到不覆盖新数据', async () => {

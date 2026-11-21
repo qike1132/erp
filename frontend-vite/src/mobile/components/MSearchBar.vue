@@ -38,6 +38,9 @@ const inputRef = ref<HTMLInputElement>()
 
 function handleClear() {
   emit('update:modelValue', '')
+  // L-12（2026-11-21 审计）：清空即新搜索词生效，与回车同口径上抛 search，
+  // 让消费方重查（否则列表仍按清空前的关键词过滤，按钮像「坏了」）
+  emit('search', '')
   inputRef.value?.focus()
 }
 

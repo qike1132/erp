@@ -232,7 +232,10 @@ export function get<T>(
   // finally 会派生一个与原 Promise 同状态的新 Promise；若原请求失败（403/401/网络错误），
   // 必须 catch 这个派生 Promise，否则每次失败 GET 都会产生一次未处理的 Promise 拒绝（Uncaught (in promise) AxiosError）
   raw.finally(() => {
-    _inflightGet.delete(key)
+    // L-20（2026-11-21 审计）：先判再删——原实现无条件 delete(key)。若本请求结束时
+    // 同 key 已发起新请求（旧响应后到场景），会把**新请求**的去重条目误删，
+    // 之后第三个请求就不再命中去重、发出重复 GET。只在表里还是自己时才删。
+    if (_inflightGet.get(key) === p) _inflightGet.delete(key)
     if (routeCancel) _pendingControllers.delete(controller)
   }).catch(() => { /* 错误已由调用方处理 */ })
   return p

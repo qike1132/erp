@@ -91,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { toISODate } from '@/utils/format'
+import { toISODate, formatNumber } from '@/utils/format'
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { planApi } from '@/api'
 import MobileNavBar from '@/mobile/layouts/components/MobileNavBar.vue'
@@ -158,7 +158,8 @@ const dateProduced = computed(() => selectedPlans.value.reduce((s, p) => s + Num
 const dateRemain = computed(() => dateTotal.value - dateProduced.value)
 const datePct = computed(() => dateTotal.value > 0 ? Math.floor(dateProduced.value / dateTotal.value * 1000) / 10 : 0)
 
-function fmtQty(n: number) { return String(n) }
+// L-2（2026-11-21 审计）：原 String(n) 漂移口径改走统一千分位格式化
+const fmtQty = formatNumber
 
 function dotClass(status: string) {
   if (status === 'shipped' || status === 'completed') return 'm-dot-done'

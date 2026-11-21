@@ -13,7 +13,7 @@
         :items="items"
         :is-loading="isLoading"
         :is-error="isError"
-        :action-id="actionId"
+        :action-ids="actionIds"
         :total-items="totalItems"
         :per-page="perPage"
         :current-page="currentPage"
@@ -52,7 +52,7 @@ import RejectDialog from './components/RejectDialog.vue'
 import { useApproval } from './composables/useApproval'
 
 const {
-  actionId,
+  actionIds,
   searchTerm,
   statusFilter,
   currentPage,

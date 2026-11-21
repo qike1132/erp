@@ -20,6 +20,7 @@
 import { computed } from 'vue'
 import { factoryTone } from './factoryMeta'
 import type { CustSumItem } from './types'
+import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 const props = defineProps<{ customers: CustSumItem[]; factory: string }>()
 const row = computed(() => {
@@ -27,7 +28,6 @@ const row = computed(() => {
   for (const c of props.customers) { plan += Number(c.plan_qty || 0); produced += Number(c.produced_qty || 0) }
   return { plan, produced, pct: plan > 0 ? Math.floor(produced / plan * 1000) / 10 : 0 }
 })
-function fmt(n: number) { return Number(n || 0).toLocaleString('zh-CN') }
 function pctCls(p: number) { return p <= 0 ? 'fm-r' : p < 100 ? 'fm-a' : 'fm-g' }
 </script>
 

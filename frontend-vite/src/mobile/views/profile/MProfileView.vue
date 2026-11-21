@@ -65,7 +65,11 @@ onUnmounted(() => {
 // 原「退出登录」项既无 `to` 也无 `@click`，而 MListItem 只处理 `to`，
 // 点击什么都不发生 —— **移动端根本没法登出**（共用终端下用户以为已退出、会话仍在）。
 // 与桌面端 DashboardView.handleLogout 同款：接口失败也照样清本地态并跳登录页。
+// N-30（2026-11-21 审计）：防重入——连点两次会并发两个 /auth/logout 且重复 router.replace
+let _loggingOut = false
 async function onLogout() {
+  if (_loggingOut) return
+  _loggingOut = true
   try {
     await authApi.logout()
   } catch {
@@ -74,6 +78,7 @@ async function onLogout() {
   } finally {
     authStore.logout()
     router.replace('/login')
+    _loggingOut = false
   }
 }
 </script>

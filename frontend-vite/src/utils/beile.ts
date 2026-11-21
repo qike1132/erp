@@ -6,6 +6,9 @@
  * 判定；等预设维护有独立权限码后再改为纯权限点门控。
  *
  * 注意：与后端 scripts/add_outsource_ship_receive_perms.py 的 BEILE_USERNAME 保持一致。
+ *
+ * L-4 / N-34（2026-11-21 审计）：按用户名硬编码门控是**已知取舍**——
+ * 后端补独立权限码后应移除用户名判定，改为纯权限点门控。
  */
 export const BEILE_USERNAME = '贝乐'
 

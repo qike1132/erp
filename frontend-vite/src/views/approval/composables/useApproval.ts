@@ -33,7 +33,10 @@ function extractErrMsg(err: unknown): string {
 
 export function useApproval() {
   const queryClient = useQueryClient()
-  const actionId = ref<number | ''>(0)
+  // L-19（2026-11-21 审计）：actionId 单值改 Set（对照 beile confirmingIds 模式）——
+  // 单值时并行点两行的「通过」，后点的一行会覆盖前者，先点的那行按钮提前解锁，
+  // 看起来可以重复提交；Set 让每一行各自盯各自的处理中状态。
+  const actionIds = ref<Set<number>>(new Set())
   const searchTerm = ref('')
   const statusFilter = ref('')
   const currentPage = ref(1)
@@ -102,7 +105,7 @@ export function useApproval() {
   }
 
   async function handleApprove(row: ApprovalItem) {
-    actionId.value = row.id
+    actionIds.value.add(row.id)
     try {
       await approvalApi.approve(row.id)
       showToast('审批通过', 'success')
@@ -113,7 +116,7 @@ export function useApproval() {
     } finally {
       // AUD-11（2026-10-24 审计）：成功/失败都复位——原先失败路径不复位，
       // 该行按钮永久禁用显示「处理中…」直到刷新（同仓 user/supplier/customer 均正确复位）
-      actionId.value = 0
+      actionIds.value.delete(row.id)
     }
   }
 
@@ -150,7 +153,7 @@ export function useApproval() {
   }
 
   return {
-    actionId,
+    actionIds,
     searchTerm,
     statusFilter,
     currentPage,

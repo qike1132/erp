@@ -261,6 +261,8 @@ describe('print utils', () => {
         if (tag === 'iframe') {
           const iframe = {
             style: {} as CSSStyleDeclaration,
+            // 回收分支判 iframe.parentNode（append 后由 appendSpy 挂到 body）
+            parentNode: document.body,
             contentDocument: {
               open: vi.fn(),
               write: vi.fn((s: string) => { written = s }),

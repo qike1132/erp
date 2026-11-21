@@ -206,7 +206,9 @@ async function refetchOrders(page = 1) {
     if (isCanceledError(e)) return
     // M-33：持久错误态（3 秒 toast 不够，用户把故障当「没订单」）
     ordersError.value = '订单加载失败'
-    showToast('订单加载失败，请重试', 'error')
+    // N-29（2026-11-21 审计）：非当前页签的失败只置错误态不弹 toast——
+    // 该页签渲染着错误横幅+重试入口，切过去自然看到；弹 toast 反而打断当前页签
+    if (activeTab.value === 'orders') showToast('订单加载失败，请重试', 'error')
   } finally {
     if (seq === ordersSeq) ordersLoading.value = false
   }
@@ -230,7 +232,8 @@ async function loadUnprocessed(page = 1) {
     // 同上：取消也要回退页码，但不弹提示（2026-10-17 审计 P1-21）
     if (isCanceledError(e)) return
     unprocessedError.value = '待生成订单加载失败'
-    showToast('待生成订单加载失败，请重试', 'error')
+    // N-29（2026-11-21 审计）：非当前页签只置错误态不弹 toast
+    if (activeTab.value === 'unprocessed') showToast('待生成订单加载失败，请重试', 'error')
   } finally {
     if (seq === unprocessedSeq) unprocessedLoading.value = false
   }
@@ -255,7 +258,8 @@ async function loadCompleted(page = 1) {
     // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
     if (isCanceledError(e)) return
     completedError.value = '已完成订单加载失败'
-    showToast('已完成订单加载失败，请重试', 'error')
+    // N-29（2026-11-21 审计）：非当前页签只置错误态不弹 toast
+    if (activeTab.value === 'completed') showToast('已完成订单加载失败，请重试', 'error')
   } finally {
     if (seq === completedSeq) completedLoading.value = false
   }
@@ -274,11 +278,15 @@ function showOrderDetail(order: PurchaseOrder | UnprocessedOrder) {
 function statusColor(s: string | undefined) {
   if (s === 'completed') return 'var(--m-accent-emerald)'
   if (s === 'pending') return 'var(--m-accent-amber)'
-  if (s === 'cancelled') return 'var(--m-accent-rose)'
+  if (s === 'confirmed') return 'var(--m-accent-blue, #0071E3)'
   return 'var(--m-text-secondary)'
 }
 function statusLabel(s: string | undefined) {
-  const map: Record<string, string> = { completed: '已完成', pending: '待处理', processing: '采购中', cancelled: '已取消' }
+  // L-23（2026-11-21 审计）：映射集与后端 PurchaseOrderStatus.ALL（pending/completed/
+  // confirmed，见 shared_models/purchase_order.py）对齐——confirmed 是存量数据的
+  // 历史状态，此前漏译；'processing'/'cancelled' 是幽灵值（后端不产生），删除。
+  // 未知值原样显示原始枚举，不再吞成「—」。
+  const map: Record<string, string> = { completed: '已完成', pending: '待处理', confirmed: '已确认' }
   return (s && map[s]) || s || '—'
 }
 

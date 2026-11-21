@@ -7,7 +7,7 @@
       <template v-if="activeTab === 'overview'">
         <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="overviewError" :title="overviewError">
-          <template #action>
+          <template v-if="overviewErrorRetryable" #action>
             <button class="m-retry-btn" @click="loadOverview">重试</button>
           </template>
         </MEmpty>
@@ -27,7 +27,7 @@
         <MSearchBar v-model="keyword" placeholder="搜索订单号/供应商/物料..." @search="onRecordsSearch" />
         <div v-if="recordsLoading" class="m-center"><MSpinner size="lg" /></div>
         <MEmpty v-else-if="recordsError" :title="recordsError">
-          <template #action>
+          <template v-if="recordsErrorRetryable" #action>
             <button class="m-retry-btn" @click="loadRecords">重试</button>
           </template>
         </MEmpty>
@@ -85,9 +85,16 @@ const recordsTotal = ref(0)
 const recordsPerPage = MOBILE_PAGE_SIZE
 let recordsSeq = 0
 
+// L-11（2026-11-21 审计）：对齐 MStockView:150 口径——403 重试只会再吃一次 403，不显示「重试」
+const overviewErrorRetryable = ref(true)
+const recordsErrorRetryable = ref(true)
+
 function errorText(e: unknown, fallback: string) {
+  const is403 = (e as { response?: { status?: number } })?.response?.status === 403
   // 403 已由全局拦截器 toast；页面仍需可理解状态，不能只留空白
-  return (e as { response?: { status?: number } })?.response?.status === 403 ? '无查看权限' : fallback
+  overviewErrorRetryable.value = !is403
+  recordsErrorRetryable.value = !is403
+  return is403 ? '无查看权限' : fallback
 }
 
 let overviewSeq = 0

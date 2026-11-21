@@ -18,10 +18,11 @@
     <!-- Stock List -->
     <template v-else>
       <div v-if="filteredStock.length" class="m-stock-list">
+        <!-- L-24（2026-11-21 审计）：原 clickable 无 @click——渲染成 role=button 可聚焦
+             但点了没反应的伪交互，移除该误导样式 -->
         <MCard
           v-for="item in filteredStock"
           :key="item.product_id"
-          clickable
           padded
           class="m-stock-card"
         >

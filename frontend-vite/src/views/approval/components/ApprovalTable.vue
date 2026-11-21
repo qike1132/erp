@@ -40,8 +40,8 @@
           </td>
           <td>
             <template v-if="row.status === 'pending'">
-              <button class="ap-action-btn ap-action-success" :disabled="actionId === row.id" :aria-label="actionId === row.id ? '处理中…' : '通过'" @click="emit('approve', row)">
-                {{ actionId === row.id ? '处理中…' : '通过' }}
+              <button class="ap-action-btn ap-action-success" :disabled="actionIds.has(row.id)" :aria-label="actionIds.has(row.id) ? '处理中…' : '通过'" @click="emit('approve', row)">
+                {{ actionIds.has(row.id) ? '处理中…' : '通过' }}
               </button>
               <button class="ap-action-btn ap-action-danger" aria-label="驳回" @click="emit('reject', row)">驳回</button>
             </template>
@@ -72,7 +72,8 @@ defineProps<{
   isLoading: boolean
   /** 查询失败（M-33：与「暂无审批记录」分开渲染） */
   isError?: boolean
-  actionId: number | ''
+  /** 正在审批处理的行 id 集合（L-19：Set 支持多行并行，单值会被后点的行覆盖） */
+  actionIds: Set<number>
   totalItems: number
   perPage: number
   currentPage: number

@@ -73,7 +73,7 @@
                         :style="{ width: (item.progress || 0) + '%' }"
                       />
                     </div>
-                    <span :class="['oso-status-badge', statusClass(item.status_label || '')]">{{ item.status_label }}</span>
+                    <span :class="['oso-status-badge', statusClass(item)]">{{ item.status_label }}</span>
                   </div>
                   <span v-else class="oso-cell-muted">未配置</span>
                 </td>
@@ -192,12 +192,19 @@ function progressClass(progress: number): string {
   return 'oso-progress-fill--wait'
 }
 
-/** 状态徽章配色（按状态文案匹配） */
-function statusClass(label: string): string {
-  if (label === '外发完成') return 'oso-status-completed'
-  if (label === '待开始' || label === '未配置工序') return 'oso-status-pending'
-  if (label.startsWith('进行中')) return 'oso-status-in_progress'
-  return 'oso-status-pending'
+/** 状态徽章配色。
+ *  L-17（2026-11-21 审计）：原按中文文案匹配（`外发完成`/`startsWith('进行中')`），
+ *  后端改文案样式就悄悄丢。改为按**状态枚举值**判类——口径镜像后端
+ *  fastapi_app/services/outsource/_common.py::_format_process_progress：
+ *  total=0 → 未配置；completed==total → 完成；否则（started>0 或未开始）→ 进行中/待发货。
+ *  行数据带 total_processes/completed_processes/progress（useOutsourceOrders 类型），
+ *  与 status_label 同源于同一次聚合响应，不再依赖显示文案。 */
+function statusClass(item: Pick<OutsourceOrderRow, 'total_processes' | 'completed_processes' | 'progress'>): string {
+  const total = item.total_processes || 0
+  if (total === 0) return 'oso-status-pending' // 未配置工序
+  if ((item.completed_processes ?? 0) >= total) return 'oso-status-completed' // 外发完成
+  if ((item.progress ?? 0) > 0) return 'oso-status-in_progress' // 进行中
+  return 'oso-status-pending' // 待发货
 }
 </script>
 

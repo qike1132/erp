@@ -54,15 +54,29 @@ export function printHtml(title: string, bodyHtml: string, style: string = PRINT
 
   const safeTitle = escapeHtml(title)
   doc.open()
-  doc.write(
-    `<!DOCTYPE html><html><head><title>${safeTitle}</title><style>${style}</style></head>` +
-    `<body><div style="text-align:center;margin-bottom:20px;"><h2>${safeTitle}</h2></div>${bodyHtml}</body></html>`,
-  )
-  doc.close()
+  // L-26 / N-33（2026-11-21 审计）：print() 或 doc.write 抛异常时原先 removeChild
+  // 不会执行，隐藏 iframe 泄漏在 body 里（每次打印失败积累一个）。
+  // 结构：write/close 的同步异常走外层 catch 立即回收；
+  // 延迟打印的 print() 异常走内层 finally 兜底回收。
+  try {
+    doc.write(
+      `<!DOCTYPE html><html><head><title>${safeTitle}</title><style>${style}</style></head>` +
+      `<body><div style="text-align:center;margin-bottom:20px;"><h2>${safeTitle}</h2></div>${bodyHtml}</body></html>`,
+    )
+    doc.close()
+  } catch (e) {
+    if (iframe.parentNode) document.body.removeChild(iframe)
+    throw e
+  }
 
   setTimeout(() => {
-    iframe.contentWindow?.print()
-    setTimeout(() => document.body.removeChild(iframe), 1000)
+    try {
+      iframe.contentWindow?.print()
+    } finally {
+      setTimeout(() => {
+        if (iframe.parentNode) document.body.removeChild(iframe)
+      }, 1000)
+    }
   }, 300)
 }
 

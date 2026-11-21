@@ -89,6 +89,7 @@ import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import UiSkeleton from '@/components/ui/UiSkeleton.vue'
 import UiButton from '@/components/ui/UiButton.vue'
 import { useDebouncedRef } from '@/composables/useDebouncedRef'
+import { formatQtyBlank as fmtQty } from '@/utils/formatQty' // L-1（2026-11-21 审计）：改走共享「0 留白」口径，删除本地逐字复制
 import { useExport } from '@/composables/useExport'
 import { formatNumber } from '@/utils/format'
 import InventoryToolbar from './components/InventoryToolbar.vue'
@@ -125,12 +126,6 @@ const {
   gcTime: 60_000,
   placeholderData: keepPreviousData,
 })
-
-/** 数量展示：有值走千分位，0 与空值留白（后端把 0 序列化成空串，不做占位符） */
-function fmtQty(v: unknown): string {
-  const n = Number(v)
-  return Number.isFinite(n) && n !== 0 ? formatNumber(n) : ''
-}
 
 /** 库存（结余）：0 与负数都要显示（不是「空值」），故不做留白 */
 function fmtBalance(v: unknown): string {

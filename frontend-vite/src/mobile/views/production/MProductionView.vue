@@ -12,7 +12,7 @@
 
       <div v-if="loading" class="m-center"><MSpinner size="lg" /></div>
       <MEmpty v-else-if="loadError" :title="loadError">
-        <template #action>
+        <template v-if="loadErrorRetryable" #action>
           <button class="m-retry-btn" @click="retryLoad">重试</button>
         </template>
       </MEmpty>
@@ -121,9 +121,14 @@ function nextDate() {
   }
 }
 
+// L-11（2026-11-21 审计）：对齐 MStockView:150 口径——403 重试只会再吃一次 403，不显示「重试」
+const loadErrorRetryable = ref(true)
+
 function errorText(e: unknown, fallback: string) {
-  // 403 已由全局拦截器 toast；页面仍要有可理解状态与重试入口
-  return (e as { response?: { status?: number } })?.response?.status === 403 ? '无查看权限' : fallback
+  const is403 = (e as { response?: { status?: number } })?.response?.status === 403
+  loadErrorRetryable.value = !is403
+  // 403 已由全局拦截器 toast；页面仍要有可理解状态（重试入口按 retryable 显隐）
+  return is403 ? '无查看权限' : fallback
 }
 
 async function loadDaily() {
