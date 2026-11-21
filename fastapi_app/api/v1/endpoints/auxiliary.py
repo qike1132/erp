@@ -441,13 +441,15 @@ class BatchStockOutItem(BaseModel):
     )
 
 class BatchOrderRequest(BaseModel):
-    orders: list[BatchOrderItem]
+    # M-18（2026-11-21 审计）：无界列表每项一次工厂闸门查询后逐项编排，可长时间
+    # 占用事件循环与 DB——补上限（对齐 order_batch 的 ≤500 口径取 200）。
+    orders: list[BatchOrderItem] = Field(..., max_length=200)
 
 class BatchStockInRequest(BaseModel):
-    stockins: list[BatchStockInItem]
+    stockins: list[BatchStockInItem] = Field(..., max_length=200)
 
 class BatchStockOutRequest(BaseModel):
-    stockouts: list[BatchStockOutItem]
+    stockouts: list[BatchStockOutItem] = Field(..., max_length=200)
 
 # ==================== 批量提交 API ====================
 

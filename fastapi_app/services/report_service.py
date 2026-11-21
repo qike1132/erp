@@ -30,10 +30,20 @@ def _append_biz_date_window(where_clauses: list[str], params: dict, column: str,
     end 侧 [次日 00:00) 开区间，与原「+1 天后 <」等价。
     """
     if start_date:
-        params['start_date'] = business_day_range(parse_date_strict(start_date, '开始'))[0]
+        try:
+            start_day = parse_date_strict(start_date, '开始')
+        except ValueError as e:
+            # M-15（2026-11-21 审计）：ValueError 落到端点层是 500——统一在源头
+            # 转成 BusinessError(400)，五个流水端点与导出一次覆盖。
+            raise BusinessError(str(e)) from None
+        params['start_date'] = business_day_range(start_day)[0]
         where_clauses.append(f"{column} >= :start_date")
     if end_date:
-        params['end_date'] = business_day_range(parse_date_strict(end_date, '结束'))[1]
+        try:
+            end_day = parse_date_strict(end_date, '结束')
+        except ValueError as e:
+            raise BusinessError(str(e)) from None
+        params['end_date'] = business_day_range(end_day)[1]
         where_clauses.append(f"{column} < :end_date")
 
 

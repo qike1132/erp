@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.core.cache import _cache_local
+from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.services.report_service import (
     _query_logs_generic,
     _quote_identifier,
@@ -185,9 +186,9 @@ class TestGetOrderLogs:
 
     @pytest.mark.asyncio
     async def test_invalid_date_raises(self, mock_async_db):
-        """非法日期格式抛 ValueError（不再静默忽略）"""
+        """非法日期格式抛 BusinessError(400)（M-15：此前 ValueError 落端点是 500）"""
         with _patch_generic():
-            with pytest.raises(ValueError):
+            with pytest.raises(BusinessError):
                 await get_order_logs(mock_async_db, start_date='2024/01/01')
 
 
@@ -271,9 +272,9 @@ class TestGetReturnLogs:
 
     @pytest.mark.asyncio
     async def test_invalid_date_raises(self, mock_async_db):
-        """非法日期格式抛 ValueError（与其他流水一致）"""
+        """非法日期格式抛 BusinessError(400)（与其他流水一致）"""
         with _patch_generic():
-            with pytest.raises(ValueError):
+            with pytest.raises(BusinessError):
                 await get_return_logs(mock_async_db, start_date='2026/10/01')
 
 
@@ -465,6 +466,8 @@ class TestExportDateFilterStrict:
         from fastapi_app.shared.report_data_service import get_all_logs_data
 
         _configure_orm_mappers()
+        # 导出侧（shared/report_data_service）是独立的第二套过滤，其契约是「故意
+        # 抛 ValueError 供 export 端点映射 400」（M-15 只改列表端点的源头）。
         with pytest.raises(ValueError):
             get_all_logs_data(MagicMock(), 'order', start_date='2026/10/01')
         with pytest.raises(ValueError):

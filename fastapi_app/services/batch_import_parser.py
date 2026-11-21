@@ -185,7 +185,9 @@ async def _save_uploaded_file(file: ExcelUpload):
         if temp_path:
             # M1：解析线程可能仍在占用该文件（超时后请求先返回），重试删除并在
             # 最终失败时 ERROR 留痕，避免临时文件在 %TEMP% 里无声堆积。
-            cleanup_temp_file(temp_path)
+            # M-8（2026-11-21 审计）：重试里的 time.sleep（最长 ~4.5s）此前跑在
+            # 事件循环上阻塞全部请求——挪进工作线程。
+            await asyncio.to_thread(cleanup_temp_file, temp_path)
 
 
 # ==================== Sheet 定位与类型识别 ====================

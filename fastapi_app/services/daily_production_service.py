@@ -592,10 +592,13 @@ async def update_record(
         raise ValueError('记录不存在')
 
     # 校验更新数据
-    dept = kwargs.get('department', record.department)
-    name = kwargs.get('product_name', record.product_name)
-    qty = kwargs.get('quantity', record.quantity)
-    price = kwargs.get('unit_price', record.unit_price)
+    # M-10（2026-11-21 审计）：schema 允许显式传 null，dict.get(key, 默认) 对
+    # 「键存在且为 None」会返回 None——None 进 validate 的 <= 0 比较抛 TypeError
+    # 未捕获 → 500。显式 None 一律归并为「不修改」（与下方 setattr 层同语义）。
+    dept = kwargs.get('department') or record.department
+    name = kwargs.get('product_name') or record.product_name
+    qty = kwargs['quantity'] if kwargs.get('quantity') is not None else record.quantity
+    price = kwargs['unit_price'] if kwargs.get('unit_price') is not None else record.unit_price
     validate_record_data(dept, name, qty, price)
 
     # 库存联动基线（2026-10-06 生产即入库）：变更前快照
