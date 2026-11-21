@@ -19,7 +19,8 @@ class ProductionRecordCreate(BaseModel):
     barcode: str = Field('', max_length=50, description="69码")
     # M-17（2026-11-21 审计）：库列是 Decimal，float 直入会让金额口径与 Decimal
     # 侧漂移——schema 收 Decimal（pydantic 对 JSON number 自动收敛，契约兼容）。
-    unit_price: Decimal = Field(0, ge=0, description="单价")
+    # 默认值用 Decimal('0')：mypy 对 Field(0)（int 默认）与 Decimal 注解报 assignment。
+    unit_price: Decimal = Field(Decimal('0'), ge=0, description="单价")
     quantity: int = Field(..., gt=0, le=999999, description="生产数量")
     production_date: str = Field(..., description="生产日期 (YYYY-MM-DD)")
     remark: str | None = Field(None, max_length=500, description="备注")
