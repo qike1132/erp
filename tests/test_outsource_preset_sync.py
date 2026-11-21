@@ -289,6 +289,7 @@ class TestProcessTypeUniqueConflict:
         product = MagicMock()
         product.id = 1
         product.name = '测试产品'
+        product.factory = '湖北'  # hubei-L-7 后预设创建限定湖北工厂，须给合法湖北产品
         return product
 
     @pytest.mark.asyncio

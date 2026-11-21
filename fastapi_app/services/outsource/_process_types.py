@@ -64,10 +64,18 @@ async def list_process_types(
 async def create_process_type(
     db: AsyncSession, data: dict, username: str | None = None,
 ) -> dict:
-    """创建 SKU 工序预设；同一产品下工序类型不可重复。"""
+    """创建 SKU 工序预设；同一产品下工序类型不可重复。
+
+    仅限湖北工厂产品（审计 hubei-L-7，与搜索候选 search_hubei_products 同口径）：
+    预设是订单创建路径 auto_generate_for_order 生成外发工序的依据，非湖北 SKU
+    挂预设会给东莞订单生成「影子外发工序」——不在待发货面板也不在外发列表，
+    但 GET /orders/{id}/processes 与发货 API 均可触达，污染状态统计口径。
+    """
     product = await db.get(Product, data['product_id'])
     if not product:
         raise ValueError('产品不存在')
+    if product.factory != '湖北':
+        raise ValueError('外发工序预设仅限湖北工厂产品')
 
     process_type = data['process_type'].strip()
     if not process_type:
@@ -102,10 +110,14 @@ async def batch_create_process_types(
 
     幂等：同一产品下已存在的工序名称跳过，返回 (created, skipped)。
     sort_order 取该产品现有最大顺序 +1 递增。
+
+    仅限湖北工厂产品（审计 hubei-L-7，与 create_process_type 同口径）。
     """
     product = await db.get(Product, product_id)
     if not product:
         raise ValueError('产品不存在')
+    if product.factory != '湖北':
+        raise ValueError('外发工序预设仅限湖北工厂产品')
 
     names = [n.strip() for n in (process_types or []) if n and n.strip()]
     if not names:

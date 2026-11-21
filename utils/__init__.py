@@ -21,23 +21,22 @@ PEP 562 惰性导出这一层历史契约。
   不会把 openpyxl/polars/sqlalchemy 拉进 sys.modules，且旧名字仍可取到）。
 
   P0-8（2026-10-01）：``utils/batch_upload_utils.py``（501 行，全仓零调用）已删除，
-  故 ``_EXPORTS``/``__all__`` 里与之对应的 10 个名字一并移除；``logger`` 一项保留
+  故 ``_EXPORTS``/``__all__`` 里与之对应的 10 个名字一并移除；``logger`` 一项当时保留
   （``tests/test_logger.py``、``tests/test_utils_lazy_import.py`` 仍是它的消费者）。
+
+  2026-11-21 死代码清理：``utils/logger.py``（core/logger.py 的遗留副本，生产零消费）
+  与 ``tests/test_logger.py`` 已删除，导出表清空 —— 真正的日志系统只有
+  ``fastapi_app/core/logger.py`` 一份。
 """
 from __future__ import annotations
 
 import importlib
 
-# 名字 → 所在子模块（与原 eager 导入的对外契约逐字一致；batch_upload_utils 十项随 P0-8 删除）
-_EXPORTS = {
-    'log_request': 'logger',
-    'logger': 'logger',
-}
+# 名字 → 所在子模块（与原 eager 导入的对外契约逐字一致；batch_upload_utils 十项随
+# P0-8 删除，log_request/logger 两项随 2026-11-21 utils/logger.py 删除而清空）
+_EXPORTS: dict[str, str] = {}
 
-__all__ = [
-    'log_request',
-    'logger',
-]
+__all__: list[str] = []
 
 
 def __getattr__(name: str):

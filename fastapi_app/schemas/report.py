@@ -47,12 +47,3 @@ class ReportResponse(BaseModel):
     logs: list[ReportLogItem] = []
     stats: dict = {}
     pagination: dict = {}
-
-
-class ReportExportRequest(BaseModel):
-    type: str = 'order'
-    customer: str = ''
-    product: str = ''
-    status: str = ''
-    start_date: str = ''
-    end_date: str = ''

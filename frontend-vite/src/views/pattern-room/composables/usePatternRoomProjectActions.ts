@@ -182,8 +182,14 @@ export function usePatternRoomProjectActions(options: UsePatternRoomProjectActio
             if (upRes.url) proj.product_image_url = upRes.url
             if (upRes.thumbnail_url) proj.product_image_thumbnail_url = upRes.thumbnail_url
             if (upRes.file_id != null) proj.product_image_file_id = upRes.file_id
-            // 服务端上传后自增了 version，本地同步（否则保存会 409）
-            proj.version = (proj.version ?? 0) + 1
+            // 服务端上传后自增了 version：直接回写响应返回的服务端真相（upload.py
+            // 明确返回 'version'），不能用「本地 +1」——新建流程里 onSelectProject
+            // 触发的 fetchDetail（其 version 已含上传自增）与上传响应并发到达时，
+            // 本地 +1 会把版本双算，下一次保存必吃假 409（审计 L-7）。
+            // 响应缺 version 时保持现值：写 undefined 会让下一次保存跳过后端乐观锁校验。
+            if (upRes.version != null) {
+              proj.version = upRes.version
+            }
           }
           // 刷新分组列表，让卡片缩略图显示新图片
           void groupHook.loadGrouped(searchKeyword.value || undefined, statusFilter.value, groupHook.currentPage.value, 'fresh')

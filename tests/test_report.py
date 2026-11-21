@@ -140,10 +140,12 @@ class TestGetOrderLogs:
                 status='已备货', page=1, per_page=20,
             )
         where = m.call_args.kwargs['base_where']
-        assert any('o.customer LIKE' in c for c in where)
+        # ILIKE（大小写不敏感，审计 data-M-3）：与库存页 _resolve_products 同口径，
+        # m01 必须搜得到 M01。
+        assert any('o.customer ILIKE' in c for c in where)
         # 产品筛选与 SELECT 的显示口径同源（COALESCE(p.*, oi.*)）：多 SKU 展开后，
         # 产品行缺失的 SKU 行会显示 oi.product_name，筛选必须也能命中它。
-        assert any('COALESCE(p.name, oi.product_name) LIKE :product' in c for c in where)
+        assert any('COALESCE(p.name, oi.product_name) ILIKE :product' in c for c in where)
         assert any('o.status = :status' in c for c in where)
 
     def test_export_filter_invalid_status_raises(self):
@@ -253,8 +255,8 @@ class TestGetReturnLogs:
                 start_date='2026-10-01', end_date='2026-10-31',
             )
         where = m.call_args.kwargs['base_where']
-        assert any("COALESCE(sr.customer, '') LIKE :customer" in c for c in where)
-        assert any("COALESCE(p.name, '') LIKE :product" in c for c in where)
+        assert any("COALESCE(sr.customer, '') ILIKE :customer" in c for c in where)
+        assert any("COALESCE(p.name, '') ILIKE :product" in c for c in where)
         assert any('sr.return_date >= :start_date' in c for c in where)
         assert any('sr.return_date < :end_date' in c for c in where)
         params = m.call_args.kwargs['params']

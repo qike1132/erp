@@ -419,7 +419,14 @@ async def _load_bom_context(db: AsyncSession, product_ids: list[int]) -> _BomCon
         return ctx
 
     fill_result = await db.execute(
-        select(ProductMaterial).where(ProductMaterial.product_id.in_(product_ids))
+        select(ProductMaterial).where(
+            ProductMaterial.product_id.in_(product_ids),
+            # 0 用量填充行不算 BOM（审计 M-13 口径统一）：与
+            # _unprocessed._fetch_bom_product_ids / 撤销守卫 / 同步守卫同口径，
+            # 否则 UI 显示未配置 BOM 却能生成 quantity=0 的填充明细。
+            (ProductMaterial.cotton_usage.isnot(None))
+            & (ProductMaterial.cotton_usage > 0),
+        )
     )
     ctx.filling = _bom_rows_by_scope(fill_result.scalars().all())
 
@@ -571,7 +578,11 @@ def _validate_current_sources(
 
 
 def _missing_bom_products(records: list, ctx: _BomContext, names: dict[int, str]) -> list[dict]:
-    """逐 SKU 校验 BOM，不能因其他 SKU 有物料而提前生成整单。"""
+    """逐 SKU 校验 BOM，不能因其他 SKU 有物料而提前生成整单。
+
+    口径来自 ``_load_bom_context``（审计 M-13：filling 桶已滤 0 用量填充行），
+    与 ``_fetch_bom_product_ids`` / has_bom 判定 A 同口径：0 用量填充行 = 无 BOM。
+    """
     configured = {
         row.product_id
         for bucket in (ctx.filling, ctx.fabric, ctx.accessory)

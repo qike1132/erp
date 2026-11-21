@@ -21,6 +21,7 @@
         <PatternRoomSplitBody v-model:drawer-open="drawerOpen" :is-narrow="isNarrow">
           <template #group-list>
             <CustomerGroupList
+              ref="groupListRef"
               :groups="groupHook.groups.value"
               :loading="groupHook.loading.value"
               :has-data="groupHook.hasData.value"
@@ -92,6 +93,7 @@
     <PrintDialog
       ref="printDialogRef"
       :project="projectHook.currentProject.value"
+      :display-number="printDisplayNumber"
       :parts="printParts"
       :roles="printRoles"
     />
@@ -198,6 +200,15 @@ function onSelectProject(id: number) {
   projectHook.fetchDetail(id)
   if (isNarrow.value) drawerOpen.value = false
 }
+
+// 卡片编号的单一真相源在 CustomerGroupList 内的 useProjectGrouping（M-6）：
+// 经模板 ref 读取其 projectDisplayNumbers，把选中项目对应的编号下发给打印弹窗，
+// 消除打印件「日期+恒 01」的第二套编号实现（未取到时 PrintDialog 自带回退）。
+const groupListRef = ref<InstanceType<typeof CustomerGroupList> | null>(null)
+const printDisplayNumber = computed(() => {
+  const id = projectHook.currentProject.value?.id
+  return id != null ? groupListRef.value?.projectDisplayNumbers.get(id) : undefined
+})
 
 const {
   printDialogRef,

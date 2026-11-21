@@ -88,7 +88,12 @@ class TestEndpointsSurfaceIt:
 
     @pytest.mark.asyncio
     async def test_stockout_preview_returns_503_with_hint(self, client):
-        with patch('fastapi_app.services.ocr_service.extract_table_structure',
+        # M-2（2026-11-21 审计）后预览与导入共用 ocr/_import._recognize_items：
+        # 表格阶段缺依赖按设计被吞掉回退文本模式（本文件 test_error_is_runtime_error_subclass
+        # 锁的语义），503 从文本阶段冒泡——两个阶段都要打桩才能稳定断言端点映射。
+        with patch('fastapi_app.services.ocr._import.extract_table_structure',
+                   side_effect=OcrDependencyError(MISSING_MSG)), \
+             patch('fastapi_app.services.ocr._import.extract_text',
                    side_effect=OcrDependencyError(MISSING_MSG)):
             response = await client.post(PREVIEW_URL, files=upload())
         assert response.status_code == 503

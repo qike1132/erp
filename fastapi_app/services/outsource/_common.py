@@ -173,27 +173,6 @@ class OutsourceOrderViewStatus:
     COMPLETED = 'completed'
 
 
-def _matches_process_status(row: dict, status: str) -> bool:
-    """按订单外发工序整体状态过滤。
-
-    - pending 待发货：已配置工序且全部未发货
-    - in_progress 进行中：有工序已发货但未全部收货
-    - completed 已完成：全部工序已收货
-    未配置工序（total=0）不属于任何状态。
-    """
-    total = row.get('total_processes', 0)
-    if total == 0:
-        return False
-    completed = row.get('completed_processes', 0)
-    started = row.get('started_processes', 0)
-    if status == OutsourceOrderViewStatus.COMPLETED:
-        return completed == total
-    if status == OutsourceOrderViewStatus.IN_PROGRESS:
-        return started > 0 and completed < total
-    if status == OutsourceOrderViewStatus.PENDING:
-        return started == 0
-    return True
-
 async def _attach_progress_to_orders(db: AsyncSession, items: list[dict]) -> None:
     """为订单列表条目附加外发工序进度统计（就地修改，仅订单记录；备货记录无工序）。
 

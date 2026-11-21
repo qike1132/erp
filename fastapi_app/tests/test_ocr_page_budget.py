@@ -158,10 +158,15 @@ def _png_bytes() -> bytes:
 
 @pytest.mark.asyncio
 async def test_preview_returns_400_when_page_budget_exceeded(client, monkeypatch):
-    """超预算 → 400 且带上限说明（映射成 500 的话前端只会看到「服务器内部错误」）。"""
+    """超预算 → 400 且带上限说明（映射成 500 的话前端只会看到「服务器内部错误」）。
+
+    M-2（2026-11-21 审计）后预览与导入共用 ocr/_import._recognize_items，桩要打在
+    它实际引用的 _import 命名空间上；预算异常刻意不被「识别失败回退文本」吞掉
+    （test_budget_error_is_business_error_not_a_swallowed_type 锁了这一点）。
+    """
     message = f'PDF 共 {ex._MAX_PDF_PAGES + 10} 页，超过识别上限 {ex._MAX_PDF_PAGES} 页'
     monkeypatch.setattr(
-        'fastapi_app.services.ocr_service.extract_table_structure',
+        'fastapi_app.services.ocr._import.extract_table_structure',
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             ex.OcrPageBudgetExceededError(message)
         ),

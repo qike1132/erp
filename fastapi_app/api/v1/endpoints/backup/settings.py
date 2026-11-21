@@ -77,11 +77,15 @@ async def update_backup_settings(
     result['success'] = True
     # Z05-R24：这些字段仅落库展示，清理/加密实际读环境变量；保存成功必须明确提示，
     # 否则用户会误以为 retention_days=1 已生效。
-    if any(v is not None for v in (payload.retention_days, payload.max_count, payload.encryption_mode)):
+    # 2026-11-20 审计 system-M-2：backup_dir 同样「仅落库、不驱动落盘位置」
+    # （settings_service 落库后的解析函数全仓零调用，实际目录以服务端配置为准），
+    # 管理员改了路径却静默不生效 = 灾备假设被污染。警告条件补上它并写明事实。
+    if any(v is not None for v in (payload.retention_days, payload.max_count, payload.encryption_mode, payload.backup_dir)):
         result['warning'] = (
-            'retention_days / max_count / encryption_mode 当前仅记录，不驱动实际行为；'
+            'retention_days / max_count / encryption_mode / backup_dir 当前仅记录，不驱动实际行为；'
             '清理与加密读取环境变量（BACKUP_RETENTION_DAYS / BACKUP_RETENTION_COUNT / '
-            'BACKUP_ENCRYPTION_ENABLED），修改后需重启服务生效'
+            'BACKUP_ENCRYPTION_ENABLED），备份实际落盘以服务端配置的目录为准'
+            '（生效值见页面上方的「当前生效目录」），修改后需重启服务生效'
         )
     logger.info('备份设置已更新 operator=%s dir=%s', operator, result.get('backup_dir'))
     return result

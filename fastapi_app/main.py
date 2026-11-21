@@ -332,12 +332,7 @@ async def lifespan(application: FastAPI):
     task = asyncio.create_task(_audit_flush_loop())
     background_tasks.append(task)
 
-    # 2026-10-15：warmup_cache 自根 utils/redis_cache.py 迁入 core/cache_warmup.py
-    # （原实现内 import fastapi_app.* 与 fastapi_app→utils 构成包级循环，见其模块 docstring）
-    from fastapi_app.core.cache_warmup import warmup_cache
-    task = asyncio.create_task(warmup_cache())
-    background_tasks.append(task)
-
+    # 启动预热唯一真相源 = _warm_inventory_cache（上方 create_task）；旧 warmup_cache 已于 2026-11-21 死代码清理删除。
     yield
 
     # 关闭超时保护：防止某步骤 hang 导致整个关闭阻塞

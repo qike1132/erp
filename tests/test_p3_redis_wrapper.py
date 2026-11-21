@@ -15,7 +15,7 @@ def test_redis_wrapper_has_all_safe_functions():
         'safe_get', 'safe_set', 'safe_delete', 'safe_delete_pattern',
         'ping', 'get_client',
         'safe_lpush', 'safe_rpush', 'safe_lrange', 'safe_ltrim', 'safe_llen', 'safe_lrem',
-        'safe_publish', 'safe_incr', 'safe_expire', 'safe_exists', 'safe_get_stats',
+        'safe_get_stats',
     ]
     for name in expected:
         assert hasattr(redis_wrapper, name), f"redis_wrapper 缺少函数: {name}"

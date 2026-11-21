@@ -293,10 +293,21 @@ async def receive_shipment(db: AsyncSession, shipment_id: int, username: str | N
     幂等早退在门控之前（参照 confirm_beile_order）：已收货的历史发货单直接返回
     成功（already_received=True），不重复回写工序收货数量。
     """
+    # 行锁（with_for_update，与 confirm_beile_order 同款；审计 hubei-M-2）：
+    # 状态检查与写回是 check-then-act，shipment 读取必须持行锁。并发双收场景
+    # （双标签页/双人同时点确认、或超时重试撞上人工点击）：无锁的 T2 会在 T1
+    # 未提交前读到 status=shipped 并通过状态检查；等 T2 的 receive_order_process
+    # 在工序行锁上拿到 T1 提交后的最新值时，工序剩余已是 0 → clamp_to_remaining
+    # 分支返回 None → T2 把每条明细 received_quantity 覆盖为 0 并再次置
+    # status=received，发货单「已完成」但明细收货数量全 0，与工序台账对不上。
+    # 加行锁后 T2 在本行上等待，T1 提交后重读 status=received → 幂等早退
+    # （下方 already_received 分支），明细保持 T1 写入的值。
+    # selectinload 是独立的第二条查询，不影响主查询的 FOR UPDATE。
     shipment = (await db.execute(
         select(OutsourceShipment)
         .options(selectinload(OutsourceShipment.items))
         .where(OutsourceShipment.id == shipment_id)
+        .with_for_update()
     )).scalars().unique().one_or_none()
     if not shipment:
         raise ValueError('发货单不存在')

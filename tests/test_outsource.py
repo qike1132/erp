@@ -174,10 +174,42 @@ class TestProcessTypeCRUD:
             )
 
     @pytest.mark.asyncio
+    async def test_create_non_hubei_product_rejected(self, mock_async_db):
+        """回归（hubei-L-7）：外发工序预设仅限湖北工厂产品。
+
+        预设页搜索候选已限定湖北（search_hubei_products），但创建入口不校验工厂时，
+        API 直调可给东莞 SKU 挂预设，订单创建路径 auto_generate_for_order 随即给
+        非湖北订单自动生成「影子外发工序」（不在待发货面板也不在外发列表）。
+        """
+        product = MagicMock()
+        product.id = 1
+        product.factory = '东莞'
+        mock_async_db.get = AsyncMock(return_value=product)
+
+        with pytest.raises(ValueError, match='外发工序预设仅限湖北工厂产品'):
+            await create_process_type(
+                mock_async_db, {'product_id': 1, 'process_type': '电绣'}, username='admin',
+            )
+
+    @pytest.mark.asyncio
+    async def test_batch_create_non_hubei_product_rejected(self, mock_async_db):
+        """回归（hubei-L-7）：批量创建入口与单创同口径，非湖北工厂产品拒绝。"""
+        product = MagicMock()
+        product.id = 1
+        product.factory = '东莞'
+        mock_async_db.get = AsyncMock(return_value=product)
+
+        with pytest.raises(ValueError, match='外发工序预设仅限湖北工厂产品'):
+            await batch_create_process_types(
+                mock_async_db, product_id=1, process_types=['电绣'], username='admin',
+            )
+
+    @pytest.mark.asyncio
     async def test_create_duplicate_process_type(self, mock_async_db):
         """同一产品重复工序类型"""
         product = MagicMock()
         product.id = 1
+        product.factory = '湖北'
         mock_async_db.get = AsyncMock(return_value=product)
 
         dup_result = MagicMock()
@@ -195,6 +227,7 @@ class TestProcessTypeCRUD:
         product = MagicMock()
         product.id = 1
         product.name = '测试产品'
+        product.factory = '湖北'
         mock_async_db.get = AsyncMock(return_value=product)
 
         existing_result = MagicMock()
@@ -219,6 +252,7 @@ class TestProcessTypeCRUD:
         """批量添加：工序名称列表为空/全空白"""
         product = MagicMock()
         product.id = 1
+        product.factory = '湖北'  # hubei-L-7 后工厂校验先于名称校验，须给合法湖北产品
         mock_async_db.get = AsyncMock(return_value=product)
         with pytest.raises(ValueError, match='至少填写一个'):
             await batch_create_process_types(mock_async_db, product_id=1, process_types=['', '  '])
@@ -729,6 +763,68 @@ class TestUpdateOrderProcessPlannedTime:
         assert result['planned_start_time'] is None
 
 
+class TestUpdateOrderProcessRenameGuard:
+    """改工序名重名预检（回归 hubei-M-4）
+
+    旧实现直接赋值 p.process_type，flush 时撞唯一索引
+    uq_oosp_order_item_product_process（NULLS NOT DISTINCT）抛 IntegrityError，
+    端点默认映射 500「数据库操作失败」；与服务层/端点修复配套，
+    同 SKU 已有同名工序应预检拦截（ValueError → 400 + 可读文案）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_rename_to_existing_sibling_name_rejected(self, mock_async_db):
+        """改成同 SKU 下已有工序名 → 拒绝（文案与端点 409 兜底一致）"""
+        p = make_order_process(pid=7, item_id=1, process_type='电绣')
+        mock_async_db.get = AsyncMock(return_value=p)
+        dup_result = MagicMock()
+        dup_result.scalar_one_or_none.return_value = 2  # 同 (order, item, product) 已有「转印」
+        mock_async_db.execute = AsyncMock(return_value=dup_result)
+
+        with pytest.raises(ValueError, match='该 SKU 已存在同名工序'):
+            await update_order_process(mock_async_db, 7, {'process_type': '转印'})
+
+    @pytest.mark.asyncio
+    async def test_rename_to_free_name_proceeds(self, mock_async_db):
+        """改成未被占用的名字 → 正常改名"""
+        p = make_order_process(pid=7, item_id=1, process_type='电绣')
+        mock_async_db.get = AsyncMock(return_value=p)
+        dup_result = MagicMock()
+        dup_result.scalar_one_or_none.return_value = None
+        mock_async_db.execute = AsyncMock(return_value=dup_result)
+
+        result = await update_order_process(mock_async_db, 7, {'process_type': '烫钻'})
+
+        assert result['process_type'] == '烫钻'
+
+    @pytest.mark.asyncio
+    async def test_rename_to_same_name_is_no_op_not_rejected(self, mock_async_db):
+        """同名提交不得误报重名——预检必须排除自身（id != p.id）"""
+        p = make_order_process(pid=7, item_id=1, process_type='电绣')
+        mock_async_db.get = AsyncMock(return_value=p)
+        dup_result = MagicMock()
+        dup_result.scalar_one_or_none.return_value = None
+        mock_async_db.execute = AsyncMock(return_value=dup_result)
+
+        result = await update_order_process(mock_async_db, 7, {'process_type': '电绣'})
+
+        assert result['process_type'] == '电绣'
+
+    @pytest.mark.asyncio
+    async def test_rename_legacy_null_item_instance_checked(self, mock_async_db):
+        """旧单实例（order_item_id 为空）同样走预检分支（NULL 须按 IS NULL 匹配）"""
+        p = make_order_process(pid=7, item_id=None, process_type='电绣')
+        mock_async_db.get = AsyncMock(return_value=p)
+        dup_result = MagicMock()
+        dup_result.scalar_one_or_none.return_value = None
+        mock_async_db.execute = AsyncMock(return_value=dup_result)
+
+        result = await update_order_process(mock_async_db, 7, {'process_type': '烫钻'})
+
+        assert result['process_type'] == '烫钻'
+        assert mock_async_db.execute.await_count == 1, '改名必须先查重'
+
+
 class TestOrderListProgress:
     """订单列表附加外发工序进度（看板合并进订单列表）"""
 
@@ -819,6 +915,26 @@ class TestOutsourceRegressions:
         mock_async_db.get = AsyncMock(return_value=p)
 
         await receive_order_process(mock_async_db, 1, '贝乐')
+
+        first_call = mock_async_db.get.await_args_list[0]
+        assert first_call.args[0] is OrderOutsourceProcess
+        assert first_call.kwargs.get('with_for_update') is True
+
+    @pytest.mark.asyncio
+    async def test_delete_locks_process_row(self, mock_async_db):
+        """并发保护（hubei-M-5）：删除必须持行锁取行
+
+        「有流水禁删」守卫与 db.delete 是 check-then-act：不持锁时，并发发货可在
+        检查之后、DELETE 之前提交，DELETE 仍会命中该行，外键 ondelete=CASCADE
+        把刚生成的发货/收货流水一并物理删除（审计台账无痕丢失）。with_for_update
+        让「检查→删除」整段持有工序行锁，并发 ship 在 ship_order_process 的
+        行锁上等待，删除提交后才能继续 → 守卫串行化生效（与 ship/receive 同款）。
+        """
+        p = make_order_process(pid=1)
+        mock_async_db.get = AsyncMock(return_value=p)
+        mock_async_db.scalar = AsyncMock(return_value=0)
+
+        await delete_order_process(mock_async_db, 1)
 
         first_call = mock_async_db.get.await_args_list[0]
         assert first_call.args[0] is OrderOutsourceProcess

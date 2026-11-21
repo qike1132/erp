@@ -143,3 +143,147 @@ class TestListShippableProcesses:
             assert rows == []
         finally:
             await engine.dispose()
+
+
+class TestListUnshippedProcesses:
+    """未到货清单（导出/打印）聚合"""
+
+    @staticmethod
+    async def _session(tmp_path):
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from fastapi_app.shared_models import (
+            Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
+            OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
+            OutsourceProcessType as PresetModel,
+        )
+        from fastapi_app.shared_models import (
+            Product as ProductModel,
+        )
+        engine = create_async_engine(f'sqlite+aiosqlite:///{tmp_path / "unshipped.db"}')
+        async with engine.begin() as conn:
+            for table in (
+                ProductModel.__table__, OrderModel.__table__, OrderItemModel.__table__,
+                OrderOutsourceProcess.__table__, PresetModel.__table__,
+            ):
+                await conn.run_sync(lambda c, t=table: t.create(c, checkfirst=True))
+        return engine, async_sessionmaker(engine, expire_on_commit=False)
+
+    @pytest.mark.asyncio
+    async def test_legacy_order_without_order_item_listed(self, tmp_path):
+        """回归（hubei-M-3 / P1-6）：无 OrderItem 的旧单工序必须出现在未到货清单。
+
+        旧单（单 SKU、无明细行）的工序实例 order_item_id 为空；待发货面板
+        （list_shippable_processes）与发货校验（_process_target_quantity）都按
+        coalesce(OrderItem.quantity, Order.quantity) 回退整单数量——旧单可见可发，
+        但未到货清单以 OrderItem 为驱动表 → 旧单整单漏出，打印给贝乐的
+        「未到货清单」少列这些欠货（对账差异）。
+        """
+        from fastapi_app.services.outsource_service import list_unshipped_processes
+        from fastapi_app.shared_models import (
+            Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
+            Product as ProductModel,
+        )
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                session.add(ProductModel(id=1, name='老SKU', factory='湖北'))
+                # 旧单：无 OrderItem 行，quantity 在订单上
+                session.add(OrderModel(id=1, order_no='PO-OLD-1', customer='贝乐客户',
+                                       product_id=1, quantity=50))
+                # 工序实例 order_item_id 为空，已发 20
+                session.add(OrderOutsourceProcess(
+                    id=1, order_id=1, order_item_id=None, product_id=1, product_name='老SKU',
+                    process_type='电绣', sort_order=0, status='shipped', shipped_quantity=20,
+                ))
+                await session.commit()
+
+            async with session_factory() as session:
+                rows = await list_unshipped_processes(session)
+
+            assert [(r['order_no'], r['process_type'], r['target_qty'], r['shipped_qty'], r['remaining'])
+                    for r in rows] == [
+                ('PO-OLD-1', '电绣', 50, 20, 30),
+            ]
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_new_order_preset_rows_still_listed(self, tmp_path):
+        """守卫：新单（有 OrderItem）的预设口径行为不变——SKU 明细驱动 + 启用预设展开。"""
+        from fastapi_app.services.outsource_service import list_unshipped_processes
+        from fastapi_app.shared_models import (
+            Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
+            OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
+            OutsourceProcessType as PresetModel,
+        )
+        from fastapi_app.shared_models import (
+            Product as ProductModel,
+        )
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                session.add(ProductModel(id=1, name='新SKU', factory='湖北'))
+                session.add(OrderModel(id=1, order_no='PO-1', customer='贝乐客户',
+                                       product_id=1, quantity=100))
+                session.add(OrderItemModel(id=10, order_id=1, product_id=1, quantity=100))
+                session.add(PresetModel(id=1, product_id=1, process_type='电绣',
+                                        sort_order=0, is_active=True))
+                await session.commit()
+
+            async with session_factory() as session:
+                rows = await list_unshipped_processes(session)
+
+            assert [(r['process_type'], r['target_qty'], r['shipped_qty'], r['remaining'])
+                    for r in rows] == [
+                ('电绣', 100, 0, 100),
+            ]
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_dirty_null_item_instance_on_new_order_not_listed(self, tmp_path):
+        """订单已有 SKU 明细而实例 order_item_id 为空（脏数据）：_process_target_quantity
+        对其 fail-closed 拒发，未到货清单同样不把它当旧单欠货列出。"""
+        from fastapi_app.services.outsource_service import list_unshipped_processes
+        from fastapi_app.shared_models import (
+            Order as OrderModel,
+        )
+        from fastapi_app.shared_models import (
+            OrderItem as OrderItemModel,
+        )
+        from fastapi_app.shared_models import (
+            Product as ProductModel,
+        )
+
+        engine, session_factory = await self._session(tmp_path)
+        try:
+            async with session_factory() as session:
+                session.add(ProductModel(id=1, name='新SKU', factory='湖北'))
+                session.add(OrderModel(id=1, order_no='PO-1', customer='贝乐客户',
+                                       product_id=1, quantity=100))
+                session.add(OrderItemModel(id=10, order_id=1, product_id=1, quantity=100))
+                session.add(OrderOutsourceProcess(
+                    id=1, order_id=1, order_item_id=None, product_id=1, product_name='新SKU',
+                    process_type='电绣', sort_order=0, status='pending',
+                ))
+                await session.commit()
+
+            async with session_factory() as session:
+                rows = await list_unshipped_processes(session)
+
+            assert rows == []
+        finally:
+            await engine.dispose()

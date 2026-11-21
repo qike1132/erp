@@ -212,7 +212,7 @@ def _register_slow_listener_for_read_engine():
             from fastapi_app.core.slow_query import setup_slow_query_listener
             setup_slow_query_listener(_read_engine.sync_engine)
             logger.debug("只读引擎慢查询监听器已注册")
-        except (ImportError, Exception) as e:  # broad-except: 数据库连接容错，初始化失败不应阻断启动
+        except Exception as e:  # broad-except: 数据库连接容错，初始化失败不应阻断启动
             logger.warning('只读引擎慢查询监听器注册失败: %s', e)
 
 

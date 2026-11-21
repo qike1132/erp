@@ -1,6 +1,6 @@
 import { get, post, put, del, upload, download } from './request'
 import type {
-  Product, StagingListResponse, StagingRow, StagingImportResult,
+  StagingListResponse, StagingRow, StagingImportResult,
   InventoryResponse, StockInRecord, ShipmentInfo, QueryParams,
 } from '@/types'
 import type { StockStatsData, StockStatsResponse } from '@/types/api'
@@ -88,7 +88,6 @@ export const stockApi = {
   editStockout: (id: number, data: StockOutUpdatePayload) =>
     put<{ success?: boolean; message?: string }>(`/stock/out/edit/${id}`, data),
   deleteStockout: (id: number) => del(`/stock/out/delete/${id}`),
-  searchProducts: (q: string) => get<{ products?: Product }>('/aux/product-search', { q }),
   /**
    * 可出货量查询（后端 `auxiliary.py::AvailableShipmentResponse`）。
    *

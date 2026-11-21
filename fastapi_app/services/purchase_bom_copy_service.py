@@ -142,6 +142,9 @@ async def search_products_for_bom_copy(db: AsyncSession, keyword: str) -> list:
     """搜索产品用于复制BOM
 
     根据关键词搜索产品名称或条码，返回产品基本信息和BOM状态。
+
+    **唯一实现**（审计 M-15）：bom_service.search_for_bom_copy 的生产不可达死副本
+    已删除，本函数是端点 products/search 实际接线的唯一入口。
     """
     if not keyword:
         return []
@@ -189,6 +192,10 @@ async def get_bom_preview(db: AsyncSession, source_product_id: int) -> dict:
     """获取源产品BOM预览用于复制确认
 
     返回源产品的基本信息和完整BOM数据（filling/fabric/accessory/packaging）。
+
+    **唯一实现**（审计 M-15）：bom_service.preview_bom 的生产不可达死副本
+    （响应含 roles 计数，结构已分叉）已删除，本函数是端点 bom-preview 实际接线的
+    唯一入口。
     """
     result = await db.execute(
         select(Product)

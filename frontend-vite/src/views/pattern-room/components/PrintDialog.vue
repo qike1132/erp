@@ -88,12 +88,22 @@ const props = defineProps<{
   project: ProjectDetailResponse | null
   parts: PartDetail[]
   roles: RoleBrief[]
+  /**
+   * 宿主下发的展示编号（卡片的 projectDisplayNumbers：日期 + 当天序号，
+   * 唯一实现在 useProjectGrouping）。未下发时回退「日期 + 01」，保证打印件不断号。
+   */
+  displayNumber?: string
 }>()
 
 const printTime = ref('')
 
-/** 按更新日期生成编号：YYYYMMDD + 01（单项目打印，序号固定 01） */
+/**
+ * 编号单一真相源是卡片的 projectDisplayNumbers（日期 + 当天序号），由宿主经
+ * displayNumber prop 下发。本地不再重算序号——旧实现在此恒拼 01，同天第二个
+ * 项目打印件编号与卡片不一致（M-6）。回退分支仅防宿主未传时打印件空白。
+ */
 const displayNumber = computed(() => {
+  if (props.displayNumber) return props.displayNumber
   const dateStr = props.project?.updated_at?.slice(0, 10) || ''
   if (!dateStr) return '-'
   return `${dateStr.replace(/-/g, '')}01`

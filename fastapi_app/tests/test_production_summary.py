@@ -76,7 +76,12 @@ class TestProductionSummaryEndpoints:
         mock_svc.create_craft_work.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_edit_craft_work_success(self, client, mock_db):
+    async def test_edit_craft_work_is_gone(self, client, mock_db):
+        """审计 M-1（2026-11-21）：旧表写入口的 PUT 与 create 同口径停用，必须 410。
+
+        拦的错：编辑「成功」写进没有任何页面会再读取的 `craft_work` 旧表——
+        用户以为改生效了，实际是黑洞写入。
+        """
         with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
             mock_svc.update_craft_work = AsyncMock(return_value=None)
             response = await client.put(
@@ -86,30 +91,31 @@ class TestProductionSummaryEndpoints:
                     "remark": "更新数量",
                 },
             )
-        assert response.status_code == 200
-        data = response.json()
-        assert data['success'] is True
-        assert '更新成功' in data['message']
+        assert response.status_code == 410
+        assert '/production' in response.json()['detail']
+        # 关键：停用的入口不得再落库
+        mock_svc.update_craft_work.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_edit_craft_work_not_found(self, client, mock_db):
+    async def test_edit_craft_work_gone_even_for_invalid_payload(self, client, mock_db):
+        """挡的错：以为「先校验再拒绝」，让一个能通过的校验把编辑放回来。"""
         with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
-            mock_svc.update_craft_work = AsyncMock(side_effect=ValueError("记录不存在"))
             response = await client.put(
                 "/api/v1/production-summary/craft/edit/999",
-                json={"quantity": 80},
+                json={"work_date": "invalid-date"},
             )
-        assert response.status_code == 400
+        assert response.status_code == 410
+        mock_svc.update_craft_work.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_delete_craft_work_success(self, client, mock_db):
+    async def test_delete_craft_work_is_gone(self, client, mock_db):
+        """审计 M-1（2026-11-21）：旧表 DELETE 与 create 同口径停用，必须 410 且不得落库。"""
         with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
             mock_svc.delete_craft_work = AsyncMock(return_value=None)
             response = await client.delete("/api/v1/production-summary/craft/delete/1")
-        assert response.status_code == 200
-        data = response.json()
-        assert data['success'] is True
-        assert '删除成功' in data['message']
+        assert response.status_code == 410
+        assert '/production' in response.json()['detail']
+        mock_svc.delete_craft_work.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_list_packaging_records_success(self, client, mock_db):
@@ -160,27 +166,27 @@ class TestProductionSummaryEndpoints:
         mock_svc.create_packaging_record.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_edit_packaging_record_success(self, client, mock_db):
+    async def test_edit_packaging_record_is_gone(self, client, mock_db):
+        """审计 M-1（2026-11-21）：包装部旧表 PUT 与 create 同口径停用，必须 410。"""
         with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
             mock_svc.update_packaging_record = AsyncMock(return_value=None)
             response = await client.put(
                 "/api/v1/production-summary/packaging/edit/1",
                 json={"quantity": 50},
             )
-        assert response.status_code == 200
-        data = response.json()
-        assert data['success'] is True
-        assert '更新成功' in data['message']
+        assert response.status_code == 410
+        assert '/production' in response.json()['detail']
+        mock_svc.update_packaging_record.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_delete_packaging_record_success(self, client, mock_db):
+    async def test_delete_packaging_record_is_gone(self, client, mock_db):
+        """审计 M-1（2026-11-21）：包装部旧表 DELETE 与 create 同口径停用，必须 410。"""
         with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
             mock_svc.delete_packaging_record = AsyncMock(return_value=None)
             response = await client.delete("/api/v1/production-summary/packaging/delete/1")
-        assert response.status_code == 200
-        data = response.json()
-        assert data['success'] is True
-        assert '删除成功' in data['message']
+        assert response.status_code == 410
+        assert '/production' in response.json()['detail']
+        mock_svc.delete_packaging_record.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_production_summary_success(self, client, mock_db):

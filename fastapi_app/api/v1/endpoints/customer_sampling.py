@@ -75,9 +75,14 @@ PERM = 'customer_sampling_manage'
 # 将来新增只读角色时只发 customer_sampling_view 即可读到本模块数据。
 READ_PERM = 'customer_sampling_view'
 
-# 候选字段白名单：与 services/customer_sampling/parts.py 的 _CANDIDATE_FIELDS、
-# 前端 PartEditableKey（usePartInlineEdit.ts）同源维护。开新字段下拉三处都要加。
-_CANDIDATE_FIELDS = ('supplier_name', 'fabric_name')
+# 候选字段白名单单一真相源：services/customer_sampling/parts.py 的 _CANDIDATE_FIELDS
+# （dict：字段名 → 模型列）。端点 tuple 从它派生，仅供下方 422 校验使用——新增候选
+# 字段只改 service dict 即可，本处自动跟随（消除审计 L-2 的第三处人工同步点）。
+# 前端 PartEditableKey（usePartInlineEdit.ts）属跨语言对齐，仍需人工同步。
+# 导入下划线成员为本模块域内（端点 ↔ service）对齐，可接受。
+from fastapi_app.services.customer_sampling.parts import _CANDIDATE_FIELDS as _CANDIDATE_FIELD_MAP
+
+_CANDIDATE_FIELDS = tuple(_CANDIDATE_FIELD_MAP)
 
 
 # ==================== 1. 按客户分组聚合查询 ====================

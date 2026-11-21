@@ -15586,7 +15586,7 @@
           "生产计划"
         ],
         "summary": "Update Craft Work",
-        "description": "编辑手工部生产记录。\n\nArgs:\n    record_id: 手工部记录 ID。\n    data: 手工部记录更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，作为操作人。\n\nReturns:\n    CraftWorkActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "【已停用，恒返回 410】编辑手工部生产记录（审计 M-1，2026-11-21）。\n\n与 create 同一处置：旧表 `craft_work` 已无页面读取（生产报表页只读\n`daily_production_record`），编辑「成功」等于把改动写进黑洞。保留路由与\n入参模型是为了让老前端的请求得到明确答复，而不是 404 或静默写入。\n\nRaises:\n    HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。",
         "operationId": "update_craft_work_api_v1_production_summary_craft_edit__record_id__put",
         "parameters": [
           {
@@ -15639,7 +15639,7 @@
           "生产计划"
         ],
         "summary": "Delete Craft Work",
-        "description": "删除手工部生产记录。\n\nArgs:\n    record_id: 手工部记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    CraftWorkActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "【已停用，恒返回 410】删除手工部生产记录（审计 M-1，2026-11-21）。\n\n与 create 同一处置：旧表 `craft_work` 已无页面读取，任何页面都看不见这条\n数据的消失，删除只是制造「看起来成功了」的假象。\n\nRaises:\n    HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。",
         "operationId": "delete_craft_work_api_v1_production_summary_craft_delete__record_id__delete",
         "parameters": [
           {
@@ -15874,7 +15874,7 @@
           "生产计划"
         ],
         "summary": "Update Packaging Record",
-        "description": "编辑包装部记录。\n\nArgs:\n    record_id: 包装部记录 ID。\n    data: 包装部记录更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，作为操作人。\n\nReturns:\n    PackagingRecordActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "【已停用，恒返回 410】编辑包装部记录（审计 M-1，2026-11-21）。\n\n与 create 同一处置：旧表 `packaging_record` 已无页面读取，编辑「成功」等于\n把改动写进黑洞。\n\nRaises:\n    HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。",
         "operationId": "update_packaging_record_api_v1_production_summary_packaging_edit__record_id__put",
         "parameters": [
           {
@@ -15927,7 +15927,7 @@
           "生产计划"
         ],
         "summary": "Delete Packaging Record",
-        "description": "删除包装部记录。\n\nArgs:\n    record_id: 包装部记录 ID。\n    db: 异步数据库会话（读写主库）。\n    _user: 当前登录用户（仅需通过权限校验）。\n\nReturns:\n    PackagingRecordActionResponse: 包含成功标志和提示消息的响应。",
+        "description": "【已停用，恒返回 410】删除包装部记录（审计 M-1，2026-11-21）。\n\n与 create 同一处置：旧表 `packaging_record` 已无页面读取，任何页面都看不见\n这条数据的消失，删除只是制造「看起来成功了」的假象。\n\nRaises:\n    HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。",
         "operationId": "delete_packaging_record_api_v1_production_summary_packaging_delete__record_id__delete",
         "parameters": [
           {
@@ -15970,7 +15970,7 @@
           "生产计划"
         ],
         "summary": "Upload Packaging Excel",
-        "description": "批量导入包装部记录（Excel上传）。\n\nArgs:\n    file: 上传的 Excel 文件（.xlsx 格式）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，作为操作人。\n\nReturns:\n    PackagingUploadResponse: 包含导入结果的响应。\n\nRaises:\n    HTTPException: 文件格式不支持或读取失败时抛出 400。",
+        "description": "【已停用，恒返回 410】批量导入包装部记录（Excel上传）。\n\n2026-11-16 审计 A-16 收尾（评审 F11）：本端点写的是**旧表** packaging_record，\n与两个 create 端点同源；任何页面都不再读它，继续放行等于让旧客户端/脚本\n「上传成功、但 /production 永远看不到」。与 create 同口径直接 410。\n410 之后的历史校验体（扩展名/体积/魔数/事务）已按审计 L-1（2026-11-21）删除；\n若将来要恢复上传，请从 git 历史找回而不是在本文件里堆死代码。\n\nRaises:\n    HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。",
         "operationId": "upload_packaging_excel_api_v1_production_summary_packaging_upload_post",
         "requestBody": {
           "content": {

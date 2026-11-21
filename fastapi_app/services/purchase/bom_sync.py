@@ -35,6 +35,7 @@ from fastapi_app.services.purchase_order_generate import (
     build_expected_items,
 )
 from fastapi_app.services.purchase_order_sku import fetch_po_sku_map
+from fastapi_app.services.purchase_utils import role_sentinel
 from fastapi_app.shared_models import Product, PurchaseOrder, PurchaseOrderItem
 from fastapi_app.shared_models.purchase_center import ModificationLog
 from fastapi_app.shared_models.purchase_order import PurchaseOrderStatus
@@ -64,17 +65,15 @@ class SyncResult:
 def _norm(value) -> str:
     return (value or '').strip()
 
-
-def _norm_role(value) -> int:
-    """role 归一：NULL（默认 BOM/历史/手工）与 None 统一为哨兵 0 参与键比较。"""
-    return int(value) if value is not None else 0
+# role 归一收敛为 purchase_utils.role_sentinel（审计 L-1：三份逐字相同副本 → 单一实现；
+# 原本模块内的 _norm_role 已删，同步键/回退键/签名比对全部直接用共享实现）。
 
 
 def _existing_key(row: PurchaseOrderItem) -> tuple:
     # 2026-11-11 口径：键加入 role_id——同物料多角色各自成行，同步继承不得跨 role
     # 互相覆盖损耗率（问题 2 根因：旧键无 role，A 行改率会把 B 行一并顶掉）。
     return (
-        _norm_role(getattr(row, 'role_id', None)),
+        role_sentinel(getattr(row, 'role_id', None)),
         _norm(row.material_name), _norm(row.specification), _norm(row.unit),
         _norm(row.part_name), _norm(row.supplier_name), _norm(row.material_category),
     )
@@ -82,7 +81,7 @@ def _existing_key(row: PurchaseOrderItem) -> tuple:
 
 def _target_key(item: dict) -> tuple:
     return (
-        _norm_role(item.get('role_id')),
+        role_sentinel(item.get('role_id')),
         _norm(item.get('material_name')), _norm(item.get('specification')),
         _norm(item.get('unit')), _norm(item.get('part_name')),
         _norm(item.get('supplier_name')), _norm(item.get('category')),
@@ -103,7 +102,7 @@ def _canonical(item: dict) -> tuple:
     # 数量/用量按落库列精度比较（Numeric(12,2) / Numeric(10,4)），避免
     # 浮点表示差异和 Numeric 截断导致「刚同步过又被判为有变化」。
     return (
-        _norm_role(item.get('role_id')),
+        role_sentinel(item.get('role_id')),
         _norm(item.get('material_name')), _norm(item.get('specification')),
         _norm(item.get('unit')), _norm(item.get('part_name')),
         _norm(item.get('supplier_name')), _norm(item.get('category')),
@@ -497,7 +496,7 @@ async def sync_purchase_order_items(
 
     existing_sig = sorted(
         (
-            _norm_role(getattr(r, 'role_id', None)),
+            role_sentinel(getattr(r, 'role_id', None)),
             *_existing_key(r)[1:],
             round(float(r.quantity or 0), 2), round(float(r.unit_usage or 0), 4),
         )

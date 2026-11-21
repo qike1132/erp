@@ -2,26 +2,15 @@ import { get, post, put, del, download } from './request'
 import type {
   DailySummary,
   MonthlySummary,
-  ProductionCraft,
   ProductionRecordListResponse,
   QueryParams,
   RecordsQuery,
   TrendResponse,
 } from '@/types'
 
-export const productionApi = {
-  craft: (params?: QueryParams) =>
-    get<ProductionCraft[]>('/production-summary/craft/list', {
-      year: new Date().getFullYear(),
-      month: new Date().getMonth() + 1,
-      ...params,
-    }),
-  createCraft: (data: Partial<ProductionCraft>) => post<ProductionCraft>('/production-summary/craft/create', data),
-  editCraft: (id: number, data: Partial<ProductionCraft>) => put<ProductionCraft>(`/production-summary/craft/edit/${id}`, data),
-  deleteCraft: (id: number) => del(`/production-summary/craft/delete/${id}`),
-  summary: (params?: QueryParams) =>
-    get<Record<string, unknown>>('/production-summary/summary', { year: new Date().getFullYear(), ...params }),
-}
+// 旧生产报表 craft/packaging 的 productionApi 已删除（审计 L-2，2026-11-21）：
+// 全仓零消费的死客户端；对应后端写入口（craft/packaging 的 create/edit/delete/upload）
+// 也已 410 停用（审计 M-1）。生产报表统一走 dailyProductionApi。
 
 export const dailyProductionApi = {
   /**

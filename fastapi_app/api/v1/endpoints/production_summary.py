@@ -13,13 +13,9 @@ from fastapi.responses import Response
 from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.backup_progress import _sanitize_error
 from fastapi_app.core.config import settings
 from fastapi_app.core.database import get_async_db, get_async_read_db
 from fastapi_app.core.deps import require_permission
-from fastapi_app.core.exceptions import db_transaction
-from fastapi_app.core.response import success_response
-from fastapi_app.core.validators import require_upload_magic
 from fastapi_app.schemas.production_summary import (
     CraftWorkActionResponse,
     CraftWorkCreate,
@@ -33,16 +29,9 @@ from fastapi_app.schemas.production_summary import (
     ProductionSummaryResponse,
 )
 from fastapi_app.services import production_summary_service
-from fastapi_app.services.xlsx_budget import XlsxBudgetError
 from fastapi_app.shared_models import User
 
 router = APIRouter()
-
-#: 包装部 Excel 上传体积上限（端点级兜底，**文件级**口径）。multipart 请求体 =
-#: 文件 + 边界/字段头开销，外层 body 预算由 core/middleware.py 的放宽名单给足
-#: 余量、nginx 同步 12m——本常量若与外层相等，「恰好 10MB 的合法文件」会在
-#: 抵达端点前被 413（M2，2026-10-25 上线前检查）。
-MAX_PACKAGING_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 #: 旧表写入口（craft/packaging create）的停用说明。文案直接给出去处，
 #: 让仍在调这两个接口的旧前端/脚本知道该去哪录，而不是只看到一个 410 码。
@@ -112,23 +101,19 @@ async def update_craft_work(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission('production_summary_manage')),
 ) -> CraftWorkActionResponse:
-    """编辑手工部生产记录。
+    """【已停用，恒返回 410】编辑手工部生产记录（审计 M-1，2026-11-21）。
 
-    Args:
-        record_id: 手工部记录 ID。
-        data: 手工部记录更新参数（仅包含需要修改的字段）。
-        db: 异步数据库会话（读写主库）。
-        user: 当前登录用户，作为操作人。
+    与 create 同一处置：旧表 `craft_work` 已无页面读取（生产报表页只读
+    `daily_production_record`），编辑「成功」等于把改动写进黑洞。保留路由与
+    入参模型是为了让老前端的请求得到明确答复，而不是 404 或静默写入。
 
-    Returns:
-        CraftWorkActionResponse: 包含成功标志和提示消息的响应。
+    Raises:
+        HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。
     """
-    async with db_transaction(db):
-        update_data = data.model_dump(exclude_unset=True)
-        await production_summary_service.update_craft_work(
-            db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data,
-        )
-    return CraftWorkActionResponse(success=True, message='手工部记录更新成功！')
+    raise HTTPException(
+        status_code=410,
+        detail=LEGACY_WRITE_GONE_DETAIL,
+    )
 
 
 @router.delete('/craft/delete/{record_id}', response_model=CraftWorkActionResponse)
@@ -137,19 +122,18 @@ async def delete_craft_work(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission('production_summary_manage')),
 ) -> CraftWorkActionResponse:
-    """删除手工部生产记录。
+    """【已停用，恒返回 410】删除手工部生产记录（审计 M-1，2026-11-21）。
 
-    Args:
-        record_id: 手工部记录 ID。
-        db: 异步数据库会话（读写主库）。
-        _user: 当前登录用户（仅需通过权限校验）。
+    与 create 同一处置：旧表 `craft_work` 已无页面读取，任何页面都看不见这条
+    数据的消失，删除只是制造「看起来成功了」的假象。
 
-    Returns:
-        CraftWorkActionResponse: 包含成功标志和提示消息的响应。
+    Raises:
+        HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。
     """
-    async with db_transaction(db):
-        await production_summary_service.delete_craft_work(db, record_id)
-    return CraftWorkActionResponse(success=True, message='手工部记录删除成功！')
+    raise HTTPException(
+        status_code=410,
+        detail=LEGACY_WRITE_GONE_DETAIL,
+    )
 
 
 @router.get('/craft/export')
@@ -258,23 +242,18 @@ async def update_packaging_record(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission('production_summary_manage')),
 ) -> PackagingRecordActionResponse:
-    """编辑包装部记录。
+    """【已停用，恒返回 410】编辑包装部记录（审计 M-1，2026-11-21）。
 
-    Args:
-        record_id: 包装部记录 ID。
-        data: 包装部记录更新参数（仅包含需要修改的字段）。
-        db: 异步数据库会话（读写主库）。
-        user: 当前登录用户，作为操作人。
+    与 create 同一处置：旧表 `packaging_record` 已无页面读取，编辑「成功」等于
+    把改动写进黑洞。
 
-    Returns:
-        PackagingRecordActionResponse: 包含成功标志和提示消息的响应。
+    Raises:
+        HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。
     """
-    async with db_transaction(db):
-        update_data = data.model_dump(exclude_unset=True)
-        await production_summary_service.update_packaging_record(
-            db, record_id, created_by=user.username if hasattr(user, 'username') else '', **update_data,
-        )
-    return PackagingRecordActionResponse(success=True, message='包装部记录更新成功！')
+    raise HTTPException(
+        status_code=410,
+        detail=LEGACY_WRITE_GONE_DETAIL,
+    )
 
 
 @router.delete('/packaging/delete/{record_id}', response_model=PackagingRecordActionResponse)
@@ -283,19 +262,18 @@ async def delete_packaging_record(
     db: AsyncSession = Depends(get_async_db),
     _user: User = Depends(require_permission('production_summary_manage')),
 ) -> PackagingRecordActionResponse:
-    """删除包装部记录。
+    """【已停用，恒返回 410】删除包装部记录（审计 M-1，2026-11-21）。
 
-    Args:
-        record_id: 包装部记录 ID。
-        db: 异步数据库会话（读写主库）。
-        _user: 当前登录用户（仅需通过权限校验）。
+    与 create 同一处置：旧表 `packaging_record` 已无页面读取，任何页面都看不见
+    这条数据的消失，删除只是制造「看起来成功了」的假象。
 
-    Returns:
-        PackagingRecordActionResponse: 包含成功标志和提示消息的响应。
+    Raises:
+        HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。
     """
-    async with db_transaction(db):
-        await production_summary_service.delete_packaging_record(db, record_id)
-    return PackagingRecordActionResponse(success=True, message='包装部记录删除成功！')
+    raise HTTPException(
+        status_code=410,
+        detail=LEGACY_WRITE_GONE_DETAIL,
+    )
 
 
 @router.post('/packaging/upload', response_model=PackagingUploadResponse)
@@ -304,51 +282,22 @@ async def upload_packaging_excel(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_permission('production_summary_manage')),
 ) -> PackagingUploadResponse:
-    """批量导入包装部记录（Excel上传）。
+    """【已停用，恒返回 410】批量导入包装部记录（Excel上传）。
 
-    Args:
-        file: 上传的 Excel 文件（.xlsx 格式）。
-        db: 异步数据库会话（读写主库）。
-        user: 当前登录用户，作为操作人。
-
-    Returns:
-        PackagingUploadResponse: 包含导入结果的响应。
+    2026-11-16 审计 A-16 收尾（评审 F11）：本端点写的是**旧表** packaging_record，
+    与两个 create 端点同源；任何页面都不再读它，继续放行等于让旧客户端/脚本
+    「上传成功、但 /production 永远看不到」。与 create 同口径直接 410。
+    410 之后的历史校验体（扩展名/体积/魔数/事务）已按审计 L-1（2026-11-21）删除；
+    若将来要恢复上传，请从 git 历史找回而不是在本文件里堆死代码。
 
     Raises:
-        HTTPException: 文件格式不支持或读取失败时抛出 400。
+        HTTPException: 410 —— 该入口已停用，请改用 `/production` 录入。
     """
-    # 2026-11-16 审计 A-16 收尾（评审 F11）：本端点写的是**旧表** packaging_record，
-    # 与两个 create 端点同源；任何页面都不再读它，继续放行等于让旧客户端/脚本
-    # 「上传成功、但 /production 永远看不到」。与 create 同口径直接 410。
     raise HTTPException(
         status_code=410,
         detail='该入口已停用，请在 /production 录入生产记录'
                '（本入口写入的是历史旧表，任何页面都不再读取它）',
     )
-
-    filename = file.filename or ''
-    if not filename.endswith('.xlsx'):
-        raise HTTPException(status_code=400, detail='仅支持 .xlsx 格式文件，.xls 已不再支持')
-    # 端点级体积兜底（文件级 10MB；multipart body 的余量由 core/middleware.py 放宽名单负责）
-    declared = getattr(file, 'size', None)
-    if declared is not None and declared > MAX_PACKAGING_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail=f'文件超过 {MAX_PACKAGING_UPLOAD_SIZE // 1024 // 1024}MB 上传限制')
-    try:
-        content = await file.read()
-    except (OSError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=_sanitize_error(f'文件读取失败: {e}')) from e
-    if len(content) > MAX_PACKAGING_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail=f'文件超过 {MAX_PACKAGING_UPLOAD_SIZE // 1024 // 1024}MB 上传限制')
-    # P0-12：扩展名之外再校验文件头（改扩展名的伪 xlsx 在此拦下）
-    require_upload_magic(content, ('xlsx', 'xlsm'), filename=file.filename or '')
-    try:
-        async with db_transaction(db):
-            created_by = user.username if hasattr(user, 'username') else ''
-            result = await production_summary_service.upload_packaging_excel(db, content, created_by)
-    except XlsxBudgetError as e:
-        # M5 评审 finding 3：资源预算拒绝必须落成 400 友好报错，而不是全局 handler 的 500
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    return PackagingUploadResponse(**success_response(**{**result}))
 
 
 @router.get('/packaging/export')

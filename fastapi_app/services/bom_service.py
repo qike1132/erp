@@ -3,9 +3,9 @@ BOM（物料清单）领域服务 - 深模块聚合
 
 将原分散于 product_service、purchase_product_service、purchase_bom_copy_service、
 product_search_service 四个文件中的 BOM 领域逻辑聚合为单一深模块，统一对外提供
-BOM 的查询、保存、复制、预览与搜索能力。
+BOM 的查询、保存与复制能力。
 
-入口函数（共 6 个）：
+入口函数（共 4 个）：
 1. has_bom(product) -> bool
    判断产品是否配置了 BOM（填充物/面料/辅料任一有数据即视为有 BOM）。
 2. get_bom(db, product_id) -> dict
@@ -17,10 +17,11 @@ BOM 的查询、保存、复制、预览与搜索能力。
    当 data 携带 role_id 时复制到该指定角色（不新建角色、不波及默认/其他角色）；
    当 role_id 为空但携带 role_name 时，在目标产品中按名称查找角色（幂等），
    不存在则新建后再复制，用于支持前端尚未保存的新角色。
-5. preview_bom(db, source_product_id) -> dict
-   预览源产品 BOM 结构，供复制前确认。
-6. search_for_bom_copy(db, keyword) -> list
-   搜索可用于 BOM 复制的产品（含 has_bom 标记与物料计数）。
+
+注：BOM 复制前的预览与搜索入口在 ``purchase_bom_copy_service``
+（get_bom_preview / search_products_for_bom_copy，端点实际接线）。本文件曾各持有
+一份生产不可达的副本（preview_bom / search_for_bom_copy，响应结构已分叉），
+已删除（审计 M-15），勿再在此聚合预览/搜索。
 
 三类物料映射规则：
 - filling（填充物）: ProductMaterial 模型，与产品 1:1 关系，
@@ -41,7 +42,6 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstanceState, selectinload
 
-from fastapi_app.core.business_time import fmt_business
 from fastapi_app.services.product.bom_role_resolver import resolve_role_rows
 from fastapi_app.services.product.role_service import _name_key
 from fastapi_app.services.purchase_supplier_service import resolve_bom_suppliers
@@ -1044,113 +1044,3 @@ async def copy_bom(db: AsyncSession, target_product_id: int, data: dict, usernam
         'source_product': {'id': source_product.id, 'name': source_product.name},
         'target_product': {'id': target_product.id, 'name': target_product.name},
     }
-
-
-async def preview_bom(db: AsyncSession, source_product_id: int) -> dict:
-    result = await db.execute(
-        select(Product).options(
-            selectinload(Product.material),
-            selectinload(Product.material_rows),
-            selectinload(Product.fabrics),
-            selectinload(Product.accessories),
-            selectinload(Product.roles),
-        ).where(Product.id == source_product_id)
-    )
-    source_product = result.scalar_one_or_none()
-    if not source_product:
-        raise ValueError(f'产品ID {source_product_id} 不存在')
-    if not has_bom(source_product):
-        raise ValueError('该产品没有配置BOM表，无法复制')
-
-    # 源产品所有填充物（含各角色行）
-    src_mat_result = await db.execute(
-        select(ProductMaterial).where(ProductMaterial.product_id == source_product_id)
-    )
-    source_materials = src_mat_result.scalars().all()
-
-    bom_data: dict[str, Any] = {
-        'filling': None,
-        'fabric': [],
-        'accessory': [],
-        'roles': [],
-    }
-
-    if source_product.material and getattr(source_product.material, 'cotton_usage', Decimal('0')) > 0:
-        bom_data['filling'] = source_product.material.to_dict()
-
-    for fabric in source_product.fabrics:
-        if fabric.role_id is not None:
-            continue
-        bom_data['fabric'].append(fabric.to_dict())
-    for accessory in source_product.accessories:
-        if accessory.role_id is not None:
-            continue
-        bom_data['accessory'].append(accessory.to_dict())
-
-    for role in source_product.roles:
-        bom_data['roles'].append({
-            'id': role.id,
-            'name': role.role_name,
-            'filling_count': sum(1 for m in source_materials if m.role_id == role.id),
-            'fabric_count': sum(1 for f in source_product.fabrics if f.role_id == role.id),
-            'accessory_count': sum(1 for a in source_product.accessories if a.role_id == role.id),
-        })
-
-    material_count = (
-        (1 if bom_data['filling'] else 0)
-        + len(bom_data['fabric'])
-        + len(bom_data['accessory'])
-        + sum(r['filling_count'] + r['fabric_count'] + r['accessory_count'] for r in bom_data['roles'])
-    )
-
-    create_time_str = fmt_business(
-        source_product.create_time, '%Y-%m-%d %H:%M:%S') or None
-
-    return {
-        'product': {
-            'id': source_product.id,
-            'name': source_product.name,
-            'barcode': source_product.barcode,
-            'create_time': create_time_str,
-        },
-        'bom': bom_data,
-        'material_count': material_count,
-        'role_count': len(source_product.roles),
-    }
-
-
-async def search_for_bom_copy(db: AsyncSession, keyword: str, *, search_service=None) -> list:
-    if search_service is None:
-        from fastapi_app.services.product_search_service import product_search_service
-        search_service = product_search_service
-
-    if not keyword:
-        return []
-
-    query = search_service.build_search_query_async(db, keyword)
-    query = query.options(
-        selectinload(Product.material),
-        selectinload(Product.material_rows),
-        selectinload(Product.fabrics),
-        selectinload(Product.accessories),
-    ).limit(20)
-    result = await db.execute(query)
-    products = result.scalars().unique().all()
-
-    output = []
-    for p in products:
-        has_bom_flag = has_bom(p)
-        material_count = (
-            len(p.fabrics) + len(p.accessories)
-            + (1 if p.material and getattr(p.material, "cotton_usage", Decimal("0")) > 0 else 0)
-        )
-        output.append({
-            "id": p.id,
-            "name": p.name,
-            "barcode": p.barcode,
-            "price": float(p.price) if p.price else 0,
-            "has_bom": has_bom_flag,
-            "material_count": material_count,
-        })
-
-    return output

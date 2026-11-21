@@ -9,6 +9,7 @@
 - calc_spare_quantity: 计算备品数量（前后端同源的唯一后端实现）
 - resolve_item_loss_rate: 解析明细行的有效损耗率（逐行 → 订单级 → 0）
 - magnified_purchase_qty: 计价数量（落库数量按损耗率加放，不取整）
+- role_sentinel: role_id 归一哨兵（purchase 族共用的唯一实现）
 """
 import json
 import logging
@@ -16,6 +17,18 @@ import math
 from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger(__name__)
+
+
+def role_sentinel(role_id) -> int:
+    """role 归一哨兵：``None``（默认 BOM/历史/手工行）→ 0，其余 ``int(role_id)``。
+
+    purchase 族键比较的**唯一实现**（审计 L-1 收敛，原三份逐字相同副本：
+    bom_sync._norm_role、_supplier._role_sentinel、_factory._role_sentinel）。
+    同物料多角色各自成行的键（同步键/汇总键/部位匹配键）都必须经本函数归一；
+    三份副本时代改一处（如哨兵改 -1）另两处会静默失配、键比较跨模块崩，
+    现在只改这里。
+    """
+    return int(role_id) if role_id is not None else 0
 
 
 def parse_source_order_ids(source_order_ids: str | list | None) -> list[int]:

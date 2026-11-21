@@ -145,11 +145,31 @@ def _build_unprocessed_stockin_record(stockin) -> dict:
     }
 
 async def _fetch_bom_product_ids(db: AsyncSession, product_ids: list) -> set[int]:
+    """「产品已配置 BOM」的唯一 SQL 判定（审计 M-13 口径统一）。
+
+    **共用方（三处，判定必须同口径）**：
+    1. 未处理列表 has_bom 标记 / 自动生成候选（本模块 ``_order_has_bom``）；
+    2. 撤销守卫 ``purchase_order_revoke.revoke_pending_purchase_orders_for_product``
+       （「BOM 是否已删空」决定要不要撤 pending 单）；
+    3. 同步守卫 ``bom_sync.product_has_bom``（防「解析口径差把整单明细删光」）。
+
+    **口径裁定（审计 M-13，2026-11-21）**：0 用量填充行（cotton_usage=0/NULL）
+    = 无 BOM，与判定 A（``shared_models.Product.has_bom``、``bom_service.has_bom``、
+    ``purchase_product_service._batch_check_bom_exists/_has_bom_clause``）同口径——
+    原先只看「行存在」，UI 显示未配置 BOM 却能生成 quantity=0 的填充明细。
+    面料/辅料行无用量门槛，行存在即算（与判定 A 一致）。
+    """
     if not product_ids:
         return set()
     # UNION ALL 单次查询：合并填充物/面料/辅料三张 BOM 子表的 product_id
     stmt = union_all(
-        select(ProductMaterial.product_id).where(ProductMaterial.product_id.in_(product_ids)),
+        select(ProductMaterial.product_id).where(
+            ProductMaterial.product_id.in_(product_ids),
+            # 0 用量填充行不算 BOM（审计 M-13；SQL 里 >0 已排除 NULL，显式写
+            # isnot(None) 与判定 A 的 Python 口径 `cotton_usage and cotton_usage > 0` 对齐）
+            (ProductMaterial.cotton_usage.isnot(None))
+            & (ProductMaterial.cotton_usage > 0),
+        ),
         select(ProductFabric.product_id).where(ProductFabric.product_id.in_(product_ids)),
         select(ProductAccessory.product_id).where(ProductAccessory.product_id.in_(product_ids)),
     )

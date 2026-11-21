@@ -13,7 +13,6 @@ from fastapi_app.services.outsource._common import (  # noqa: F401
     _fmt_dt,
     _format_process_progress,
     _is_fully_received,
-    _matches_process_status,
     _serialize_order_process,
     _serialize_process_type,
 )
