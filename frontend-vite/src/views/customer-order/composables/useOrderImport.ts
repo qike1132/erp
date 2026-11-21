@@ -216,10 +216,13 @@ export function useOrderImport(stagedItems: Ref<StagedItem[]>, isOrder: Computed
         )).map(toStagedStockin)
       }
 
-      // 服务端已按「本次文件」重建暂存区：用它替换上次导入的条目，
-      // 同时保留本页手工新增的条目（手工条目只存在于前端，服务端不会清）。
+      // 服务端已按「本次文件」重建当前类型的暂存区：只替换本类型已导入条目，
+      // 保留手工条目与其他类型的导入条目（M-30，2026-11-21 审计：原先
+      // origin!=='import' 会把另一类型已导入的暂存行一并清掉——跨类型连续导入丢数据）。
       stagedItems.value = [
-        ...stagedItems.value.filter((i) => i.origin !== 'import'),
+        ...stagedItems.value.filter(
+          (i) => i.origin !== 'import' || i.type !== (isOrder.value ? 'order' : 'stockin'),
+        ),
         ...imported,
       ]
       excelFile.value = null

@@ -55,6 +55,10 @@ export function useEnhancedList<T>(opts: Options) {
     ...extraParams?.()
   }))
 
+  // M-39（2026-11-21 审计）：共享 total 的代际计数——不同 queryKey 的请求并行在途，
+  // 只有「当前最新一次发起」的结果才允许写 total。
+  let latestQuerySeq = 0
+
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: qk,
     // routeCancel: false —— 查询请求归 Vue Query 缓存所有，不属于任何路由。
@@ -62,7 +66,14 @@ export function useEnhancedList<T>(opts: Options) {
     // 变成永不 settle 的 Promise → 该 queryKey 永久停在 fetchStatus='fetching'，
     // 用户再切回来时 useQuery 不复用/不重取，页面永远显示「加载中」且刷新也救不回
     // （2026-10-22 登录后仪表盘无数据是同源事故，这里覆盖全部列表页）。
-    queryFn: async () => { const r = await get<PaginatedResponse<T>>(url, qp.value, { routeCancel: false }); total.value = r.total ?? 0; return r },
+    queryFn: async () => {
+      // M-39（2026-11-21 审计）：total 写共享 ref 需代际守卫——快速翻页/切筛选时
+      // 旧 key 响应后到会把新页 total 覆盖成旧值（items 与「共 N 条」错页）。
+      const seq = ++latestQuerySeq
+      const r = await get<PaginatedResponse<T>>(url, qp.value, { routeCancel: false })
+      if (seq === latestQuerySeq) total.value = r.total ?? 0
+      return r
+    },
     staleTime,
     placeholderData: (prev) => prev,
   })
