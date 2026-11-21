@@ -260,6 +260,9 @@ const { checkedRows, checkedCount, shipSum, selectedOrderCount, invalidCount, fi
 
 // ===== 提交与结果 =====
 function submit() {
+  // M-31（2026-11-21 审计，H6 标准）：按钮 disabled 挡不住同帧程序化双调——
+  // 入口加函数级重入闸（useStockOutActions.ts:19 同款）。
+  if (submitting.value) return
   for (const r of checkedRows.value) {
     if (!isRowInvalid(r)) continue
     const n = Number(r.input.qty)

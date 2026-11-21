@@ -232,6 +232,9 @@ export function useCreateShipmentPlan(
   }
 
   async function handleSubmit() {
+    // M-31（2026-11-21 审计，H6 标准）：submitting 闸门必须在 validate 之前——
+    // 同帧双调时两份都在途会重复建计划。
+    if (submitting.value) return
     const err = validate()
     if (err) { errorMsg.value = err; return }
     errorMsg.value = ''
