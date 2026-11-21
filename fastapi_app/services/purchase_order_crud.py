@@ -4,6 +4,7 @@
 职责：采购订单的创建、更新、删除、完成、清理等写操作。
 从 purchase_order_service.py 拆分而来，保持函数签名不变。
 """
+import hashlib
 import json
 import logging
 from collections import defaultdict
@@ -19,6 +20,7 @@ from fastapi_app.core.business_time import business_today
 from fastapi_app.core.exceptions import ConflictError, ItemsVersionConflict
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.numbering import generate_purchase_order_number
+from fastapi_app.services.purchase_order_idempotency import acquire_key_lock, load_replay, save_result
 from fastapi_app.services.purchase_order_purge import purge_purchase_order_children
 from fastapi_app.services.purchase_order_sku import resync_po_sku_spare
 from fastapi_app.services.purchase_utils import (
@@ -93,13 +95,30 @@ async def _create_material_registration(
     return registration
 
 
-async def create_purchase_order(db: AsyncSession, data: dict, include_summary: bool = False) -> dict:
+async def create_purchase_order(
+    db: AsyncSession, data: dict, include_summary: bool = False,
+    idempotency_key: str = '', actor_id: int | None = None,
+) -> dict:
     # P1（2026-10-24）：端点 schema 的字段名是 materials/remark（purchase_center/schemas.py），
     # 而本函数原先只读 items/note，pydantic 忽略多余字段 → POST /purchase-center/orders
     # 恒 400「至少需要一条明细」。两种键名都接受，兼容脚本/旧调用方。
     items = data.get('materials') or data.get('items') or []
     if not items:
         raise ValueError('采购订单至少需要一条明细')
+
+    # M-28（2026-11-21 审计）：手工建单与一键生成共用幂等登记——uq_po_pending_dedup
+    # 只盖 source_order_ids 非空的生成单，手工单双击/重试会产生重复 pending 单。
+    fingerprint = ''
+    if idempotency_key:
+        if actor_id is None:
+            raise ValueError('使用幂等键时必须提供操作者 ID')
+        fingerprint = hashlib.sha256(
+            json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')
+        ).hexdigest()
+        await acquire_key_lock(db, actor_id, idempotency_key)
+        replay = await load_replay(db, actor_id, idempotency_key, fingerprint)
+        if replay is not None:
+            return replay
 
     order_no = await generate_purchase_order_number(db)
     supplier_name = items[0].get('supplier_name', '')
@@ -177,6 +196,10 @@ async def create_purchase_order(db: AsyncSession, data: dict, include_summary: b
     if include_summary:
         result['summary'] = await _build_order_summary(db, order)
 
+    if idempotency_key and actor_id is not None:
+        # load_replay 只重放 body.get('success') 为真的结果（生成路径的 result 自带
+        # success 键）；手工建单的 result 没有——不带键存会永不重放、每次都真建单。
+        await save_result(db, actor_id, idempotency_key, fingerprint, {'success': True, **result})
     return result
 
 
