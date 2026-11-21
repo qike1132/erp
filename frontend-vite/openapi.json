@@ -32216,7 +32216,7 @@
             ],
             "title": "Unit Price",
             "description": "单价",
-            "default": 0
+            "default": "0"
           },
           "quantity": {
             "type": "integer",
