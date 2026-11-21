@@ -231,8 +231,8 @@ async def _preflight_staging_stockout(
 
 async def _confirm_one_staging_stockout(
     db: AsyncSession, staging, completed_orders: list[dict],
-    *, scoped_factory: str | None = None,
-) -> None:
+    *, scoped_factory: str | None = None, balance_cache: dict | None = None,
+) -> int:
     """确认单条暂存出货（在 savepoint 内运行，异常由调用方捕获）。
 
     校验链：数量为正 → 客户必填 → 产品存在 → 库存充足 → 订单可出 → 按订单分摊出库。
@@ -255,7 +255,13 @@ async def _confirm_one_staging_stockout(
     # 会出现「手工出货被拒、同一张表导入却成功」。
     from fastapi_app.services.stock_inventory_service import get_inventory_balance
 
-    _balance = await get_inventory_balance(db, product_id)
+    # 性能（2026-11-21 审计）：同产品多行此前逐行重算结余（每行 2 条全表聚合）——
+    # 批量预取 + 行间按成功确认量递减（自写库存已扣除，与逐行新鲜读语义等价；
+    # 行失败 savepoint 回滚时调用方不递减）。缓存未命中回退单查。
+    if balance_cache is not None and product_id in balance_cache:
+        _balance = balance_cache[product_id]
+    else:
+        _balance = await get_inventory_balance(db, product_id)
     if staging.quantity > _balance:
         raise ValueError(
             f'出货{staging.customer}-{staging.product_name}确认失败: '
@@ -328,6 +334,7 @@ async def _confirm_one_staging_stockout(
         note=f'批量导入出货：客户{staging.customer}，数量{staging.quantity}',
     )
     db.add(log)
+    return product_id
 
 
 async def confirm_staging_stockouts(
@@ -358,14 +365,29 @@ async def confirm_staging_stockouts(
     errors: list[str] = []
     completed_orders: list[dict] = []
 
+    # 性能（2026-11-21 审计）：批量预取结余，行间按成功确认量递减（行失败
+    # savepoint 回滚则不递减，缓存与库内状态保持一致）。
+    # 结余口径 = 包装部入库 + 出货净额（净额为负，见 get_inventory_balance docstring）。
+    from fastapi_app.services.stock_inventory_service import get_inventory_balance_detail_batch
+    balance_cache = {
+        pid: packaging + shipped_net
+        for pid, (packaging, shipped_net) in (
+            await get_inventory_balance_detail_batch(
+                db, [s.product_id for s in staging_stockouts if s.product_id is not None])
+        ).items()
+    }
+
     for staging in staging_stockouts:
         try:
             async with db.begin_nested():
-                await _confirm_one_staging_stockout(
+                used_pid = await _confirm_one_staging_stockout(
                     db, staging, completed_orders, scoped_factory=scoped_factory,
+                    balance_cache=balance_cache,
                 )
                 staging.status = staging_machine.transition(staging.status, StagingAction.APPROVE)
                 confirmed += 1
+            if used_pid in balance_cache:
+                balance_cache[used_pid] -= staging.quantity
         except _NegativeQuantityError as e:
             # 数量无效：异常已使 savepoint 回滚，此处在外层事务重置 REJECTED，
             # 错误格式与改动前逐字一致（无「确认失败」字样）
