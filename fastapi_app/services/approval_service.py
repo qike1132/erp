@@ -25,6 +25,7 @@ from fastapi_app.core.state_machine import (
 )
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services.approval_log_service import create_approval_log as _create_approval_log
+from fastapi_app.services.notification_service import dispatch_factory_notifications
 from fastapi_app.services.order_utils import (
     assert_no_linked_returns,
     compute_order_status_from_db,
@@ -391,6 +392,17 @@ async def _handle_edit_approval(
     # 数量变了 → order.status 是 (抵扣量, 出货量, 数量) 的派生值，必须重算。
     # 与 order/commands.py 的直改路径同源：两处原先都漏了这一步。
     order.status = await compute_order_status_from_db(db, order)
+
+    # M-22（2026-11-21 审计）：审批通过的编辑此前不派发工厂通知（直改路径
+    # order/commands.py:474 有 dispatch_factory_notifications('order_updated')），
+    # 工厂用户通知中心对审批修改无感知。与直改路径对齐；通知失败不影响审批结果。
+    try:
+        await dispatch_factory_notifications(db, order, 'order_updated', None)
+    except Exception as notify_err:  # broad-except: 服务层容错，通知失败不影响审批
+        logger.warning(
+            "审批路径工厂通知派发失败 order_no=%s: %s", order.order_no, notify_err,
+            exc_info=True,
+        )
 
 
 

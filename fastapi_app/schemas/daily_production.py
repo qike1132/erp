@@ -4,6 +4,8 @@
 统一三部门（充棉部、手工部、包装部）的请求/响应模型。
 """
 
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 # ==================== 生产记录 CRUD ====================
@@ -15,7 +17,9 @@ class ProductionRecordCreate(BaseModel):
     customer_id: int | None = Field(None, description="客户ID")
     product_name: str = Field(..., min_length=1, max_length=100, description="产品名称")
     barcode: str = Field('', max_length=50, description="69码")
-    unit_price: float = Field(0, ge=0, description="单价")
+    # M-17（2026-11-21 审计）：库列是 Decimal，float 直入会让金额口径与 Decimal
+    # 侧漂移——schema 收 Decimal（pydantic 对 JSON number 自动收敛，契约兼容）。
+    unit_price: Decimal = Field(0, ge=0, description="单价")
     quantity: int = Field(..., gt=0, le=999999, description="生产数量")
     production_date: str = Field(..., description="生产日期 (YYYY-MM-DD)")
     remark: str | None = Field(None, max_length=500, description="备注")
@@ -31,7 +35,8 @@ class ProductionRecordUpdate(BaseModel):
     customer_id: int | None = Field(None, description="客户ID")
     product_name: str | None = Field(None, min_length=1, max_length=100, description="产品名称")
     barcode: str | None = Field(None, max_length=50, description="69码")
-    unit_price: float | None = Field(None, ge=0, description="单价")
+    # M-17：同上，更新入口同样收 Decimal
+    unit_price: Decimal | None = Field(None, ge=0, description="单价")
     quantity: int | None = Field(None, gt=0, le=999999, description="生产数量")
     production_date: str | None = Field(None, description="生产日期 (YYYY-MM-DD)")
     remark: str | None = Field(None, max_length=500, description="备注")
