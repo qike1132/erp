@@ -16,6 +16,9 @@ from zoneinfo import ZoneInfo
 
 _BUSINESS_TZ = ZoneInfo('Asia/Shanghai')
 
+#: SQL 显式时区转换用（与 _BUSINESS_TZ 单源；M-41 分桶 timezone(BUSINESS_TZ_NAME, col)）
+BUSINESS_TZ_NAME = 'Asia/Shanghai'
+
 
 def business_today() -> date:
     """业务时区（Asia/Shanghai）的「今天」。

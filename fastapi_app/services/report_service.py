@@ -6,12 +6,12 @@ SECURITY NOTE: where_clauses 列表仅包含硬编码的 SQL 片段，
 """
 import logging
 from collections.abc import Callable
-from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.business_time import business_day_range
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.core.sanitizer import escape_like
@@ -19,6 +19,22 @@ from fastapi_app.shared_models.order import VALID_ORDER_STATUSES
 from fastapi_app.utils import calc_total_pages, parse_date_strict
 
 logger = logging.getLogger(__name__)
+
+
+def _append_biz_date_window(where_clauses: list[str], params: dict, column: str,
+                            start_date: str, end_date: str) -> None:
+    """日期窗统一业务时区 aware 边界（M-26，2026-11-21 审计）。
+
+    timestamptz 列（order_date/return_date/stockin_date/stockout_date）+ naive date
+    参数的正确性耦合在会话时区恰为 Asia/Shanghai；改 aware 边界与会话时区解耦。
+    end 侧 [次日 00:00) 开区间，与原「+1 天后 <」等价。
+    """
+    if start_date:
+        params['start_date'] = business_day_range(parse_date_strict(start_date, '开始'))[0]
+        where_clauses.append(f"{column} >= :start_date")
+    if end_date:
+        params['end_date'] = business_day_range(parse_date_strict(end_date, '结束'))[1]
+        where_clauses.append(f"{column} < :end_date")
 
 
 def _quote_identifier(name: str) -> str:
@@ -206,12 +222,7 @@ async def get_order_logs(db: AsyncSession, customer: str = '', product: str = ''
             raise BusinessError(f'状态参数无效: {status}')
         where_clauses.append("o.status = :status")
         params['status'] = status
-    if start_date:
-        params['start_date'] = parse_date_strict(start_date, '开始')
-        where_clauses.append("o.order_date >= :start_date")
-    if end_date:
-        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
-        where_clauses.append("o.order_date < :end_date")
+    _append_biz_date_window(where_clauses, params, "o.order_date", start_date, end_date)
 
     order_tbl = _quote_identifier("order")
 
@@ -281,12 +292,7 @@ async def get_return_logs(db: AsyncSession, customer: str = '', product: str = '
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
         where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
-    if start_date:
-        params['start_date'] = parse_date_strict(start_date, '开始')
-        where_clauses.append("sr.return_date >= :start_date")
-    if end_date:
-        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
-        where_clauses.append("sr.return_date < :end_date")
+    _append_biz_date_window(where_clauses, params, "sr.return_date", start_date, end_date)
 
     return await _query_logs_generic(
         db,
@@ -415,12 +421,7 @@ async def get_stockin_logs(db: AsyncSession, customer: str = '', product: str = 
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
         where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
-    if start_date:
-        params['start_date'] = parse_date_strict(start_date, '开始')
-        where_clauses.append("s.stockin_date >= :start_date")
-    if end_date:
-        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
-        where_clauses.append("s.stockin_date < :end_date")
+    _append_biz_date_window(where_clauses, params, "s.stockin_date", start_date, end_date)
 
     return await _query_logs_generic(
         db,
@@ -482,12 +483,7 @@ async def get_stockout_logs(db: AsyncSession, customer: str = '', product: str =
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
         where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
-    if start_date:
-        params['start_date'] = parse_date_strict(start_date, '开始')
-        where_clauses.append("so.stockout_date >= :start_date")
-    if end_date:
-        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
-        where_clauses.append("so.stockout_date < :end_date")
+    _append_biz_date_window(where_clauses, params, "so.stockout_date", start_date, end_date)
 
     return await _query_logs_generic(
         db,
@@ -552,12 +548,7 @@ async def get_deduction_logs(db: AsyncSession, customer: str = '', product: str 
         # 与库存/订单流水同口径：未分配工厂的历史产品也算本厂（否则屏幕有、报表无）
         where_clauses.append("(p.factory = :factory OR p.factory IS NULL OR p.factory = '')")
         params['factory'] = factory
-    if start_date:
-        params['start_date'] = parse_date_strict(start_date, '开始')
-        where_clauses.append("so.stockout_date >= :start_date")
-    if end_date:
-        params['end_date'] = parse_date_strict(end_date, '结束') + timedelta(days=1)
-        where_clauses.append("so.stockout_date < :end_date")
+    _append_biz_date_window(where_clauses, params, "so.stockout_date", start_date, end_date)
 
     order_tbl = _quote_identifier('order')
 

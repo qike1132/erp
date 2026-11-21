@@ -19,6 +19,7 @@ from sqlalchemy.orm import joinedload
 # 为仅走 WebSocket 广播的字符串事件名（无对应 DomainEventType 枚举值），统一经
 # core.exception_handler.safe_publish_event 发布——失败仅记日志、不中断主流程。
 # 原 core/event_bus.py 的同名 safe_publish_event 已删除（双签名撞名，详见其迁移说明）。
+from fastapi_app.core.business_time import business_day_bounds_utc_naive
 from fastapi_app.core.cache import CacheDomain
 from fastapi_app.core.cache_invalidation import (
     InvalidationStrategy,
@@ -47,6 +48,7 @@ from fastapi_app.shared_models import (
     User,
 )
 from fastapi_app.shared_models.order import ORDER_STATUS_BATCH_COMPLETED, ORDER_STATUS_SHIPPED
+from fastapi_app.utils import parse_date_strict
 
 logger = logging.getLogger(__name__)
 
@@ -506,9 +508,17 @@ async def get_batch_history(
     if customer:
         stmt = stmt.where(Order.customer == customer)
     if date_from:
-        stmt = stmt.where(Order.batch_completed_at >= date_from)
+        # M-3（2026-11-21 审计，实为 [H]）：batch_completed_at 是 naive-UTC 列，
+        # 字符串直比不仅时区错位（AUD-02），asyncpg 下更是 timestamp >= varchar
+        # 直接 UndefinedFunctionError → 带日期筛选的批次历史必 500。改走
+        # business_day_bounds_utc_naive 的北京日界（start 含、end 次日开区间）。
+        stmt = stmt.where(
+            Order.batch_completed_at
+            >= business_day_bounds_utc_naive(parse_date_strict(date_from, '开始'))[0])
     if date_to:
-        stmt = stmt.where(Order.batch_completed_at <= date_to)
+        stmt = stmt.where(
+            Order.batch_completed_at
+            < business_day_bounds_utc_naive(parse_date_strict(date_to, '结束'))[1])
 
     if factory_scope:
         stmt = stmt.where(_order_factory_scope_clause(factory_scope))

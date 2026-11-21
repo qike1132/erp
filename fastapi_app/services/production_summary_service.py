@@ -21,7 +21,7 @@ import calendar
 import io
 import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 
 import openpyxl
@@ -29,7 +29,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fastapi_app.core.business_time import fmt_business
+from fastapi_app.core.business_time import BUSINESS_TZ_NAME, business_day_range, fmt_business
 from fastapi_app.core.cache import cache_result
 from fastapi_app.core.cache_invalidation import (
     InvalidationStrategy,
@@ -389,20 +389,26 @@ async def get_production_summary(db: AsyncSession, year: int, month: int) -> dic
 
 async def _get_case_stockout_daily(db: AsyncSession, start: date, end: date) -> dict:
     """获取皮套出库按日汇总"""
-    # 范围条件（>= 当日零点，< 次日零点）而非 func.date()，使 stockout_date 索引可命中
+    # 范围条件（>= 当日零点，< 次日零点）而非裸 func.date()，使 movement_date 索引可命中。
     # 2026-10-03 第八轮审计：原 end_dt = start_dt + timedelta(days=1) 忽略 end 形参，
     # 区间恒为 [start, start+1天) → 每月 2 号起皮套出库汇总恒为 0。改为按 end 计算。
-    start_dt = datetime(start.year, start.month, start.day)
-    end_dt = datetime(end.year, end.month, end.day) + timedelta(days=1)
-    result = await db.execute(select(func.date(CaseMovement.movement_date).label('d'), func.coalesce(func.sum(CaseMovement.quantity), 0).label('total')).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).group_by(func.date(CaseMovement.movement_date)))
+    # M-41（2026-11-21 审计）：movement_date 是 timestamptz，naive 边界的正确性耦合在
+    # 会话时区（恰为 Asia/Shanghai 才对）——改 business_day_range 的 aware 北京日界，
+    # 分桶显式 timezone('Asia/Shanghai', …)，与会话时区解耦。
+    start_dt = business_day_range(start)[0]
+    end_dt = business_day_range(end)[1]
+    bucket = func.date(func.timezone(BUSINESS_TZ_NAME, CaseMovement.movement_date))
+    result = await db.execute(select(bucket.label('d'), func.coalesce(func.sum(CaseMovement.quantity), 0).label('total')).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).group_by(bucket))
     return {str(row.d): int(row.total) for row in result.all()}
 
 async def _get_case_stockout_detail(db: AsyncSession, start: date, end: date) -> dict:
     """获取皮套出库按日+客户+产品明细"""
     # 2026-10-03 第八轮审计：同 _get_case_stockout_daily，原区间只覆盖 start 当天。
-    start_dt = datetime(start.year, start.month, start.day)
-    end_dt = datetime(end.year, end.month, end.day) + timedelta(days=1)
-    result = await db.execute(select(func.date(CaseMovement.movement_date).label('d'), CaseMovement.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseMovement.quantity).join(Case, CaseMovement.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).order_by(CaseMovement.movement_date))
+    # M-41：aware 北京日界 + 显式时区分桶（见 _get_case_stockout_daily）。
+    start_dt = business_day_range(start)[0]
+    end_dt = business_day_range(end)[1]
+    bucket = func.date(func.timezone(BUSINESS_TZ_NAME, CaseMovement.movement_date))
+    result = await db.execute(select(bucket.label('d'), CaseMovement.customer, func.coalesce(Product.name, Case.name).label('product_name'), CaseMovement.quantity).join(Case, CaseMovement.case_id == Case.id).outerjoin(Product, Case.product_id == Product.id).where(and_(CaseMovement.direction == 'out', CaseMovement.movement_date >= start_dt, CaseMovement.movement_date < end_dt)).order_by(CaseMovement.movement_date))
     data: dict[str, list[dict[str, Any]]] = {}
     for row in result.all():
         d = str(row.d)

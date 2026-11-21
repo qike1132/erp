@@ -1,7 +1,8 @@
 """皮套域共享辅助(日期/分页/过滤工具 + 常量)"""
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
+from fastapi_app.core.business_time import business_day_range
 from fastapi_app.core.exceptions import BusinessError
 from fastapi_app.utils import parse_date_strict
 
@@ -33,11 +34,15 @@ def _normalize_pagination(page: int, per_page: int, max_per_page: int) -> tuple[
 
 
 def _apply_date_filter(query, column, start_date: str, end_date: str, field_label: str):
-    """为查询添加日期范围过滤条件（end_date 含当天）。"""
+    """为查询添加日期范围过滤条件（end_date 含当天）。
+
+    M-41（2026-11-21 审计）：movement_date 是 timestamptz，naive 参数的正确性耦合在
+    会话时区；统一走 business_day_range 的业务时区 aware 边界（end 侧 [次日 00:00)）。
+    """
     if start_date:
-        query = query.where(column >= _parse_date(start_date, field_label))
+        query = query.where(column >= business_day_range(_parse_date(start_date, field_label))[0])
     if end_date:
-        query = query.where(column < _parse_date(end_date, field_label) + timedelta(days=1))  # sql-safe: escape_like/绑定参数/常量片段
+        query = query.where(column < business_day_range(_parse_date(end_date, field_label))[1])  # sql-safe: escape_like/绑定参数/常量片段
     return query
 
 
