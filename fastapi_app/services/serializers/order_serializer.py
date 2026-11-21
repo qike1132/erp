@@ -224,10 +224,13 @@ class OrderSerializer:
             # 优先使用调用方批量预取的结果：单次 SQL 完成，且不会在异步会话里
             # 触发 item.product 的惰性加载（那会抛 MissingGreenlet 并使整个列表接口 500）。
             precomputed = context.get("item_factories")
-            if precomputed is not None:
-                result["factories"] = precomputed
-            else:
-                result["factories"] = cls._loaded_item_factories(order)
+            factories = precomputed if precomputed is not None else cls._loaded_item_factories(order)
+            # H-2（2026-11-21 审计，owner 裁定）：厂绑定用户的 factories 只回本厂。
+            # items 维持全量（「任一本厂 SKU 即整单可见」是设计意图），他厂工厂名不外泄。
+            bound_factory = context.get("factory")
+            if bound_factory:
+                factories = [f for f in factories if f == bound_factory]
+            result["factories"] = factories
 
         return result
 

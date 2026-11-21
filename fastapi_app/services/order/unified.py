@@ -237,8 +237,12 @@ def _product_dict(product: Product | None) -> dict | None:
     }
 
 
-def _build_order_record(order: Order, deduct_quantity: int, factories: list[str]) -> dict:
-    """构造订单行（product 取首 SKU，无 SKU 时回退 order.product）。"""
+def _build_order_record(order: Order, deduct_quantity: int, factories: list[str],
+                        factory: str | None = None) -> dict:
+    """构造订单行（product 取首 SKU，无 SKU 时回退 order.product）。
+
+    factory 非空时 ``factories`` 只回本厂（H-2，2026-11-21 审计；items 全量=设计意图）。
+    """
     first_item = order.items[0] if order.items else None
     product_src = first_item.product if first_item else order.product
     items_data = [
@@ -254,6 +258,9 @@ def _build_order_record(order: Order, deduct_quantity: int, factories: list[str]
         }
         for item in order.items
     ]
+    # H-2（2026-11-21 审计）：厂绑定用户的 factories 只回本厂，他厂工厂名不外泄。
+    if factory:
+        factories = [f for f in factories if f == factory]
     return {
         'id': order.id,
         'record_type': 'order',
@@ -337,8 +344,11 @@ async def _fetch_page_rows(db: AsyncSession, unified, page: int, per_page: int):
     return rows, rows[0].total_count or 0
 
 
-async def _assemble_records(db: AsyncSession, rows) -> list[dict]:
-    """按行类型批量回填订单/备货并组装统一记录 dict（行序保持分页排序）。"""
+async def _assemble_records(db: AsyncSession, rows, factory: str | None = None) -> list[dict]:
+    """按行类型批量回填订单/备货并组装统一记录 dict（行序保持分页排序）。
+
+    factory 非空时订单行的 factories 字段只回本厂（H-2，见 _build_order_record）。
+    """
     order_ids = [r.source_id for r in rows if r.record_type == 'order']
     stockin_ids = [r.source_id for r in rows if r.record_type == 'stockin']
 
@@ -356,6 +366,7 @@ async def _assemble_records(db: AsyncSession, rows) -> list[dict]:
                     order,
                     deduct_map.get(order.id, 0),
                     factory_map.get(order.id, []),
+                    factory=factory,
                 ))
         else:
             stockin = stockins_map.get(r.source_id)
@@ -414,5 +425,5 @@ async def get_unified_records(
     )
 
     rows, total = await _fetch_page_rows(db, unified, page, per_page)
-    items = await _assemble_records(db, rows) if rows else []
+    items = await _assemble_records(db, rows, factory=factory) if rows else []
     return {'items': items, 'total': total, 'page': page, 'per_page': per_page}
