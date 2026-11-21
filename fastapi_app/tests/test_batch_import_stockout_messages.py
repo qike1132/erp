@@ -54,17 +54,20 @@ async def test_ambiguous_product_reports_reason():
 async def test_no_available_order_reports_reason(monkeypatch):
     # AUD-01 结余闸门位于订单余量校验之前；本用例聚焦订单余量文案，
     # 桩掉结余查询（mock db 无法执行结余 SQL）。
+    # 产品行锁（P→O）由 deps 注入桩——mock db 的 execute 不模拟 FOR UPDATE 结果。
     from fastapi_app.services import stock_out_service
     monkeypatch.setattr(stock_out_service, '_assert_inventory_balance', AsyncMock())
+    product = _product()
     deps = ImportDeps(
         calculate_available_shipment_quantity=AsyncMock(return_value={
             'available_quantity': 0, 'order_quantity': 0,
             'shipped_quantity': 0, 'orders': [],
         }),
+        get_product_for_update=AsyncMock(return_value=product),
     )
     row = {'产品名称': '产品A', '数量': 1, '客户名称': '客户A'}
     count, messages = await batch_import_core.import_stockouts_from_data(
-        _db([_product()]), [row], deps=deps)
+        _db([product]), [row], deps=deps)
     assert count == 0
     assert any('没有可用的订单支持出货' in m for m in messages)
 

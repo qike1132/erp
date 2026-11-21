@@ -748,5 +748,12 @@ async def test_concurrent_manual_and_import_stockout_no_deadlock(
         stockouts = await check.scalar(
             select(func.count()).select_from(StockOut).where(StockOut.product_id == product_id)
         )
+        net_log = await check.scalar(
+            select(func.coalesce(func.sum(InventoryLog.change_quantity), 0)).where(
+                InventoryLog.product_id == product_id,
+                InventoryLog.change_type == '出库',
+            )
+        )
     assert product_row.current_stock == 80
     assert stockouts == 2
+    assert net_log == -20
