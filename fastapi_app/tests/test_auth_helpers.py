@@ -4,7 +4,7 @@
 - _check_login_rate_limit（Redis burst + window 双计数器，降级内存限流）
 - _set_login_cookies（httpOnly cookie 设置，SameSite/Secure 自适应）
 """
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from fastapi import HTTPException, Request, Response
@@ -37,6 +37,14 @@ class TestCheckLoginRateLimit:
         # TOCTOU），不再单独 await redis.expire。这里断言 pipeline 被构建且执行。
         mock_redis.pipeline.assert_called_once()
         mock_pipe.execute.assert_awaited_once()
+        # X-T 假测试修复：key 前缀与 TTL 窗口必须正确——改坏限流 key 或窗口本测试应红
+        assert mock_pipe.incr.call_args_list == [
+            call('login_burst:192.168.1.1'), call('login_attempt:192.168.1.1'),
+        ]
+        assert mock_pipe.expire.call_args_list == [
+            call('login_burst:192.168.1.1', auth.LOGIN_BURST_WINDOW),
+            call('login_attempt:192.168.1.1', auth.LOGIN_ATTEMPT_WINDOW),
+        ]
 
     @pytest.mark.asyncio
     async def test_rate_limit_raises_429_when_burst_exceeded(self):

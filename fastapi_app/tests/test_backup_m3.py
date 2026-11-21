@@ -147,7 +147,8 @@ class TestMaintenance:
         client = AsyncMock()
         monkeypatch.setattr(maintenance, '_get_client', AsyncMock(return_value=client))
         assert await maintenance.enter_maintenance() is True
-        client.set.assert_called_once()
+        # X-T 假测试修复：key/值/TTL 必须精确——改坏 flag 名或 TTL 本测试应红
+        client.set.assert_called_once_with('erp:maintenance_mode', '1', ex=1800)
 
     @pytest.mark.asyncio
     async def test_exit_deletes_flag(self, monkeypatch):
