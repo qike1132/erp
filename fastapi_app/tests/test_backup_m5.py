@@ -199,6 +199,10 @@ class TestExportEndpointAudit:
         ), patch(
             'fastapi_app.api.v1.endpoints.backup.export._audit_export_download',
             new=audit_mock,
+        ), patch(
+            # M-27：JSON 导出补了还原互斥守卫——本测试聚焦审计接线，还原不在进行中
+            'fastapi_app.api.v1.endpoints.backup.export.is_restore_in_progress',
+            new=AsyncMock(return_value=False),
         ):
             resp = await client.get(
                 '/api/v1/backup/export',

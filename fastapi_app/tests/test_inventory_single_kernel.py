@@ -25,7 +25,8 @@ async def test_get_inventory_delegates_to_paginated(monkeypatch):
         object(), search_customer='C', search_product='P',
     )
 
-    assert captured == {'search_customer': 'C', 'search_product': 'P', 'page': 1, 'per_page': 100_000}
+    # L-6（2026-11-21 审计）：get_inventory 补 factory 透传——兼容入口委托时也带 factory
+    assert captured == {'search_customer': 'C', 'search_product': 'P', 'page': 1, 'per_page': 100_000, 'factory': ''}
     assert result == {
         'inventory_data': [{'customer': 'C', 'product_name': 'P'}],
         'total_order_qty': 1,

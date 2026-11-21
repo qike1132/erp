@@ -51,7 +51,17 @@ class _Result:
 
 
 class _Cursor:
+    """DELETE/UPDATE 结果 + 空聚合结果两用（批量确认链的后续查询都返回空集）。"""
     rowcount = 0
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def unique(self):
+        return self
 
 
 class _Savepoint:

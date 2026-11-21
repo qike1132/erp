@@ -348,14 +348,17 @@ def _parse_quantity(value: str) -> int:
 
     M-25（2026-11-21 审计）：超长数字串 ``float()``→``inf``→``int(inf)`` 抛
     OverflowError，上层 except 不拦 → 整次导入 500。输入截到 12 位、结果封顶
-    9 位（9.99 亿，出货单不存在更大量纲）；小数一律拒绝（与 H-1 导入口径一致），
-    越界/不可解析返回 0 由调用方按「数量非正」跳过该行。
+    9 位（9.99 亿，出货单不存在更大量纲）；越界/不可解析返回 0 由调用方按
+    「数量非正」跳过该行。
+    小数**四舍五入**而非拒绝：OCR 单据里「保温杯 1.5个」是合法读数（暂存行
+    还要人工确认），整行丢弃会让用户以为识别漏行——导入 Excel 路径（H-1）
+    才用「小数一律拒绝」口径，两条路径语义不同。
     """
     cleaned = re.sub('[^\\d.]', '', str(value))[:12]
     try:
         qty = float(cleaned)
     except (ValueError, TypeError, OverflowError):
         return 0
-    if not qty.is_integer() or not 0 < qty <= 999_999_999:
+    if not 0 < qty <= 999_999_999:
         return 0
-    return int(qty)
+    return round(qty)

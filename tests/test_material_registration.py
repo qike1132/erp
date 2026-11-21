@@ -9,7 +9,7 @@ M-H（2026-10-25 复审）：原文件挂了 6 个零测试方法的空类（列
 统计/订单物料/历史），只制造「已测」假象——已删除；这些域的行为覆盖在
 fastapi_app/tests/test_material_registration.py（computed_status 三分支真断言等）。
 """
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -36,8 +36,10 @@ class TestDeleteRegistration:
 
     @pytest.mark.asyncio
     async def test_delete_registration_not_found(self, mock_async_db):
-        """删除不存在的登记"""
-        mock_async_db.get = AsyncMock(return_value=None)
+        """删除不存在的登记（M-12 改造：走 execute(selectinload) 取登记）"""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_async_db.execute = AsyncMock(return_value=mock_result)
 
         with pytest.raises(ValueError, match='来料登记不存在'):
             await delete_registration(mock_async_db, 999)

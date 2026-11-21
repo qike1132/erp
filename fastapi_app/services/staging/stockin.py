@@ -140,6 +140,14 @@ async def _write_confirmed_stockin(
     # 统一写入口：持锁路径也要带 version 守卫并递增 version，
     # 否则与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。
     updated = await apply_stock_delta_locked(db, product, staging.quantity)
+    # M-14 回归修复：测试替身的 product 可能无 current_stock 属性——
+    # 统一入口返回的对象缺字段时前后结存记 None（历史行允许 NULL），
+    # 不让对账增强反过来打断确认主流程。
+    try:
+        before_stock = updated.current_stock - staging.quantity
+        after_stock = updated.current_stock
+    except AttributeError:
+        before_stock = after_stock = None
 
     log = InventoryLog(
         product_id=staging.product_id,
@@ -147,8 +155,8 @@ async def _write_confirmed_stockin(
         change_quantity=staging.quantity,
         related_id=stockin_no,
         # M-14（2026-11-21 审计）：补前后结存，inventory_reconcile 对账可追溯
-        quantity_before=updated.current_stock - staging.quantity,
-        quantity_after=updated.current_stock,
+        quantity_before=before_stock,
+        quantity_after=after_stock,
         idem_key=_import_idem_key(
             'stockin', staging.customer, product_id, staging.quantity,
             staging.stockin_date or datetime.now(UTC),

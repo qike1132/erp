@@ -19,8 +19,16 @@ def test_parse_quantity_caps_huge_digits():
     assert _parse_quantity('9' * 400) == 0
 
 
-def test_parse_quantity_rejects_decimal_and_garbage():
-    assert _parse_quantity('10.5') == 0  # 小数拒绝（对齐 H-1 导入口径）
+def test_parse_quantity_rounds_decimal():
+    # OCR 路径小数四舍五入（「保温杯 1.5个」是合法读数，暂存行有人工确认兜底）；
+    # Excel 导入路径才用「小数一律拒绝」（H-1），两条路径语义不同。
+    # Python round 是银行家舍入：10.5→10、1.5→2、2.5→2——业务可接受。
+    assert _parse_quantity('1.5') == 2
+    assert _parse_quantity('2.4') == 2
+    assert _parse_quantity('10.5') == 10
+
+
+def test_parse_quantity_rejects_garbage():
     assert _parse_quantity('abc') == 0
     assert _parse_quantity('') == 0
 
