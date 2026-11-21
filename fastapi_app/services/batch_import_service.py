@@ -36,6 +36,7 @@ from fastapi_app.services.batch_import_core import (
     _backfill_empty_product_fields,
     _fmt_money,
     _import_idem_key,
+    _parse_positive_quantity,
     _parse_product_price,
     _resolve_import_customer_id,
     _row_factory_rejected,
@@ -506,12 +507,11 @@ async def import_case_stockouts_service(db: AsyncSession, file: ExcelUpload) -> 
                 return False, None
             product_identifier = str(product_identifier).strip()
             customer = str(customer).strip() if customer else ''
-            try:
-                qty = int(quantity)
-                if qty <= 0:
-                    return False, '出库数量必须大于0'
-            except ValueError:
-                return False, '出库数量必须是整数'
+            # 数量解析走唯一实现（H-1，2026-11-21 审计）：小数一律拒绝，不得静默截断。
+            qty = _parse_positive_quantity(
+                quantity, 0, label='皮套出库', product_name=product_identifier, customer=customer)
+            if qty is None:
+                return False, '出库数量必须大于0（须为整数，小数一律拒绝）'
             case, case_err = await find_case_locked(db, product_identifier)
             if case_err:
                 return False, case_err
@@ -570,12 +570,11 @@ async def import_case_stockins_service(db: AsyncSession, file: ExcelUpload) -> B
                 return False, None
             product_identifier = str(product_identifier).strip()
             customer = str(customer).strip() if customer else ''
-            try:
-                qty = int(quantity)
-                if qty <= 0:
-                    return False, '入库数量必须大于0'
-            except ValueError:
-                return False, '入库数量必须是整数'
+            # 数量解析走唯一实现（H-1，2026-11-21 审计）：小数一律拒绝，不得静默截断。
+            qty = _parse_positive_quantity(
+                quantity, 0, label='皮套入库', product_name=product_identifier, customer=customer)
+            if qty is None:
+                return False, '入库数量必须大于0（须为整数，小数一律拒绝）'
             case, case_err = await find_case_locked(db, product_identifier)
             if case_err:
                 return False, case_err
@@ -715,12 +714,11 @@ async def import_stockouts_service(
             if _row_factory_rejected(scoped_factory, product.factory):
                 return False, '产品不在你的工厂范围，已拒绝该条'
             product = await get_product_for_update(db, product.id)
-            try:
-                qty = int(quantity)
-                if qty <= 0:
-                    return False, '出库数量必须大于0'
-            except ValueError:
-                return False, '出库数量必须是整数'
+            # 数量解析走唯一实现（H-1，2026-11-21 审计）：小数一律拒绝，不得静默截断。
+            qty = _parse_positive_quantity(
+                quantity, 0, label='出库', product_name=product_identifier, customer=customer)
+            if qty is None:
+                return False, '出库数量必须大于0（须为整数，小数一律拒绝）'
             # 统一负库存校验入口（env ALLOW_NEGATIVE_STOCK，缺省拒绝）
             if reason := check_stock_available(
                 product.current_stock, -qty,

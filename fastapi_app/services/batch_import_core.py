@@ -1106,14 +1106,12 @@ async def _resolve_stockout_inputs(
             f'行{idx}: 产品不在你的工厂范围，已拒绝该行（{product_identifier}）')
         return None
 
-    try:
-        qty = int(quantity)
-        if qty <= 0:
-            debug_messages.append(f'行{idx}: 出库数量必须大于0')
-            return None
-    except ValueError:
-        logger.warning("出货导入：quantity 解析失败，跳过该行 (product=%s, customer=%s, value=%r)", product_identifier, customer, quantity)
-        debug_messages.append(f'行{idx}: 出库数量必须是整数')
+    # 数量解析走唯一实现（H-1，2026-11-21 审计）：裸 int(quantity) 会把 Excel 数值
+    # 单元格的 10.5 截成 10 按错误数量扣库存，且与订单/备货路径「小数一律拒绝」口径分裂。
+    qty = _parse_positive_quantity(
+        quantity, idx, label='出货', product_name=product_identifier, customer=customer)
+    if qty is None:
+        debug_messages.append(f'行{idx}: 出库数量必须大于0（须为整数，小数一律拒绝）')
         return None
 
     # 负库存判定统一走统一入口（P1-2b）；策略拒绝时按原行为跳过该行
