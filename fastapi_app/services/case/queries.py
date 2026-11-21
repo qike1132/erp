@@ -273,7 +273,11 @@ async def get_case_movement_detail(db: AsyncSession, movement_id: int) -> dict:
 async def fetch_movements_for_export(db: AsyncSession, case_id: int | None = None, direction: str = '',
                                      customer: str = '', start_date: str = '', end_date: str = '',
                                      limit: int = 20000) -> list[dict]:
-    """导出用：按筛选条件取流水（不分页，上限 limit）。"""
+    """导出用：按筛选条件取流水（不分页，上限 limit）。
+
+    M-9（2026-11-21 审计）：此前超限静默截尾，用户拿到缺行 Excel 无从察觉
+    （违反 A-M24 口径）——独立 COUNT 超限即抛 ValueError，由端点映射 413。
+    """
     query = select(CaseMovement).options(joinedload(CaseMovement.case))
     if case_id is not None:
         query = query.where(CaseMovement.case_id == case_id)
@@ -282,6 +286,14 @@ async def fetch_movements_for_export(db: AsyncSession, case_id: int | None = Non
     if customer:
         query = query.where(CaseMovement.customer.like(f'%{escape_like(customer)}%'))  # sql-safe: escape_like/绑定参数
     query = _apply_date_filter(query, CaseMovement.movement_date, start_date, end_date, '开始日期')
+    total = (await db.execute(
+        select(func.count()).select_from(query.order_by(None).limit(None).subquery())
+    )).scalar() or 0
+    if total > limit:
+        raise ValueError(
+            f'符合条件的数据共 {total} 条，超过单次导出上限 {limit} 条，'
+            '请缩小筛选范围后重试'
+        )
     result = await db.execute(
         query.order_by(CaseMovement.movement_date.desc(), CaseMovement.id.desc()).limit(limit)
     )
