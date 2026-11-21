@@ -7,6 +7,12 @@
       <template v-if="activeTab === 'orders'">
         <MSearchBar v-model="keyword" placeholder="搜索订单号/产品..." @search="() => refetchOrders()" />
         <div v-if="ordersLoading" class="m-center"><MSpinner size="lg" /></div>
+        <!-- M-33：失败与「暂无」分开渲染（对齐 MStockView loadError） -->
+        <MEmpty v-else-if="ordersError" :title="ordersError">
+          <template #action>
+            <button class="m-empty-retry" @click="refetchOrders()">重试</button>
+          </template>
+        </MEmpty>
         <MEmpty v-else-if="!orders?.orders?.length" title="暂无采购订单" subtitle="新订单将实时推送" />
         <MList v-else header="采购中">
           <MListItem
@@ -38,6 +44,11 @@
 
       <template v-if="activeTab === 'unprocessed'">
         <div v-if="unprocessedLoading" class="m-center"><MSpinner size="lg" /></div>
+        <MEmpty v-else-if="unprocessedError" :title="unprocessedError">
+          <template #action>
+            <button class="m-empty-retry" @click="loadUnprocessed()">重试</button>
+          </template>
+        </MEmpty>
         <MEmpty v-else-if="!unprocessed?.orders?.length" title="暂无待生成订单" subtitle="未配置BOM的订单无法下单" />
         <MList v-else :header="`待生成 (${unprocessed.total || 0})`">
           <MListItem
@@ -65,6 +76,11 @@
       <template v-if="activeTab === 'completed'">
         <MSearchBar v-model="completedKeyword" placeholder="搜索已完成订单..." @search="searchCompleted" />
         <div v-if="completedLoading" class="m-center"><MSpinner size="lg" /></div>
+        <MEmpty v-else-if="completedError" :title="completedError">
+          <template #action>
+            <button class="m-empty-retry" @click="loadCompleted(1)">重试</button>
+          </template>
+        </MEmpty>
         <MEmpty v-else-if="!completedOrders?.orders?.length" title="暂无已完成订单" />
         <MList v-else header="已完成">
           <MListItem
@@ -140,10 +156,14 @@ type CompletedOrderList = Awaited<ReturnType<typeof purchaseApi.completed>>
 
 const orders = ref<PurchaseOrderList | null>(null)
 const ordersLoading = ref(false)
+// M-33（2026-11-21 审计）：加载失败与「暂无订单」分开渲染（对齐 MStockView loadError）
+const ordersError = ref('')
 const unprocessed = ref<UnprocessedOrderList | null>(null)
 const unprocessedLoading = ref(false)
+const unprocessedError = ref('')
 const completedOrders = ref<CompletedOrderList | null>(null)
 const completedLoading = ref(false)
+const completedError = ref('')
 const detailVisible = ref(false)
 const detailOrder = ref<PurchaseOrder | UnprocessedOrder | null>(null)
 
@@ -175,6 +195,7 @@ async function refetchOrders(page = 1) {
     const res = await purchaseApi.orders({ page, per_page: MOBILE_PAGE_SIZE, keyword: keyword.value })
     if (seq !== ordersSeq) return
     orders.value = res
+    ordersError.value = ''
   } catch (e) {
     if (seq !== ordersSeq) return
     // 页码先回退：取消也要回退，否则「第 2 页的请求被取消」会留下页码与数据不一致
@@ -183,6 +204,8 @@ async function refetchOrders(page = 1) {
     // 那是我们主动取消，不是后端失败；弹了还会挂到用户刚跳过去的新页面上
     // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
     if (isCanceledError(e)) return
+    // M-33：持久错误态（3 秒 toast 不够，用户把故障当「没订单」）
+    ordersError.value = '订单加载失败'
     showToast('订单加载失败，请重试', 'error')
   } finally {
     if (seq === ordersSeq) ordersLoading.value = false
@@ -200,11 +223,13 @@ async function loadUnprocessed(page = 1) {
     const res = await purchaseApi.unprocessedOrders({ page, per_page: MOBILE_PAGE_SIZE })
     if (seq !== unprocessedSeq) return
     unprocessed.value = res
+    unprocessedError.value = ''
   } catch (e) {
     if (seq !== unprocessedSeq) return
     unprocessedPage.value = prev
     // 同上：取消也要回退页码，但不弹提示（2026-10-17 审计 P1-21）
     if (isCanceledError(e)) return
+    unprocessedError.value = '待生成订单加载失败'
     showToast('待生成订单加载失败，请重试', 'error')
   } finally {
     if (seq === unprocessedSeq) unprocessedLoading.value = false
@@ -220,6 +245,7 @@ async function loadCompleted(page = 1) {
     const res = await purchaseApi.completed({ page, per_page: MOBILE_PAGE_SIZE, keyword: completedKeyword.value })
     if (seq !== completedSeq) return
     completedOrders.value = res
+    completedError.value = ''
   } catch (e) {
     if (seq !== completedSeq) return
     // 页码先回退：取消也要回退，否则「第 2 页的请求被取消」会留下页码与数据不一致
@@ -228,6 +254,7 @@ async function loadCompleted(page = 1) {
     // 那是我们主动取消，不是后端失败；弹了还会挂到用户刚跳过去的新页面上
     // （2026-10-17 审计 P1-21）。同目录 MStockView/MProductView/MCaseView 早已这么写。
     if (isCanceledError(e)) return
+    completedError.value = '已完成订单加载失败'
     showToast('已完成订单加载失败，请重试', 'error')
   } finally {
     if (seq === completedSeq) completedLoading.value = false
@@ -269,4 +296,13 @@ loadCompleted()
 .m-detail-body { display: flex; flex-direction: column; gap: 12px; }
 .m-detail-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 0.5px solid rgba(0,0,0,0.06); }
 .m-detail-label { font-size: var(--fs-body-sm); color: var(--m-text-secondary); }
+.m-empty-retry {
+  margin-top: 12px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--m-border, #dbe3ef);
+  background: var(--m-bg, #fff);
+  font: inherit;
+  color: var(--m-accent, #2563eb);
+}
 </style>

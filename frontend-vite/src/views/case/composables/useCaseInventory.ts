@@ -34,7 +34,7 @@ export function useCaseInventory() {
   const invPage = ref(1)
   const invPerPage = ref(50)
 
-  const { data: invData, isLoading: invIsLoading, isFetching: invIsFetching, refetch: invRefetch } = useQuery({
+  const { data: invData, isLoading: invIsLoading, isFetching: invIsFetching, isError: invIsError, refetch: invRefetch } = useQuery({
     queryKey: ['case-inventory', invPage, debouncedInvSearch, invPerPage],
     queryFn: () =>
       caseApi.inventory({
@@ -104,6 +104,8 @@ export function useCaseInventory() {
     invPerPage,
     invIsLoading,
     invIsFetching,
+    // M-33（2026-11-21 审计）：查询失败与「暂无库存数据」分开渲染
+    invIsError,
     invRefetch,
     inventoryList,
     invTotal,

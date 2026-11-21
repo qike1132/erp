@@ -12,6 +12,7 @@
       <ApprovalTable
         :items="items"
         :is-loading="isLoading"
+        :is-error="isError"
         :action-id="actionId"
         :total-items="totalItems"
         :per-page="perPage"
@@ -21,6 +22,7 @@
         :status-label="statusLabel"
         @approve="handleApprove"
         @reject="openRejectDialog"
+        @retry="refetch()"
         @page="goPage"
       />
     </div>
@@ -59,6 +61,8 @@ const {
   onSearchInput,
   clearSearch,
   isLoading,
+  isError,
+  refetch,
   items,
   totalItems,
   totalPages,

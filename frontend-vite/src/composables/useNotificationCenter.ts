@@ -18,6 +18,8 @@ export function useNotificationCenter() {
   // 数据状态
   const list = ref<Notification[]>([])
   const total = ref(0)
+  /** M-33：列表加载失败态（null=正常），视图据此渲染错误横幅而非「暂无通知」 */
+  const listError = ref<string | null>(null)
   const page = ref(1)
   const pageSize = ref(DEFAULT_PAGE_SIZE)
   const loading = ref(false)
@@ -46,6 +48,7 @@ export function useNotificationCenter() {
   ) {
     list.value = response.data ?? []
     total.value = response.total ?? 0
+    listError.value = null
     if (resetSelection) {
       selectedIds.value = new Set()
     } else {
@@ -71,8 +74,9 @@ export function useNotificationCenter() {
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[notification-center] list failed', e)
       if (requestId !== loadRequestId || silent) return
-      list.value = []
-      total.value = 0
+      // M-33（2026-11-21 审计）：失败不得渲染成「暂无通知」——置错误态保留既有
+      // 数据，由视图提供重试入口（与 beile-order A-M32 同口径）。
+      listError.value = e instanceof Error ? e.message : String(e ?? '通知加载失败')
     }
   }
 
@@ -256,6 +260,8 @@ export function useNotificationCenter() {
     // 数据
     list: readonly(list),
     total: readonly(total),
+    // M-33：列表加载失败态，视图据此渲染错误横幅而非「暂无通知」
+    listError: readonly(listError),
     page: readonly(page),
     pageSize: readonly(pageSize),
     totalPages: readonly(totalPages),

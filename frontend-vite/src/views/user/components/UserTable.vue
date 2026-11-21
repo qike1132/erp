@@ -11,7 +11,12 @@
       @page="onPageChange"
     >
       <template #empty>
-        <div class="us-empty">
+        <div v-if="isError" class="us-empty" role="alert">
+          <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+          <span>用户加载失败，请检查网络后重试</span>
+          <UiButton variant="outline" @click="emit('retry')">重试</UiButton>
+        </div>
+        <div v-else class="us-empty">
           <FontAwesomeIcon icon="users" aria-hidden="true" />
           <span>暂无用户</span>
         </div>
@@ -57,6 +62,7 @@
  * 从 UserView.vue 拆出：UiDataTable 分页表格 + 角色/工厂/部门/状态徽章 + 行操作按钮。
  * 分页与行操作通过 emit 交回父组件处理。
  */
+import UiButton from '@/components/ui/UiButton.vue'
 import UiDataTable from '@/components/ui/UiDataTable.vue'
 import type { TableColumn } from '@/components/ui/UiDataTable.vue'
 import type { User } from '@/types'
@@ -67,6 +73,8 @@ defineProps<{
   users: User[]
   /** 加载中 */
   isLoading: boolean
+  /** 查询失败（M-33：与「暂无用户」分开渲染） */
+  isError?: boolean
   /** 每页条数 */
   perPage: number
   /** 用户总数 */
@@ -78,6 +86,8 @@ defineProps<{
 const emit = defineEmits<{
   /** 分页变化 */
   page: [event: { page: number; rows: number }]
+  /** 查询失败后重试（M-33 错误态） */
+  retry: []
   /** 打开权限分配弹窗 */
   openPermission: [row: UserRow]
   /** 打开编辑弹窗 */

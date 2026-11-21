@@ -3,6 +3,13 @@
     <div v-if="isLoading" class="ap-empty">
       <UiSpinner />
     </div>
+    <template v-else-if="isError && items.length === 0">
+      <div class="ap-empty" role="alert">
+        <FontAwesomeIcon icon="triangle-exclamation" aria-hidden="true" />
+        <span>审批记录加载失败，请检查网络后重试</span>
+        <UiButton variant="outline" @click="emit('retry')">重试</UiButton>
+      </div>
+    </template>
     <template v-else-if="items.length === 0">
       <div class="ap-empty">
         <FontAwesomeIcon icon="clipboard-check" aria-hidden="true" />
@@ -57,11 +64,14 @@
 <script setup lang="ts">
 import type { ApprovalItem } from '@/types'
 import UiPagination from '@/components/ui/UiPagination.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import UiSpinner from '@/components/ui/UiSpinner.vue'
 
 defineProps<{
   items: ApprovalItem[]
   isLoading: boolean
+  /** 查询失败（M-33：与「暂无审批记录」分开渲染） */
+  isError?: boolean
   actionId: number | ''
   totalItems: number
   perPage: number
@@ -74,6 +84,8 @@ defineProps<{
 const emit = defineEmits<{
   approve: [row: ApprovalItem]
   reject: [row: ApprovalItem]
+  /** 查询失败后重试（M-33 错误态） */
+  retry: []
   page: [page: number]
 }>()
 </script>

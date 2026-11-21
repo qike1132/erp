@@ -48,6 +48,8 @@ export function useNotificationCenterPage() {
   const {
     list,
     total,
+    // M-33（2026-11-21 审计）：失败态透传视图（错误横幅而非「暂无通知」）
+    listError,
     page,
     totalPages,
     loading,
@@ -178,12 +180,14 @@ export function useNotificationCenterPage() {
   return {
     list,
     total,
+    listError,
     page,
     totalPages,
     loading,
     marking,
     selectedIds,
     selectAll,
+    fetchList,
     isIndeterminate,
     selectedCount,
     hasSelection,

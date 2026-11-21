@@ -9,7 +9,7 @@
             <div class="w-8 h-8 rounded-[var(--radius-md)] bg-primary-50 flex items-center justify-center">
               <FontAwesomeIcon icon="chart-line" class="text-primary-500 text-sm" />
             </div>
-            <span class="text-sm font-semibold text-text">订单趋势（近7日）</span>
+            <span class="text-sm font-semibold text-text">今日订单</span>
           </div>
           <span class="text-xs text-text-muted">单位：件</span>
         </div>
@@ -101,17 +101,13 @@ function registerChart(chart: import('echarts/core').ECharts) {
 
 /** 构建折线图 option（数据和日期可变，样式固定） */
 function buildOrderChartOption(echarts: EChartsModule) {
-  const days: string[] = []
-  const now = new Date()
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - i)
-    days.push(`${d.getMonth() + 1}/${d.getDate()}`)
-  }
-  const data = [0, 0, 0, 0, 0, 0, props.stats?.order_today ?? 0]
+  // M-32（2026-11-21 审计）：此前 7 日轴硬编码 [0,0,0,0,0,0,今日]——标题宣称
+  // 近 7 日趋势、昨日 500 单也显示 0。后端尚无订单趋势接口，先诚实呈现
+  // 「今日」单值；趋势接口就绪后恢复折线并接真数据。
+  const data = [props.stats?.order_today ?? 0]
   return {
     tooltip: {
-      trigger: 'axis' as const,
+      trigger: 'item' as const,
       backgroundColor: 'rgba(255,255,255,0.95)',
       borderColor: '#e2e8f0',
       borderWidth: 1,
@@ -120,7 +116,7 @@ function buildOrderChartOption(echarts: EChartsModule) {
     },
     grid: { top: 24, right: 20, bottom: 32, left: 48 },
     xAxis: {
-      type: 'category' as const, data: days,
+      type: 'category' as const, data: ['今日'],
       axisLine: { lineStyle: { color: '#e2e8f0' } },
       axisLabel: { color: '#64748b', fontSize: 11 },
       axisTick: { show: false },
@@ -132,8 +128,8 @@ function buildOrderChartOption(echarts: EChartsModule) {
       axisLine: { show: false }, axisTick: { show: false },
     },
     series: [{
-      type: 'line' as const, smooth: true, symbol: 'circle' as const, symbolSize: 8,
-      showSymbol: false, data,
+      type: 'line' as const, symbol: 'circle' as const, symbolSize: 10,
+      data,
       lineStyle: { color: '#5b8def', width: 3, cap: 'round' as const },
       itemStyle: { color: '#5b8def', borderWidth: 2, borderColor: '#fff' },
       areaStyle: {

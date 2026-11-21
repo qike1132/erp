@@ -55,7 +55,7 @@ export function useApproval() {
     currentPage.value = 1
   }
 
-  const { data: result, isLoading } = useQuery({
+  const { data: result, isLoading, isError, refetch } = useQuery({
     queryKey: ['approvals', () => statusFilter.value, () => debouncedSearch.value, () => currentPage.value],
     queryFn: () =>
       approvalApi.list({
@@ -159,6 +159,9 @@ export function useApproval() {
     onSearchInput,
     clearSearch,
     isLoading,
+    // M-33（2026-11-21 审计）：查询失败与「暂无审批记录」分开渲染
+    isError,
+    refetch,
     items,
     totalItems,
     totalPages,
