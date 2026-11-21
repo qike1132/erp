@@ -34,6 +34,24 @@ logger = logging.getLogger(__name__)
 # 已于 2026-10-15 随验证族一起迁至 drill_validator.py（纯搬移）。
 
 
+def _sql_dump_decompressed_size(data_path_sql_gz) -> int:
+    """流式统计 SQL dump 解压后字节数（M-19，2026-11-21 审计）。
+
+    整份解压读进内存只为算 size，GB 级 dump 演练内存峰值 ≈2×解压体积可 OOM；
+    psql 导入本就不依赖这份内容，逐 MB 计数即可。
+    """
+    import gzip as gzip_mod
+
+    sql_size = 0
+    with gzip_mod.open(data_path_sql_gz, 'rt', encoding='utf-8') as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            sql_size += len(chunk)
+    return sql_size
+
+
 class DisasterRecoveryTestService:
     """灾难恢复测试服务类"""
 
@@ -511,13 +529,12 @@ class DisasterRecoveryTestService:
                     with open(data_path_json, encoding='utf-8') as f:
                         backup_data = json.load(f)
                 elif data_path_sql_gz.exists():
-                    # SQL dump 格式，无法直接解析为 JSON，记录基本信息
-                    import gzip as gzip_mod
-                    with gzip_mod.open(data_path_sql_gz, 'rt', encoding='utf-8') as f:
-                        sql_content = f.read()
+                    # SQL dump 无法解析为 JSON，只记解压后字节数。
+                    # M-19（2026-11-21 审计）：整份解压读进内存只为算 size 会 OOM，
+                    # 流式计数（psql 导入本就不依赖这份内容）。
                     backup_data = {
                         'format': 'sql',
-                        'sql_size': len(sql_content),
+                        'sql_size': _sql_dump_decompressed_size(data_path_sql_gz),
                         'tables': manifest.get('tables', {})
                     }
                 else:

@@ -262,7 +262,7 @@ def _summarize_validation(validation_results: dict[str, Any]) -> tuple[bool, boo
     all_passed = all(
         result['passed']
         for key, result in validation_results.items()
-        if key.endswith('_validation')
+        if key.endswith('_validation') and not result.get('skipped')
     )
     return all_passed and not evidence_incomplete, evidence_incomplete
 
@@ -339,12 +339,16 @@ class DrillValidator:
                 }},
             )
 
+            # M-20（2026-11-21 审计）：被 env 禁用的族标 skipped 并排除出 all()
+            # （此前禁用族恒 passed=False，演练必判失败刷假告警）。
+            _skip_flags = (('schema_validation', 'validate_schema'),
+                           ('data_validation', 'validate_data_integrity'),
+                           ('constraint_validation', 'validate_constraints'))
             validation_results = {
-                'schema_validation': {'passed': False, 'details': {}},
-                'data_validation': {'passed': False, 'details': {}},
-                'constraint_validation': {'passed': False, 'details': {}},
-                'performance_validation': {'passed': False, 'details': {}}
+                key: {'passed': False, 'skipped': not self.test_config[flag], 'details': {}}
+                for key, flag in _skip_flags
             }
+            validation_results['performance_validation'] = {'passed': False, 'details': {}}
 
             try:
                 async with test_engine.connect() as conn:

@@ -17,6 +17,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi_app.core.atomic_write import atomic_output
+
 from .._constants import (
     _CHECKSUM_EXCLUDE_TABLES,
     BACKUP_FORMAT_VERSION,
@@ -835,12 +837,16 @@ async def create_full_backup_to_file(
 
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(zip_bytes)
+        # M-21（2026-11-21 审计）：备份产物原子落盘——半截包按 _counts_as_restorable
+        # （只看 size>0）可充当「最后一份可还原」，原子写消除该窗口。
+        with atomic_output(output_path) as fh:
+            fh.write(zip_bytes)
         return output_path, manifest
     else:
         fd, tmp_file = tempfile.mkstemp(suffix='.zip', prefix='erp_backup_')
         os.close(fd)
-        Path(tmp_file).write_bytes(zip_bytes)
+        with atomic_output(Path(tmp_file)) as fh:
+            fh.write(zip_bytes)
         return Path(tmp_file), manifest
 
 
@@ -873,7 +879,8 @@ async def create_pre_restore_backup(db: AsyncSession, skip_restore_check: bool =
         _encrypted = bool(_manifest.get('encrypted'))
         filename = f'pre_restore_{timestamp}.zip.enc' if _encrypted else f'pre_restore_{timestamp}.zip'
         filepath = PRE_RESTORE_DIR / filename
-        filepath.write_bytes(zip_bytes)
+        with atomic_output(filepath) as fh:  # M-21：回滚点半截包同样致命，同口径原子落盘
+            fh.write(zip_bytes)
         cleanup_pre_restore_backups()
         return {'success': True, 'filename': filename, 'filepath': str(filepath), 'size': len(zip_bytes), 'encrypted': _encrypted}
     except Exception as e:  # broad-except: 备份/恢复容错，防止局部异常导致整体流程中断

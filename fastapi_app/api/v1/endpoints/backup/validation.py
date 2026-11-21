@@ -792,9 +792,20 @@ async def validate_backup_integrity(
                             message = f'JSON格式错误: {e!s}'
                             corrupted_files.append(filename)
 
+                    elif filename.endswith('.enc') and not encrypted:
+                        # M-29（2026-11-21 审计）：内容头探测不出加密的 legacy 裸信封
+                        # （_is_encrypted_data 不猜测）落入此分支——不能按「验证通过」
+                        # 放行，否则损坏的 legacy 加密备份被巡检判有效，灾难时才暴露。
+                        valid = False
+                        message = '加密格式未识别（legacy 裸信封？），未验证，需人工确认'
+
+                    if filename.endswith('.enc') and not encrypted:
+                        status = 'unverified'
+                    else:
+                        status = 'valid' if valid else 'invalid'
                     details.append({
                         'filename': filename,
-                        'status': 'valid' if valid else 'invalid',
+                        'status': status,
                         'message': message,
                         'size': file_size,
                         'encrypted': encrypted,
@@ -821,8 +832,11 @@ async def validate_backup_integrity(
 
         # Z05-R9：只把 status=valid 计入有效；加密文件未做深度验证，单列为 unverified，
         # 不再用「总数 - 损坏 - 缺失」把 encrypted/error 混进 valid。
+        # M-29：legacy 裸信封（未识别加密）也计 unverified——不是损坏，也不是有效。
         valid_files = sum(1 for d in details if d.get('status') == 'valid')
-        unverified_files = sum(1 for d in details if d.get('status') == 'encrypted')
+        unverified_files = sum(
+            1 for d in details if d.get('status') in ('encrypted', 'unverified')
+        )
         invalid_files = sum(
             1 for d in details if d.get('status') in ('invalid', 'corrupted', 'missing', 'error')
         )
