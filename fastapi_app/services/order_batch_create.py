@@ -293,12 +293,16 @@ async def _apply_deductions(
         if deduct_qty <= 0:
             continue
         try:
-            await process_order_deduction(
+            deducted_amount, _ded_details = await process_order_deduction(
                 db, order, it['product_id'], it['quantity'],
                 deduct_stock=True,
                 custom_deduct_quantity=deduct_qty,
                 product=it['product'],
             )
+            # M-1（2026-11-21 审计）：落库的 deduct_quantity 此前只按订单量收口，
+            # 备货不足时实扣更少（order_deduction_service 再按 available 收口），而
+            # purchase/_unprocessed.py 把该列当「已抵扣」展示——口径分叉。以实扣回写。
+            _order_item.deduct_quantity = int(deducted_amount)
         except (ValueError, TypeError, RuntimeError, OSError) as ded_err:
             logger.error(f"订单抵扣处理失败: {ded_err}", exc_info=True)
             results.append({

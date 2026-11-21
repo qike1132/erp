@@ -276,6 +276,12 @@ async def update_order_item(db: AsyncSession, item_id: int, quantity: int | None
     old_qty = item.quantity
     if quantity is not None:
         validate_quantity_range(quantity, '订单数量')
+        # M-2：明细改量同样守「不得低于该明细已抵扣量」（deduction.py:303 同款；
+        # 出库按订单级计量无法按明细归属，明细级下限只取已抵扣）。
+        if quantity < (item.deduct_quantity or 0):
+            raise ValueError(
+                f'明细数量不得低于已抵扣量 {item.deduct_quantity or 0}（请求 {quantity}），'
+                '请先撤销抵扣')
         item.quantity = quantity
     if note is not None:
         item.note = note
@@ -421,6 +427,23 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     return {'success': True, 'message': '明细删除成功', 'requires_approval': False}
 
 
+async def _order_quantity_floor(db: AsyncSession, order: Order) -> int:
+    """整单改量的数量下限 = max(Σ明细已抵扣, Σ出库净量)（M-2，2026-11-21 审计）。
+
+    把已抵扣/已出货的订单改小，派生状态会恒「已出货」、明细可用量恒负；
+    deduction.py 对抵扣量本身有同款守卫，这里守的是整单改量入口。
+    """
+    deducted = (await db.execute(
+        select(func.coalesce(func.sum(OrderItem.deduct_quantity), 0))
+        .where(OrderItem.order_id == order.id)
+    )).scalar() or 0
+    shipped = (await db.execute(
+        select(func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0))
+        .where(StockOut.order_id == order.id)
+    )).scalar() or 0
+    return max(int(deducted), int(shipped))
+
+
 async def _update_order_directly(
     db: AsyncSession, order: Order, order_id: int,
     quantity: int, customer: str, note: str,
@@ -428,6 +451,13 @@ async def _update_order_directly(
 ) -> dict:
     validate_quantity_range(quantity, "订单数量")
     validate_not_empty(customer, "客户名称")
+    # M-2（2026-11-21 审计）：改量无「不得低于已抵扣/已出库量」守卫——
+    # 把已出货 50 的订单改成 10，状态恒「已出货」、明细可用量恒负。
+    floor_q = await _order_quantity_floor(db, order)
+    if quantity < floor_q:
+        raise ValueError(
+            f'订单数量不得低于已抵扣/已出库量 {floor_q}（请求 {quantity}），'
+            '请先撤销相应抵扣/出货')
     # TODO(multi-sku-order): 读取/修改 order.quantity 在多 SKU 下语义变更（多 item 改哪个？），待后续 spec 改造为遍历 order.items；当前依赖兼容值。
     old_quantity = order.quantity
     _ = order.customer
