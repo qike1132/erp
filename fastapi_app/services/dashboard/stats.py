@@ -175,6 +175,8 @@ async def _query_production_stats(db: AsyncSession, today_start: datetime) -> di
             "production_completion_rate": round_qty(completed_plans / total_plans, precision_digits=2) if total_plans > 0 else 0.0,
             "pending_shipments": total_plans - completed_plans,
         }
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503，不得吞成 0 值统计
     except Exception:  # defensive: 仪表盘某个统计项失败时不影响整体返回
         logger.warning("生产排产统计查询失败", exc_info=True)
         return {"production_completion_rate": 0.0, "pending_shipments": 0}

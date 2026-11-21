@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import DatabaseError, DataError, OperationalError
+from sqlalchemy.exc import DataError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_time import (
@@ -92,7 +92,9 @@ async def fetch_customer_out_details(
                 total_amount=round_money(float(row[2] or 0))
             ))
         return CustomerOutDetailResponse(success=True, data=details).model_dump()
-    except (OperationalError, DataError, DatabaseError, ValueError, TypeError) as e:
+    except (DataError, ValueError, TypeError) as e:
+        # M-16 族（2026-11-21 审计）：连接类异常（OperationalError/DisconnectionError）
+        # 不得吞成空数据 200——交全局 503 处理器；数据形状类异常保留既有容错。
         logger.warning("客户出库详情加载失败: %s", e)
         return CustomerOutDetailResponse(success=True, data=[]).model_dump()
 
@@ -149,6 +151,7 @@ async def fetch_customer_order_details(
                 total_amount=round_money(float(row[2] or 0))
             ))
         return CustomerOutDetailResponse(success=True, data=details).model_dump()
-    except (OperationalError, DataError, DatabaseError, ValueError, TypeError) as e:
+    except (DataError, ValueError, TypeError) as e:
+        # M-16 族：连接类异常交全局 503 处理器（见 fetch_customer_out_details 注释）。
         logger.warning("客户订单详情加载失败: %s", e)
         return CustomerOutDetailResponse(success=True, data=[]).model_dump()

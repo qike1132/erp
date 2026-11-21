@@ -5,6 +5,7 @@
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.cache import cache_result
@@ -62,10 +63,14 @@ async def fetch_dashboard_todos(db: AsyncSession, factory: str = '') -> dict:
                     created_at=str(p.plan_date) if p.plan_date else "",
                     related_module="shipment_plan", related_business_id=p.id
                 ))
+        except (OperationalError, DisconnectionError):
+            raise  # M-16 族：连接类异常交全局 503，不得吞成部分/空待办
         except Exception as e:  # defensive: 单个待办来源失败时返回其他来源
             logger.warning("获取出货计划待办失败: %s", e)
         todos.sort(key=lambda x: 0 if x.urgency == "urgent" else 1)
         return TodoListResponse(success=True, data=todos[:10]).model_dump()
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503，不得吞成空待办列表
     except Exception as e:  # defensive: 待办整体失败时返回空列表
         logger.warning("仪表盘待办加载失败: %s", e, exc_info=True)
         return TodoListResponse(success=True, data=[]).model_dump()

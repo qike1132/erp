@@ -6,6 +6,7 @@ import logging
 from datetime import date, datetime
 
 from sqlalchemy import extract, func, select
+from sqlalchemy.exc import DisconnectionError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.business_time import (
@@ -97,6 +98,8 @@ async def _load_stock_data(
         # 需将 shipping 拆分为独立查询，否则 shipping 不会自动跟随变更。
         shipping_data.daily_qty = stock_data.today_quantity
         shipping_data.total_amount = stock_data.today_amount
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503，不得吞成 0/空卡片
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
         logger.warning("移动看板出库数据加载失败: %s", e)
 
@@ -172,6 +175,8 @@ async def _load_production_data(
             d["output_value"] = round_money(d["output_value"])
             production_data.departments.append(MobileDeptData(**d))
         logger.info(f"生产数据加载完成: {len(production_data.departments)}个部门, 总值{production_data.total_value}")
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
         logger.warning("移动看板生产数据加载失败: %s", e, exc_info=True)
 
@@ -221,6 +226,8 @@ async def _load_order_data(
         )).one()
         order_data.total_inventory = int(inv_row.inv_qty)
         order_data.total_inventory_amount = round_money(float(inv_row.inv_amt))
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
         logger.warning("移动看板订单数据加载失败: %s", e)
 
@@ -260,6 +267,8 @@ async def _load_warehouse_data(
         )).one()
         warehouse_data.out_qty = int(cso_row.qty)
         warehouse_data.out_amount = round_money(float(cso_row.amt))
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
         logger.warning("移动看板仓储数据加载失败: %s", e)
 
@@ -332,6 +341,8 @@ async def _load_plans_data(db: AsyncSession, plans_data: dict[str, object]) -> N
             "customer_summary": {},
         }
         logger.info(f"生产计划数据准备完成: {len(item_list)} 条")
+    except (OperationalError, DisconnectionError):
+        raise  # M-16 族：连接类异常交全局 503
     except Exception as e:  # defensive: 移动看板单个数据卡片失败时继续加载其他卡片
         logger.warning("移动看板生产计划数据加载失败", exc_info=True)
         if hasattr(e, '__cause__') and e.__cause__:
