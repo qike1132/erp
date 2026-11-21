@@ -12,6 +12,15 @@ from fastapi_app.core.business_time import fmt_business
 from fastapi_app.shared_models import Base
 
 
+class ProductionPlanStatus:
+    """排产计划状态唯一权威定义：业务代码引用常量，禁止新增字面量（仿 PurchaseOrderStatus）。"""
+
+    PENDING = 'pending'
+    CONFIRMED = 'confirmed'
+    COMPLETED = 'completed'
+    ALL = (PENDING, CONFIRMED, COMPLETED)
+
+
 class ProductionPlan(Base):
     """排产计划模型"""
     __tablename__ = 'production_plan'

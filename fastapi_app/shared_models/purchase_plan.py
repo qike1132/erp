@@ -14,6 +14,16 @@ from fastapi_app.shared.numbering_format import NUMBERING_FORMAT_REGEX
 from fastapi_app.shared_models import Base
 
 
+class PurchasePlanStatus:
+    """采购计划状态唯一权威定义：业务代码引用常量，禁止新增字面量（仿 PurchaseOrderStatus）。"""
+
+    PENDING = 'pending'
+    CONFIRMED = 'confirmed'
+    COMPLETED = 'completed'
+    CANCELLED = 'cancelled'
+    ALL = (PENDING, CONFIRMED, COMPLETED, CANCELLED)
+
+
 class PurchasePlan(Base):
     """采购计划主表"""
     __tablename__ = 'purchase_plans'

@@ -33,6 +33,7 @@ from fastapi_app.shared_models import (
     PurchasePlan,
     PurchasePlanDetail,
 )
+from fastapi_app.shared_models.purchase_plan import PurchasePlanStatus
 
 
 class PlanExistsError(ValueError):
@@ -162,6 +163,13 @@ async def create_plan(db: AsyncSession, *, customer_id: int, customer_name: str,
 
 async def update_plan(db: AsyncSession, plan_id: int, *, created_by: str='', **kwargs) -> dict:
     """更新采购计划主单信息（状态、备注等）"""
+    # M-6（2026-11-21 审计）：schema 层 Literal 已校验，这里兜内部调用方——自由字符串
+    # 曾让 completed 被改回 pending 绕过状态机（仿 PO 侧 P1-16）。守卫先于取数，
+    # 非法值不产生任何 DB 访问。
+    status_value = kwargs.get('status')
+    if status_value is not None and status_value not in PurchasePlanStatus.ALL:
+        raise ValueError(
+            f'非法采购计划状态: {status_value!r}（允许: {", ".join(PurchasePlanStatus.ALL)}）')
     result = await db.execute(select(PurchasePlan).where(PurchasePlan.id == plan_id))
     plan = result.scalar_one_or_none()
     if not plan:

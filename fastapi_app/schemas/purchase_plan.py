@@ -4,6 +4,8 @@
 主从表结构：PurchasePlan（主表）+ PurchasePlanDetail（明细表）
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 # ==================== 请求模型 ====================
@@ -29,7 +31,9 @@ class PurchasePlanCreate(BaseModel):
 
 class PurchasePlanUpdate(BaseModel):
     """更新采购计划主单"""
-    status: str | None = Field(None, description="状态: pending/confirmed/completed/cancelled")
+    # M-6（2026-11-21 审计）：自由字符串曾让 completed 改回 pending 绕过状态机。
+    status: Literal['pending', 'confirmed', 'completed', 'cancelled'] | None = Field(
+        None, description="状态: pending/confirmed/completed/cancelled")
     remark: str | None = Field(None, description="备注")
 
 
