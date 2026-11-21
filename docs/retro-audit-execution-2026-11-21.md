@@ -27,6 +27,7 @@
 | # | 提案 | 形态 | 优先级 |
 |---|---|---|---|
 | 1 | **pydantic 无界列表检查**：`list[X]` 字段无 max_length 即报（本次 M-18 门禁盲区） | quality_gate 新 gate（AST） | 高 |
+| 1b | **schema 改动三件套门禁**：改 `schemas/*.py` 后 openapi.json/api.d.ts/buster 三者不同步即拦——本次同一教训**两轮复发**（评审 M-1 漏重导、14695302 改默认值又漏），本地 check:types 读过期快照互相印证失效，只有 CI 全指纹比对能拦。做成 pre-commit：`git diff --name-only | grep schemas/` 时跑三件套校验 | pre-commit hook | 高 |
 | 2 | **naive datetime 比 timestamptz 检查**：`column >= datetime(y,m,d)` 形态扫描（M-41 族根因） | quality_gate 新 gate（AST，列型映射表） | 中（误报需调） |
 | 3 | **行号锁定断言检测**：测试断言含 `file.py:NNN` 字面量时提示改 AST 锚定 | 提示性检查（不阻断） | 低 |
 | 4 | **前端孤儿模块门禁**：check_orphan_modules 只扫 Python；前端死组件/死 composable 零消费不报（本次 4 处） | 前端 check 脚本（knip 或自写 import 图） | 中 |
