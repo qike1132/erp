@@ -159,14 +159,18 @@ async def _increase_deduction(
         db.add(stockout)
 
         # 更新产品库存（统一走乐观锁写入口，WHERE version=旧值；不再直写 current_stock）
+        updated = None
         if product and deduct_amount > 0:
-            await update_stock_with_optimistic_lock(db, order_product_id, -deduct_amount)
+            updated = await update_stock_with_optimistic_lock(db, order_product_id, -deduct_amount)
 
         logs.append(InventoryLog(
             product_id=order.product_id,
             change_type='订单抵扣',
             change_quantity=-deduct_amount,
             related_id=stockout_no,
+            # M-14（2026-11-21 审计）：补前后结存，inventory_reconcile 对账可追溯
+            quantity_before=updated.current_stock + deduct_amount if updated else None,
+            quantity_after=updated.current_stock if updated else None,
             note=f'修改抵扣增加：订单{order.order_no}，备货{stockin.stockin_no}，数量{deduct_amount}'
         ))
         remaining -= deduct_amount
@@ -227,26 +231,34 @@ async def _decrease_deduction(
             # 拒绝、已取消退货解除关联。放在库存/日志写入之前，失败时不产生半截副作用。
             await guard_stockout_deletion(db, stockout)
             remaining -= effective_qty
+            updated = None
             if product:
-                await update_stock_with_optimistic_lock(db, order_product_id, effective_qty)
+                updated = await update_stock_with_optimistic_lock(db, order_product_id, effective_qty)
             logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',
                 change_quantity=effective_qty,
                 related_id=stockout.stockout_no,
+                # M-14：补前后结存（同上）
+                quantity_before=updated.current_stock - effective_qty if updated else None,
+                quantity_after=updated.current_stock if updated else None,
                 note=f'修改抵扣减少：订单{order.order_no}，取消出库{stockout.stockout_no}，数量{effective_qty}'
             ))
             await db.delete(stockout)
         else:
             # 部分减少
             stockout.quantity -= remaining
+            updated = None
             if product:
-                await update_stock_with_optimistic_lock(db, order_product_id, remaining)
+                updated = await update_stock_with_optimistic_lock(db, order_product_id, remaining)
             logs.append(InventoryLog(
                 product_id=order.product_id,
                 change_type='取消抵扣',
                 change_quantity=remaining,
                 related_id=stockout.stockout_no,
+                # M-14：补前后结存（同上）
+                quantity_before=updated.current_stock - remaining if updated else None,
+                quantity_after=updated.current_stock if updated else None,
                 note=f'修改抵扣减少：订单{order.order_no}，减少出库{stockout.stockout_no}，数量{remaining}'
             ))
             remaining = 0

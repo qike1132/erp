@@ -379,11 +379,12 @@ async def confirm_staging_stockouts(
     # 若此处不先 flush，DELETE 在库里仍按旧 PENDING 匹配 0 行——紧接着的 flush
     # 反而把「本该清掉」的 REJECTED 行永久写回，列表又只查 PENDING，用户再也看不到/
     # 重试不了这一行。与 stockin/order 路径的「改状态后显式 flush 再删」对齐。
+    # M-13（2026-11-21 审计）：APPROVED 行确认后同样清理，防 staging 表无界增长。
     await db.flush()
     await db.execute(
         delete(StagingStockOut).where(
             StagingStockOut.session_id == session_id,
-            StagingStockOut.status == StagingStatus.REJECTED,
+            StagingStockOut.status.in_([StagingStatus.REJECTED, StagingStatus.APPROVED]),
         )
     )
     await db.flush()

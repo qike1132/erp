@@ -139,13 +139,16 @@ async def _write_confirmed_stockin(
         raise ValueError(f'备货{staging.customer}-{staging.product_name}的产品不在你的工厂范围，已拒绝')
     # 统一写入口：持锁路径也要带 version 守卫并递增 version，
     # 否则与走乐观锁的写入口并发时会因 WHERE version=旧值 仍命中而丢失更新。
-    await apply_stock_delta_locked(db, product, staging.quantity)
+    updated = await apply_stock_delta_locked(db, product, staging.quantity)
 
     log = InventoryLog(
         product_id=staging.product_id,
         change_type='备货',
         change_quantity=staging.quantity,
         related_id=stockin_no,
+        # M-14（2026-11-21 审计）：补前后结存，inventory_reconcile 对账可追溯
+        quantity_before=updated.current_stock - staging.quantity,
+        quantity_after=updated.current_stock,
         idem_key=_import_idem_key(
             'stockin', staging.customer, product_id, staging.quantity,
             staging.stockin_date or datetime.now(UTC),
@@ -201,12 +204,13 @@ async def confirm_staging_stockins(
             staging.status = staging_machine.transition(staging.status, StagingAction.REJECT)
 
     # P2（2026-10-24）：DELETE 前必须 flush（session 为 autoflush=False，
-    # 上面改的 status 尚未落库，Core DELETE 不会触发 autoflush → 匹配 0 行）
+    # 上面改的 status 尚未落库，Core DELETE 不会触发 autoflush → 匹配 0 行）。
+    # M-13（2026-11-21 审计）：APPROVED 行确认后同样清理，防 staging 表无界增长。
     await db.flush()
     await db.execute(
         delete(StagingStockIn).where(
             StagingStockIn.session_id == session_id,
-            StagingStockIn.status == StagingStatus.REJECTED,
+            StagingStockIn.status.in_([StagingStatus.REJECTED, StagingStatus.APPROVED]),
         )
     )
     await db.flush()
