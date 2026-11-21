@@ -3,6 +3,7 @@
 """
 import asyncio
 import io
+import re
 import zipfile
 from datetime import datetime
 from urllib.parse import quote
@@ -145,7 +146,10 @@ async def export_supplier_summary_excel(data: SupplierSummaryExportRequest, db: 
                     wb.save(excel_buffer)
                     wb.close()
                     excel_buffer.seek(0)
-                    filename = f"{supplier['supplier_name']}_采购订单汇总.xlsx"
+                    # L-29（2026-11-21 审计）：供应商名来自用户提交，直接拼 zip 条目名
+                    # 可构造 `..\` 跨目录条目（zip-slip）——滤掉路径分隔符与父目录片段。
+                    _safe_name = re.sub(r'[\\/:*?"<>|]|\.\.', '_', supplier['supplier_name'])
+                    filename = f"{_safe_name}_采购订单汇总.xlsx"
                     zf.writestr(filename, excel_buffer.read())
             zip_buffer.seek(0)
             zip_filename = f'{date_prefix}-供应商采购订单汇总.zip'
