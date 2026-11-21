@@ -102,9 +102,13 @@ def _build_staging_row(session_id: str, item: dict, all_products: list,
 
     product, match_confidence = fuzzy_match_product(product_name, all_products, product_map)
     matched_customer, customer_confidence = fuzzy_match_customer(customer, all_customers)
+    customer_match_note = ''
     if matched_customer and customer_confidence >= 0.7:
         if customer_confidence < 1.0:
             logger.info(f"客户模糊匹配: OCR='{customer}' -> DB='{matched_customer.name}', 置信度={customer_confidence:.2f}")
+        # M-24（2026-11-21 审计）：客户改写同样写进 note——与产品匹配对齐，
+        # 「张三」命中「张三丰」这类静默改名从此在暂存行上可追溯原文。
+        customer_match_note = f"客户模糊匹配: OCR='{customer}'→'{matched_customer.name}'({customer_confidence:.0%})"
         customer = matched_customer.name
 
     is_validated = False
@@ -128,6 +132,8 @@ def _build_staging_row(session_id: str, item: dict, all_products: list,
             stock_check_message = f'库存充足，当前库存: {product.current_stock}'
     else:
         validation_error = f'产品"{product_name}"不存在'
+    if customer_match_note:
+        match_info_parts.append(customer_match_note)
     if match_info_parts:
         note = note + '；' + '；'.join(match_info_parts) if note else '；'.join(match_info_parts)
 
