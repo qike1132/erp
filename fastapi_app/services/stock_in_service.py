@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -273,6 +273,19 @@ async def batch_create_stockins(db: AsyncSession, stockins_data: list, operator_
             except ConflictError as e:
                 # 幂等冲突按行失败处理（begin_nested 已回滚该行），不影响同批其它行
                 results[orig_idx] = {'success': False, 'error': str(e), 'id': item.get('id', '未知')}
+            except IntegrityError as e:
+                # L-7（2026-11-21 审计）：IntegrityError 此前未捕获，会冲出整个
+                # 批量函数 → 整批 500 全回滚，与单行路径不对称。对齐
+                # stock_out_service 批量路径的 409 口径：幂等键冲突转可读的
+                # 「请勿重复提交」；其余约束冲突按行失败（savepoint 已回滚该行，
+                # 不影响同批其它行），不再把约束原文以 500 抛给前端。
+                raise_if_idempotency_conflict(e, '请勿重复提交：该请求已登记过入库')
+                logger.error(f'批量入库单项失败: {e}', exc_info=True)
+                results[orig_idx] = {'success': False, 'error': '入库处理失败，请稍后重试', 'id': item.get('id', '未知')}
+            except OperationalError as e:
+                # L-7（2026-11-21 审计）：同上，连接类错误按行失败而非整批 500。
+                logger.error(f'批量入库单项失败: {e}', exc_info=True)
+                results[orig_idx] = {'success': False, 'error': '入库处理失败，请稍后重试', 'id': item.get('id', '未知')}
             except (TypeError, OSError) as e:
                 logger.error(f'批量入库单项失败: {e}', exc_info=True)
                 results[orig_idx] = {'success': False, 'error': str(e) or '入库处理失败，请稍后重试', 'id': item.get('id', '未知')}

@@ -97,7 +97,9 @@ async def create_craft_work(db: AsyncSession, *, worker_name: str, quantity: int
 
 async def update_craft_work(db: AsyncSession, record_id: int, *, created_by: str='', **kwargs) -> CraftWork:
     """更新手工部生产记录"""
-    result = await db.execute(select(CraftWork).where(CraftWork.id == record_id))
+    # L-3（2026-11-21 审计）：update/delete 与并发写方（同记录双开页签）无行锁会
+    # 丢失更新，对齐 F-BE-SVC-STOCK-03 口径补 with_for_update。
+    result = await db.execute(select(CraftWork).where(CraftWork.id == record_id).with_for_update())
     record = result.scalar_one_or_none()
     if not record:
         raise ValueError('记录不存在')
@@ -114,7 +116,8 @@ async def update_craft_work(db: AsyncSession, record_id: int, *, created_by: str
 
 async def delete_craft_work(db: AsyncSession, record_id: int) -> None:
     """删除手工部生产记录"""
-    result = await db.execute(select(CraftWork).where(CraftWork.id == record_id))
+    # L-3（2026-11-21 审计）：删除前加行锁，防并发 update 与 delete 交错。
+    result = await db.execute(select(CraftWork).where(CraftWork.id == record_id).with_for_update())
     record = result.scalar_one_or_none()
     if not record:
         raise ValueError('记录不存在')
@@ -225,7 +228,8 @@ async def batch_create_packaging_records(db: AsyncSession, records_data: list[di
 
 async def update_packaging_record(db: AsyncSession, record_id: int, *, created_by: str='', **kwargs) -> PackagingRecord:
     """更新包装部记录"""
-    result = await db.execute(select(PackagingRecord).where(PackagingRecord.id == record_id))
+    # L-3（2026-11-21 审计）：同 update_craft_work，补 with_for_update 行锁。
+    result = await db.execute(select(PackagingRecord).where(PackagingRecord.id == record_id).with_for_update())
     record = result.scalar_one_or_none()
     if not record:
         raise ValueError('记录不存在')
@@ -240,7 +244,8 @@ async def update_packaging_record(db: AsyncSession, record_id: int, *, created_b
 
 async def delete_packaging_record(db: AsyncSession, record_id: int) -> None:
     """删除包装部记录"""
-    result = await db.execute(select(PackagingRecord).where(PackagingRecord.id == record_id))
+    # L-3（2026-11-21 审计）：同 delete_craft_work，补 with_for_update 行锁。
+    result = await db.execute(select(PackagingRecord).where(PackagingRecord.id == record_id).with_for_update())
     record = result.scalar_one_or_none()
     if not record:
         raise ValueError('记录不存在')

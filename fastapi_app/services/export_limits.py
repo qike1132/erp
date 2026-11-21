@@ -8,8 +8,17 @@
 EXPORT_MAX_ROWS = 20000
 
 
+class ExportLimitError(ValueError):
+    """导出行数超上界（L-35/N-54，2026-11-21 审计）。
+
+    继承 ValueError 保持向后兼容：既有 `except ValueError` → 413/400 的映射
+    行为不变。类型化的目的是让端点**不必**再靠 `'日期' in str(e)` 字符串判别
+    来区分「行数上界」与「日期非法」两种 ValueError。
+    """
+
+
 async def ensure_within_export_limit(db, count_query, *, limit: int = EXPORT_MAX_ROWS) -> int:
-    """读取计数查询的标量结果，超过 limit 行时抛 ValueError（端点转 413 引导缩小范围）。
+    """读取计数查询的标量结果，超过 limit 行时抛 ExportLimitError（端点转 413 引导缩小范围）。
 
     Returns:
         实际行数（未超限时调用方可继续导出）。
@@ -17,7 +26,7 @@ async def ensure_within_export_limit(db, count_query, *, limit: int = EXPORT_MAX
     total = await db.scalar(count_query)
     total = int(total or 0)
     if total > limit:
-        raise ValueError(
+        raise ExportLimitError(
             f'导出数据量过大（{total} 行，上限 {limit}），请缩小筛选范围后分批导出'
         )
     return total

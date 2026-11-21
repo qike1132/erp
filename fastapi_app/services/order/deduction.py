@@ -32,6 +32,7 @@ from fastapi_app.services.notification_service import (
 )
 from fastapi_app.services.order._common import (
     PermissionDeniedError,
+    _invalidate_order_domains,
     _log_background_task_exception,
     _pending_tasks,
     _safe_invalidate_purchase_cache,
@@ -67,13 +68,8 @@ from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 logger = logging.getLogger(__name__)
 
 
-async def _invalidate_order_domains() -> None:
-    """失效订单/库存与报表域缓存（提交前后共用；与 commands.py 同口径）。"""
-    await cache_mgr.invalidate(
-        InvalidationStrategy.DOMAIN,
-        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
-    )
-
+# L-10（2026-11-21 审计）：_invalidate_order_domains 原地删除——与 commands.py 的
+# 逐字重复实现收敛到 order/_common 单源（本文件顶部已改为从 _common 导入）
 
 
 from fastapi_app.services.order.approval_flow import _check_order_lock

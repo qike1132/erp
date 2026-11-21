@@ -30,6 +30,7 @@ from fastapi_app.services.notification_service import (
 from fastapi_app.services.numbering import generate_order_number
 from fastapi_app.services.order._common import (
     PermissionDeniedError,
+    _invalidate_order_domains,
     _safe_invalidate_purchase_cache,
     schedule_post_commit_event,
 )
@@ -71,12 +72,8 @@ from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 logger = logging.getLogger(__name__)
 
 
-async def _invalidate_order_domains() -> None:
-    """失效订单/库存与报表域缓存（供 post-commit 兜底回调复用）。"""
-    await cache_mgr.invalidate(
-        InvalidationStrategy.DOMAIN,
-        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
-    )
+# L-10（2026-11-21 审计）：_invalidate_order_domains 原地删除——与 deduction.py 的
+# 逐字重复实现收敛到 order/_common 单源（本文件顶部已改为从 _common 导入）
 
 
 async def _purge_synced_plan_details(db: AsyncSession, order_no: str, product_id: int | None) -> None:

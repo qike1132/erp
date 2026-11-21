@@ -223,14 +223,17 @@ class TestExportRowLimitMapsTo413:
 
     旧实现是 `limit(MAX+1)` 后只 logger.warning 再 records[:10000]，端点照常 200
     返回一份少行的 Excel —— 用户拿它去对账，账永远对不上却没有任何信号。
-    现在的契约：服务层 `ensure_within_export_limit` 抛 ValueError，端点映射 413。
+    现在的契约：服务层 `ensure_within_export_limit` 抛 ExportLimitError（ValueError
+    子类，L-35/N-54 2026-11-21 类型化），端点映射 413；其余 ValueError（日期非法）映射 400。
     """
 
     @pytest.mark.asyncio
     async def test_craft_export_over_limit_returns_413_and_no_file(self, client, mock_db):
+        from fastapi_app.services.export_limits import ExportLimitError
+
         with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
             mock_svc.export_craft_works = AsyncMock(
-                side_effect=ValueError('导出数据量过大（20001 行，上限 20000），请缩小筛选范围后分批导出')
+                side_effect=ExportLimitError('导出数据量过大（20001 行，上限 20000），请缩小筛选范围后分批导出')
             )
             response = await client.get('/api/v1/production-summary/craft/export')
 
@@ -241,14 +244,28 @@ class TestExportRowLimitMapsTo413:
 
     @pytest.mark.asyncio
     async def test_packaging_export_over_limit_returns_413_and_no_file(self, client, mock_db):
+        from fastapi_app.services.export_limits import ExportLimitError
+
         with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
             mock_svc.export_packaging_records = AsyncMock(
-                side_effect=ValueError('导出数据量过大（20001 行，上限 20000），请缩小筛选范围后分批导出')
+                side_effect=ExportLimitError('导出数据量过大（20001 行，上限 20000），请缩小筛选范围后分批导出')
             )
             response = await client.get('/api/v1/production-summary/packaging/export')
 
         assert response.status_code == 413
         assert 'attachment' not in response.headers.get('content-disposition', '')
+
+    @pytest.mark.asyncio
+    async def test_craft_export_invalid_date_returns_400(self, client, mock_db):
+        # L-35/N-54 反向断言：非上界的 ValueError（如日期非法）必须回 400，
+        # 不得被 413 误吞（用户拿到 413 会去缩范围，缩了也没用——评审 F1）。
+        with patch('fastapi_app.api.v1.endpoints.production_summary.production_summary_service') as mock_svc:
+            mock_svc.export_craft_works = AsyncMock(
+                side_effect=ValueError('日期格式非法: abc')
+            )
+            response = await client.get('/api/v1/production-summary/craft/export')
+
+        assert response.status_code == 400
 
     @pytest.mark.asyncio
     async def test_craft_export_within_limit_still_returns_xlsx(self, client, mock_db):

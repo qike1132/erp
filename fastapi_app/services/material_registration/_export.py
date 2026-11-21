@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from fastapi_app.core.sanitizer import escape_like
+from fastapi_app.services.export_limits import ExportLimitError
 from fastapi_app.services.material_registration._queries import _parse_filter_date
 from fastapi_app.shared_models import MaterialRegistration, MaterialRegistrationItem, PurchaseOrder
 from utils.report_exporter import _sanitize_excel_value
@@ -64,7 +65,10 @@ async def export_registrations(db, order_no: str = '', supplier: str = '',
     total_count = (await db.execute(count_query)).scalar() or 0
     if total_count > 5000:
         # 明确拒绝而不是静默截断：用户拿到缺行 Excel 无从察觉（A-M24）。
-        raise ValueError(
+        # L-35/N-54（2026-11-21 审计）：类型化为 ExportLimitError（ValueError 子类），
+        # 端点仍映射 400（test_material_export_limit.py 锁定该契约，未随 L-35 对齐 413，
+        # 状态码是否统一由 owner 裁定）。
+        raise ExportLimitError(
             f'符合条件的数据共 {total_count} 条，超过单次导出上限 5000 条，'
             '请缩小日期/供应商/客户等筛选范围后重试'
         )

@@ -402,13 +402,25 @@ def _resolve_db_env() -> dict:
     db_name = os.getenv('DB_NAME', 'erp_system')
     if not db_name.isidentifier() or not all(c.isalnum() or c == '_' for c in db_name) or db_name[0].isdigit():
         raise ValueError(f'Invalid database name: {db_name!r}')
+    # L-15（2026-11-21 审计）：db_user 会内插进 CREATE DATABASE ... OWNER "{db_user}"，
+    # 与 db_name 同款 isidentifier 白名单——角色名含引号/特殊字符时防注入
+    # （db_name 此前已加，db_user 漏了）。
+    if not db_user.isidentifier() or not all(c.isalnum() or c == '_' for c in db_user) or db_user[0].isdigit():
+        raise ValueError(f'Invalid database user: {db_user!r}')
     db_password = os.getenv('DB_PASSWORD', '')
     env = os.environ.copy()
     env['PGPASSWORD'] = db_password
+    # L-10（2026-11-21 审计）：pg_dump/pg_restore/psql 的客户端编码默认继承宿主
+    # （Windows 中文环境常为 GBK），dump 出的 SQL 注释/数据含非 ASCII 时会产生
+    # 乱码或转码失败。显式钉 UTF8（与服务端 UTF-8 库一致）。
+    env['PGCLIENTENCODING'] = 'UTF8'
 
     admin_user, admin_password = _resolve_admin_credentials(db_user, db_password)
     admin_env = os.environ.copy()
     admin_env['PGPASSWORD'] = admin_password
+    # L-10（2026-11-21 审计）：psql -c 'CREATE/DROP DATABASE' 的 stderr 回显同样
+    # 受客户端编码影响，与上方 env 同口径钉 UTF8。
+    admin_env['PGCLIENTENCODING'] = 'UTF8'
     return {
         'db_host': db_host, 'db_port': db_port, 'db_user': db_user, 'db_name': db_name,
         'env': env, 'admin_user': admin_user, 'admin_env': admin_env,

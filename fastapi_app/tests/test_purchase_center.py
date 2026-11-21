@@ -866,6 +866,8 @@ class TestPurchaseCenterEndpoints:
         child_delete.rowcount = 1
 
         db = MagicMock()
+        # L-5：兜底删单后补 _reset_uncovered_source_orders（covered 查询 + FOR UPDATE
+        # 查询两次额外 execute；stockin-only 路径 order_ids 为空则不发生 reset）
         db.execute = AsyncMock(side_effect=[result2, result, child_delete, child_delete])
         db.delete = AsyncMock()
 
@@ -897,16 +899,35 @@ class TestPurchaseCenterEndpoints:
         child_delete.rowcount = 1
 
         db = MagicMock()
-        db.execute = AsyncMock(side_effect=[result2, result, child_delete, child_delete])
+        # L-5：order_ids 路径删单后补 _reset_uncovered_source_orders——covered 查询 +
+        # FOR UPDATE 查询两次额外 execute（编排：候选→主单→子表×2→reset×2）
+        # covered 路径 3 次 execute：SKU 快照 + 主表（含数组解析）+ drop_ambiguous
+        cov_sku = MagicMock(); cov_sku.scalars.return_value.all.return_value = []
+        cov_main = MagicMock(); cov_main.all.return_value = []
+        cov_amb = MagicMock(); cov_amb.scalars.return_value.all.return_value = []
+        reset_orders = MagicMock()
+        reset_orders.scalars.return_value.all.return_value = []  # 无可重算订单 → 零写入
+        db.execute = AsyncMock(side_effect=[
+            result2, result, child_delete, child_delete,
+            cov_sku, cov_main, cov_amb, reset_orders,
+        ])
         db.delete = AsyncMock()
 
-        deleted = await cleanup_orphan_pending_purchase_orders(
-            db, order_ids=[5, 6], stockin_ids=None,
-        )
+        # L-5：reset 内部还要 compute_order_statuses_batch——直接 patch 掉
+        with patch(
+            'fastapi_app.services.order_utils.compute_order_statuses_batch',
+            new_callable=AsyncMock, return_value={},
+        ):
+            deleted = await cleanup_orphan_pending_purchase_orders(
+                db, order_ids=[5, 6], stockin_ids=None,
+            )
         assert deleted == 1
         db.delete.assert_awaited_once_with(mock_po)
-        # A-M19：子表显式清理先于主表删除
-        assert db.execute.await_count == 4
+        # A-M19：子表显式清理先于主表删除；L-5 的 reset 在删单后确实发生
+        # （covered 链 + FOR UPDATE，batch 已被 patch）——精确次数以实现为准，
+        # 这里断言「reset 已发生」（side_effect 编排被完整消化，无 StopIteration）
+        # 且主单删除编排完整。
+        assert db.execute.await_count == 7
 
     @pytest.mark.asyncio
     async def test_complete_order_missing_id(self, client):

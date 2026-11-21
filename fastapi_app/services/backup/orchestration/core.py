@@ -810,6 +810,10 @@ async def _do_create_full_backup(
 
         # Z05-R10：GB 级备份同步读取会阻塞事件循环，下沉线程池
         zip_bytes = await asyncio.to_thread(zip_path.read_bytes)
+        # N-50（2026-11-21 审计）：zip_size 记录的是**明文** zip 的大小；加密包
+        # 落盘后的密文体积会更大（AES 封装 + base64 头），列表页若用 zip_size
+        # 展示密文体积需要对 .enc 文件重新 stat。已知取舍：manifest 在加密前
+        # 固化，密文大小以文件系统为准。
         manifest['zip_size'] = len(zip_bytes)
         if progress_cb:
             await progress_cb('generate_checksum', 1.0, '校验和已生成')

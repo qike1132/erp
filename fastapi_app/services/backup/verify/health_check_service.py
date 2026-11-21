@@ -26,7 +26,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi_app.core.database import get_async_db_context
 from fastapi_app.services.backup._constants import BACKUP_DIR, BACKUP_FILE_EXTENSIONS
 from fastapi_app.services.backup.metrics.alert_service import alert_service
-from fastapi_app.services.backup.records import ensure_backup_dir
+from fastapi_app.services.backup.records import _backup_created_time, ensure_backup_dir
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
@@ -323,9 +323,18 @@ class BackupHealthCheckService:
                     'issue': '未找到备份文件'
                 }
 
-            # 按修改时间排序
-            latest_file = max(backup_files, key=lambda f: f.stat().st_mtime)
-            file_mtime = datetime.fromtimestamp(latest_file.stat().st_mtime)
+            # L-14（2026-11-21 审计）：与 records._backup_created_time 同口径——
+            # 加密备份的 mtime 可能被读取/巡检刷新，裸 mtime 会把「文件被碰过」
+            # 误判成「刚备份过」假新鲜。优先 .meta.created_at（权威），无 meta
+            # 才回退 mtime。导入私有助手属同包内复用，见 records.py 该函数 docstring。
+            def _created_at(f: Path) -> datetime:
+                try:
+                    return _backup_created_time(f)
+                except OSError:
+                    return datetime.fromtimestamp(f.stat().st_mtime)
+
+            latest_file = max(backup_files, key=_created_at)
+            file_mtime = _created_at(latest_file)
             age_hours = (datetime.now() - file_mtime).total_seconds() / 3600
 
             threshold = self.health_config['backup_age_threshold']

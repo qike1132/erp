@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_app.core.cache_keys import CACHE_KEY_PREFIX, CacheNamespace, build_cache_key
 from fastapi_app.core.database import get_async_db as get_db
 from fastapi_app.core.deps import require_any_permission, require_permission
+
+# N-3（2026-11-21 审计）：post-commit 挂载收编到 canonical 单实现
+from fastapi_app.core.domain_events import schedule_post_commit_callback
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.redis_wrapper import safe_delete_pattern, safe_get, safe_set
 from fastapi_app.schemas.supplier import (
@@ -135,7 +138,8 @@ async def _run_supplier_write(
     async with db_transaction(db, error_map=error_map):
         await action()
         await _invalidate_supplier_caches()  # 提交前失效，避免并发读回填旧缓存
-        db.info.setdefault('post_commit_callbacks', []).append(_invalidate_supplier_caches)
+        # N-3（2026-11-21 审计）：内联挂载收编到 canonical（schedule_post_commit_callback）
+        schedule_post_commit_callback(db, _invalidate_supplier_caches)
     return SupplierActionResponse(message=success_msg)
 
 
@@ -334,7 +338,8 @@ async def toggle_status(
         supplier.status = not bool(supplier.status)
         await db.flush()
         await _invalidate_supplier_caches()  # 提交前失效
-        db.info.setdefault('post_commit_callbacks', []).append(_invalidate_supplier_caches)
+        # N-3（2026-11-21 审计）：内联挂载收编到 canonical（schedule_post_commit_callback）
+        schedule_post_commit_callback(db, _invalidate_supplier_caches)
     # expire_on_commit=False：内存中的 status 已是切换后的值，无需 refresh
     status_text = '启用' if supplier.status else '禁用'
     return SupplierToggleResponse(status=supplier.status, message=f'供应商已{status_text}')

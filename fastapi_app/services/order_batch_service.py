@@ -588,6 +588,10 @@ async def update_batch_no(
     order = next((o for o in locked if o.id == order_id), None)
     if order is None:
         raise ValueError(f"订单不存在: {order_id}")
+    # L-11（2026-11-21 审计）：目标订单已「批次完成」禁止改批次号——sync 候选
+    # （:580）已排除该状态，目标单此前漏了
+    if order.status == ORDER_STATUS_BATCH_COMPLETED:
+        raise ValueError('订单已批次完成，不能修改批次号')
     if should_sync and order.batch_no != old_batch_no:
         raise ConflictError('订单批次信息已被并发修改，请刷新后重试')
 
@@ -674,6 +678,12 @@ async def batch_assign(
 
     if len(orders) != len(order_ids):
         raise ValueError("部分订单不存在")
+
+    # L-11（2026-11-21 审计）：已「批次完成」的订单禁止再分配批次号
+    # （与 update_batch_no 的 sync 候选 / complete_batch 的排除口径一致）
+    completed_ids = [o.id for o in orders if o.status == ORDER_STATUS_BATCH_COMPLETED]
+    if completed_ids:
+        raise ValueError(f"以下订单已批次完成，不能分配批次号: {', '.join(map(str, completed_ids))}")
 
     await assert_orders_factory_scoped(db, order_ids, user)
 

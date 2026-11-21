@@ -195,9 +195,16 @@ validate_customer_name = _shared_validate_customer_name
 # ==================== 订单/备货导入（ARQ/Celery 通用） ====================
 
 async def process_order_import(
-    db: AsyncSession, file_path: str, original_filename: str, user_id: int
+    db: AsyncSession, file_path: str, original_filename: str, user_id: int,
+    scoped_factory: str | None = None,
 ) -> dict:
-    """处理订单批量导入（ARQ/Celery 通用）"""
+    """处理订单批量导入（ARQ/Celery 通用）。
+
+    L-4（2026-11-21 审计）：本函数是异步任务队列入口，当前全仓无调用方
+    （batch_service.py 仅 re-export）。复接时**必须**把厂绑定用户的
+    ``scoped_factory`` 闸门传进来——不传等价于绕过 H1 工厂闸门，厂绑定用户
+    可经此入口给他厂产品建单（与综合导入 :331 修的是同一类洞）。
+    """
     result_logger = logging.getLogger(f"{__name__}.order_import")
     result_logger.info(f"订单批量导入开始: {original_filename}, user_id={user_id}")
 
@@ -208,7 +215,7 @@ async def process_order_import(
     if not data_list:
         return {"success": True, "imported": 0, "skipped": 0, "message": "没有有效数据行"}
 
-    imported, errors = await import_orders_from_data(db, data_list)
+    imported, errors = await import_orders_from_data(db, data_list, scoped_factory=scoped_factory)
     return {
         "success": True,
         "total_imported": imported,
@@ -219,9 +226,14 @@ async def process_order_import(
 
 
 async def process_stockin_import(
-    db: AsyncSession, file_path: str, original_filename: str, user_id: int
+    db: AsyncSession, file_path: str, original_filename: str, user_id: int,
+    scoped_factory: str | None = None,
 ) -> dict:
-    """处理备货批量导入（ARQ/Celery 通用）"""
+    """处理备货批量导入（ARQ/Celery 通用）。
+
+    L-4（2026-11-21 审计）：同 process_order_import——复接时必须透传
+    ``scoped_factory`` 工厂闸门，否则厂绑定用户可经此入口给他厂产品备货。
+    """
     result_logger = logging.getLogger(f"{__name__}.stockin_import")
     result_logger.info(f"备货批量导入开始: {original_filename}, user_id={user_id}")
 
@@ -232,7 +244,7 @@ async def process_stockin_import(
     if not data_list:
         return {"success": True, "imported": 0, "skipped": 0, "message": "没有有效数据行"}
 
-    imported, errors = await import_stockins_from_data(db, data_list)
+    imported, errors = await import_stockins_from_data(db, data_list, scoped_factory=scoped_factory)
     return {
         "success": True,
         "total_imported": imported,

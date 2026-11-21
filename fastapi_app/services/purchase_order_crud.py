@@ -154,7 +154,9 @@ async def create_purchase_order(
         material_name = item_data.get('material_name', '')
         unit_price = Decimal(str(item_data.get('unit_price', 0)))
         quantity = Decimal(str(item_data.get('quantity', 0)))
-        amount = unit_price * quantity
+        # L-4（2026-11-21 审计）：行金额先按落库精度（Numeric(12,2)）quantize 再合计，
+        # 与 _recalc_item_total_price「内存/落库合计同口径」的约定一致
+        amount = (unit_price * quantity).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         unit_usage = item_data.get('unit_usage')
 
         poi = PurchaseOrderItem(
@@ -379,7 +381,9 @@ async def _update_item_prices(
     changed = False
     for entry in price_entries:
         item_id = entry['id']
-        price = Decimal(str(entry['unit_price'])).quantize(Decimal('0.01'))
+        # L-3（2026-11-21 审计）：显式 ROUND_HALF_UP——Python 默认 ROUND_HALF_EVEN
+        # 与 PG numeric 落库方向不一致（同文件 _recalc_item_total_price 的约定）
+        price = Decimal(str(entry['unit_price'])).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         if item_id in seen:
             raise ValueError(f'采购明细 {item_id} 重复提交单价')
         seen.add(item_id)
@@ -1170,4 +1174,8 @@ async def cleanup_orphan_pending_purchase_orders(
             'cleanup_orphan_pending_purchase_orders: 清理 %d 个 pending 采购单 (source_ids=%s)',
             deleted, source_ids,
         )
+        # L-5（2026-11-21 审计）：兜底删单与 delete_purchase_order 同责——删后把已无
+        # 任何采购单覆盖的来源客户订单状态重算回真实值；只传 order ids（stockin id
+        # 与 order id 撞号，不可混入 _reset_uncovered_source_orders）
+        await _reset_uncovered_source_orders(db, {int(i) for i in (order_ids or [])})
     return deleted

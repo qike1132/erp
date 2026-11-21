@@ -24,7 +24,18 @@ from fastapi_app.services.backup._constants import (
     retention_count,
     retention_days,
 )
+
+# L-11（2026-11-21 审计）：加密检查改校验真正的决策点（原 policy['encryption']
+# 键恒空，检查恒真）。crypto 只依赖 _constants/config，无循环导入。
+from fastapi_app.services.backup.crypto import (
+    get_backup_encryption_password,
+    is_encryption_enabled,
+)
 from fastapi_app.services.backup.metrics.alert_service import alert_service
+
+# L-12（2026-11-21 审计）：cron 校验单源收口到 schedule_service.parse_cron
+# （原先两套口径相反：本文件放行步长 `*/5`，调度器 parse_cron 不认 → 假绿灯永不执行）。
+from fastapi_app.services.backup.schedule_service import parse_cron
 from fastapi_app.shared_models.backup_record import BackupRecord
 
 logger = logging.getLogger(__name__)
@@ -158,58 +169,15 @@ class BackupPolicyService:
         }
 
     def _is_valid_cron(self, cron_expr: str) -> bool:
-        """验证cron表达式"""
-        # 简单的cron表达式验证
-        parts = cron_expr.strip().split()
-        if len(parts) != 5:
-            return False
+        """验证 cron 表达式（L-12，2026-11-21 审计：单源收口到 schedule_service.parse_cron）。
 
-        # 各字段取值范围: 分钟 时 日 月 周
-        field_ranges = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 7)]
-
-        # 检查每个部分
-        for part, (min_val, max_val) in zip(parts, field_ranges, strict=False):
-            if not self._is_valid_cron_part(part, min_val, max_val):
-                return False
-
-        return True
-
-    def _is_valid_cron_part(self, part: str, min_val: int = 0, max_val: int = 59) -> bool:
-        """验证cron表达式部分（支持 *、数字、范围、列表、步长及其组合）"""
-        if part == '*':
-            return True
-
-        # 步长: */5 或 0-23/2
-        if '/' in part:
-            base, _, step_str = part.partition('/')
-            if not step_str.isdigit() or int(step_str) == 0:
-                return False
-            if base == '*':
-                return True
-            return self._is_valid_cron_part(base, min_val, max_val)
-
-        # 范围 0-59
-        if '-' in part:
-            try:
-                start, end = part.split('-')
-            except ValueError:
-                return False
-            if not (start.isdigit() and end.isdigit()):
-                return False
-            return min_val <= int(start) <= max_val and min_val <= int(end) <= max_val
-
-        # 列表 1,2,3
-        if ',' in part:
-            return all(
-                self._is_valid_cron_part(item, min_val, max_val)
-                for item in part.split(',')
-            )
-
-        # 检查数字范围
-        if part.isdigit():
-            return min_val <= int(part) <= max_val
-
-        return False
+        原实现自带一套更宽松的校验（支持 `*/5` 步长等），与真正执行调度的
+        ``schedule_service.parse_cron`` 口径**相反**：步长表达式能过这里的检查
+        （假绿灯），但 parse_cron 不认步长 → 调度器永不命中，任务静默不跑。
+        收口后「检查通过」与「调度可执行」是同一个事实源；本方法只是薄包装，
+        保留方法名以稳定既有调用点与测试桩。
+        """
+        return parse_cron(cron_expr) is not None
 
     async def apply_backup_policy(self) -> dict[str, Any]:
         """
@@ -310,15 +278,26 @@ class BackupPolicyService:
                     checks['backup_location']['passed'] = False
                     checks['backup_location']['message'] = f'无法创建备份目录: {e!s}'
 
-            # 检查加密密钥
-            encryption = policy.get('encryption', {})
-            if encryption.get('enabled', False):
-                key_path = encryption.get('key_path', '')
-                if key_path and not Path(key_path).exists():
-                    checks['encryption_key']['passed'] = False
-                    checks['encryption_key']['message'] = f'加密密钥文件不存在: {key_path}'
-                else:
-                    checks['encryption_key']['message'] = '加密配置正常'
+            # 检查加密配置
+            # L-11（2026-11-21 审计）：原实现读 policy['encryption']['key_path']——
+            # 策略字典里基本没有这个键，`if key_path and not exists` 恒走 else
+            # 「加密配置正常」，是恒真的假绿灯。改为校验**真正的加密决策点**
+            # （crypto.resolve 链路：is_encryption_enabled + 密码可得性），与
+            # AGENTS.md 红线 #4 的语义对齐：开关开而密码缺 = fail-closed 隐患，
+            # 必须在策略检查里报出来而不是绿灯。
+            encryption_enabled = is_encryption_enabled()
+            encryption_password = get_backup_encryption_password() if encryption_enabled else None
+            if encryption_enabled and not encryption_password:
+                checks['encryption_key']['passed'] = False
+                checks['encryption_key']['message'] = (
+                    'BACKUP_ENCRYPTION_ENABLED=true 但未配置 '
+                    'BACKUP_ENCRYPTION_PASSWORD/BACKUP_ENCRYPTION_KEY，'
+                    '加密请求将 fail-closed（全量备份拒绝产出）'
+                )
+            else:
+                checks['encryption_key']['message'] = (
+                    '备份加密已启用且密码可用' if encryption_enabled else '备份加密未启用（明文备份）'
+                )
 
             # 检查计划任务有效性
             full_schedule = policy.get('full_backup', {}).get('schedule', '')

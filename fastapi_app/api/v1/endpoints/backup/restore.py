@@ -29,6 +29,10 @@ from fastapi_app.api.v1.endpoints.backup._deps import (
     require_backup_permission,
 )
 from fastapi_app.core.backup_progress import _sanitize_error
+
+# L-33/N-55（2026-11-21 审计）：restored_at 统一北京显式偏移 isoformat
+#（原 '%Y-%m-%d %H:%M:%S' naive 与 validation/.meta 口径并存）。
+from fastapi_app.core.business_time import isoformat_business
 from fastapi_app.core.database import get_async_db
 from fastapi_app.core.exceptions import db_transaction
 from fastapi_app.core.response import success_response
@@ -347,7 +351,7 @@ async def import_backup(
             return {
                 'success': verification_ok, 'format': 'zip', 'results': result,
                 'total_inserted': total_rows,
-                'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'restored_at': isoformat_business(datetime.now()),
             }
         # JSON path
         try:
@@ -381,7 +385,7 @@ async def import_backup(
             'success': verification_ok and revocation.get('ok', True), 'format': 'json',
             'total_inserted': result['total_inserted'], 'results': result['results'],
             'errors': result['errors'], 'pre_restore_backup': pre_restore_info,
-            'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'restored_at': isoformat_business(datetime.now()),
         }
     finally:
         await backup_service.release_restore_lock(lock_owner)
@@ -462,7 +466,7 @@ async def restore_server_backup(
         return {
             'success': verification_ok, 'format': 'zip', 'filename': safe_name,
             'results': result, 'total_inserted': total_rows,
-            'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'restored_at': isoformat_business(datetime.now()),
         }
     # 2026-10-18 OCR 评审：非 zip 分支的 .json.enc 解密、.gz 解压已在入口 sniff 完成，
     # 此处 content 已是可直接 json.loads 的明文。
@@ -498,7 +502,7 @@ async def restore_server_backup(
         'success': verification_ok and revocation.get('ok', True), 'format': 'json', 'filename': safe_name,
         'total_inserted': result['total_inserted'], 'results': result['results'],
         'errors': result['errors'], 'pre_restore_backup': pre_restore_info,
-        'restored_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'restored_at': isoformat_business(datetime.now()),
     }
 
 
@@ -744,7 +748,7 @@ async def _run_async_file_restore(
                             json_restore_succeeded = True
 
                         result['pre_restore_backup'] = pre_restore_info
-                        result['restored_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        result['restored_at'] = isoformat_business(datetime.now())
                         result['filename'] = filename
                         result['format'] = 'zip' if is_zip else 'json'
 

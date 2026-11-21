@@ -4,6 +4,7 @@
 """
 import logging
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +40,14 @@ async def _fetch_bom_data(db: AsyncSession, product_ids: list[int], prod_name_ma
         return bom_data
 
     fill_result = await db.execute(
-        select(ProductMaterial).where(ProductMaterial.product_id.in_(product_ids))
+        select(ProductMaterial).where(
+            ProductMaterial.product_id.in_(product_ids),
+            # L-1（2026-11-21 审计）：0 用量填充行=无 BOM（M-13 口径，与
+            # _unprocessed._fetch_bom_product_ids 对齐）——不过滤会让工厂/供应商
+            # 汇总的 has_bom 回退判定把「只有 0 用量填充行」的产品当有 BOM
+            (ProductMaterial.cotton_usage.isnot(None))
+            & (ProductMaterial.cotton_usage > 0),
+        )
     )
     for row in fill_result.scalars().all():
         name_prefix = prod_name_map.get(row.product_id, '') if prod_name_map else ''
@@ -124,9 +132,11 @@ def _apply_po_list_filters(query, count_query, *, status, supplier_id,
         query = query.where(PurchaseOrder.create_time >= date_from)
         count_query = count_query.where(PurchaseOrder.create_time >= date_from)
     if date_to:
-        end_date = f'{date_to} 23:59:59'
-        query = query.where(PurchaseOrder.create_time <= end_date)
-        count_query = count_query.where(PurchaseOrder.create_time <= end_date)
+        # L-2（2026-11-21 审计）：闭区间 '23:59:59' 留微秒洞，改 < 次日 00:00
+        # （照 _completed.py:80-83 口径；create_time 是 timestamptz，字面量按会话时区换算）
+        next_day = datetime.strptime(date_to, '%Y-%m-%d').date() + timedelta(days=1)
+        query = query.where(PurchaseOrder.create_time < f'{next_day} 00:00:00')
+        count_query = count_query.where(PurchaseOrder.create_time < f'{next_day} 00:00:00')
     return query, count_query
 
 def _apply_po_sort(query, sort_by, sort_order, default_col, sort_map):

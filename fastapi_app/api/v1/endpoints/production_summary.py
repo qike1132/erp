@@ -29,6 +29,7 @@ from fastapi_app.schemas.production_summary import (
     ProductionSummaryResponse,
 )
 from fastapi_app.services import production_summary_service
+from fastapi_app.services.export_limits import ExportLimitError
 from fastapi_app.shared_models import User
 
 router = APIRouter()
@@ -166,14 +167,14 @@ async def export_craft_works(
             media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={'Content-Disposition': 'attachment; filename=craft_work_export.xlsx'},
         )
-    except ValueError as e:
-        # 只有「行数上界」才是 413；日期非法也是 ValueError，必须回 400，
-        # 否则用户拿到 413 会去缩范围（缩了也没用）——评审 F1。
-        if '日期' in str(e):
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        # 行数上界（审计 A-15）：服务层超限抛 ValueError，映射 413 引导缩小范围，
+    except ExportLimitError as e:
+        # 行数上界（审计 A-15）：服务层超限抛 ExportLimitError，映射 413 引导缩小范围，
         # 而不是像从前那样静默截断后照常 200 出一份缺行的文件。
         raise HTTPException(status_code=413, detail=str(e)) from e
+    except ValueError as e:
+        # 日期非法等其余 ValueError 回 400（评审 F1）——
+        # L-35/N-54（2026-11-21 审计）：改为异常类型判别，不再靠 '日期' in str(e)。
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e
 
@@ -330,11 +331,12 @@ async def export_packaging_records(
             media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             headers={'Content-Disposition': 'attachment; filename=packaging_export.xlsx'},
         )
-    except ValueError as e:
-        # 同手工部导出：日期非法回 400，只有行数上界才是 413（评审 F1）。
-        if '日期' in str(e):
-            raise HTTPException(status_code=400, detail=str(e)) from e
+    except ExportLimitError as e:
+        # 同手工部导出：行数上界 413（评审 F1）。
         raise HTTPException(status_code=413, detail=str(e)) from e
+    except ValueError as e:
+        # 日期非法等其余 ValueError 回 400——L-35/N-54（2026-11-21 审计）：类型判别。
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except (OperationalError, DisconnectionError) as e:
         raise HTTPException(status_code=500, detail=f'导出失败: {settings.sanitize_error(e)}') from e
 

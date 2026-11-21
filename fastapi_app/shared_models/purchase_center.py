@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from fastapi_app.core.business_time import fmt_business
+from fastapi_app.core.business_time import fmt_business, fmt_business_naive_utc
 from fastapi_app.shared_models import Base
 
 
@@ -78,5 +78,7 @@ class SavedQuery(Base):
             'creator_name': self.creator_name,
             'create_time': fmt_business(self.create_time, '%Y-%m-%d %H:%M:%S') if self.create_time else None,
             'use_count': self.use_count,
-            'last_use_time': self.last_use_time.strftime('%Y-%m-%d %H:%M:%S') if self.last_use_time else None,
+            # L-8（2026-11-21 审计）：last_use_time 是 naive 列、存 UTC 墙钟（唯一写入方
+            # purchase_history_service 走 naive-UTC 约定），裸 strftime 直出会早 8 小时
+            'last_use_time': fmt_business_naive_utc(self.last_use_time, '%Y-%m-%d %H:%M:%S') or None,
         }

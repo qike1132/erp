@@ -99,7 +99,10 @@ async def get_customers_statistics(db: AsyncSession) -> dict:
     if hasattr(Customer, 'update_time'):
         recent_result = await db.execute(
             select(func.count(Customer.id)).where(
-                Customer.update_time >= datetime.now(UTC).replace(tzinfo=None) - timedelta(days=30)
+            # L-8（2026-11-21 审计）：update_time 是 timestamptz（读回 aware），比较值必须
+            # 保持 aware——原先剥掉 tzinfo 的 UTC 墙钟会被按会话时区（Asia/Shanghai）
+            # 解释，30 天边界漂 8 小时
+                Customer.update_time >= datetime.now(UTC) - timedelta(days=30)
             )
         )
         recently_updated = recent_result.scalar() or 0

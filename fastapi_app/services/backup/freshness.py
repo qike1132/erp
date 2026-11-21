@@ -29,14 +29,25 @@ def backup_freshness(threshold_hours: float = BACKUP_STALE_HOURS) -> dict:
     备份异常而返回 5xx(它同时是 prod_runner 的后端存活判据)。
     """
     try:
-        from fastapi_app.services.backup.records import list_backup_files
+        from fastapi_app.services.backup import records as _records
+        from fastapi_app.services.backup.records import _backup_created_time, list_backup_files
 
         files = list_backup_files()
         if not files:
             return {"ok": False, "age_hours": None, "last_at": None}
-        latest = max(files, key=lambda f: f.get("mtime", 0))
-        mtime = latest.get("mtime") or 0
-        last_dt = datetime.fromtimestamp(mtime)
+        # L-14（2026-11-21 审计）：裸 mtime 判新鲜度会把「文件被读取/巡检碰过」
+        # 误判成「刚备份过」（加密备份的 mtime 可能被刷新）。与 records.py 的
+        # _backup_created_time 同口径：.meta.created_at 权威，无 meta 才回退 mtime。
+        # 目录经 records.BACKUP_DIR 取（测试会 monkeypatch 它，不能在顶层静态 import）。
+        def _created(entry: dict) -> datetime:
+            path = _records.BACKUP_DIR / (entry.get("filename") or "")
+            try:
+                return _backup_created_time(path)
+            except OSError:
+                return datetime.fromtimestamp(entry.get("mtime") or 0)
+
+        latest = max(files, key=_created)
+        last_dt = _created(latest)
         age_hours = (datetime.now() - last_dt).total_seconds() / 3600
         return {
             "ok": age_hours <= threshold_hours,

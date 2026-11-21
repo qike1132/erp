@@ -16,8 +16,9 @@ import hashlib
 import json
 import re
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.core.exceptions import BusinessError, ConflictError
@@ -35,6 +36,10 @@ _KEY_PATTERN = re.compile(r'^[A-Za-z0-9._:-]+$')
 REPLAY_MESSAGE = '重复请求，已返回首次结果（未重复建单）'
 
 _CONFLICT_MESSAGE = '同一幂等键已用于不同的下单内容，请更换 Idempotency-Key 或核对请求体'
+
+#: 幂等登记保留期（天）。L-13（2026-11-21 审计）：order_create_attempt 只增不减，
+#: 登记行含完整响应体，无界增长；重放窗口远小于 90 天，超期登记无重放价值。
+ORDER_ATTEMPT_RETENTION_DAYS = 90
 
 
 def validate_key(key: str | None) -> str | None:
@@ -149,3 +154,23 @@ async def save_result(
         raise ConflictError(_CONFLICT_MESSAGE)
     attempt.response_body = deepcopy(result)
     await db.flush()
+
+
+async def purge_expired_attempts(db: AsyncSession, retention_days: int = ORDER_ATTEMPT_RETENTION_DAYS) -> int:
+    """按 created_at 裁剪过期的下单幂等登记（默认保留 90 天），返回删除行数。
+
+    L-13（2026-11-21 审计）：order_create_attempt 之前无任何过期清理。
+
+    调用时机：本仓 ARQ cron_schedules 的保留治理任务（audit-retention /
+    numbering-audit-retention）走「独立任务模块 + functions 注册 + 健康信号 +
+    归档账本」的完整惯例，且 cron 注册有契约单测把守；本表无归档价值（幂等
+    重放体到期即弃），不值得整套基建，故**未注册 cron**——运维可在低峰于
+    ``db_transaction`` 内手工调用本函数，或后续按上述惯例补 ARQ 日任务。
+    删除不主动 commit：与调用方事务同生共死，回滚即无副作用。
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+    result = await db.execute(
+        delete(OrderCreateAttempt).where(OrderCreateAttempt.created_at < cutoff)
+    )
+    await db.flush()
+    return result.rowcount or 0

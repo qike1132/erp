@@ -125,12 +125,17 @@ class TestBackupPolicyService:
         assert policy['notification']['enabled'] is True
 
     def test_is_valid_cron(self, policy_service):
-        """测试验证cron表达式"""
-        # 有效的cron表达式
+        """测试验证cron表达式（L-12，2026-11-21：单源收口到 schedule_service.parse_cron）。
+
+        收口后口径与**真正执行调度**的 parse_cron 完全一致——原先本文件自带的
+        宽松版放行步长表达式（`*/1`），调度器却永不命中（假绿灯），故步长现在
+        必须判 False。
+        """
+        # 有效的cron表达式（parse_cron 认可的子集：数字/范围/列表/星号）
         assert policy_service._is_valid_cron('0 2 * * *') is True  # 每天凌晨2点
-        assert policy_service._is_valid_cron('0 */1 * * *') is True  # 每小时
         assert policy_service._is_valid_cron('30 3 * * 1-5') is True  # 工作日凌晨3:30
         assert policy_service._is_valid_cron('0 0 1 * *') is True  # 每月1号
+        assert policy_service._is_valid_cron('0 6,10,14,18 * * *') is True  # 列表
 
         # 无效的cron表达式
         assert policy_service._is_valid_cron('') is False  # 空字符串
@@ -138,24 +143,16 @@ class TestBackupPolicyService:
         assert policy_service._is_valid_cron('0 2 * * * *') is False  # 多余字段
         assert policy_service._is_valid_cron('60 2 * * *') is False  # 分钟超出范围
         assert policy_service._is_valid_cron('0 24 * * *') is False  # 小时超出范围
+        # L-12 收口的关键行为变化：步长表达式 parse_cron 不支持（调度器永不命中），
+        # 策略检查必须同样拒绝——否则「检查通过但任务一次都不跑」的假绿灯回归。
+        assert policy_service._is_valid_cron('0 */1 * * *') is False  # 步长：调度器不支持
 
-    def test_is_valid_cron_part(self, policy_service):
-        """测试验证cron表达式部分"""
-        # 有效的cron部分
-        assert policy_service._is_valid_cron_part('*') is True
-        assert policy_service._is_valid_cron_part('5') is True
-        assert policy_service._is_valid_cron_part('0-59') is True
-        assert policy_service._is_valid_cron_part('0,15,30,45') is True
-        assert policy_service._is_valid_cron_part('*/5') is True
-        assert policy_service._is_valid_cron_part('0-23/2') is True
+    def test_is_valid_cron_single_source_with_scheduler(self, policy_service):
+        """L-12 锁死单源：policy 的口径必须与 schedule_service.parse_cron 一致。"""
+        from fastapi_app.services.backup.schedule_service import parse_cron
 
-        # 无效的cron部分
-        assert policy_service._is_valid_cron_part('') is False
-        assert policy_service._is_valid_cron_part('60') is False  # 超出范围
-        assert policy_service._is_valid_cron_part('0-60') is False  # 结束值超出范围
-        assert policy_service._is_valid_cron_part('0,61,30') is False  # 包含超出范围的值
-        assert policy_service._is_valid_cron_part('*/0') is False  # 步长为0
-        assert policy_service._is_valid_cron_part('*/a') is False  # 非数字步长
+        for expr in ('0 2 * * *', '30 3 * * 1-5', '0 */1 * * *', '60 2 * * *', '0 2 * *', ''):
+            assert policy_service._is_valid_cron(expr) == (parse_cron(expr) is not None)
 
     @pytest.mark.asyncio
     async def test_get_current_policy_no_file(self, policy_service, temp_policy_file):

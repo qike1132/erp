@@ -15,6 +15,8 @@
 import logging
 from functools import partial
 
+# N-3（2026-11-21 审计）：post-commit 挂载收编到 canonical 单实现
+
 logger = logging.getLogger(__name__)
 
 #: 采购相关缓存前缀（与一键审核端点同口径）：采购列表 / 湖北订单 / 未处理列表。

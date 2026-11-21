@@ -84,6 +84,9 @@ class OrderActionResponse(BaseModel):
     """订单操作响应"""
     success: bool
     message: str
+    # L-14（2026-11-21 审计）：幂等重放响应要带 order_no——重试成功后客户端
+    # 无从知道建了哪张单。可选字段，其余构造方不传时保持 None（向后兼容）。
+    order_no: str | None = None
 
 
 class ApprovalCancelResponse(BaseModel):
