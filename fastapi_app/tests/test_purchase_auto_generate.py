@@ -417,7 +417,9 @@ async def test_order_deleted_event_revokes_and_cleans_up(monkeypatch):
                               payload={'order_id': 68939}))
 
     revoke.assert_awaited_once()
+    assert revoke.await_args.args[1] == 68939
     cleanup.assert_awaited_once()
+    assert cleanup.await_args.args[1] == [68939]
     invalidate.assert_awaited_once()   # 撤销发生在删除端点失效之后，必须再失效一次
 
 

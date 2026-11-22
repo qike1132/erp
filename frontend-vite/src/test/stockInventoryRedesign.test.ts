@@ -408,6 +408,19 @@ describe('InventoryTab —— 6 列表格与数字格式', () => {
     await w.find('.sk-export-btn').trigger('click')
 
     expect(mocks.exportInventoryMock).toHaveBeenCalledTimes(1)
+    // R5（2026-11-22 审计）：只断次数会让「漏传/错传 customer/product」假绿。
+    // 参数形态锁定为 InventoryTab.vue handleExport 的 { customer, product }（未筛选时均为 ''）。
+    expect(mocks.exportInventoryMock).toHaveBeenCalledWith({ customer: '', product: '' })
+  })
+
+  it('导出携带当前客户筛选参数（错传/漏传 customer 即失败）', async () => {
+    const w = mountTab()
+
+    // 客户筛选是同步生效的（selectCustomer 直接写 filters.customer，无 debounce）
+    await w.findAll('.sk-chip')[1]?.trigger('click')
+    await w.find('.sk-export-btn').trigger('click')
+
+    expect(mocks.exportInventoryMock).toHaveBeenCalledWith({ customer: '滨发服饰', product: '' })
   })
 })
 

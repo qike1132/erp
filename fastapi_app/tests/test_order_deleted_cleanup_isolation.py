@@ -82,7 +82,9 @@ async def test_fallback_cleanup_uses_separate_session_and_swallow_failure():
     assert cap['ctx'].call_count == 2
     assert sessions == ['main', 'fallback']
     m_revoke.assert_awaited_once()
+    assert m_revoke.await_args.args[1] == 42
     m_cleanup.assert_awaited_once()
+    assert m_cleanup.await_args.args[1] == [42]
     # 兜底失败后仍要失效缓存（否则已删采购单会存活到 TTL）
     m_invalidate.assert_awaited_once()
 

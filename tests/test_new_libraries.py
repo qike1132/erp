@@ -326,13 +326,16 @@ class TestIntegration:
         ]
 
         query = "pingguo"
-        query_pinyin = query
 
-        for product in products:
-            product_pinyin = ''.join(lazy_pinyin(product["name"]))
-            if query_pinyin in product_pinyin:
-                assert product["id"] == 1
-                break
+        matched_ids = [
+            product["id"]
+            for product in products
+            if query in ''.join(lazy_pinyin(product["name"]))
+        ]
+
+        # 2026-11-22 审计 R5：原先只在循环命中分支里断言，完全不命中时循环走完自然通过
+        # （零断言盲区）。改为先收集匹配集合再断言——未命中即失败，误命中其他产品也失败。
+        assert matched_ids == [1]
 
     def test_date_range_calculation(self):
         """测试日期范围计算"""
