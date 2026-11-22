@@ -42,20 +42,29 @@ def _sync_one_date(session, target_date: date, customer_id_map: dict[str, int]) 
         if existing:
             session.execute(text('\n                        UPDATE shipment_records\n                        SET quantity = :qty, synced_at = NOW()\n                        WHERE shipment_no = :no\n                    '), {'qty': row.quantity - row.returned_quantity, 'no': row.stockout_no})
         else:
-            # 走 ORM 而非原生 SQL：created_at/synced_at 只有 Python 侧 default
-            # （无 server_default），原生 INSERT 列清单漏列即 NotNullViolation——
-            # 2026-10-23 起生产每日同步因此断流 3 天（2026-10-25 上线前审计 H-1）。
-            from fastapi_app.shared_models.purchase_plan import ShipmentRecord
-            session.add(ShipmentRecord(
-                shipment_no=row.stockout_no,
-                customer_id=customer_id,
-                customer_name=row.customer,
-                product_id=row.product_id,
-                product_name=row.product_name,
-                quantity=row.quantity - row.returned_quantity,
-                shipment_date=row.stockout_date,
-                source_id=row.id,
-            ))
+            # 预 SELECT 与 INSERT 之间存在 cron/catchup 竞态；冲突时仅刷新同步字段。
+            session.execute(text('''
+                        INSERT INTO shipment_records (
+                            shipment_no, customer_id, customer_name,
+                            product_id, product_name, quantity, shipment_date,
+                            source_type, source_id, created_at, synced_at
+                        ) VALUES (
+                            :no, :customer_id, :customer_name,
+                            :product_id, :product_name, :qty, :shipment_date,
+                            'stockout', :source_id, NOW(), NOW()
+                        )
+                        ON CONFLICT (shipment_no) DO UPDATE
+                        SET quantity = EXCLUDED.quantity, synced_at = NOW()
+                    '''), {
+                'no': row.stockout_no,
+                'customer_id': customer_id,
+                'customer_name': row.customer,
+                'product_id': row.product_id,
+                'product_name': row.product_name,
+                'qty': row.quantity - row.returned_quantity,
+                'shipment_date': row.stockout_date,
+                'source_id': row.id,
+            })
         synced += 1
     return synced
 
