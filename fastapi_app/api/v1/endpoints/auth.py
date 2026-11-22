@@ -21,11 +21,13 @@ from fastapi_app.core.deps import (
     create_refresh_token,
     get_current_user_id,
     get_current_user_id_write_strict,
+    require_permission,
 )
 from fastapi_app.core.exceptions import AppError
 from fastapi_app.core.limiter import limiter, memory_limiter, rate_limit_key
 from fastapi_app.core.response import success_response
 from fastapi_app.core.validators import require_upload_magic
+from fastapi_app.shared_models import User
 
 logger = logging.getLogger(__name__)
 
@@ -694,6 +696,7 @@ MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
 async def upload_file(
     file: UploadFile = File(...),
     user_id: int = Depends(get_current_user_id_write_strict),
+    _user: User = Depends(require_permission('product_manage')),
     db: AsyncSession = Depends(get_async_db),
 ):
     """图片上传API（限制5MB，需登录）"""

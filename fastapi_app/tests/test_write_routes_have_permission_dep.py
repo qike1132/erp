@@ -42,8 +42,7 @@ ALLOWED_WITHOUT_PERMISSION_CODE: dict[tuple[str, str], str] = {
         '认证出口：只需要 bearer',
     ('POST', '/api/v1/auth/refresh'):
         '令牌刷新：只需要 refresh_token',
-    ('POST', '/api/v1/auth/upload'):
-        '通用文件上传：get_current_user_id_write_strict（资源级校验在调用方端点）',
+
     ('POST', '/api/v1/auth/logs/frontend-error'):
         '前端错误上报：get_current_user_id_write_strict（已登录即可）',
     ('POST', '/api/v1/monitoring/vitals'):
