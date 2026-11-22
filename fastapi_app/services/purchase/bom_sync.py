@@ -154,6 +154,9 @@ def _inherit_fields(
                     # （purchase_order_crud.py:158 写 _scope_remark）不同源。
                     fallback_pool[fb] = (loss_rate, unit_price, remark)
 
+    old_counts = {key: len(entries) for key, entries in pool.items()}
+    target_counts = Counter(_target_key(item) for item in target)
+
     assigned: set[int] = set()
     for item in target:
         key = _target_key(item)
@@ -162,7 +165,15 @@ def _inherit_fields(
             item['loss_rate'] = loss_rate
             item['unit_price'] = unit_price
             item['remark'] = remark
-            if inherit_quantity and _same_usage(unit_usage, item.get('unit_usage')):
+            # 2026-11-22 审计 H-1：多对一合并的重算总量 0.26 曾被首条旧行
+            # 数量覆盖为 0.13；行数缩小时必须保留目标行的重算数量。
+            old_n = old_counts[key]
+            new_n = target_counts[key]
+            if (
+                inherit_quantity
+                and not (old_n > 1 and new_n < old_n)
+                and _same_usage(unit_usage, item.get('unit_usage'))
+            ):
                 item['quantity'] = quantity
             assigned.add(id(item))
 
