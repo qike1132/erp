@@ -89,6 +89,18 @@ def test_installer_requires_trusted_tls_and_package_before_mutations() -> None:
     assert not re.search(r'\.sha256["\']', code, re.I)
 
 
+def test_tls_preflight_verifies_leaf_only_from_chain_file() -> None:
+    """证书文件常含「叶 + 中间 CA」；openssl verify 会把每张证书都当终端实体，
+    中间 CA 在 -purpose sslserver 下被判用途不符，合法链会被误拒。"""
+    code = '\n'.join(_code_lines(DEPLOY_LIB))
+    tls = code.split('function Assert-DeploymentTls(', 1)[1].split('\nfunction ', 1)[0]
+    assert re.search(r'& \$OpenSsl x509 -in \$Certificate -out \$leafFile', tls)
+    assert re.search(
+        r'& \$OpenSsl verify\b(?=[^\n]*-untrusted \$Certificate)(?=[^\n]*\$leafFile)(?![^\n]*\s\$Certificate\s*\|\s*Out-Null)', tls
+    )
+    assert re.search(r"\} finally \{\s*if\(Test-Path -LiteralPath \$leafFile\)\{ Remove-Item -LiteralPath \$leafFile", tls)
+
+
 def test_builder_creates_only_encrypted_outputs_and_hides_temporary_data() -> None:
     code = '\n'.join(_code_lines(BUILD_PACKAGE))
     assert not re.search(r'Remove-Item[^\n]*-Recurse', code, re.I)

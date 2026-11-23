@@ -256,8 +256,19 @@ function Assert-DeploymentTls([string]$OpenSsl,[string]$Certificate,[string]$Pri
   $sanType = if($isIp){ 'IP Address:' } else { 'DNS:' }
   $sans=& $OpenSsl x509 -in $Certificate -noout -ext subjectAltName
   if($LASTEXITCODE -ne 0 -or ($sans -join "`n") -cnotmatch $sanType){ throw 'TLS 叶证书必须包含适用于目标主机的 SAN' }
-  & $OpenSsl verify -x509_strict -purpose sslserver -no-CAfile -no-CApath -no-CAstore -trusted $TrustedCa -untrusted $Certificate $verifyName $ServerName $Certificate | Out-Null
-  if($LASTEXITCODE -ne 0){ throw 'TLS 证书链、有效期、用途或入口主机名校验失败' }
+  # 证书文件可能是「叶证书 + 中间 CA」链（部署文档即如此交付）。openssl verify 会把
+  # 文件里**每一张**证书都当成待验证的终端实体，中间 CA 在 -purpose sslserver 下会被
+  # 判「用途不符」，把合法链误判为失败。故只提取叶证书作为验证目标，整份文件仅作为
+  # -untrusted 链来源。
+  $leafFile=[IO.Path]::GetTempFileName()
+  try {
+    & $OpenSsl x509 -in $Certificate -out $leafFile
+    if($LASTEXITCODE -ne 0){ throw '无法从证书文件提取叶证书' }
+    & $OpenSsl verify -x509_strict -purpose sslserver -no-CAfile -no-CApath -no-CAstore -trusted $TrustedCa -untrusted $Certificate $verifyName $ServerName $leafFile | Out-Null
+    if($LASTEXITCODE -ne 0){ throw 'TLS 证书链、有效期、用途或入口主机名校验失败' }
+  } finally {
+    if(Test-Path -LiteralPath $leafFile){ Remove-Item -LiteralPath $leafFile -Force -ErrorAction SilentlyContinue }
+  }
   $leafPub=& $OpenSsl x509 -in $Certificate -pubkey -noout
   if($LASTEXITCODE -ne 0){ throw '无法读取 TLS 证书公钥' }
   $keyPub=& $OpenSsl pkey -in $PrivateKey -passin 'pass:' -pubout
