@@ -16173,7 +16173,7 @@
           "仪表盘"
         ],
         "summary": "Get Dashboard Activities",
-        "description": "仪表盘最近活动数据（Redis缓存60秒）",
+        "description": "仪表盘最近活动数据（Redis缓存60秒）。",
         "operationId": "get_dashboard_activities_api_v1_dashboard_activities_get",
         "responses": {
           "200": {
