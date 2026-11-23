@@ -3,9 +3,9 @@
 > **怎么用**：把本文件**整篇**发给一个能执行命令、读写文件的 AI 代理（Claude Code / Cursor / Codex / Windsurf 等），
 > 让它在**目标 Windows 服务器**上从零把本系统部署起来。本文件既是给人看的说明，也是给 AI 的**可执行指令**。
 >
-> - **目标形态**：Windows 主机 + Nginx `:3000` + Uvicorn `:5002`（仅回环）+ PostgreSQL 18 + 双 Redis（`6379`/`6380`）+ NSSM 五服务。
+> - **目标形态**：Windows 主机 + Nginx HTTPS `:443` + Uvicorn `:5002`（仅回环）+ PostgreSQL 18 + 双 Redis（`6379`/`6380`）+ NSSM 五服务。
 > - **全流程 17 步、约 2–4 小时**（不含数据迁移）。每步都有验收命令，**验收不过不许进下一步**。
-> - 想走**全自动离线包**（源机一条命令打包、目标机一条命令安装）：见 [`deploy/README.md`](deploy/README.md)。
+> - **离线便携包**目前仅支持安装预检，不允许实际安装或覆盖升级；限制与预检步骤见 [`deploy/README.md`](deploy/README.md)。
 > - 完整**人工手册**（架构 / 运维 / 门禁 / API 约定）已移至 [`docs/PROJECT_MANUAL.md`](docs/PROJECT_MANUAL.md)，排障与深挖以它为准。
 
 ---
@@ -33,7 +33,7 @@
 | **Redis 口令** | 无（必填） | 三处必须一致：Redis 服务参数 / `.env` / broker conf |
 | **初始 `admin` 口令** | 无（必填） | 全新空库引导时写入（走数据迁移则可省） |
 | **数据来源** | 全量镜像恢复 / 空库起步 | 决定步骤 9 走 A 还是 B |
-| 是否启用 **443 TLS** | 否 | 全新 clone 无私钥，默认注释 443 段 |
+| 是否启用 **443 TLS** | 生产必需 | 安装前配置目标主机证书与私钥，客户端信任其签发链 |
 
 ### 0.2 完成后必须回报用户
 
@@ -44,7 +44,7 @@
 ## 目标形态速览（端口与五服务）
 
 ```text
-浏览器 → Nginx :3000 (config/nginx-windows.conf, root = frontend-vite/dist)
+浏览器 → Nginx HTTPS :443 (config/nginx-windows.conf, root = frontend-vite/dist)
         → uvicorn 127.0.0.1:5002 (仅绑回环，API 不直接暴露局域网)
         → PostgreSQL :5432 / Redis :6379(缓存) + :6380(ARQ broker)
 后台任务 → ARQ worker（独立进程/服务 erp-arq）
@@ -52,13 +52,13 @@
 
 | 端口 | 用途 | 暴露范围 |
 |---|---|---|
-| 3000 | Nginx：前端静态 + API/WS 反代（**用户唯一入口**） | 局域网 |
-| 443 | Nginx：自签内网 TLS（可选） | 局域网 |
+| 3000 | Nginx：HTTP 兼容重定向与有限本机健康探针，不提供登录/业务页面 | 默认不对局域网放行 |
+| 443 | Nginx：前端静态文件及 API/WS 反代（用户入口） | 局域网，必需 TLS |
 | 5002 | FastAPI（uvicorn） | **仅 127.0.0.1**（禁止 0.0.0.0） |
 | 5432 | PostgreSQL | 仅本机 |
 | 6379 / 6380 | Redis 缓存 / ARQ broker | 仅 127.0.0.1 |
 
-**五个 NSSM 服务**：`erp-prod`（uvicorn `:5002`）、`erp-arq`（ARQ worker）、`erp-web`（nginx `:3000`）、`erp-redis`（`:6379`）、`erp-redis-broker`（`:6380`）。
+**五个 NSSM 服务**：`erp-prod`（uvicorn `:5002`）、`erp-arq`（ARQ worker）、`erp-web`（nginx HTTPS `:443`）、`erp-redis`（`:6379`）、`erp-redis-broker`（`:6380`）。
 两个关键不变量：`erp-arq` **必须依赖** `erp-redis-broker`（否则开机抢跑 → 无限重启 → 备份静默停摆）；`erp-web` 与 `erp-prod` **启停解耦**（重启后端不影响前端静态）。
 
 ---
@@ -70,13 +70,13 @@
 - [ ] **管理员权限**（安装服务、写 `C:\`、注册计划任务都需要）
 - [ ] Windows 10/11 或 Server 2019+（**x64**，本部署依赖 NSSM/Windows 服务）
 - [ ] 磁盘：项目 + 备份至少预留 **100 GB**（备份默认保留 30 天）
-- [ ] **3000 / 5002 / 5432 / 6379 / 6380 端口未被占用**
+- [ ] **443 / 3000 / 5002 / 5432 / 6379 / 6380 端口未被占用**
 - [ ] 规划好项目路径：**强烈建议沿用 `D:\erp_system`**（全仓绝对路径按此写好，换路径要同步改）
 
 **✅ 验收**：以上逐条为真。检查端口：
 
 ```powershell
-foreach ($p in 3000,5002,5432,6379,6380) {
+foreach ($p in 443,3000,5002,5432,6379,6380) {
   $r = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
   if ($r) { "PORT $p IN USE by PID $($r.OwningProcess)" } else { "PORT $p free" }
 }
@@ -250,7 +250,7 @@ python -m venv .venv
 | 上传 URL 签名 | `openssl rand -hex 32` | `.env` 的 `UPLOAD_URL_SIGNING_SECRET` + `config/uploads-signing.conf` |
 | 备份加密口令 | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | `.env` 的 `BACKUP_ENCRYPTION_PASSWORD`（**严禁留空**） |
 | `/metrics` Token | `python -c "import secrets; print(secrets.token_urlsafe(32))"` | `.env` 的 `METRICS_BEARER_TOKEN` |
-| 内网 TLS 自签证书（可选） | `config/tls/` 下**公钥证书已入库**，**私钥 `*.key` 未入库**；全新 clone 需自备 `server.key` 或重新签发 | `config/tls/` |
+| 生产 TLS（必需） | 目标机配备证书和私钥；可选内部 CA 等签发方式，但客户端必须信任签发链，且证书覆盖实际入口。私钥不得入库 | `config/tls/` |
 
 **统一把上面所有真实值记录到 `_ops/credentials/`**（受 ACL 保护、不入库）。
 
@@ -278,7 +278,7 @@ Copy-Item .env.example .env
 | `PG_TOOLS_BIN` | `D:\PostgreSQL\bin`（本机实际路径） | `pg_dump`/`psql` 所在目录。**留空且 PATH 里也没有 → 备份静默降级为 JSON 导出** |
 | `REDIS_PASSWORD`、`REDIS_CACHE_URL`、`REDIS_BROKER_URL` | 与步骤 4 一致 | broker 指 `:6380`，cache 指 `:6379` |
 | `ALLOWED_HOSTS` | **JSON 数组**（如 `["192.168.1.97","localhost"]`），**禁止 `*`** | 字段名与变量同名，pydantic 对 list 按 **JSON** 解析：写成裸 `*` 或逗号串会 `SettingsError` 直接起不来 |
-| `CORS_ORIGINS` | **逗号串**（如 `http://<主机IP>:3000`） | 与 `ALLOWED_HOSTS` 格式**不同**；不得含 `null` |
+| `CORS_ORIGINS` | **逗号串**（如 `https://<证书中的目标主机名>`） | 与 `ALLOWED_HOSTS` 格式**不同**；不得含 `null` |
 | `WS_ALLOWED_ORIGINS` | 同上（逗号串） | **漏配 → 全站 WebSocket 403** |
 | `JWT_ALGORITHM` + `JWT_PRIVATE_KEY_PATH` + `JWT_PUBLIC_KEY_PATH` | `RS256` + 步骤 6 两个路径 | RS256 下两文件必须真实存在，否则启动失败 |
 | `BACKUP_ENCRYPTION_ENABLED` + `BACKUP_ENCRYPTION_PASSWORD` | `true` + 强随机口令 | **口令为空会静默降级为不加密备份** |
@@ -370,7 +370,7 @@ npm run build                 # vue-tsc -b && node scripts/vite-build.mjs → di
 
 ## 步骤 11 —— 配置 Nginx
 
-**目标**：让 `:3000` 正确托管前端并反代 API。
+**目标**：由 `:443` 托管前端和 API，并验证 `:3000` 不提供业务页面。
 
 ```powershell
 # 1) 校验/替换 config\nginx-windows.conf 中的绝对路径（换过盘符时）
@@ -383,8 +383,9 @@ npm run build                 # vue-tsc -b && node scripts/vite-build.mjs → di
 Copy-Item D:\erp_system\config\uploads-signing.conf.example D:\erp_system\config\uploads-signing.conf
 #    将里面 <在此填入密钥...> 替换为与 .env 的 UPLOAD_URL_SIGNING_SECRET 逐字相同的值
 
-# 3) TLS（可选）：config\tls\server.crt / server.key 就位；不启用就把 443 server 块整段注释掉
-#    ⚠️ 全新 clone 只有公钥，私钥 server.key 被 gitignore、不随仓库来 → 默认即「不启用」
+# 3) TLS（生产必需）：配置 config\tls\server.crt / server.key。
+#    私钥不随仓库交付；先在目标机安全配置证书，验证入口主机名及签发信任链。
+#    迁机需同时更新 3000 重定向的目标主机；不要把完整业务入口改成 HTTP。
 
 # 4) 首次运行前建 nginx temp 目录（nginx -p <项目根> 时【不会自建】）
 $root = 'D:\erp_system'
@@ -396,12 +397,10 @@ foreach ($d in 'client_body_temp','proxy_temp','fastcgi_temp','uwsgi_temp','scgi
 C:\nginx\nginx.exe -p D:\erp_system -c D:\erp_system\config\nginx-windows.conf -t
 ```
 
-**防火墙**：只放行入站 TCP **3000**（启用 443 时再加 **443**）；5002/5432/6379/6380 一律仅回环。
+**防火墙**：用户端只需访问 TCP **443**。默认不放行 3000；仅在需要兼容旧链接且确认只作重定向时另行审批。5002/5432/6379/6380 不对客户端开放。
 
 ```powershell
-New-NetFirewallRule -DisplayName "erp-web-3000" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
-# 启用 443 时再加一条：
-New-NetFirewallRule -DisplayName "erp-web-443"  -Direction Inbound -Protocol TCP -LocalPort 443  -Action Allow
+New-NetFirewallRule -DisplayName "erp-web-443" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
 ```
 
 **✅ 验收**：`nginx -t` 输出 `syntax is ok` + `test is successful`。
@@ -459,17 +458,17 @@ erp-redis → erp-redis-broker → erp-prod → erp-arq → erp-web
 逐项验收（缺一不可）：
 
 ```powershell
-# ① 后端健康
-curl.exe -s --noproxy "*" http://127.0.0.1:5002/api/health        # 200 healthy
+# ① 后端严格就绪（仅本机）
+curl.exe -fsS --noproxy "*" http://127.0.0.1:5002/api/health/ready
 
-# ② 前端确由 Nginx 托管（四条判据）
-curl.exe -s --noproxy "*" http://127.0.0.1:3000/ | findstr /c:"@vite/client"   # 应为空
-curl.exe -s --noproxy "*" http://127.0.0.1:3000/ | findstr /c:"/src/main.ts"   # 应为空
-curl.exe -sI --noproxy "*" http://127.0.0.1:3000/ | findstr /i "^server:"      # Server: nginx
-curl.exe -sI --noproxy "*" -H "Accept-Encoding: gzip" "http://127.0.0.1:3000/api/v1/products/list?page=1&per_page=50" | findstr /i content-encoding
+# ② 前端由 Nginx 通过可信 HTTPS 托管；填已写入证书 SAN 的地址
+$entry = 'https://<证书中的目标主机名或IP>'
+curl.exe -fsSI --noproxy "*" "$entry/"                                     # 200，证书验证成功
+curl.exe -fsS --noproxy "*" "$entry/" | findstr /c:"/assets/"              # 有生产构建资源
+curl.exe -fsS --noproxy "*" "$entry/" | findstr /c:"@vite/client" /c:"/src/main.ts"  # 应为空
 
-# ③ 用户入口健康
-curl.exe -s --noproxy "*" http://127.0.0.1:3000/api/health
+# ③ 用户入口就绪
+curl.exe -fsS --noproxy "*" "$entry/api/health/ready"
 
 # ④ ARQ 在线（用哨兵键，不要只看进程；broker 在 :6380）
 C:\Redis\redis-cli.exe -p 6380 -a <REDIS_PASSWORD> TTL arq:queue:health-check   # 期望 0..61
@@ -515,7 +514,7 @@ powershell -ExecutionPolicy Bypass -File D:\erp_system\scripts\ops\install_watch
 - [ ] 五服务 `Start=Auto`、当前 RUNNING；`erp-prod` 依赖 `erp-redis`、`erp-arq` 依赖 `erp-redis-broker`
 - [ ] `logs/prod_runner.json`：`ready=true`、`frontend_ok=true`
 - [ ] `runtime_mode_probe.py` 三项 verdict 全部符合预期
-- [ ] 浏览器从**另一台局域网机器**访问 `http://<主机IP>:3000` 能登录并跑通一笔业务
+- [ ] 浏览器从**另一台局域网机器**访问 `https://<证书中的目标主机名>` 能登录并跑通一笔业务
 - [ ] 上传一张图片 → 刷新仍可见（验证签名 URL 链路）
 - [ ] 触发一次手动备份 → `backups/` 出现产物且时间戳新鲜
 - [ ] 看门狗计划任务已注册且首轮检查通过
@@ -576,7 +575,7 @@ cd ..
 | 主题 | 位置 |
 |---|---|
 | **完整人工手册**（架构 / 运维 / 门禁 / API 约定） | [docs/PROJECT_MANUAL.md](docs/PROJECT_MANUAL.md) |
-| 离线便携包一键部署（源机打包 → 目标机安装） | [deploy/README.md](deploy/README.md) |
+| 离线便携包的构建与安装预检（实际安装暂停） | [deploy/README.md](deploy/README.md) |
 | 服务生命周期与提权边界（操作前必读） | [docs/runbooks/service-lifecycle.md](docs/runbooks/service-lifecycle.md) |
 | 环境变量：单一来源 / 漂移检查 / 灾备重建 | [docs/runbooks/env-config.md](docs/runbooks/env-config.md) |
 | 项目协作契约（AI 与人都适用） | [AGENTS.md](AGENTS.md) |

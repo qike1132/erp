@@ -2,29 +2,25 @@
 # ============================================================
 # ERP 离线便携包 —— 安装端（在**目标机**以管理员运行）
 # 用法：
-#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File install_package.ps1 `
-#       -Package D:\erp_portable_20261008_1200.tar.gz.enc -ServerIP 192.168.1.97
-#
-# 分阶段装配（提权 → 解包 → 基础软件 → 建库 → 部署 → .env → 数据 → 五服务 →
-# 防火墙 → 看门狗 → 验收），幂等、失败可续跑、finally 清 %TEMP% 明文与 PGPASSWORD。
-# 目标机路径默认 D:\erp_system（与源机同路径）；-Force 覆盖已有部署；-Blank 走空库引导。
-# 依赖同目录 _lib.ps1（dot-source）。
+#   powershell.exe -NoProfile -File install_package.ps1 `
+#       -Package <加密包> -ExpectedSha256 <独立可信摘要> -ServerIP <证书主机名> ...
+# 只支持全新安装；禁止覆盖、删库或跳过验收。依赖同目录 _lib.ps1。
 # ============================================================
 [CmdletBinding()]
 param(
   [Parameter(Mandatory)][string]$Package,
+  [Parameter(Mandatory)][ValidatePattern('\A[0-9a-fA-F]{64}\z')][string]$ExpectedSha256,
+  [Parameter(Mandatory)][string]$ServerIP,
+  [Parameter(Mandatory)][string]$TlsCertificate,
+  [Parameter(Mandatory)][string]$TlsPrivateKey,
+  [Parameter(Mandatory)][string]$TlsTrustedCa,
+  [Parameter(Mandatory)][string]$OpenSsl,
   [string]$TargetDir = 'D:\erp_system',
-  [string]$ServerIP = '192.168.1.97',
-  [string]$PgSuperPassword = '',
   [string]$NginxDir = 'C:\nginx',
   [string]$RedisDir = 'C:\Redis',
   [string]$Nssm = 'C:\nssm\nssm.exe',
-  [string]$EncryptKey = '',
-  [string]$AdminPassword = '',
-  [switch]$Force, [switch]$Blank, [switch]$SkipVerify,
-  # 2026-10-17 审计 F-OPS-DEPLOY-03：DROP DATABASE 与通用 -Force 解耦——
-  # 重建既有库必须显式声明，防止「以为 -Force 只是覆盖文件」误删数据。
-  [switch]$AllowDropDatabase
+  [switch]$PreflightOnly,
+  [switch]$Force, [switch]$Blank, [switch]$SkipVerify, [switch]$AllowDropDatabase
 )
 . (Join-Path $PSScriptRoot '_lib.ps1')
 
@@ -55,32 +51,30 @@ function Start-ErpService([string]$Name){
   }
   Write-Ok "服务 $Name 运行中"
 }
-function New-DeployRedisConf([string]$SrcConf,[string]$DstConf,[string]$Name,[string]$RedisRoot){
-  # 去掉任何**生效**的 requirepass 行；口令只经 --requirepass 注入，绝不写进 .conf。
+function New-DeployRedisConf([string]$SrcConf,[string]$DstConf,[string]$Name,[string]$RedisRoot,[string]$Password){
+  # 凭据只写入安装器创建的专用 ACL 目录，不进入 NSSM 或 Redis 进程参数。
   # 并把 dir/logfile 指向部署目录（非默认 RedisDir 时避免脏数据/日志落到 C:\Redis）。
   # ⚠️ 路径一律用**正斜杠**：Redis 把反斜杠当转义符，单反斜杠的 "C:\Redis\data"
   #    会被解析成 C:Redisdata → 启动报 Can't chdir to 'C:Redisdata' → NSSM 崩溃循环置 Paused。
   $root = $RedisRoot -replace '\\','/'
-  $dataDir = "$root/data"
-  New-Item -ItemType Directory -Force -Path (Join-Path $RedisRoot 'data') | Out-Null
+  $dataDir = "$root/$Name"
+  New-Item -ItemType Directory -Path (Join-Path $RedisRoot $Name) | Out-Null
   $lines=[IO.File]::ReadAllLines($SrcConf,[Text.UTF8Encoding]::new($false))
   $out = $lines | Where-Object { $_ -notmatch '^\s*requirepass(\s|$)' } | ForEach-Object {
-    if($_ -match '^\s*dir\s'){ "dir $dataDir" }
+    if($_ -match '^\s*dir\s'){ "dir `"$dataDir`"" }
     elseif($_ -match '^\s*logfile\s'){ "logfile `"$root/$Name.log`"" }
     else { $_ }
   }
   # 防回归：生成的 dir/logfile 行不得残留反斜杠（Redis 会当转义符）
   foreach($ln in $out){ if($ln -match '^\s*(dir|logfile)\s' -and $ln.Contains('\')){ Write-Fail "Redis conf 的 dir/logfile 含反斜杠（Redis 会当转义符）：$ln"; exit 1 } }
+  if(-not $Password -or $Password -match '[\x00-\x1f\x7f]'){ throw 'Redis 口令不能为空或含控制字符' }
+  $quoted=$Password.Replace('\','\\').Replace('"','\"')
+  $out=@($out) + "requirepass `"$quoted`""
   [IO.File]::WriteAllText($DstConf, (($out -join "`r`n") + "`r`n"), [Text.UTF8Encoding]::new($false))
 }
-function New-BlankAdmin([string]$Py,[string]$Psql,[string]$TargetDir,[string]$WorkDir,[string]$DbUser,[string]$DbName,[string]$DbPw,[string]$AdminPassword){
-  # 空库引导：项目无内置用户种子，必须建一个超管，否则装完无法登录（README §4.10B）
-  $pw = $AdminPassword
-  if(-not $pw){
-    $sec = Read-Host -AsSecureString '新 admin 口令（Argon2id 哈希后写入）'
-    $pw = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
-  }
-  if(-not $pw){ Write-Fail 'admin 口令为空，无法建用户'; exit 1 }
+function New-BlankAdmin([string]$Py,[string]$Psql,[string]$TargetDir,[string]$WorkDir,[string]$DbUser,[string]$DbName,[string]$DbPw){
+  # 空库引导：项目无内置用户种子。
+  $pw = Read-DeploySecret '新 admin 口令（Argon2id 哈希后写入）'
   # 口令经环境变量进 python，绝不拼进命令行（避免进命令历史/进程列表）
   $env:ERP_ADMIN_PW = $pw
   $prevPyPath = $env:PYTHONPATH
@@ -99,7 +93,7 @@ function New-BlankAdmin([string]$Py,[string]$Psql,[string]$TargetDir,[string]$Wo
   [IO.File]::WriteAllText($sqlFile, $sql, [Text.UTF8Encoding]::new($false))
   $env:PGPASSWORD = $DbPw
   try {
-    & $Psql -h localhost -U $DbUser -d $DbName -v ON_ERROR_STOP=1 -f $sqlFile
+    & $Psql -X -w -h 127.0.0.1 -p 5432 -U $DbUser -d $DbName -v ON_ERROR_STOP=1 -f $sqlFile
     if($LASTEXITCODE -ne 0){ Write-Fail 'admin 用户创建失败（见上方 psql 输出）'; exit 1 }
   } finally {
     Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
@@ -143,405 +137,139 @@ function Test-ArqSentinel([string]$RedisHost='127.0.0.1',[int]$Port=6380,[string
   return ($ttl -ge 0 -and $ttl -le 61)
 }
 
-$work = Join-Path $env:TEMP ("erp_pkg_" + [guid]::NewGuid().ToString('N'))
+function Assert-NewDatabase([string]$Psql,[string]$DbName,[string]$DbUser){
+  $conflict=(& $Psql -X -w -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -tAc "SELECT 1 WHERE EXISTS (SELECT FROM pg_database WHERE datname='$DbName') OR EXISTS (SELECT FROM pg_roles WHERE rolname='$DbUser')" | Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or $conflict){ throw '不能确认数据库及角色均不存在；拒绝更改 PostgreSQL' }
+}
+
+$work = $null
 try {
-  # ==========================================================
-  Write-Step '0 提权 + 参数'
-  if(-not (Test-Admin)){ Write-Fail '必须以管理员运行'; exit 1 }
-  if(-not (Test-HostLiteral $ServerIP)){ Write-Fail "非法 ServerIP（需 IPv4 / IPv6 / 域名）: $ServerIP"; exit 1 }
-  if(-not (Test-Path -LiteralPath $Package)){ Write-Fail "找不到安装包: $Package"; exit 1 }
-  if(-not (Get-Command tar.exe -ErrorAction SilentlyContinue)){ Write-Fail '未找到 tar.exe（需 Win10 1809+）'; exit 1 }
-  $drive=([IO.Path]::GetPathRoot($TargetDir)).TrimEnd('\',':')
-  $free=(Get-PSDrive -Name $drive).Free
-  if($free -lt 8GB){ Write-Fail "目标盘可用空间不足 8GB（实 $([math]::Round($free/1GB,1))GB）"; exit 1 }
-  # 命令行明文口令会进 PowerShell 历史与进程列表——与构建端同一告警
-  $cliSecrets=@(); if($EncryptKey){ $cliSecrets+='-EncryptKey' }; if($PgSuperPassword){ $cliSecrets+='-PgSuperPassword' }; if($AdminPassword){ $cliSecrets+='-AdminPassword' }
-  if($cliSecrets.Count -gt 0){ Write-Warn (($cliSecrets -join '/') + ' 会进入 PowerShell 历史与进程列表；建议省略改用交互式隐藏输入') }
-  if(-not $EncryptKey){ $sec=Read-Host -AsSecureString '便携包口令'; $EncryptKey=[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)) }
-
-  # ==========================================================
-  Write-Step '1 解密解包'
-  # 包完整性：随包带的 .sha256 侧车先比对（spec §6.2）；缺失仅告警不硬失败
-  $shaSide = "$Package.sha256"
-  if(Test-Path -LiteralPath $shaSide){
-    $want=([IO.File]::ReadAllText($shaSide)).Trim().ToLower()
-    $got=(Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLower()
-    if(-not $want -or $want -ne $got){
-      Write-Fail "包 sha256 校验失败（期望 '$want'，实算 '$got'）——包损坏或被篡改"; exit 1
-    }
-    Write-Ok '包 sha256 校验通过'
-  } else {
-    Write-Warn "未找到 $shaSide，跳过包完整性校验（建议随包携带 .sha256）"
+  Write-Step '0 只读预检'
+  Assert-FreshInstallOptions $Force $AllowDropDatabase $SkipVerify
+  if(-not $PreflightOnly){ throw '便携安装尚未放行：迁移连接隔离和 Windows 恢复演练未完成；仅支持 -PreflightOnly' }
+  if(-not (Test-Admin)){ throw '必须以管理员运行' }
+  if(-not (Test-HostLiteral $ServerIP)){ throw "非法的 HTTPS 入口主机名：$ServerIP" }
+  $hBare = $ServerIP.Trim().Trim('[',']').ToLowerInvariant()
+  $is6 = Test-IsIPv6Literal $hBare
+  $hUrl = if($is6){ "[$hBare]" }else{ $hBare }
+  Assert-DeploymentTls $OpenSsl $TlsCertificate $TlsPrivateKey $TlsTrustedCa $hBare
+  $TargetDir=Assert-LocalDeploymentPath $TargetDir
+  $NginxDir=Assert-LocalDeploymentPath $NginxDir
+  if($TargetDir.Contains(' ') -or $NginxDir.Contains(' ')){ throw 'nginx 模板使用未加引号的绝对路径；TargetDir 和 NginxDir 不能含空格' }
+  if(-not (Test-Path -LiteralPath (Split-Path $TargetDir -Parent) -PathType Container)){ throw '目标路径的父目录不存在' }
+  $RedisDir=Assert-LocalDeploymentPath $RedisDir
+  $Nssm=Assert-LocalDeploymentPath $Nssm
+  if(-not (Test-Path -LiteralPath $Package -PathType Leaf)){ throw '安装包不存在' }
+  $Package=(Get-Item -LiteralPath $Package -Force).FullName
+  $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+  $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+  $schtasks=Join-Path $env:SystemRoot 'System32\schtasks.exe'
+  foreach($tool in @($tar,$curl,$schtasks)){
+    if(-not (Test-Path -LiteralPath $tool -PathType Leaf)){ throw "缺少 Windows 系统工具：$tool" }
   }
-  New-Item -ItemType Directory -Force -Path $work | Out-Null
-  $tgz = Join-Path $work 'p.tar.gz'
-  try {
-    Unprotect-File -InPath $Package -OutPath $tgz -Password $EncryptKey
-  } catch [System.Security.Cryptography.CryptographicException] {
-    Write-Fail '口令错误或包损坏（解密失败）'; exit 1
-  }
-  & tar.exe -xzf $tgz -C $work
-  if($LASTEXITCODE -ne 0){ throw 'tar 解包失败' }
-  $pkgRoot = (Get-ChildItem $work -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'manifest.txt') } | Select-Object -First 1)
-  if(-not $pkgRoot){ throw '包内未找到 manifest.txt（口令错误或包损坏）' }
-  $binDir = Join-Path $pkgRoot.FullName 'binaries'
-  Write-Ok "解包到 $($pkgRoot.FullName)"
-
-  # postgres 超级用户口令：优先命令行，其次包内 settings\.env 的 PG_SUPER_PASSWORD，最后交互式隐藏输入
-  if(-not $PgSuperPassword){
-    $pgEnv = Read-EnvMap (Join-Path $pkgRoot.FullName 'settings\.env')
-    if($pgEnv['PG_SUPER_PASSWORD']){ $PgSuperPassword=$pgEnv['PG_SUPER_PASSWORD']; Write-Ok '已从包内 settings\.env 取用 PG_SUPER_PASSWORD' }
-    else { $sec=Read-Host -AsSecureString 'postgres 超级用户口令'; $PgSuperPassword=[Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)) }
-  }
-  if(-not $PgSuperPassword){ Write-Fail 'postgres 超级用户口令为空（-PgSuperPassword / 包内 PG_SUPER_PASSWORD / 交互式输入）'; exit 1 }
-
-  # ---- 覆盖守卫：无 -Force 时拒绝 ----
-  # 诚实边界：基础软件步骤是幂等「已装跳过」；若本步之后中途失败，可能已装过 PostgreSQL/Redis/nginx…
-  # 故只承诺「不覆盖既有库/服务」，不声称「未改动任何现场」。
-  # 唯一权威停机序（依赖方先停），启动/安装序取其反向。
-  # 必须与 server_manager/constants.py::_SVC_REVERSE 保持一致（tests/test_service_order_single_source.py 锁定）。
+  $curlVersion=& $curl -q --version
+  if($LASTEXITCODE -ne 0 -or ($curlVersion -join "`n") -notmatch '\bSchannel\b'){ throw '验收需要使用 Windows 信任存储的系统 curl（Schannel）' }
+  $drive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($TargetDir))
+  if($drive.AvailableFreeSpace -lt 8GB){ throw '目标盘可用空间不足 8GB' }
+  if(Test-Path -LiteralPath $TargetDir){ throw "目标路径已存在，拒绝覆盖：$TargetDir" }
+  # 停机序由 tests/test_service_order_single_source.py 锁定；新装只用其反向启动序。
   $stopOrder = @('erp-prod','erp-arq','erp-web','erp-redis','erp-redis-broker')
   $five = @($stopOrder[($stopOrder.Count-1)..0])
-  $existingSvc = @($five | Where-Object { Get-Service -Name $_ -ErrorAction SilentlyContinue })
-  $targetExists = Test-Path -LiteralPath $TargetDir
-
-  # 库存在性预检：仅在能定位 psql 时做（无 psql 则跳过，留待第 3 步判定）
-  $dbNameGuard = 'erp_system'
-  $pgEnvMap = Read-EnvMap (Join-Path $pkgRoot.FullName 'settings\.env')
-  if($pgEnvMap['DB_NAME']){ $dbNameGuard = $pgEnvMap['DB_NAME'] }
-  $dbExistsGuard = $false
-  $psqlGuard = Get-PgTool 'psql.exe'
-  if($psqlGuard){
-    try{
-      $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用（值来自参数/包内 .env），非字面量口令
-      $q = (& $psqlGuard -h localhost -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$dbNameGuard'" | Out-String).Trim()
-      if($q -eq '1'){ $dbExistsGuard = $true }
-    } catch { } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
-  } else {
-    Write-Warn '未定位到 psql，跳过建库前「库已存在」预检（第 3 步仍会判定）'
+  foreach($svc in $five){
+    if($null -ne (Get-ServiceStatus $svc)){ throw "服务已存在，拒绝替换：$svc" }
   }
-
-  $conflicts=@()
-  if($targetExists){ $conflicts += $TargetDir }
-  if($existingSvc.Count -gt 0){ $conflicts += ($existingSvc -join ',') }
-  if($dbExistsGuard){ $conflicts += "库 $dbNameGuard" }
-  if(-not $Force -and $conflicts.Count -gt 0){
-    Write-Fail ("已存在: " + ($conflicts -join '; ') + "；覆盖请加 -Force（将停止并移除既有服务、覆写目标目录；重建既有数据库还需 -AllowDropDatabase，不加时库冲突直接退出；基础软件可能已先装）")
-    exit 1
+  if(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq 'erp-watchdog' }){ throw '看门狗已存在，拒绝替换' }
+  $busy=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -in 443,3000,5002,6379,6380 })
+  if($busy.Count){ throw 'ERP 所需的 443/3000/5002/6379/6380 已有监听；拒绝在共用主机部署' }
+  foreach($component in @((Join-Path $NginxDir 'nginx.exe'),(Join-Path $RedisDir 'redis-server.exe'),$Nssm)){
+    [void](Assert-LocalDeploymentPath $component)
+    if(-not (Test-Path -LiteralPath $component -PathType Leaf)){ throw "请预装可信基础组件：$component" }
   }
-  if($Force -and $conflicts.Count -gt 0){
-    Write-Warn ("-Force：将覆盖 " + ($conflicts -join '; '))
-  }
+  $psqlGuard=Get-PgTool 'psql.exe'
+  if(-not $psqlGuard){ throw '必须预装 PostgreSQL 18 和可信 psql；安装器不传递超级用户口令作为进程参数' }
+  [void](Assert-LocalDeploymentPath $psqlGuard)
 
-  # 2026-10-17 OCR 评审：fail-fast——库已存在而未显式给 -AllowDropDatabase 时，
-  # 立即退出（原先要等到第 3 步建库段才失败，基础软件已在第 2 步装完、快照也未做）。
-  if($dbExistsGuard -and -not ($Force -and $AllowDropDatabase)){
-    Write-Fail "库 $dbNameGuard 已存在；未指定 -Force -AllowDropDatabase 不会重建数据库（将删除库内全部数据）。覆盖文件/服务请加 -Force；确认要重建库再加 -AllowDropDatabase。"
-    exit 1
+  Write-Step '1 验证并解包'
+  $work=New-DeployStagingDirectory
+  $tgz=Join-Path $work 'p.tar.gz'
+  Unprotect-File -InPath $Package -OutPath $tgz -ExpectedSha256 $ExpectedSha256 -Password (Read-DeploySecret '便携包口令')
+  & $tar -xzf $tgz -C $work
+  if($LASTEXITCODE -ne 0){ throw 'tar 解包失败' }
+  Assert-NoDeploymentLinks $work
+  $roots=@(Get-ChildItem -LiteralPath $work -Directory -Force)
+  if($roots.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $roots[0].FullName 'manifest.txt') -PathType Leaf)){ throw '便携包缺少唯一的 manifest 根目录' }
+  $pkgRoot=$roots[0]
+  $appRoot=Join-Path $pkgRoot.FullName 'app'
+  $envMap=Read-EnvMap (Join-Path $appRoot '.env')
+  $dbPw=$envMap['DB_PASSWORD']
+  if(-not $dbPw -or $dbPw -match '[\x00-\x1f\x7f]'){ throw '包内 DB_PASSWORD 为空或含控制字符' }
+  $dbUser=if($envMap['DB_USER']){ $envMap['DB_USER'] }else{ 'erp_app' }
+  $dbName=if($envMap['DB_NAME']){ $envMap['DB_NAME'] }else{ 'erp_system' }
+  foreach($identifier in @($dbName,$dbUser)){
+    if($identifier -cnotmatch '\A[a-z_][a-z0-9_]{0,62}\z'){ throw '数据库和角色必须是 PostgreSQL 小写标识符' }
   }
+  foreach($p in @('app\.env','app\config\nginx-windows.conf','runtime\python313\python.exe','frontend\dist\index.html')){
+    if(-not (Test-Path -LiteralPath (Join-Path $pkgRoot.FullName $p) -PathType Leaf)){ throw "便携包缺少：$p" }
+  }
+  if(-not $Blank){
+    if(-not (Test-Path -LiteralPath (Join-Path $pkgRoot.FullName 'data\erp_system.dump') -PathType Leaf)){ throw '镜像部署缺少数据库 dump' }
+    $pgrestore=Join-Path (Split-Path $psqlGuard -Parent) 'pg_restore.exe'
+    [void](Assert-LocalDeploymentPath $pgrestore)
+    if(-not (Test-Path -LiteralPath $pgrestore -PathType Leaf)){ throw '缺少 PostgreSQL 客户端 pg_restore' }
+  }
+  if(-not $envMap['REDIS_PASSWORD'] -or $envMap['REDIS_PASSWORD'] -match '[\x00-\x1f\x7f]' -or
+     -not $envMap['UPLOAD_URL_SIGNING_SECRET'] -or $envMap['UPLOAD_URL_SIGNING_SECRET'] -match '[\x00-\x1f\x7f"\\$]'){
+    throw '安装包缺少合规的 Redis 或上传签名凭据'
+  }
+  if(Test-Path -LiteralPath (Join-Path $appRoot 'config\tls')){ throw '便携包不得携带 TLS 物料' }
+  $tlsDir=New-DeployPrivateDirectory (Join-Path $work 'tls')
+  Copy-Item -LiteralPath $TlsCertificate -Destination (Join-Path $tlsDir 'server.crt')
+  Copy-Item -LiteralPath $TlsPrivateKey -Destination (Join-Path $tlsDir 'server.key')
+  Assert-DeploymentTls $OpenSsl (Join-Path $tlsDir 'server.crt') (Join-Path $tlsDir 'server.key') $TlsTrustedCa $hBare
+  $nginxStaged=Join-Path $appRoot 'config\nginx-windows.conf'
+  $newRoot=$TargetDir.Replace('\','/')
+  [void](Update-NginxConf $nginxStaged 'D:/erp_system' $newRoot $NginxDir $hBare)
+  if($PreflightOnly){
+    Remove-DeployStagingDirectory $work
+    $work=$null
+    Write-Ok '预检通过：未连接数据库或启动部署'
+    exit 0
+  }
+  throw '便携安装未放行；拒绝进入数据库迁移和部署'
 
+  $PgSuperPassword = (Read-DeploySecret '目标机现有 postgres 超级用户口令')
   # ==========================================================
-  Write-Step '2 装基础软件（已装跳过）'
-  function Find-Bin([string]$Pattern){
-    @(Get-ChildItem -Path $binDir -Filter $Pattern -File -ErrorAction SilentlyContinue) | Sort-Object Name | Select-Object -First 1
-  }
-
-  # VC++ 运行库（1638=已装更高版本；3010=需重启，均判成功）
-  $vc = Find-Bin 'vc_redist*'
-  if($vc){
-    $vcExe = $vc
-    if($vc.Extension -ieq '.zip'){
-      $vcDir = Join-Path $work 'vc'; Expand-Archive -LiteralPath $vc.FullName -DestinationPath $vcDir -Force
-      $vcExe = @(Get-ChildItem $vcDir -Recurse -Filter 'vc_redist*.exe' -File | Select-Object -First 1)[0]
-    }
-    if($vcExe){
-      $p=Start-Process -FilePath $vcExe.FullName -ArgumentList '/install','/quiet','/norestart' -Wait -PassThru
-      if($p.ExitCode -in 0,1638,3010){ Write-Ok "VC++ 运行库就绪 (exit=$($p.ExitCode))" }
-      else { Write-Warn "VC++ 运行库安装返回 $($p.ExitCode)（可继续）" }
-    }
-  } else { Write-Warn 'deploy\binaries 无 vc_redist（若已装可忽略）' }
-
-  # PostgreSQL 18（检测 postgresql* 服务或 psql 是否存在，缺才静默装）
-  $pgSvc = @(Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue)
-  $pgInstalled = ($pgSvc.Count -gt 0) -or [bool](Get-PgTool 'psql.exe')
-  if($pgInstalled){
-    Write-Ok 'PostgreSQL 已安装（跳过）'
-  } else {
-    $pgInst = Find-Bin 'pg*'
-    if(-not $pgInst){ Write-Fail '未找到 PostgreSQL 安装器（deploy\binaries\pg18*）。官方：https://www.enterprisedb.com/downloads/postgres-postgresql-downloads'; exit 1 }
-    $p=Start-Process -FilePath $pgInst.FullName -ArgumentList '--mode','unattended','--superpassword',$PgSuperPassword,'--serverport','5432' -Wait -PassThru
-    if($p.ExitCode -ne 0){ Write-Fail "PostgreSQL 静默安装失败 exit=$($p.ExitCode)"; exit 1 }
-    foreach($s in @(Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue)){ if($s.Status -ne 'Running'){ Start-Service $s -ErrorAction SilentlyContinue } }
-    Start-Sleep -Seconds 3
-    Write-Ok 'PostgreSQL 18 已静默安装'
-  }
-
-  # Redis（tporadowski 发行版，解压到 RedisDir）
-  if(Test-Path (Join-Path $RedisDir 'redis-server.exe')){
-    Write-Ok 'Redis 已就位（跳过）'
-  } else {
-    $rz = Find-Bin 'Redis-x64-*'
-    if(-not $rz){ Write-Fail '未找到 Redis 包（deploy\binaries\Redis-x64-5.0.14.1*）。官方：https://github.com/tporadowski/redis/releases'; exit 1 }
-    New-Item -ItemType Directory -Force -Path $RedisDir | Out-Null
-    Expand-Archive -LiteralPath $rz.FullName -DestinationPath $RedisDir -Force
-    if(-not (Test-Path (Join-Path $RedisDir 'redis-server.exe'))){ Write-Fail 'Redis 解压后未见 redis-server.exe'; exit 1 }
-    Write-Ok "Redis 解压到 $RedisDir"
-  }
-
-  # nginx（zip 内常含一层 nginx-<ver>\ 目录）
-  if(Test-Path (Join-Path $NginxDir 'nginx.exe')){
-    Write-Ok 'nginx 已就位（跳过）'
-  } else {
-    $ng = Find-Bin 'nginx*.zip'
-    if(-not $ng){ Write-Fail '未找到 nginx 压缩包（deploy\binaries\nginx*zip）。官方：https://nginx.org/en/download.html'; exit 1 }
-    $ngTmp = Join-Path $work 'nginx'; Expand-Archive -LiteralPath $ng.FullName -DestinationPath $ngTmp -Force
-    $inner = @(Get-ChildItem $ngTmp -Directory)
-    $src = if($inner.Count -gt 0){ $inner[0].FullName } else { $ngTmp }
-    New-Item -ItemType Directory -Force -Path $NginxDir | Out-Null
-    robocopy $src $NginxDir /E /NFL /NDL /NJH /NJS /NP | Out-Null
-    if(-not (Test-Path (Join-Path $NginxDir 'nginx.exe'))){ Write-Fail 'nginx 解压后未见 nginx.exe'; exit 1 }
-    Write-Ok "nginx 解压到 $NginxDir"
-  }
-
-  # NSSM（zip 内含 win64\ 与 win32\，取 win64）
-  if(Test-Path $Nssm){
-    Write-Ok 'nssm 已就位（跳过）'
-  } else {
-    $nz = Find-Bin 'nssm*.zip'
-    if(-not $nz){ Write-Fail '未找到 nssm 包（deploy\binaries\nssm*zip）。官方：https://nssm.cc/download'; exit 1 }
-    $nzTmp = Join-Path $work 'nssm'; Expand-Archive -LiteralPath $nz.FullName -DestinationPath $nzTmp -Force
-    $nx = @(Get-ChildItem $nzTmp -Recurse -Filter 'nssm.exe' -File | Sort-Object FullName -Descending | Select-Object -First 1)
-    if($nx.Count -eq 0){ Write-Fail 'nssm 包内未见 nssm.exe'; exit 1 }
-    New-Item -ItemType Directory -Force -Path (Split-Path $Nssm -Parent) | Out-Null
-    Copy-Item $nx[0].FullName $Nssm -Force
-    Write-Ok "nssm 就位：$Nssm"
-  }
-
-  # Node（仅前端开发需要；生产只需 dist，缺则 WARN）
-  $nodeOk = [bool](Get-Command node.exe -ErrorAction SilentlyContinue) -or (Test-Path (Join-Path ${env:ProgramFiles} 'nodejs\node.exe'))
-  if($nodeOk){
-    Write-Ok 'Node 已安装（跳过）'
-  } else {
-    $msi = Find-Bin 'node*.msi'
-    if($msi){
-      $p=Start-Process msiexec.exe -ArgumentList '/i',"`"$($msi.FullName)`"",'/qn','/norestart' -Wait -PassThru
-      if($p.ExitCode -in 0,1638,3010){ Write-Ok "Node 安装完成 (exit=$($p.ExitCode))" } else { Write-Warn "Node 安装返回 $($p.ExitCode)" }
-    } else { Write-Warn '未找到 Node msi（deploy\binaries\node*.msi）—— 目标机不做前端开发可忽略' }
-  }
-
-  # ==========================================================
-  Write-Step '3 建库'
-  $psql = Get-PgTool 'psql.exe'; if(-not $psql){ Write-Fail '未找到 psql（PostgreSQL 是否安装成功？）'; exit 1 }
-  $envMap = Read-EnvMap (Join-Path $pkgRoot.FullName 'settings\.env')
-  $dbPw = $envMap['DB_PASSWORD']; if(-not $dbPw){ Write-Fail '包内 .env 缺 DB_PASSWORD'; exit 1 }
-  $dbUser = if($envMap['DB_USER']) { $envMap['DB_USER'] } else { 'erp_app' }
-  $dbName = if($envMap['DB_NAME']) { $envMap['DB_NAME'] } else { 'erp_system' }
+  Write-Step '2 建库'
+  $psql=$psqlGuard
   $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用，非字面量口令
   try {
-    $esc = $dbPw.Replace("'","''")
-    $roleExists = (& $psql -h localhost -U postgres -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$dbUser'" | Out-String).Trim()
-    if($roleExists -ne '1'){
-      & $psql -h localhost -U postgres -d postgres -c "CREATE ROLE $dbUser LOGIN PASSWORD '$esc'" | Out-Null
-      if($LASTEXITCODE -ne 0){ Write-Fail 'CREATE ROLE 失败'; exit 1 }
-      Write-Ok "角色 $dbUser 已创建"
-    } else {
-      & $psql -h localhost -U postgres -d postgres -c "ALTER ROLE $dbUser LOGIN PASSWORD '$esc'" | Out-Null
-      Write-Ok "角色 $dbUser 已存在，口令已同步"
-    }
-    $dbExists = (& $psql -h localhost -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$dbName'" | Out-String).Trim()
-    if($dbExists -ne '1'){
-      & $psql -h localhost -U postgres -d postgres -c "CREATE DATABASE $dbName WITH OWNER = $dbUser ENCODING = 'UTF8' TEMPLATE = template0" | Out-Null
-      if($LASTEXITCODE -ne 0){ Write-Fail 'CREATE DATABASE 失败'; exit 1 }
-      Write-Ok "数据库 $dbName 已创建（owner=$dbUser）"
-    } elseif($Force -and $AllowDropDatabase){
-      Write-Warn "库 $dbName 已存在，-Force -AllowDropDatabase：删除并重建（数据不可恢复）"
-      # 2026-10-17 OCR 评审（high）：DROP DATABASE 原先发生在 step4 快照之前——
-      # 快照只保护 config/.env/服务定义，保护不了数据库。删库前必须先 pg_dump。
-      $pgDump = Get-PgTool 'pg_dump.exe'
-      if($pgDump){
-        $preDump = Join-Path $TargetDir ("backups\preinstall-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-db.sql")
-        New-Item -ItemType Directory -Force -Path (Split-Path $preDump -Parent) | Out-Null
-        $env:PGPASSWORD = $PgSuperPassword  # secret-scan:allow 变量引用，非字面量口令
-        & $pgDump -h localhost -U postgres -d $dbName -f $preDump | Out-Null
-        $dumpOk = ($LASTEXITCODE -eq 0 -and (Test-Path $preDump) -and ((Get-Item $preDump).Length -gt 0))
-        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
-        if(-not $dumpOk){ Write-Fail "删库前的 pg_dump 失败或产物为空：$preDump —— 拒绝删除数据库"; exit 1 }
-        Write-Ok "删库前基线已保存：$preDump"
-      } else {
-        Write-Fail '未定位到 pg_dump，无法做删库前基线备份 —— 拒绝删除数据库'; exit 1
-      }
-      # 2026-11-17 上线前审计 P1-25：删库前必须先停生产服务 ——
-      # 五服务 RUNNING 时 DROP 会强断连接（pg_terminate_backend），且若随后的
-      # CREATE DATABASE 失败，服务就会对着一个不存在的库继续运行。
-      foreach($svc in $stopOrder){
-        $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
-        if($s -and $s.Status -ne 'Stopped'){
-          Write-Warn "删库前停止服务 $svc（当前 $($s.Status)）"
-          Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
-        }
-      }
-      $stillRunning = @($stopOrder | Where-Object {
-        $sv = Get-Service -Name $_ -ErrorAction SilentlyContinue
-        $sv -and $sv.Status -ne 'Stopped'
-      })
-      if($stillRunning.Count -gt 0){
-        Write-Fail ("以下服务未能停止，拒绝删库：" + ($stillRunning -join ', '))
-        exit 1
-      }
-      Write-Ok '五服务已停止（可以安全删库）'
-      & $psql -h localhost -U postgres -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='$dbName' AND pid<>pg_backend_pid()" | Out-Null
-      & $psql -h localhost -U postgres -d postgres -c "DROP DATABASE $dbName" | Out-Null
-      if($LASTEXITCODE -ne 0){ Write-Fail 'DROP DATABASE 失败'; exit 1 }
-      & $psql -h localhost -U postgres -d postgres -c "CREATE DATABASE $dbName WITH OWNER = $dbUser ENCODING = 'UTF8' TEMPLATE = template0" | Out-Null
-      if($LASTEXITCODE -ne 0){ Write-Fail 'CREATE DATABASE（重建）失败'; exit 1 }
-      Write-Ok "数据库 $dbName 已重建"
-    } elseif($Force){
-      # 2026-10-17 审计 F-OPS-DEPLOY-03：-Force 单独不足以删库重建——
-      # 提示语曾声称「不会覆盖既有库」，实际却 DROP；现在必须显式 -AllowDropDatabase。
-      Write-Fail "库 $dbName 已存在；-Force 只覆盖文件与服务，重建数据库须另加 -AllowDropDatabase（将删除库内全部数据）"; exit 1
-    } else {
-      Write-Fail "$dbName 已存在；覆盖请加 -Force（重建库须另加 -AllowDropDatabase）"; exit 1
-    }
+    Assert-NewDatabase $psql $dbName $dbUser
+    $esc=$dbPw.Replace("'","''")
+    $sqlFile=Join-Path $work 'init-db.sql'
+    $sql="SET standard_conforming_strings = on;`nCREATE ROLE `"$dbUser`" LOGIN PASSWORD '$esc';`nCREATE DATABASE `"$dbName`" WITH OWNER = `"$dbUser`" ENCODING = 'UTF8' TEMPLATE = template0;"
+    [IO.File]::WriteAllText($sqlFile,$sql,[Text.UTF8Encoding]::new($false))
+    try {
+      & $psql -X -w -h 127.0.0.1 -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 -f $sqlFile | Out-Null
+      if($LASTEXITCODE -ne 0){ throw '新建数据库或角色失败；不修改既有对象' }
+    } finally { Remove-Item -LiteralPath $sqlFile -Force }
+    Write-Ok "数据库 $dbName 已创建（owner=$dbUser）"
   } finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
 
   # ==========================================================
-  Write-Step '4 部署文件'
-  if(Test-Path -LiteralPath $TargetDir){
-    # 2026-10-17 审计 F-OPS-DEPLOY-03：覆盖前快照（回滚依据）——
-    # 导出五服务 NSSM 参数（注册表）+ config 与 .env 副本。不做就不可回退。
-    $snapDir = Join-Path $TargetDir ("backups\preinstall-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-    New-Item -ItemType Directory -Force -Path $snapDir | Out-Null
-    $svcRegKey = 'HKLM:\SYSTEM\CurrentControlSet\Services'
-    $nssmSnapOk = $true
-    foreach($n in $five){
-      if(Get-Service -Name $n -ErrorAction SilentlyContinue){
-        $k = Join-Path $svcRegKey $n
-        if(Test-Path $k){
-          $out = Join-Path $snapDir "$n.reg"
-          & reg.exe export ($k -replace '^HKLM:', 'HKLM') $out /y | Out-Null
-          if($LASTEXITCODE -ne 0){ $nssmSnapOk = $false }
-        }
-      }
-    }
-    foreach($d in 'config','.env'){
-      $src = Join-Path $TargetDir $d
-      if(Test-Path -LiteralPath $src){ Copy-Item -Recurse -Force -Path $src -Destination $snapDir }
-    }
-    if($nssmSnapOk){
-      Write-Ok "安装前快照已保存：$snapDir（服务注册表 + config + .env）"
-    } else {
-      Write-Fail "安装前快照不完整（服务注册表导出失败）：$snapDir —— 继续执行将无法回滚服务定义"; exit 1
-    }
-
-    # 覆盖前：按逆依赖序停并移除旧的五服务（依赖方先停，否则 1051 会静默失败）
-    $notStopped=@()
-    foreach($n in $stopOrder){
-      try {
-        if(-not (Stop-NssmService $Nssm $n)){ $notStopped+=$n }
-      } catch {
-        Write-Warning "停止 $n 时出错：$($_.Exception.Message)"
-        $notStopped+=$n
-      }
-    }
-    if($notStopped.Count -gt 0){
-      Write-Fail ("以下服务未能停止，无法覆盖安装（已停服务保持停止，现场为部分停机）：" + ($notStopped -join '、') + "。请到 services.msc 检查依赖方后重跑")
-      exit 1
-    }
-    foreach($n in $five){
-      $exists=$null
-      try { $exists=Get-Service -Name $n -ErrorAction Stop }
-      catch { if($_.CategoryInfo.Category -ne 'ObjectNotFound'){ throw } }
-      if($exists){ $exists.Dispose(); Invoke-Nssm $Nssm @('remove',$n,'confirm') 'remove' }
-    }
-    Write-Ok '旧服务已停止并移除（-Force 覆盖）'
-  }
-  # 2026-11-18 审计 P1-28：robocopy /E 只覆盖同名文件，**不删**目标里多出来的旧文件。
-  # 升级一次就得到「新旧混合代码树」：旧的 .py 还在，但已被新代码的 import 抛在脑后，
-  # 只在某个分支真的被走到时才炸 —— 半坏状态最难查（AGENTS §6.1-6 记录过同型事故）。
-  #
-  # 为什么不是简单加 /PURGE：$TargetDir 同时是运行期数据目录（logs/、backups/、
-  # temp/、static/uploads/、.env 都在这一层），/PURGE 会连它们一起删。
-  # 所以分两类处理：
-  #   · PurgeWhole  —— 纯产物目录（runtime/、frontend-vite\dist），整目录清空再复制；
-  #   · PurgeCode   —— 代码树（app → 根），只删「包内确实提供的同名子目录」，
-  #                    并显式排除运行期目录名（防御性：万一包内带了空占位 logs/）。
+  Write-Step '3 部署文件'
+  [void](New-DeployPrivateDirectory $TargetDir)
   $copies = @(
-    @{ Src='app';           Dst=$TargetDir;                              PurgeCode=$true },
-    @{ Src='runtime';       Dst=(Join-Path $TargetDir 'runtime');        PurgeWhole=$true },
-    @{ Src='frontend\dist'; Dst=(Join-Path $TargetDir 'frontend-vite\dist'); PurgeWhole=$true }
+    @{ Src='app';           Dst=$TargetDir },
+    @{ Src='runtime';       Dst=(Join-Path $TargetDir 'runtime') },
+    @{ Src='frontend\dist'; Dst=(Join-Path $TargetDir 'frontend-vite\dist') }
   )
-  #: **永不删除/覆盖**的目录名（运行期数据 + 部署机本地凭据）—— 2026-11-18 评审 M3/M4。
-  #:
-  #: `config` 与 `settings` 必须在这里：`build_package.ps1` 打 `app\` 时排除了
-  #: `config\pgbouncer`（userlist.txt 是真凭据、只在部署机），并把 `config\jwt`
-  #: 另存为 `settings\jwt`。若把 `config` 当「包内有的代码目录」删掉，部署机上
-  #: 的 `config\pgbouncer\userlist.txt` 会**被删且不会被包恢复**（pgbouncer 直接挂），
-  #: `config\tls\*.key` 会被源机的 key 覆盖（nginx TLS 与目标机不匹配）。
-  $runtimeDirNames = @(
-    'logs','backups','temp','static','uploads','data',
-    'config','settings','certs',          # 部署机本地凭据/TLS，绝不删
-    '.env','.venv','.git','.github','_ops','frontend-vite'
-  )
-  #: PurgeWhole 留下的旧产物回滚点；全部复制成功后才清理
-  $purgeBaks = @()
   foreach($c in $copies){
     $src = Join-Path $pkgRoot.FullName $c.Src
-    if(-not (Test-Path $src)){ Write-Fail "包内缺少 $($c.Src)"; exit 1 }
-    New-Item -ItemType Directory -Force -Path $c.Dst | Out-Null
-
-    if($c.PurgeWhole -and (Test-Path -LiteralPath $c.Dst)){
-      # 先**改名留档**再复制，而不是直接删：中途失败时还留着一份能跑的旧产物。
-      # 直接删等于「五服务已 remove + 产物半份 + 无回滚点」。
-      $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-      $bak = "$($c.Dst).bak-$stamp"
-      Move-Item -LiteralPath $c.Dst -Destination $bak -Force -ErrorAction Stop
-      New-Item -ItemType Directory -Force -Path $c.Dst | Out-Null
-      $purgeBaks += $bak
-      Write-Ok "旧产物目录已改名留档：$bak"
-    }
-    if($c.PurgeCode){
-      foreach($item in Get-ChildItem -LiteralPath $src -Force){
-        # 只处理**目录**；顶层文件（旧的 run.py 等）交给下面那条 WARN 报告，
-        # 不自动删 —— 删文件的破坏面比删目录更难事后补救。
-        if(-not $item.PSIsContainer){ continue }
-        if($runtimeDirNames -contains $item.Name.ToLower()){ continue }
-        $dstChild = Join-Path $c.Dst $item.Name
-        if(Test-Path -LiteralPath $dstChild){
-          Remove-Item -LiteralPath $dstChild -Recurse -Force -ErrorAction Stop
-          Write-Ok "已移除旧代码目录：$($item.Name)"
-        }
-      }
-      # 目标侧有、包内没有的顶层项 —— 只报不删（可能是运维手工放的脚本）。
-      $pkgNames = @(Get-ChildItem -LiteralPath $src -Force | ForEach-Object { $_.Name.ToLower() })
-      $stale = @(
-        Get-ChildItem -LiteralPath $c.Dst -Force |
-        Where-Object {
-          $n = $_.Name.ToLower()
-          ($pkgNames -notcontains $n) -and ($runtimeDirNames -notcontains $n)
-        }
-      )
-      if($stale){
-        # 注意：不要把 `Write-Warn ("..."` 与下一行的 `+ (...)` 拆成两行 ——
-        # PowerShell 会把换行当成语句结束并报「缺少右括号」。先算成变量再输出。
-        $staleNames = (($stale | ForEach-Object { $_.Name }) -join ', ')
-        Write-Warn "目标目录里有包内不存在的顶层项（可能是旧版本遗留，也可能是运维自放；未自动删除）：$staleNames"
-      }
-    }
-
-    robocopy $src $c.Dst /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
-    if($LASTEXITCODE -ge 8){ Write-Fail "robocopy 失败 (exit=$LASTEXITCODE)：$($c.Src)"; exit 1 }
+    robocopy $src $c.Dst /E /XJ /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+    if($LASTEXITCODE -ge 8){ throw "robocopy 失败 (exit=$LASTEXITCODE)：$($c.Src)" }
   }
-  # 三个产物目录都复制成功，回滚点可以清了（失败时 exit 1 已经提前退出，不会走到这里）
-  foreach($bak in $purgeBaks){
-    if(Test-Path -LiteralPath $bak){
-      try {
-        Remove-Item -LiteralPath $bak -Recurse -Force -ErrorAction Stop
-        Write-Ok "已清理部署回滚点：$bak"
-      } catch {
-        Write-Warn "回滚点清理失败（不影响本次部署，可手工删）：$bak —— $($_.Exception.Message)"
-      }
-    }
-  }
+  $targetTls=New-DeployPrivateDirectory (Join-Path $TargetDir 'config\tls')
+  foreach($material in @('server.crt','server.key')){ Copy-Item -LiteralPath (Join-Path $tlsDir $material) -Destination $targetTls }
   # 包内 static 位于 data\static（spec §4）
   $staticSrc = Join-Path $pkgRoot.FullName 'data\static'
   if(Test-Path $staticSrc){
@@ -555,19 +283,15 @@ try {
   Write-Ok "代码/运行时/前端/静态资源已部署到 $TargetDir"
 
   # ==========================================================
-  Write-Step '5 .env 改写'
-  # 主机字面量：IPv6 需两种写法（TrustedHost 取带方括号、WS 的 urlparse 取裸形式）；域名/IPv4 一种即可
-  $hBare = $ServerIP.Trim().Trim('[',']')
-  $is6   = Test-IsIPv6Literal $ServerIP
-  $hUrl  = if($is6){ "[$hBare]" } else { $hBare }
-  Add-EnvListItemJson  $envPath 'ALLOWED_HOSTS' $hUrl
+  Write-Step '4 .env 改写'
+  Add-EnvListItemJson $envPath 'ALLOWED_HOSTS' $hUrl
   if($is6){ Add-EnvListItemJson $envPath 'ALLOWED_HOSTS' $hBare }
-  # CORS_ORIGINS 同时给 https（公网/TLS）与 http（内网私网）；生产过滤器会自行剔除公网 http 源
-  Add-EnvListItemComma $envPath 'CORS_ORIGINS' "https://${hUrl}:3000"
-  Add-EnvListItemComma $envPath 'CORS_ORIGINS' "http://${hUrl}:3000"
-  # WS_ALLOWED_ORIGINS 是 host:port（不带 scheme）；IPv6 两种写法都加
-  Add-EnvListItemComma $envPath 'WS_ALLOWED_ORIGINS' "${hUrl}:3000"
-  if($is6){ Add-EnvListItemComma $envPath 'WS_ALLOWED_ORIGINS' "${hBare}:3000" }
+  Set-EnvKey $envPath 'CORS_ORIGINS' "https://$hUrl"
+  Set-EnvKey $envPath 'WS_ALLOWED_ORIGINS' $hUrl
+  Set-EnvKey $envPath 'DB_HOST' '127.0.0.1'
+  Set-EnvKey $envPath 'DB_PORT' '5432'
+  Set-EnvKey $envPath 'WEB_PORT' '3000'
+  Set-EnvKey $envPath 'WEB_HEALTH_SCHEME' 'http'
   Set-EnvKey $envPath 'JWT_PRIVATE_KEY_PATH' (Join-Path $TargetDir 'config\jwt\private_v2.pem')
   Set-EnvKey $envPath 'JWT_PUBLIC_KEY_PATH'  (Join-Path $TargetDir 'config\jwt\public_v2.pem')
   # 注释 ASYNC_DATABASE_REPLICA_URL（副本未迁移，应用回退主库）
@@ -581,29 +305,23 @@ try {
   [IO.File]::WriteAllText($envPath, (($kept -join "`r`n")+"`r`n"), [Text.UTF8Encoding]::new($false))
   Write-Ok '.env 已改写（ALLOWED_HOSTS/CORS/WS/JWT；副本已注释；DATABASE_URL 已删）'
 
-  # nginx conf：根路径改写 + 注释 443 块 + mime.types 路径，然后建 temp 目录并 nginx -t
   $nginxConf = Join-Path $TargetDir 'config\nginx-windows.conf'
-  $newRoot = ($TargetDir -replace '\\','/')
-  $cnt = Update-NginxConf -ConfPath $nginxConf -OldRoot 'D:/erp_system' -NewRoot $newRoot -NginxDir $NginxDir
-  Write-Ok "nginx conf 已改写（替换计数=$cnt，443 块已注释，3000 块由 443 派生为 HTTP 入口）"
   New-NginxTempDirs $TargetDir
   $nginxExe = Join-Path $NginxDir 'nginx.exe'
-  if(Test-Path $nginxExe){
-    & $nginxExe -p $TargetDir -c $nginxConf -t   # 输出走 stderr 直显；勿重定向（EAP=Stop 下会终止）
-    if($LASTEXITCODE -ne 0){ Write-Fail 'nginx -t 校验失败（检查 config\nginx-windows.conf）'; exit 1 }
-    Write-Ok 'nginx -t 通过'
-  } else { Write-Warn "未找到 $nginxExe，跳过 nginx -t" }
 
   # ==========================================================
-  Write-Step '6 uploads-signing.conf'
+  Write-Step '5 上传签名与 nginx 配置校验'
   $secret = (Read-EnvMap $envPath)['UPLOAD_URL_SIGNING_SECRET']  # secret-scan:allow 变量名，非字面量
   if(-not $secret){ Write-Fail '.env 缺 UPLOAD_URL_SIGNING_SECRET，无法生成 uploads-signing.conf'; exit 1 }
   # 与 config/uploads-signing.conf(.example) 逐字对齐：secret 前有一个字面空格
   [IO.File]::WriteAllText((Join-Path $TargetDir 'config\uploads-signing.conf'), "secure_link_md5 `"`$arg_st`$uri $secret`";", [Text.UTF8Encoding]::new($false))
   Write-Ok 'uploads-signing.conf 已生成'
+  & $nginxExe -p $TargetDir -c $nginxConf -t
+  if($LASTEXITCODE -ne 0){ throw 'nginx -t 校验失败，拒绝启动服务' }
+  Write-Ok 'nginx -t 通过'
 
   # ==========================================================
-  Write-Step '7 数据'
+  Write-Step '6 数据'
   $py = Join-Path $TargetDir 'runtime\python313\python.exe'
   if(-not (Test-Path $py)){ Write-Fail "包内 runtime 缺失: $py"; exit 1 }
   $alembicIni = Join-Path $TargetDir 'migrations\alembic.ini'
@@ -616,18 +334,16 @@ try {
       if($LASTEXITCODE -ne 0){ Write-Fail 'init_permissions 失败'; exit 1 }
       & $py (Join-Path $TargetDir 'scripts\seed_nav.py')
       if($LASTEXITCODE -ne 0){ Write-Fail 'seed_nav 失败'; exit 1 }
-      New-BlankAdmin -Py $py -Psql $psql -TargetDir $TargetDir -WorkDir $work -DbUser $dbUser -DbName $dbName -DbPw $dbPw -AdminPassword $AdminPassword
+      New-BlankAdmin -Py $py -Psql $psql -TargetDir $TargetDir -WorkDir $work -DbUser $dbUser -DbName $dbName -DbPw $dbPw
     } else {
       $dump = Join-Path $pkgRoot.FullName 'data\erp_system.dump'
       if(-not (Test-Path $dump)){ Write-Fail "包内缺 data\erp_system.dump: $dump"; exit 1 }
-      $pgrestore = Get-PgTool 'pg_restore.exe'
-      if(-not $pgrestore){ Write-Fail '未找到 pg_restore.exe（PostgreSQL 客户端工具是否安装成功？）'; exit 1 }
       $env:PGPASSWORD = $dbPw
       try {
         # 输出落文件（不走本进程 stderr 重定向——EAP=Stop 下会终止）；非零即致命
         $rcOut = Join-Path $work 'pg_restore.out'
         $rcErr = Join-Path $work 'pg_restore.err'
-        $proc = Start-Process -FilePath $pgrestore -ArgumentList @('-h','localhost','-U',$dbUser,'-d',$dbName,'--no-owner','--no-privileges','-j','4',"`"$dump`"") -NoNewWindow -Wait -PassThru -RedirectStandardOutput $rcOut -RedirectStandardError $rcErr
+        $proc = Start-Process -FilePath $pgrestore -ArgumentList @('--no-password','-h','127.0.0.1','-p','5432','-U',$dbUser,'-d',$dbName,'--no-owner','--no-privileges','-j','4',"`"$dump`"") -NoNewWindow -Wait -PassThru -RedirectStandardOutput $rcOut -RedirectStandardError $rcErr
         if($proc.ExitCode -ne 0){
           Write-Fail "pg_restore 失败（exit=$($proc.ExitCode)）：部分恢复不可用。末 20 行："
           if(Test-Path $rcErr){ Get-Content $rcErr -Tail 20 | ForEach-Object { [Console]::Error.WriteLine("    $_") } }
@@ -638,7 +354,7 @@ try {
         if($LASTEXITCODE -ne 0){ Write-Fail 'alembic upgrade head 失败（078 -> head 对齐）'; exit 1 }
         Write-Ok '迁移已对齐到代码 head'
         # 哨兵：镜像库必须含用户（至少 admin），count<1 说明恢复不完整
-        $ucRaw = (& $psql -h localhost -U $dbUser -d $dbName -tAc 'select count(*) from "user"' | Out-String).Trim()
+        $ucRaw = (& $psql -X -w -h 127.0.0.1 -p 5432 -U $dbUser -d $dbName -tAc 'select count(*) from "user"' | Out-String).Trim()
         $uc = 0; [void][int]::TryParse($ucRaw, [ref]$uc)
         if($uc -lt 1){ Write-Fail "恢复后镜像校验失败：user 计数='$ucRaw'（应 >=1，含 admin 等）"; exit 1 }
         Write-Ok "镜像校验通过：user 行数=$uc"
@@ -647,75 +363,41 @@ try {
   } finally { Pop-Location }
 
   # ==========================================================
-  Write-Step '8 注册五服务'
+  Write-Step '7 注册五服务'
   $uvW = (Read-EnvMap $envPath)['UVICORN_WORKERS']; if(-not $uvW){ $uvW = '4' }
-  $envs=@('APP_ENV=production','FASTAPI_DEBUG=false',"PYTHONPATH=$TargetDir",'PYTHONUTF8=1','PYTHONUNBUFFERED=1',"UVICORN_WORKERS=$uvW")
+  $envs=@('APP_ENV=production','FASTAPI_DEBUG=false',"PYTHONPATH=$TargetDir",'PYTHONUTF8=1','PYTHONUNBUFFERED=1',"UVICORN_WORKERS=$uvW",'WEB_PORT=3000','WEB_HEALTH_SCHEME=http')
   $logDir = Join-Path $TargetDir 'logs'
   $redisPw = (Read-EnvMap $envPath)['REDIS_PASSWORD']
-  if(-not $redisPw){ Write-Warn '.env 无 REDIS_PASSWORD —— Redis 将无认证启动（生产不建议）' }
   $redisExe = Join-Path $RedisDir 'redis-server.exe'
-  if(-not (Test-Path $redisExe)){ Write-Fail "未找到 $redisExe（基础软件步骤失败？）"; exit 1 }
-
-  # --- redis conf 落位：去 requirepass，口令经 --requirepass 注入 ---
+  if(-not (Test-Path $redisExe)){ throw "未找到 $redisExe" }
   $cacheTpl = Join-Path $TargetDir 'config\redis.production.conf.template'
   if(-not (Test-Path $cacheTpl)){ $cacheTpl = Join-Path $TargetDir 'config\redis.production.conf' }
-  if(-not (Test-Path $cacheTpl)){ Write-Fail '缺 config\redis.production.conf(.template)，无法生成缓存实例 conf'; exit 1 }
-  $cacheConf = Join-Path $RedisDir 'redis.windows-service.conf'
-  New-DeployRedisConf $cacheTpl $cacheConf 'erp-redis' $RedisDir
+  $redisState=New-DeployPrivateDirectory (Join-Path $TargetDir 'redis-state')
+  $cacheConf = Join-Path $TargetDir 'config\redis.windows-service.conf'
+  New-DeployRedisConf $cacheTpl $cacheConf 'erp-redis' $redisState $redisPw
   $brokerConf = Join-Path $TargetDir 'config\redis-broker.conf'
-  if(-not (Test-Path $brokerConf)){ Write-Fail "缺 $brokerConf"; exit 1 }
-  New-DeployRedisConf $brokerConf $brokerConf 'erp-redis-broker' $RedisDir
-  # 口令加引号：不带引号时含空格/特殊字符的口令会被 NSSM 拆成多个参数，
-  # requirepass 只吃到第一段，实际口令与应用侧 .env 不一致（连不上）。
-  $authArg = if($redisPw){ ('--requirepass "{0}"' -f ($redisPw -replace '"','\"')) } else { '' }
+  New-DeployRedisConf $brokerConf $brokerConf 'erp-redis-broker' $redisState $redisPw
 
-  # 重装前按逆依赖序停掉现有服务（erp-web → erp-arq/erp-prod → broker → redis）。
-  # 顺序反了会撞 1051：依赖方还在跑时 stop 被依赖者失败，Install-NssmService
-  # 只能跳过重装 → 新生成的 conf / 轮换后的 --requirepass 不生效，但脚本仍继续。
-  $notStopped=@()
-  foreach($svc in $stopOrder){
-    try {
-      if(-not (Stop-NssmService $Nssm $svc)){ $notStopped+=$svc }
-    } catch {
-      Write-Warning "停止 $svc 时出错：$($_.Exception.Message)"
-      $notStopped+=$svc
-    }
-  }
-  if($notStopped.Count -gt 0){
-    Write-Fail ("以下服务未能停止，无法安全重装：" + ($notStopped -join '、') + "。请先在 services.msc 停止它们后重跑安装")
-    exit 1
-  }
-
-  # 先装 Redis（erp-prod/arq 依赖其存在——SCM 拒绝依赖不存在的服务）
-  $reinstallSkipped=@()
-  if(-not (Install-NssmService $Nssm @{Name='erp-redis';Application=$redisExe;Parameters=("$cacheConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis.log');Stderr=(Join-Path $logDir 'erp-redis.log')})){ $reinstallSkipped+='erp-redis' }
+  Install-NssmService $Nssm @{Name='erp-redis';Application=$redisExe;Parameters="`"$cacheConf`"";Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis.log');Stderr=(Join-Path $logDir 'erp-redis.log')}
   Assert-ServiceRegistered 'erp-redis'
-  if(-not (Install-NssmService $Nssm @{Name='erp-redis-broker';Application=$redisExe;Parameters=("$brokerConf $authArg").Trim();Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis-broker.log');Stderr=(Join-Path $logDir 'erp-redis-broker.log')})){ $reinstallSkipped+='erp-redis-broker' }
+  Install-NssmService $Nssm @{Name='erp-redis-broker';Application=$redisExe;Parameters="`"$brokerConf`"";Directory=$RedisDir;Stdout=(Join-Path $logDir 'erp-redis-broker.log');Stderr=(Join-Path $logDir 'erp-redis-broker.log')}
   Assert-ServiceRegistered 'erp-redis-broker'
-
-  if(-not (Install-NssmService $Nssm @{Name='erp-prod';Application=$py;Parameters='-m fastapi_app.core.prod_runner --no-arq';Directory=$TargetDir;Env=$envs;DependOn='erp-redis';Stdout=(Join-Path $logDir 'erp-prod.log');Stderr=(Join-Path $logDir 'erp-prod.log')})){ $reinstallSkipped+='erp-prod' }
+  Install-NssmService $Nssm @{Name='erp-prod';Application=$py;Parameters='-m fastapi_app.core.prod_runner --no-arq';Directory=$TargetDir;Env=$envs;DependOn='erp-redis';Stdout=(Join-Path $logDir 'erp-prod.log');Stderr=(Join-Path $logDir 'erp-prod.log')}
   Assert-ServiceRegistered 'erp-prod'
-  if(-not (Install-NssmService $Nssm @{Name='erp-arq';Application=$py;Parameters='-m arq fastapi_app.core.arq_app.WorkerSettings';Directory=$TargetDir;Env=$envs;DependOn='erp-redis-broker';Stdout=(Join-Path $logDir 'erp-arq.log');Stderr=(Join-Path $logDir 'erp-arq.log')})){ $reinstallSkipped+='erp-arq' }
+  Install-NssmService $Nssm @{Name='erp-arq';Application=$py;Parameters='-m arq fastapi_app.core.arq_app.WorkerSettings';Directory=$TargetDir;Env=$envs;DependOn='erp-redis-broker';Stdout=(Join-Path $logDir 'erp-arq.log');Stderr=(Join-Path $logDir 'erp-arq.log')}
   Assert-ServiceRegistered 'erp-arq'
-  if(-not (Install-NssmService $Nssm @{Name='erp-web';Application=$nginxExe;Parameters="-p $TargetDir -c $nginxConf -e $logDir\nginx-error.log";Directory=$TargetDir;Stdout=(Join-Path $logDir 'erp-web.log');Stderr=(Join-Path $logDir 'erp-web.log')})){ $reinstallSkipped+='erp-web' }
+  Install-NssmService $Nssm @{Name='erp-web';Application=$nginxExe;Parameters="-p `"$TargetDir`" -c `"$nginxConf`" -e `"$logDir\nginx-error.log`"";Directory=$TargetDir;Stdout=(Join-Path $logDir 'erp-web.log');Stderr=(Join-Path $logDir 'erp-web.log')}
   Assert-ServiceRegistered 'erp-web'
   Write-Ok '五个 NSSM 服务注册完成'
-  if($reinstallSkipped.Count -gt 0){
-    Write-Fail ("以下服务未能停止，沿用了上一次安装的定义（本次配置未生效）：" + ($reinstallSkipped -join '、') + "。安装中止，请在依赖方停止后重跑安装")
-    exit 1
-  }
 
   # ==========================================================
-  Write-Step '9 防火墙 + 启停'
-  if(-not (Get-NetFirewallRule -DisplayName 'erp-web-3000' -ErrorAction SilentlyContinue)){
-    New-NetFirewallRule -DisplayName 'erp-web-3000' -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow | Out-Null
-    Write-Ok '已放行入站 TCP 3000'
-  } else { Write-Ok '防火墙规则 erp-web-3000 已存在（跳过）' }
+  Write-Step '8 启动五服务'
   foreach($svc in $five){ Start-ErpService $svc }
 
   # ==========================================================
-  Write-Step '10 看门狗'
+  Write-Step '9 看门狗'
   $wdCmd = Join-Path $TargetDir 'scripts\ops\watchdog_task.cmd'
+  if((Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq 'erp-watchdog' })){ throw '看门狗已存在，拒绝替换' }
   if(Test-Path $wdCmd){
     $wd=[IO.File]::ReadAllLines($wdCmd)
     for($i=0;$i -lt $wd.Count;$i++){
@@ -723,16 +405,16 @@ try {
     }
     [IO.File]::WriteAllLines($wdCmd, $wd, [Text.ASCIIEncoding]::new())   # .cmd 保持 ASCII，勿写 BOM
     Write-Ok 'watchdog_task.cmd：PY 已指向包内 runtime'
-    $wdInstaller = Join-Path $TargetDir 'scripts\ops\install_watchdog_task.ps1'
-    if(Test-Path $wdInstaller){
-      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $wdInstaller
-      if($LASTEXITCODE -ne 0){ Write-Warn "看门狗计划任务注册返回 $LASTEXITCODE（可稍后手工注册）" } else { Write-Ok '看门狗计划任务已注册' }
-    } else { Write-Warn '缺 install_watchdog_task.ps1，跳过计划任务注册' }
+    $action='cmd.exe /c ' + $wdCmd
+    # 不传 /F；如果同名任务在预检后出现，禁止确认覆盖。
+    'N' | & $schtasks /Create /TN 'erp-watchdog' /TR $action /SC MINUTE /MO 5 /RU SYSTEM /RL HIGHEST | Out-Null
+    if($LASTEXITCODE -ne 0){ throw '创建看门狗任务失败；不会覆盖既有任务' }
+    Write-Ok '看门狗计划任务已注册'
   } else { Write-Warn '缺 scripts\ops\watchdog_task.cmd，跳过看门狗' }
 
   # ==========================================================
-  if(-not $SkipVerify){
-    Write-Step '11 验收'
+  . {
+    Write-Step '10 验收'
     Start-Sleep -Seconds 15
 
     # ① 后端 5002 /api/health（轮询 ~45s，仍失败即 FAIL）
@@ -743,13 +425,15 @@ try {
     if($ready){ Write-Ok "后端 /api/health -> $($r.StatusCode)" }
     else { Write-Fail '后端 /api/health 未就绪（查 logs\erp-prod.log 与 logs\prod_runner.json）'; exit 1 }
 
-    # ② 用户入口 3000/api/health（轮询 ~30s，仍失败即 FAIL——半可用不许报成功）
+    # ② curl 连本机 nginx，仍用正式主机名做 SNI/信任链校验；不跟随跳转，不使用代理或用户配置。
     $webReady=$false
     for($i=0;$i -lt 6;$i++){
-      try{ $r2=Invoke-WebRequest "http://127.0.0.1:3000/api/health" -UseBasicParsing -TimeoutSec 10; $webReady=$true; break }catch{ Start-Sleep -Seconds 5 }
+      $status=& $curl -q --noproxy '*' --connect-to "${hUrl}:443:127.0.0.1:443" --silent --max-time 10 --output NUL --write-out '%{http_code}' "https://$hUrl/api/health"
+      if($LASTEXITCODE -eq 0 -and $status -eq '200'){ $webReady=$true; break }
+      Start-Sleep -Seconds 5
     }
-    if($webReady){ Write-Ok "用户入口 :3000 -> $($r2.StatusCode)" }
-    else { Write-Fail '用户入口 http://127.0.0.1:3000/api/health 未就绪（查 logs\erp-web.log 与 config\nginx-windows.conf）'; exit 1 }
+    if(-not $webReady){ throw 'HTTPS 用户入口的系统证书校验或健康探测失败（预置 Windows 受信 CA；检查 nginx 日志）' }
+    Write-Ok 'HTTPS 用户入口：证书验证及 200 健康探测通过'
 
     # ③ prod_runner.json ready/frontend_ok（轮询 ~30s，仍失败即 FAIL）
     $pr = Join-Path $TargetDir 'logs\prod_runner.json'
@@ -794,8 +478,8 @@ try {
       }
     } else { Write-Warn '未找到 scripts\diag\runtime_mode_probe.py，跳过运行模式探针' }
   }
-  Write-Ok "完成：内网 http://${hUrl}:3000 ；若前置 TLS（自签/域名）则用 https://${hUrl}:3000  （请立即删除源包并确认 %TEMP% 已清）"
 } finally {
-  if(Test-Path $work){ Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue }
   Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+  if($work){ Remove-DeployStagingDirectory $work }
 }
+Write-Ok "安装与验收完成：https://$hUrl/；按迁移物料处置要求处理加密源包"

@@ -8,12 +8,18 @@ $tmp = Join-Path $env:TEMP ("erp_lib_" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 $src = Join-Path $tmp 'a.bin'; [IO.File]::WriteAllText($src,('中文内容' * 1000),[Text.UTF8Encoding]::new($false))
 $enc = Join-Path $tmp 'a.enc'; $dec = Join-Path $tmp 'a.out'
-Protect-File -InPath $src -OutPath $enc -Password 'pw-123'
+$fixtureKey = [guid]::NewGuid().ToString('N')
+$wrongKey = [guid]::NewGuid().ToString('N')
+Protect-File -InPath $src -OutPath $enc -Password $fixtureKey
 Assert ((Get-Item $enc).Length -gt 0) 'AES 产出非空'
-Unprotect-File -InPath $enc -OutPath $dec -Password 'pw-123'
+$fixtureHash=(Get-FileHash -LiteralPath $enc -Algorithm SHA256).Hash
+Unprotect-File -InPath $enc -OutPath $dec -Password $fixtureKey -ExpectedSha256 $fixtureHash
 Assert ((Get-FileHash $src).Hash -eq (Get-FileHash $dec).Hash) 'AES 往返一致'
-try { Unprotect-File -InPath $enc -OutPath (Join-Path $tmp 'bad') -Password 'wrong'; Assert $false '错误口令应抛' }
-catch { Assert $true '错误口令抛异常' }
+$rejected=Join-Path $tmp 'rejected.out'
+try { Unprotect-File -InPath $enc -OutPath $rejected -Password $fixtureKey; Assert $false '缺摘要必须在写入明文前拒绝' }
+catch { Assert ($_.Exception.Message -match 'SHA-256' -and -not (Test-Path -LiteralPath $rejected)) '缺摘要必须在写入明文前拒绝' }
+try { Unprotect-File -InPath $enc -OutPath (Join-Path $tmp 'bad') -Password $wrongKey -ExpectedSha256 $fixtureHash; Assert $false '错误口令应抛' }
+catch [Security.Cryptography.CryptographicException] { Assert $true '错误口令抛异常' }
 
 # .env 幂等
 $envf = Join-Path $tmp 'e.env'
@@ -54,37 +60,38 @@ Add-EnvListItemComma -Path $envf3 -Key 'CORS_ORIGINS' -Item 'http://b'   # 追�
 $mC2 = Read-EnvMap $envf3
 Assert ($mC2['CORS_ORIGINS'] -eq 'http://a,http://b') '逗号列表追加新项'
 
-# nginx 改写：D:/erp_system 全替换；443 块被注释；3000 块由 443 块派生为 HTTP 入口
-$nf = Join-Path $tmp 'n.conf'; Copy-Item (Join-Path $PSScriptRoot 'fixtures\nginx-sample.conf') $nf
-$cnt = Update-NginxConf -ConfPath $nf -OldRoot 'D:/erp_system' -NewRoot 'E:/erp' -NginxDir 'C:\nginx'
-$body=[IO.File]::ReadAllText($nf)
-Assert ($cnt -ge 2) "nginx 替换计数>=2 (实=$cnt)"
-Assert ($body -notmatch 'D:/erp_system') '旧根全清'
-Assert ($body -match '#\s*server\s*\{[\s\S]*?listen 443 ssl[\s\S]*?\n\s*#?\s*\}') '443 块已注释'
-Assert ($body -match 'listen 3000 default_server') 'HTTP 块保留'
-Assert ($body -match '3000 HTTP 入口（安装端由 443 块派生）') '3000 块被替换为派生块'
-Assert ($body -match 'access_log logs/nginx-access\.log main;') '派生块日志改回明文名'
-Assert ($body -match 'location /api/') '派生块继承 443 块的 location'
+# nginx：以测试模板与实际版本化模板断言 443 保留，3000 固定目标跳转且不提供应用。
+foreach($template in @('fixtures\nginx-sample.conf','..\..\config\nginx-windows.conf')){
+  $nf=Join-Path $tmp 'n.conf'; Copy-Item -LiteralPath (Join-Path $PSScriptRoot $template) -Destination $nf -Force
+  $cnt=Update-NginxConf $nf 'D:/erp_system' 'E:/erp' 'C:\nginx' 'erp.example.test'
+  $body=[IO.File]::ReadAllText($nf)
+  $legacy=$body.Substring($body.IndexOf('listen 3000 default_server;'))
+  Assert ($cnt -ge 2 -and $body -notmatch 'D:/erp_system') 'nginx：目标路径已改写'
+  Assert ($body -match '(?m)^\s*listen 443 ssl default_server;' -and $body -match 'ssl_certificate_key\s+E:/erp/config/tls/server.key;') 'nginx：443 和 TLS 密钥配置保留'
+  Assert ($legacy.Contains('return 301 https://erp.example.test$request_uri;') -and $legacy.Contains('if ($host != "erp.example.test")')) 'nginx：固定目标跳转并拒绝不匹配 Host'
+  Assert ($legacy.Contains('if ($remote_addr !~ "^(127\.0\.0\.1|::1)$") { return 403; }')) 'nginx：HTTP 探针限制环回'
+  Assert ($legacy -notmatch 'location /api/|frontend-vite/dist') 'nginx：3000 不提供应用'
+}
+[IO.File]::WriteAllText($nf,$body.Replace('listen 443 ssl default_server;','listen 443 default_server;'))
+try { [void](Update-NginxConf $nf 'E:/erp' 'E:/new' 'C:\nginx' 'erp.example.test'); Assert $false '缺 443 TLS 必须拒绝' }
+catch { Assert ($_.Exception.Message -like 'nginx 模板*') '缺 443 TLS 必须拒绝' }
 
-# ConvertTo-NginxHttpEntry 纯函数：端口/ssl_/日志 三类改写
-$derived = @(ConvertTo-NginxHttpEntry @(
-  '        listen 443 ssl default_server;',
-  '        listen [::]:443 ssl default_server;',
-  '        ssl_certificate     k.crt;',
-  '        ssl_certificate_key k.key;',
-  '        ssl_protocols       TLSv1.2 TLSv1.3;',
-  '        root frontend-vite/dist;',
-  '        access_log logs/nginx-access-ssl.log main;',
-  '        error_log logs/nginx-error-ssl.log warn;',
-  '        location /api/ { proxy_pass http://backend; }'
-))
-Assert (@($derived | Where-Object { $_ -match 'listen 3000 default_server;' }).Count -eq 1) '派生：IPv4 端口改 3000'
-Assert (@($derived | Where-Object { $_ -match 'listen \[::\]:3000 default_server;' }).Count -eq 1) '派生：IPv6 端口改 3000'
-Assert (@($derived | Where-Object { $_ -match 'ssl_' }).Count -eq 0) '派生：无任何 ssl_ 指令'
-Assert (@($derived | Where-Object { $_ -match 'access_log logs/nginx-access\.log main;' }).Count -eq 1) '派生：access_log 去 -ssl'
-Assert (@($derived | Where-Object { $_ -match 'error_log logs/nginx-error\.log warn;' }).Count -eq 1) '派生：error_log 去 -ssl'
-Assert (@($derived | Where-Object { $_ -match 'root frontend-vite/dist;' }).Count -eq 1) '派生：非 ssl 行原样保留'
-Assert (@($derived | Where-Object { $_ -match 'location /api/' }).Count -eq 1) '派生：location 原样保留'
+$sha='BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD'
+$bytes=[Text.Encoding]::ASCII.GetBytes('abc')
+$payload=[IO.MemoryStream]::new($bytes)
+try { Assert-PackageHash $payload $sha; Assert ($payload.Position -eq 0) '可信摘要匹配且流复位' }
+finally { $payload.Dispose() }
+foreach($invalidHash in @('', ('0' * 64), "$sha`n")){
+  $payload=[IO.MemoryStream]::new($bytes)
+  try { Assert-PackageHash $payload $invalidHash; Assert $false '错误或缺失摘要必须拒绝' }
+  catch { Assert ($_.Exception.Message -match 'SHA-256') '错误或缺失摘要必须拒绝' }
+  finally { $payload.Dispose() }
+}
+foreach($switches in @(@($true,$false,$false),@($false,$true,$false),@($false,$false,$true))){
+  try { Assert-FreshInstallOptions @switches; Assert $false '危险开关必须拒绝' }
+  catch { Assert ($_.Exception.Message -like '*仅支持全新安装*') '危险开关必须拒绝' }
+}
+Assert-FreshInstallOptions $false $false $false
 
 # Install-NssmService 可选键（DependOn/Env）容错：StrictMode 下缺席不抛、不产对应行
 $specMin = @{ Name='erp-web'; Application='C:\x\python.exe'; Parameters='-m x'; Directory='C:\d'; Stdout='C:\o.log'; Stderr='C:\e.log' }
@@ -121,6 +128,9 @@ $hostCases = @(
   @{ H='has space'; Want=$false; Is6=$false; Name='含空白非法' }
   @{ H='a:b'; Want=$false; Is6=$false; Name='单冒号非 IPv6' }
   @{ H='::1'; Want=$true; Is6=$true; Name='简写 IPv6' }
+  @{ H=':::1'; Want=$false; Is6=$false; Name='非法 IPv6' }
+  @{ H='999.1.1.1'; Want=$false; Is6=$false; Name='超范围 IPv4' }
+  @{ H='erp..example.test'; Want=$false; Is6=$false; Name='空域名标签' }
 )
 foreach($c in $hostCases){
   Assert (([bool](Test-HostLiteral $c.H)) -eq $c.Want) ("Test-HostLiteral " + $c.Name + " ($($c.H))")
@@ -154,18 +164,20 @@ foreach($c in $pendingCases){
 }
 
 # Redis 口令脱敏（安全相关，防止错误信息/截图泄露 --requirepass）
+$partA = [guid]::NewGuid().ToString('N')
+$partB = [guid]::NewGuid().ToString('N')
 $maskCases = @(
-  @{ A=@('set','erp-redis','AppParameters','--requirepass "p w"'); Name='双引号含空格' }
-  @{ A=@('set','erp-redis','AppParameters','--requirepass ''p w'''); Name='单引号含空格' }
-  @{ A=@('set','erp-redis','AppParameters','--requirepass "p w\"'); Name='末尾转义引号（无闭合）' }
-  @{ A=@('set','erp-redis','AppParameters','--requirepass "p\"q w"'); Name='转义引号后仍含空格' }
-  @{ A=@('set','erp-redis','AppParameters','--requirepass secret123'); Name='无引号' }
+ @{ A=@('set','erp-redis','AppParameters',('--requirepass "{0} {1}"' -f $partA,$partB)); Name='双引号含空格' }
+ @{ A=@('set','erp-redis','AppParameters',("--requirepass '{0} {1}'" -f $partA,$partB)); Name='单引号含空格' }
+ @{ A=@('set','erp-redis','AppParameters',('--requirepass "{0} {1}\"' -f $partA,$partB)); Name='末尾转义引号（无闭合）' }
+ @{ A=@('set','erp-redis','AppParameters',('--requirepass "{0}\" {1}"' -f $partA,$partB)); Name='转义引号后仍含空格' }
+ @{ A=@('set','erp-redis','AppParameters',('--requirepass {0}' -f $partA)); Name='无引号' }
 )
 foreach($c in $maskCases){
   $m = ConvertTo-MaskedNssmArgs $c.A
   Assert ($m -match '--requirepass \*\*\*') ("脱敏保留标记 " + $c.Name)
-  Assert ($m -notmatch 'secret123') ("脱敏不含明文 " + $c.Name)
-  Assert ($m -notmatch '\bp w') ("脱敏不含含空格口令片段 " + $c.Name)
+  Assert (-not $m.Contains($partA)) ("脱敏不含首段原值 " + $c.Name)
+  Assert (-not $m.Contains($partB)) ("脱敏不含后段原值 " + $c.Name)
 }
 $noPw = ConvertTo-MaskedNssmArgs @('set','erp-web','AppParameters','-m x')
 Assert ($noPw -notmatch '\*\*\*') '非口令参数不被改写'
@@ -214,5 +226,7 @@ function global:Get-Service {
 Assert ($null -eq (Get-ServiceStatus 'missing')) 'Get-ServiceStatus：ObjectNotFound → $null'
 Remove-Item function:Get-Service -ErrorAction SilentlyContinue
 
-Remove-Item $tmp -Recurse -Force
-if($fail){ exit 1 } else { Write-Host 'ALL PASS' }
+Remove-Item -LiteralPath $tmp -Recurse -Force
+if($fail){ exit 1 }
+Write-Host 'ALL PASS'
+exit 0

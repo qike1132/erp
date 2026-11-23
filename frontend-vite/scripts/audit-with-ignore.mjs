@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * npm audit 的「具名豁免」闸门（CI 用）。
  *
@@ -93,16 +92,45 @@ function runAudit() {
     shell: true,
     maxBuffer: 32 * 1024 * 1024,
   })
-  // 有漏洞时 npm 退出码非 0，JSON 仍在 stdout —— 我们只要报告，不要退出码。
-  const raw = (res.stdout || '').trim()
-  if (!raw) {
-    return { error: `npm audit 未返回 JSON（stderr: ${(res.stderr || '').slice(0, 400)}）` }
+  return parseAuditResult(res)
+}
+
+export function parseAuditResult({ status, signal, error, stdout }) {
+  if (error || signal || (status !== 0 && status !== 1)) {
+    return { error: 'npm audit 进程未正常结束' }
   }
+  let report
   try {
-    return { report: JSON.parse(raw) }
-  } catch (e) {
-    return { error: `npm audit 输出无法解析为 JSON: ${e.message}` }
+    report = JSON.parse(stdout || '')
+  } catch {
+    return { error: 'npm audit 未返回可解析的 JSON' }
   }
+  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  if (!isRecord(report) || 'error' in report || report.auditReportVersion !== 2 || !isRecord(report.vulnerabilities)) {
+    return { error: 'npm audit 返回错误或无有效报告' }
+  }
+  const severities = new Set(['info', 'low', 'moderate', 'high', 'critical'])
+  const entries = Object.values(report.vulnerabilities)
+  const counts = report.metadata?.vulnerabilities
+  if (!isRecord(counts) || counts.total !== entries.length || (status === 1 && entries.length === 0)
+    || entries.some((entry) => !isRecord(entry) || !severities.has(entry.severity)
+      || !Array.isArray(entry.via) || entry.via.length === 0
+      || entry.via.some((source) => typeof source === 'string'
+        ? !Object.hasOwn(report.vulnerabilities, source) : !isRecord(source)))
+    || [...severities].some((severity) => counts[severity] !== entries.filter((entry) => entry.severity === severity).length)) {
+    return { error: 'npm audit 报告的结果状态或漏洞条目无效' }
+  }
+  // 每条间接发现都必须能追溯到实际公告；纯循环不能被当作已豁免。
+  const traceable = new Set()
+  const byName = Object.entries(report.vulnerabilities)
+  for (let previous = -1; previous !== traceable.size;) {
+    previous = traceable.size
+    for (const [name, { via }] of byName) {
+      if (via.some((source) => typeof source !== 'string' || traceable.has(source))) traceable.add(name)
+    }
+  }
+  if (traceable.size !== entries.length) return { error: 'npm audit 存在无法追溯到公告的漏洞依赖' }
+  return { report }
 }
 
 function main() {
@@ -111,7 +139,7 @@ function main() {
     console.error(`[FAIL] ${error}`)
     process.exit(2)
   }
-  const { failing, applied, expired } = unwaivedVulnerabilities(report.vulnerabilities ?? {})
+  const { failing, applied, expired } = unwaivedVulnerabilities(report.vulnerabilities)
 
   if (expired.length > 0) {
     console.error('[FAIL] 以下 npm audit 豁免已到期，必须复核后再放行：')

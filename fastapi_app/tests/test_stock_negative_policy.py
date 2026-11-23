@@ -367,7 +367,7 @@ UNIFIED_ENTRY = STOCK_CONCURRENCY
 # 2026-10-30 审计 A-M22 把该子查询抽成 low_stock_stmt（按工厂收窄）后 209→226。
 # 2026-11-17 上线前审计 V-9 删掉文件顶部 27 行死代码（_get_mv_daily_quantity）后 226→198。
 DASHBOARD_STATS = REPO / "fastapi_app/services/dashboard/stats.py"
-DASHBOARD_STATS_HITS = ["stats.py:206: Product.current_stock <= 10"]
+DASHBOARD_STATS_HITS = ["stats.py:168: Product.current_stock <= 10"]
 # 2026-10-06 出货校准：可出货量 = min(订单余量, 产品净存量)，此比较为只读阈值（不写库存）
 INVENTORY_SERVICE = REPO / "fastapi_app/services/inventory_service.py"
 

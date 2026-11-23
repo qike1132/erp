@@ -77,9 +77,137 @@ function Protect-File([string]$InPath,[string]$OutPath,[string]$Password){
   } finally { $in.Dispose(); $out.Dispose(); $aes.Dispose() }
 }
 
-function Unprotect-File([string]$InPath,[string]$OutPath,[string]$Password){
-  $in=[IO.File]::OpenRead($InPath)
+function Assert-PackageHash([IO.Stream]$InputStream,[string]$Expected){
+  if($Expected -cnotmatch '\A[0-9a-fA-F]{64}\z'){ throw '必须提供独立可信渠道取得的 64 位 SHA-256 十六进制值' }
+  $hash = [Security.Cryptography.SHA256]::Create()
+  try { $actual = [BitConverter]::ToString($hash.ComputeHash($InputStream)).Replace('-','') }
+  finally { $hash.Dispose() }
+  if($actual -ine $Expected){ throw '安装包 SHA-256 与独立信任值不一致，拒绝解密' }
+  $InputStream.Position = 0
+}
+
+function Assert-FreshInstallOptions([bool]$Force,[bool]$AllowDropDatabase,[bool]$SkipVerify){
+  if($Force -or $AllowDropDatabase -or $SkipVerify){
+    throw '便携包仅支持全新安装；已禁用 Force、AllowDropDatabase 和 SkipVerify'
+  }
+}
+
+function Read-DeploySecret([string]$Prompt){
+  $secret=Read-Host -AsSecureString $Prompt
+  $bstr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
+  try {
+    if(-not $secret.Length){ throw '口令不能为空' }
+    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    $secret.Dispose()
+  }
+}
+
+function Assert-LocalDeploymentPath([string]$Path){
+  if($Path -notmatch '\A[A-Za-z]:[\\/][A-Za-z0-9_. \\/-]+\z' -or $Path -match '[. ](?:[\\/]|\z)' -or $Path -match '[\\/]{2}' -or
+     $Path -match '(?i)[\\/](?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|[\\/]|\z)'){
+    throw "路径必须是规范的本地绝对路径（不支持链接、盘根、点段和特殊字符）：$Path"
+  }
+  $full=[IO.Path]::GetFullPath($Path).TrimEnd('\','/')
+  $drive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($full))
+  if($drive.DriveType -ne 'Fixed' -or $drive.DriveFormat -ne 'NTFS'){ throw "路径必须位于本机固定 NTFS 磁盘：$Path" }
+  for($part=$full; $part; $part=Split-Path $part -Parent){
+    try { $item=Get-Item -LiteralPath $part -Force -ErrorAction Stop }
+    catch [System.Management.Automation.ItemNotFoundException] { continue }
+    if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){ throw "拒绝重解析点路径：$part" }
+  }
+  $full
+}
+
+function New-DeployPrivateDirectory([string]$Path){
+  $full=Assert-LocalDeploymentPath $Path
+  if(Test-Path -LiteralPath $full){ throw "拒绝使用已有目录：$full" }
+  if(-not (Test-Path -LiteralPath (Split-Path $full -Parent) -PathType Container)){ throw "父目录不存在：$full" }
+  $owner=[Security.Principal.WindowsIdentity]::GetCurrent().User
+  $acl=[Security.AccessControl.DirectorySecurity]::new()
+  $acl.SetAccessRuleProtection($true,$false)
+  foreach($sid in @($owner,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'),[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))){
+    $rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+    $acl.AddAccessRule($rule)
+  }
+  # Win32 CreateDirectory 在目录已存在（包括竞态）时失败，绝不接管旧目录。
+  if(-not ('ErpDeployDirectory' -as [type])){
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ErpDeployDirectory {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SecurityAttributes {
+        public int Length;
+        public IntPtr SecurityDescriptor;
+        public int InheritHandle;
+    }
+    [DllImport("kernel32.dll", EntryPoint="CreateDirectoryW", CharSet=CharSet.Unicode, SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateDirectory(string path, ref SecurityAttributes attrs);
+    public static void Create(string path, byte[] descriptor) {
+        var handle = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
+        try {
+            var attrs = new SecurityAttributes {
+                Length = Marshal.SizeOf(typeof(SecurityAttributes)),
+                SecurityDescriptor = handle.AddrOfPinnedObject(),
+                InheritHandle = 0
+            };
+            if (!CreateDirectory(path, ref attrs))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        } finally { handle.Free(); }
+    }
+}
+'@
+  }
+  [ErpDeployDirectory]::Create($full,$acl.GetSecurityDescriptorBinaryForm())
+  $applied=Get-Acl -LiteralPath $full
+  $allowed=@($owner.Value,'S-1-5-18','S-1-5-32-544') | Select-Object -Unique
+  $rules=@($applied.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+  $expectedInheritance=[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+  $unexpected=@($rules | Where-Object {
+    $_.IsInherited -or $_.AccessControlType -ne 'Allow' -or $_.IdentityReference.Value -notin $allowed -or
+    $_.FileSystemRights -ne 'FullControl' -or $_.InheritanceFlags -ne $expectedInheritance -or $_.PropagationFlags -ne 'None'
+  })
+  if(-not $applied.AreAccessRulesProtected -or $unexpected.Count -or $rules.Count -ne @($allowed).Count){
+    throw "暂存目录 ACL 验证失败；未写入明文：$full"
+  }
+  $full
+}
+
+function New-DeployStagingDirectory {
+  $parent=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+  New-DeployPrivateDirectory (Join-Path $parent ('erp-stage-' + [guid]::NewGuid().ToString('N')))
+}
+
+function Assert-NoDeploymentLinks([string]$Path){
+  $pending=[Collections.Generic.Stack[string]]::new()
+  $pending.Push($Path)
+  while($pending.Count){
+    $item=Get-Item -LiteralPath $pending.Pop() -Force
+    if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){ throw "发现不允许的重解析点：$($item.FullName)" }
+    if($item.PSIsContainer){ foreach($child in Get-ChildItem -LiteralPath $item.FullName -Force){ $pending.Push($child.FullName) } }
+  }
+}
+
+function Remove-DeployStagingDirectory([string]$Path){
+  $parent=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+  $full=Assert-LocalDeploymentPath $Path
+  if((Split-Path $full -Parent) -ine $parent -or (Split-Path $full -Leaf) -cnotmatch '\Aerp-stage-[0-9a-f]{32}\z'){
+    throw "拒绝清理非本次专用暂存路径：$full"
+  }
+  try {
+    Assert-NoDeploymentLinks $full
+    Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop
+  } catch { throw "明文暂存未能清理；请隔离并人工检查：$full（$($_.Exception.Message)）" }
+}
+
+function Unprotect-File([string]$InPath,[string]$OutPath,[string]$Password,[string]$ExpectedSha256){
+  # 持有不允许共享写/删除的句柄；校验与解密使用同一流，防止校验后换包。
+  $in=[IO.File]::Open($InPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
   try{
+    Assert-PackageHash $in $ExpectedSha256
     $magic=New-Object byte[] 8; if($in.Read($magic,0,8) -ne 8 -or [Text.Encoding]::ASCII.GetString($magic) -ne 'ERPPKG01'){ throw '不是 ERP 便携包（魔数不匹配）' }
     $salt=New-Object byte[] 16; $iv=New-Object byte[] 16; [void]$in.Read($salt,0,16); [void]$in.Read($iv,0,16)
     $kdf=[Security.Cryptography.Rfc2898DeriveBytes]::new($Password,$salt,300000,[Security.Cryptography.HashAlgorithmName]::SHA256)
@@ -107,73 +235,59 @@ function Get-PgTool([string]$ExeName){
   $null
 }
 
-function Get-NginxServerBlockExtent([Collections.Generic.List[string]]$Lines,[int]$ListenIdx){
-  # 由 'listen ...' 行定位其所属 server 块的 [起始行, 结束行]（含配对花括号）。纯函数，供单测。
-  $s=$ListenIdx; while($s -ge 0 -and $Lines[$s] -notmatch 'server\s*\{'){ $s-- }
-  if($s -lt 0){ return ,@(-1,-1) }
-  $d=0; $e=$s
-  for($j=$s;$j -lt $Lines.Count;$j++){
-    $d += ([regex]::Matches($Lines[$j],'\{')).Count - ([regex]::Matches($Lines[$j],'\}')).Count
-    if($d -le 0 -and $j -gt $s){ $e=$j; break }
+function Assert-DeploymentTls([string]$OpenSsl,[string]$Certificate,[string]$PrivateKey,[string]$TrustedCa,[string]$ServerName){
+  foreach($p in @($OpenSsl,$Certificate,$PrivateKey,$TrustedCa)){
+    [void](Assert-LocalDeploymentPath $p)
+    if(-not (Test-Path -LiteralPath $p -PathType Leaf)){ throw '缺少 OpenSSL、目标机证书、密钥或独立受信 CA 文件' }
   }
-  ,@($s,$e)
+  if($Certificate -eq $TrustedCa){ throw '受信 CA 必须由独立可信渠道提供，不能直接使用服务端证书链文件' }
+  $caPem=[IO.File]::ReadAllText($TrustedCa)
+  if($caPem -cnotmatch '\A\s*-----BEGIN CERTIFICATE-----\s+([A-Za-z0-9+/=\r\n]+)-----END CERTIFICATE-----\s*\z'){
+    throw '受信 CA 文件必须只含一张 PEM 根证书'
+  }
+  $ca=[Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($Matches[1]))
+  try {
+    if(-not (Test-Path -LiteralPath "Cert:\LocalMachine\Root\$($ca.Thumbprint)")){ throw '独立 CA 尚未预置为 Windows 本机受信根' }
+  } finally { $ca.Dispose() }
+  $version=& $OpenSsl version
+  if($LASTEXITCODE -ne 0 -or "$version" -notmatch '^OpenSSL 3\.'){ throw 'TLS 预检需要目标机预装可信 OpenSSL 3' }
+  $isIp=[uri]::CheckHostName($ServerName) -in 'IPv4','IPv6'
+  $verifyName = if($isIp){ '-verify_ip' } else { '-verify_hostname' }
+  $sanType = if($isIp){ 'IP Address:' } else { 'DNS:' }
+  $sans=& $OpenSsl x509 -in $Certificate -noout -ext subjectAltName
+  if($LASTEXITCODE -ne 0 -or ($sans -join "`n") -cnotmatch $sanType){ throw 'TLS 叶证书必须包含适用于目标主机的 SAN' }
+  & $OpenSsl verify -x509_strict -purpose sslserver -no-CAfile -no-CApath -no-CAstore -trusted $TrustedCa -untrusted $Certificate $verifyName $ServerName $Certificate | Out-Null
+  if($LASTEXITCODE -ne 0){ throw 'TLS 证书链、有效期、用途或入口主机名校验失败' }
+  $leafPub=& $OpenSsl x509 -in $Certificate -pubkey -noout
+  if($LASTEXITCODE -ne 0){ throw '无法读取 TLS 证书公钥' }
+  $keyPub=& $OpenSsl pkey -in $PrivateKey -passin 'pass:' -pubout
+  if($LASTEXITCODE -ne 0 -or -not $keyPub -or (($leafPub -join "`n") -cne ($keyPub -join "`n"))){ throw 'TLS 私钥不可读、加密或与证书不匹配' }
 }
 
-function ConvertTo-NginxHttpEntry([string[]]$BlockLines){
-  # 由 443 server 块派生 3000 HTTP 入口块：端口改 3000、去掉 ssl_* 指令、日志改回明文名。
-  # 部署包不带证书（443 块在安装端会被注释），故不另抄一份 3000 块——改 443 块后本块自动跟随。
-  $out=[Collections.Generic.List[string]]::new()
-  foreach($l in $BlockLines){
-    if($l -match '^\s*listen\s+\[::\]:443\s+ssl'){ $out.Add(($l -replace '\[::\]:443\s+ssl','[::]:3000')); continue }
-    if($l -match '^\s*listen\s+443\s+ssl'){ $out.Add(($l -replace 'listen\s+443\s+ssl','listen 3000')); continue }
-    if($l -match '^\s*ssl_(certificate_key|certificate|protocols|session_cache|session_timeout)\b'){ continue }
-    if($l -match 'nginx-access-ssl\.log'){ $out.Add(($l -replace 'nginx-access-ssl\.log','nginx-access.log')); continue }
-    if($l -match 'nginx-error-ssl\.log'){ $out.Add(($l -replace 'nginx-error-ssl\.log','nginx-error.log')); continue }
-    $out.Add($l)
+function Update-NginxConf([string]$ConfPath,[string]$OldRoot,[string]$NewRoot,[string]$NginxDir,[string]$ServerName){
+  if(-not (Test-HostLiteral $ServerName)){ throw '无效的 HTTPS 入口主机名' }
+  $h=$ServerName.Trim().Trim('[',']').ToLowerInvariant()
+  $urlHost=if(Test-IsIPv6Literal $h){ "[$h]" }else{ $h }
+  $body=[IO.File]::ReadAllText($ConfPath,[Text.UTF8Encoding]::new($false))
+  # 仅支持已知模板；不将 443 的 location 复制到明文端口。
+  $redirect='(?m)^([ \t]*return 301 https://)[^\s;/]+(\$request_uri;\r?)$'
+  $hostCheck='(?m)^([ \t]*if \(\$host != ")[^"\r\n]+("\) \{\r?)$'
+  if(([regex]::Matches($body,$redirect)).Count -ne 1 -or ([regex]::Matches($body,$hostCheck)).Count -ne 1 -or
+     $body -notmatch '(?m)^\s*listen 443 ssl default_server;' -or $body -notmatch '(?m)^\s*listen 3000 default_server;' -or
+     $body -notmatch '(?m)^\s*ssl_certificate\s+[^;]+/config/tls/server\.crt;' -or $body -notmatch '(?m)^\s*ssl_certificate_key\s+[^;]+/config/tls/server\.key;'){
+    throw 'nginx 模板必须保留 443 TLS 与 3000 固定主机跳转'
   }
-  ,$out
-}
-
-function Update-NginxConf([string]$ConfPath,[string]$OldRoot,[string]$NewRoot,[string]$NginxDir){
-  $lines=[Collections.Generic.List[string]]([IO.File]::ReadAllLines($ConfPath,[Text.UTF8Encoding]::new($false)))
-  $cnt=0
-  for($i=0;$i -lt $lines.Count;$i++){
-    if($lines[$i] -like "*$OldRoot*"){ $lines[$i]=$lines[$i].Replace($OldRoot,$NewRoot); $cnt++ }
-    if($NginxDir -and $lines[$i] -match 'mime\.types'){ $lines[$i]=[regex]::Replace($lines[$i],'C:/nginx',($NginxDir -replace '\\','/')) }
-  }
-
-  # 部署包不带证书，故安装端对 443 块：①由它派生 3000 HTTP 入口块 ②整块注释掉。
-  # 顺序：先派生（用未注释内容）→ 注释 443（不改行数）→ 替换 3000 块。
-  $idx443=-1; for($i=0;$i -lt $lines.Count;$i++){ if($lines[$i] -match 'listen\s+443\s+ssl'){ $idx443=$i; break } }
-  if($idx443 -ge 0){
-    $b443=Get-NginxServerBlockExtent $lines $idx443
-    if($b443[0] -ge 0){
-      $httpBlock=ConvertTo-NginxHttpEntry @($lines[$b443[0]..$b443[1]])
-
-      # 3000 块：整块替换为派生块；连同其上方紧邻注释一起替换，避免留下「301 跳转」这类过期说明
-      $idx3000=-1; for($i=0;$i -lt $lines.Count;$i++){ if($lines[$i] -match 'listen\s+3000\s'){ $idx3000=$i; break } }
-      if($idx3000 -ge 0){
-        $b3000=Get-NginxServerBlockExtent $lines $idx3000
-        if($b3000[0] -ge 0){
-          $c=$b3000[0]; while($c-1 -ge 0 -and $lines[$c-1] -match '^\s*#'){ $c-- }
-          $indent=[regex]::Match($lines[$b3000[0]],'^\s*').Value
-          $new=[Collections.Generic.List[string]]::new()
-          $new.Add("$indent# ==================== 3000 HTTP 入口（安装端由 443 块派生） ====================")
-          $new.Add("$indent# 部署包不带证书：安装端注释 443 块，并由 443 块派生本块作 HTTP 入口")
-          $new.Add("$indent# （端口改 3000、去掉 ssl_* 指令）。改 443 块后本块自动跟随。")
-          foreach($l in $httpBlock){ $new.Add($l) }
-          $lines.RemoveRange($c, $b3000[1]-$c+1)
-          $lines.InsertRange($c, $new)
-        }
-      }
-
-      # 注释 443 块：3000 块在其后，替换不改 443 行号（注释本身也不改行数）
-      for($k=$b443[0];$k -le $b443[1];$k++){ if($lines[$k] -notmatch '^\s*#'){ $lines[$k]='#'+$lines[$k] } }
-    }
-  }
-
-  [IO.File]::WriteAllText($ConfPath, ($lines -join "`r`n") + "`r`n", [Text.UTF8Encoding]::new($false))
-  $cnt
+  $body=[regex]::Replace($body,$redirect, { param($m) $m.Groups[1].Value + $urlHost + $m.Groups[2].Value })
+  $body=[regex]::Replace($body,$hostCheck, { param($m) $m.Groups[1].Value + $urlHost + $m.Groups[2].Value })
+  # 将 3000 探针也限制到本机；prod_runner/watchdog 仍可在环回探测。
+  $probe='(?m)^(\s*location = /nginx-health \{\r?\n)([ \t]*)access_log off;'
+  if(([regex]::Matches($body,$probe)).Count -ne 1){ throw 'nginx 模板缺少唯一的 /nginx-health 探针' }
+  # return 与 if 同属 rewrite 阶段；仅用 allow/deny 会被既有 return 200 提前绕过。
+  $body=[regex]::Replace($body,$probe, { param($m) $m.Groups[1].Value + $m.Groups[2].Value + 'if ($remote_addr !~ "^(127\.0\.0\.1|::1)$") { return 403; }' + "`n" + $m.Groups[2].Value + 'access_log off;' })
+  $count=([regex]::Matches($body,[regex]::Escape($OldRoot))).Count
+  $body=$body.Replace($OldRoot,$NewRoot).Replace('C:/nginx/conf/mime.types',($NginxDir -replace '\\','/') + '/conf/mime.types')
+  [IO.File]::WriteAllText($ConfPath,$body,[Text.UTF8Encoding]::new($false))
+  return $count
 }
 
 function New-NginxTempDirs([string]$ProjectRoot){
@@ -296,58 +410,7 @@ function Stop-NssmService([string]$Nssm,[string]$Name,[int]$PendingTimeoutSec=15
 
 function Install-NssmService([string]$Nssm,[hashtable]$Spec){
   $name=$Spec.Name
-  $cur=Get-Service -Name $name -ErrorAction SilentlyContinue
-  if($cur){
-    # 已 STOPPED 时不调用 stop（nssm 会返回非零，属良性）。
-    # 2026-10-18 OCR 评审：非零在 STOP_PENDING/依赖占用时也常见（1051：被运行中的
-    # 依赖方占着，re-install 的正序停机就会撞上），按 WARNING 处理，
-    # 由下面的「等 STOPPED」循环做权威判定。
-    if($cur.Status -ne 'Stopped'){
-      try { Invoke-Nssm $Nssm @('stop',$name) 'stop' }
-      catch {
-        # 只降级「stop 命令本身返回非零」：nssm 不存在/无法启动是硬失败，
-        # 继续往下走只会在 remove/install 处报更离谱的错。判定走异常数据而不是文案。
-        if($_.Exception.Data['nssmAction'] -ne 'stop'){ throw }
-        Write-Warning "$($_.Exception.Message)（继续等待 STOPPED 终态）"
-      }
-    }
-    # 停后必须等 STOPPED，不能立即 remove（旧实现会与正在停止的服务竞争）
-    $svc=$null
-    $deadline=(Get-Date).AddSeconds(30)
-    do {
-      Start-Sleep -Milliseconds 500
-      if($svc){ $svc.Dispose() }
-      $svc=Get-Service -Name $name -ErrorAction SilentlyContinue
-    } while($svc -and $svc.Status -ne 'Stopped' -and (Get-Date) -lt $deadline)
-    if($svc -and $svc.Status -ne 'Stopped'){
-      # 2026-10-18 OCR 复评：1051 是被依赖方占用，重装前不可能停成；此时应跳过
-      # remove/install（保留现有服务），而不是抛异常中止整个安装。
-      $stillBlocked = $false
-      if($svc.Status -ne 'Stopped'){ $stillBlocked = $true }
-      if($svc){ $svc.Dispose() }
-      if($cur){ $cur.Dispose() }
-      if($stillBlocked){
-        Write-Warning "服务 $name 未能停止（可能被运行中的依赖方占用，错误 1051）；跳过本次重装，保留现有服务定义"
-        # 返回 false 让调用方计入「未按本次配置重装」，避免安装流程报全绿
-        return $false
-      }
-      throw "服务 $name 未能停止"
-    }
-    # 2026-10-18 OCR 评审：ServiceController 句柄未释放时 remove 只会标记删除，
-    # 随后的 install 会报 ERROR_SERVICE_MARKED_FOR_DELETE (1072)。
-    if($svc){ $svc.Dispose() }
-    if($cur){ $cur.Dispose() }
-    Invoke-Nssm $Nssm @('remove',$name,'confirm') 'remove'
-    $rmDeadline=(Get-Date).AddSeconds(30)
-    do {
-      Start-Sleep -Milliseconds 300
-      if($svc){ $svc.Dispose(); $svc=$null }
-      $poll=Get-Service -Name $name -ErrorAction SilentlyContinue
-      $gone= -not $poll
-      if($poll){ $poll.Dispose() }
-    } while(-not $gone -and (Get-Date) -lt $rmDeadline)
-    if(-not $gone){ throw "服务 $name 删除未完成（可能仍标记为删除中）" }
-  }
+  if($null -ne (Get-ServiceStatus $name)){ throw "服务 $name 已存在，拒绝替换" }
   Invoke-Nssm $Nssm @('install',$name,$Spec.Application) 'install'
   foreach($a in (Get-NssmArgs $Spec)){ Invoke-Nssm $Nssm $a 'set' }
   return $true
@@ -363,17 +426,22 @@ function Test-HostLiteral([string]$HostValue){
   # 判定是否是可作为 Host 的合法字面量：IPv4 / IPv6（裸或带方括号）/ 域名。空、含空白或非法字符 → $false。
   if(-not $HostValue){ return $false }
   $h = $HostValue.Trim()
-  if($h -match '^\d{1,3}(\.\d{1,3}){3}$'){ return $true }               # IPv4
-  if($h -match '^\[[0-9A-Fa-f:.]+\]$'){ return $true }                  # [IPv6]
-  # 裸 IPv6 至少两个冒号（最短 :: 也含两个）；单个冒号的全十六进制串（如 a:b）不是 IPv6
-  if($h.Contains(':') -and $h -match '^[0-9A-Fa-f:]+$' -and $h.Split(':').Count -ge 3){ return $true }
-  if($h -match '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'){ return $true } # 域名
-  return $false
+  if($h -match '^[0-9.]+$'){
+    return ($h -match '\A(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}\z' -and [uri]::CheckHostName($h) -eq 'IPv4')
+  }
+  if($h.Contains(':') -or $h.Contains('[') -or $h.Contains(']')){
+    return ((($h -match '\A[0-9a-fA-F:.]+\z') -or ($h -match '\A\[[0-9a-fA-F:.]+\]\z')) -and (Test-IsIPv6Literal $h))
+  }
+  if($h.Length -gt 253){ return $false }
+  foreach($label in $h.Split('.')){
+    if($label -notmatch '\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\z'){ return $false }
+  }
+  return ([uri]::CheckHostName($h) -eq 'Dns')
 }
 
 function Test-IsIPv6Literal([string]$HostValue){
   # 裸或带方括号的 IPv6 → $true（用于决定是否补带方括号形式）。
   if(-not $HostValue){ return $false }
   $h = $HostValue.Trim().Trim('[',']')
-  return ($h.Contains(':') -and ($h -match '^[0-9A-Fa-f:]+$') -and ($h.Split(':').Count -ge 3))
+  return ($h -match '\A[0-9A-Fa-f:.]+\z' -and [uri]::CheckHostName($h) -eq 'IPv6')
 }

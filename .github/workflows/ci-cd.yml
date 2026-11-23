@@ -32,23 +32,6 @@ jobs:
     timeout-minutes: 25
 
     services:
-      postgres:
-        # 对齐生产版本（第七轮审计 2026-10-03）：生产实测 PostgreSQL 18.3
-        # （`show server_version`），此前 CI 用 16 —— 迁移门禁在 16 上验证，
-        # 与 18 存在保真度缺口（PG18 专有行为/语法测不出）。
-        image: postgres:18-alpine
-        env:
-          POSTGRES_DB: erp_test
-          POSTGRES_USER: erp_test
-          POSTGRES_PASSWORD: erp_test_pass  # secret-scan:allow CI 测试库口令，仅 Actions 内部网络
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
       # 限流（slowapi）与缓存走 Redis；缺 Redis 时 slowapi 会静默回退内存存储并丢弃
       # 路由级限额（见 fastapi_app/core/limiter.py 的 in_memory_fallback），使「N 次后应
       # 429」的限流回归在 CI 上误报通过（2026-10-08 实测）。故 test job 需要 redis service。
@@ -65,19 +48,54 @@ jobs:
     env:
       DB_HOST: localhost
       DB_USER: erp_test
-      DB_PASSWORD: erp_test_pass  # secret-scan:allow CI 测试库口令，仅 Actions 内部网络
       DB_NAME: erp_test
       DB_PORT: "5432"
-      # 显式给出测试库 URL，绕开 tests/conftest.py 的「{DB_NAME}_test」派生：
-      # 派生会把 DB_NAME=erp_test 拼成 erp_test_test，而本 job 的 postgres 只创建了
-      # erp_test（POSTGRES_DB），派生库不存在 → tests/ 整棵树的 fixtures 报错。
-      TEST_DATABASE_URL: postgresql+asyncpg://erp_test:erp_test_pass@localhost:5432/erp_test  # secret-scan:allow CI 测试库口令，仅 Actions 内部网络
-      # CI 专用固定密钥：仅供 test job 启动校验，不连任何真实环境
-      SECRET_KEY: "ci-test-secret-key-with-sufficient-length-for-validation-checks"  # secret-scan:allow CI 固定值
       COVERAGE_MIN: "40"
 
     steps:
     - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+    # services 会在步骤之前启动，无法读取本次作业生成的密码。PostgreSQL 改在步骤内启动，
+    # 保持与生产同一大版本（18），仅发布到 runner 回环地址。
+    - name: Generate CI credentials and start PostgreSQL
+      shell: bash
+      run: |
+        DB_PASSWORD=$(openssl rand -hex 24)
+        SECRET_KEY=$(openssl rand -hex 32)
+        # 显式指向容器创建的 erp_test，避免 tests/conftest.py 再追加 _test。
+        TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+        ci_e2e_dsn="postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+        printf '::add-mask::%s\n' "$DB_PASSWORD" "$SECRET_KEY" "$TEST_DATABASE_URL" "$ci_e2e_dsn"
+        # 环境变量文件按「键=值」逐行写入；每行单独 printf，值只来自运行时生成，
+        # 不写成内联赋值形式（避免被提交钩子的口令规则误判）。
+        printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD" >> "$GITHUB_ENV"
+        printf 'SECRET_KEY=%s\n' "$SECRET_KEY" >> "$GITHUB_ENV"
+        printf 'TEST_DATABASE_URL=%s\n' "$TEST_DATABASE_URL" >> "$GITHUB_ENV"
+        printf 'CI_E2E_DSN=%s\n' "$ci_e2e_dsn" >> "$GITHUB_ENV"
+
+        # 容器凭据经 --env-file 传入，不在命令行里以 KEY=value 形式出现。
+        container_env=$(mktemp)
+        trap 'rm -f "$container_env"' EXIT
+        chmod 600 "$container_env"
+        printf 'POSTGRES_PASSWORD=%s\n' "$DB_PASSWORD" >> "$container_env"
+        printf 'POSTGRES_USER=%s\n' "$DB_USER" >> "$container_env"
+        printf 'POSTGRES_DB=%s\n' "$DB_NAME" >> "$container_env"
+        docker run --detach --name erp-ci-postgres \
+            --env-file "$container_env" \
+            --publish "127.0.0.1:${DB_PORT}:5432" \
+            --health-cmd "pg_isready -h 127.0.0.1 -U ${DB_USER} -d ${DB_NAME}" \
+            --health-interval 10s --health-timeout 5s --health-retries 5 \
+            postgres:18-alpine > /dev/null
+        for attempt in $(seq 1 60); do
+          status=$(docker inspect --format '{{ .State.Health.Status }}' erp-ci-postgres)
+          case "$status" in
+            healthy) exit 0 ;;
+            unhealthy) break ;;
+          esac
+          sleep 1
+        done
+        echo 'PostgreSQL 测试容器未就绪' >&2
+        exit 1
 
     - name: Set up Node.js for full-stack browser E2E
       uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -192,9 +210,9 @@ jobs:
         REDIS_URL: redis://localhost:6379/15
         REDIS_DB: "15"
         E2E_API_BASE_URL: http://127.0.0.1:5502
-        ERP_E2E_REAL_DATABASE_URL: postgresql+psycopg://erp_test:erp_test_pass@localhost:5432/erp_test  # secret-scan:allow CI 测试库
         CONTRACT_BASE_URL: http://127.0.0.1:5502
       run: |
+        export ERP_E2E_REAL_DATABASE_URL="$CI_E2E_DSN"
         # 空库没有导航/权限行：/dashboard/nav-sections 只剩 core，前端左栏空白，
         # 契约基线也无法复现（实测丢 35 个字段签名）。seed_nav.py 是「新库补齐导航」
         # 的权威幂等来源；ERP_ALLOW_PROD_WRITE 仅用于放行本步骤指向的 CI *_test 库
@@ -251,13 +269,16 @@ jobs:
         REDIS_DB: "15"
         E2E_FULLSTACK_BASE_URL: http://127.0.0.1:5502
         E2E_FULLSTACK_USER: admin
-        E2E_FULLSTACK_PASSWORD: admin123  # secret-scan:allow CI 测试夹具口令
-        ERP_E2E_REAL_DATABASE_URL: postgresql+psycopg://erp_test:erp_test_pass@localhost:5432/erp_test  # secret-scan:allow CI 测试库
+      shell: bash
       run: |
-        # 空库 + 迁移后没有任何用户，浏览器真实登录会 401。
-        # 这里用项目自身的 ORM 与 hash_password 造管理员，避免在 CI 里猜列名/哈希方案。
+        export ERP_E2E_REAL_DATABASE_URL="$CI_E2E_DSN"
+        E2E_FULLSTACK_PASSWORD=$(openssl rand -hex 24)
+        printf '::add-mask::%s\n' "$E2E_FULLSTACK_PASSWORD"
+        export E2E_FULLSTACK_PASSWORD
+        # 浏览器与 ORM 共享本步骤生成的口令；前序冒烟若已创建管理员，也要更新密码。
         python - <<'PY'
         import asyncio
+        import os
 
         from sqlalchemy import select
 
@@ -269,20 +290,17 @@ jobs:
         from fastapi_app.shared_models.user import User
 
         async def main() -> None:
+            username = os.environ['E2E_FULLSTACK_USER']
             await ensure_engine_for_current_loop()
             async with require_async_session_local()() as session:
-                existing = (
-                    await session.execute(select(User).where(User.username == 'admin'))
+                user = (
+                    await session.execute(select(User).where(User.username == username))
                 ).scalars().first()
-                if existing is None:
-                    session.add(User(
-                        username='admin',
-                        password=hash_password('admin123'),
-                        is_super=True,
-                        status=True,
-                    ))
-                    await session.commit()
-                    print('seeded admin')
+                if user is None:
+                    user = User(username=username, is_super=True, status=True)
+                    session.add(user)
+                user.password = hash_password(os.environ['E2E_FULLSTACK_PASSWORD'])
+                await session.commit()
 
         asyncio.run(main())
         PY
@@ -380,6 +398,14 @@ jobs:
       run: |
         python -c "import os; import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); root = tree.getroot(); coverage = float(root.attrib['line-rate']) * 100; print(f'Coverage: {coverage:.2f}%'); threshold = float(os.getenv('COVERAGE_MIN', '20')); (print(f'Coverage below threshold: {coverage:.2f}% < {threshold:.2f}%') or exit(1)) if coverage < threshold else None"
     
+    - name: Remove isolated PostgreSQL test container
+      if: always()
+      shell: bash
+      run: |
+        if docker container inspect --format '{{ .Id }}' erp-ci-postgres >/dev/null 2>&1; then
+          docker rm --force --volumes erp-ci-postgres >/dev/null
+        fi
+
   lint:
     runs-on: ubuntu-24.04
 
@@ -610,8 +636,30 @@ jobs:
           frontend-vite/test-results.xml
           frontend-vite/coverage/
 
+  windows-verification:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: frontend-vite/package-lock.json
+    - name: Verify portable deployment helpers without installing services
+      shell: pwsh
+      run: ./deploy/tests/test_lib.ps1
+    - name: Install Windows frontend dependencies
+      working-directory: frontend-vite
+      run: npm ci
+    - name: Verify Windows production dependency audit
+      working-directory: frontend-vite
+      run: node scripts/audit-with-ignore.mjs
+    - name: Verify frontend regression on Windows
+      working-directory: frontend-vite
+      run: npm test
+
   build:
-    needs: [test, lint, frontend]
+    needs: [test, lint, frontend, windows-verification]
     runs-on: ubuntu-24.04
     
     steps:

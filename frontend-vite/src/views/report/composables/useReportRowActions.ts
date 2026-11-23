@@ -21,7 +21,7 @@ import { ref } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { orderApi, stockApi, stockReturnApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
-import type { StockFlowRecord } from '@/api/stock'
+import type { StockFlowRecord, StockOutUpdatePayload } from '@/api/stock'
 import type { StockReturnFlowRecord } from '@/api/stockReturn'
 import { showToast } from '@/composables/useToast'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
@@ -109,6 +109,7 @@ export function useReportRowActions() {
   /** 出货/抵扣编辑弹窗 */
   const stockoutEditVisible = ref(false)
   const stockoutEditForm = ref<StockoutEditForm | null>(null)
+  let stockoutEditSnapshot: Readonly<StockoutEditForm> | null = null
   const stockoutEditIsDeduction = ref(false)
   const savingStockout = ref(false)
   /** 退货编辑弹窗 */
@@ -180,7 +181,7 @@ export function useReportRowActions() {
   /** 打开出货/抵扣编辑弹窗（抵扣行的客户不可改） */
   function openStockoutEdit(record: StockFlowRecord, isDeduction: boolean) {
     stockoutEditIsDeduction.value = isDeduction
-    stockoutEditForm.value = {
+    stockoutEditSnapshot = {
       id: record.id,
       stockoutNo: record.stockout_no || '',
       productName: record.product_name || '',
@@ -189,27 +190,33 @@ export function useReportRowActions() {
       date: (record.stockout_date || '').slice(0, 10),
       note: record.note || '',
     }
+    stockoutEditForm.value = { ...stockoutEditSnapshot }
     stockoutEditVisible.value = true
   }
 
   async function saveStockoutEdit() {
     const form = stockoutEditForm.value
-    if (!form) return
+    const snapshot = stockoutEditSnapshot
+    if (!form || !snapshot) return
     // 2026-10-18 OCR 评审：与退货口径一致，数量必须是正整数
     if (!Number.isInteger(form.quantity) || form.quantity < 1) {
       showToast('数量必须为正整数', 'error')
       return
     }
+    // 未改动的字段不回写，避免用打开弹窗时的值覆盖他人之后提交的修改。
+    const payload: StockOutUpdatePayload = {}
+    if (form.quantity !== snapshot.quantity) payload.quantity = form.quantity
+    if (!stockoutEditIsDeduction.value && form.customer !== snapshot.customer) payload.customer = form.customer
+    // 清空日期仍表示保留；清空备注则需要传空串。
+    if (form.date && form.date !== snapshot.date) payload.stockout_date = form.date
+    if (form.note !== snapshot.note) payload.note = form.note
+    if (Object.keys(payload).length === 0) {
+      stockoutEditVisible.value = false
+      return
+    }
     savingStockout.value = true
     try {
-      await stockApi.editStockout(form.id, {
-        quantity: form.quantity,
-        // 抵扣行客户由订单/备货带出，不下发
-        ...(stockoutEditIsDeduction.value ? {} : { customer: form.customer }),
-        // 日期清空 = 保留原值（后端对空串先做格式校验，拿不到「空则保留」分支）
-        ...(form.date ? { stockout_date: form.date } : {}),
-        note: form.note,
-      })
+      await stockApi.editStockout(form.id, payload)
       showToast('出货修改成功', 'success')
       stockoutEditVisible.value = false
       refreshAfterWrite()

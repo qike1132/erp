@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastapi_app.services import dashboard_service
+from fastapi_app.services.dashboard.scope import DashboardReadScope
+
+DAILY_SCOPE = DashboardReadScope(orders=True, stockin=True, stockout=True)
 
 
 def _row(today=0, yesterday=0):
@@ -40,7 +43,7 @@ class TestQueryTodayYesterdayBase:
         ])
 
         result = await dashboard_service._query_today_yesterday_base(
-            db, datetime(2026, 1, 1), datetime(2026, 1, 2), datetime(2025, 12, 31),
+            db, datetime(2026, 1, 1), datetime(2026, 1, 2), datetime(2025, 12, 31), DAILY_SCOPE,
         )
         assert result == (10, 8, 20, 15, 5, 3)
         assert db.execute.await_count == 3
@@ -60,7 +63,7 @@ class TestQueryTodayYesterdayBase:
         ])
 
         result = await dashboard_service._query_today_yesterday_base(
-            db, datetime(2026, 1, 1), datetime(2026, 1, 2), datetime(2025, 12, 31),
+            db, datetime(2026, 1, 1), datetime(2026, 1, 2), datetime(2025, 12, 31), DAILY_SCOPE,
         )
         assert result == (0, 0, 0, 0, 0, 0)
         # 所有值应为 int 类型

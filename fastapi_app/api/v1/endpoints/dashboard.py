@@ -5,10 +5,8 @@
 从 pages.py:index_page 的服务端渲染逻辑提取而来。
 
 权限分级（AUD-04，2026-10-24 审计）：
-- stats / activities / todos / nav-sections / system-status / mobile：
-  登录即可读——它们是「全员首页」的运营聚合数字（今日备货/出货/待办数等），
-  前端首屏依赖，收紧会让无业务权限码的账号首屏 403。若 owner 决定进一步
-  收紧，在对应端点补 require_any_permission 即可。
+- stats / activities / todos / mobile：登录可打开首页；业务数据按各来源的读取权限及工厂、部门范围返回。
+- nav-sections / system-status：登录即可读。
 - customer-out-details / customer-order-details：逐客户营收金额明细（敏感），
   前端零调用（服务端渲染时代遗留），已收紧为 report_view + 工厂隔离，
   与 /reports/* 同口径。
@@ -26,7 +24,7 @@ from fastapi_app.core.deps import (
     get_current_user_with_permissions,
     require_permission,
 )
-from fastapi_app.core.production_scope import production_scope_of
+from fastapi_app.services.dashboard.scope import DashboardReadScope
 from fastapi_app.services.dashboard_service import (
     Activity,
     CustomerOutDetailResponse,
@@ -73,7 +71,7 @@ async def get_dashboard_stats(
     # 30s 窗口足够小，用户无感知；同时避免高并发下 10+ 聚合查询打满 DB。
     # 工厂隔离（A-M22）：厂绑定用户只能看到本厂口径，缓存键随工厂分桶。
     try:
-        dashboard_stats = await fetch_dashboard_stats(db, _dashboard_factory_scope(user))
+        dashboard_stats = await fetch_dashboard_stats(db, DashboardReadScope.for_user(user))
     except (OperationalError, DisconnectionError):
         # 数据库不可用时不得吞成空统计返回 200（会掩盖故障、前端展示全 0 无告警），
         # 应显式 503 触发监控告警与前端降级提示。
@@ -88,11 +86,11 @@ async def get_dashboard_stats(
 
 @router.get("/activities", response_model=list[Activity])
 async def get_dashboard_activities(
-    user_id: int = Depends(get_current_user_id),
+    user: User = Depends(get_current_user_with_permissions),
     db: AsyncSession = Depends(get_async_read_db),
 ):
-    """仪表盘最近活动数据（Redis缓存60秒）"""
-    return await fetch_dashboard_activities(db)
+    """仪表盘最近活动数据（Redis缓存60秒）。"""
+    return await fetch_dashboard_activities(db, DashboardReadScope.for_user(user))
 
 
 @router.get("/nav-sections", response_model=dict[str, NavSection])
@@ -108,7 +106,7 @@ async def get_dashboard_todos(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """仪表盘待办事项（按工厂隔离：厂绑定用户只看到本厂订单待办）"""
-    return await fetch_dashboard_todos(db, _dashboard_factory_scope(user))
+    return await fetch_dashboard_todos(db, DashboardReadScope.for_user(user))
 
 
 @router.get("/system-status", response_model=SystemStatusResponse)
@@ -127,10 +125,7 @@ async def get_mobile_dashboard(
     db: AsyncSession = Depends(get_async_read_db),
 ):
     """移动端数据看板（一次聚合所有板块数据）"""
-    # 生产卡片按当前用户的部门范围收窄。用非抛错的 production_scope_of：
-    # 无生产权限的用户得到空集（生产卡片为空），而不是 403 拖垮整个看板。
-    scope = production_scope_of(current_user, write=False)
-    data = await fetch_mobile_dashboard(query_date, db, departments=scope)
+    data = await fetch_mobile_dashboard(query_date, db, DashboardReadScope.for_user(current_user))
     return MobileDashboardResponse(**data)
 
 

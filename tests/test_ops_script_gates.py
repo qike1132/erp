@@ -9,8 +9,7 @@
   · `restart_erp_prod.bat` 不再自带闸门，改为**委托** `scripts/restart_backend.py`
     （评审 High1/High2/Med8：手写闸门 fail-open、`nssm restart` 假成功、
     与 `server_manager/git_guard.py` 构成第二真相源）。
-  · `install_package.ps1` 的清理必须保留 `config`/`settings`（评审 Med3：
-    否则会删掉部署机的 `config\\pgbouncer\\userlist.txt` 与 `config\\tls\\*.key`）。
+  · `install_package.ps1` 无法证明完整回切前，只允许全新安装，不替换现有资源。
 """
 from __future__ import annotations
 
@@ -22,6 +21,7 @@ INSTALLER = PROJECT_ROOT / 'deploy' / 'install_package.ps1'
 RESTART_BAT = PROJECT_ROOT / 'scripts' / 'restart_erp_prod.bat'
 RESTART_PY = PROJECT_ROOT / 'scripts' / 'restart_backend.py'
 BUILD_PACKAGE = PROJECT_ROOT / 'deploy' / 'build_package.ps1'
+DEPLOY_LIB = PROJECT_ROOT / 'deploy' / '_lib.ps1'
 
 
 def _lines(path: Path) -> list[str]:
@@ -32,8 +32,8 @@ def _code_lines(path: Path) -> list[str]:
     """去掉整行注释（`#` / `REM`）后的行 —— 注释里提到危险动作不算违规。"""
     out: list[str] = []
     for ln in _lines(path):
-        s = ln.strip()
-        if s.startswith('#') or s.upper().startswith('REM'):
+        s = ln.strip().lstrip('\ufeff')
+        if s.startswith('#') or re.match(r'REM(?:\s|$)', s, re.I):
             continue
         out.append(ln)
     return out
@@ -56,102 +56,45 @@ def test_files_exist() -> None:
 
 # --- install_package.ps1 ---------------------------------------------------
 
-def test_installer_drops_database_after_stopping_service() -> None:
-    """P1-25：DROP DATABASE 必须在 Stop-Service 之后（防回归）。
-
-    原实现把删库放在停服务之前：DROP 那一瞬间五个 NSSM 服务仍 RUNNING 并持有
-    连接，要么 DROP 失败，要么在强制断开路径上留下一堆半个状态的进程。
-    """
+def test_installer_fails_closed_without_overwriting_existing_components() -> None:
+    """没有验过完整回切，因此旧版本及旧库、服务、备份均不能被触碰。"""
     lines = _code_lines(INSTALLER)
-    stop = _first_line_matching(lines, r'Stop-Service')
-    drop = _first_line_matching(lines, r'DROP\s+DATABASE')
-    assert stop > 0, '没找到 Stop-Service —— 停服务这一步可能被删了'
-    assert drop > 0, '没找到 DROP DATABASE'
-    assert stop < drop, f'DROP DATABASE(L{drop}) 早于 Stop-Service(L{stop})'
+    code = '\n'.join(lines)
+    gate = _first_line_matching(lines, r'^\s*Assert-FreshInstallOptions \$Force \$AllowDropDatabase \$SkipVerify$')
+    stage = _first_line_matching(lines, r'^\s*\$work=New-DeployStagingDirectory$')
+    entry_lock = _first_line_matching(lines, r'^\s*if\(-not \$PreflightOnly\)\{ throw')
+    terminal_lock = _first_line_matching(lines, r'^\s*throw .*拒绝进入数据库迁移和部署')
+    create_db = _first_line_matching(lines, r'CREATE\s+ROLE')
+    assert 0 < gate < entry_lock < stage < terminal_lock < create_db
+    assert re.search(r"if\(\$PreflightOnly\)\{\s*Remove-DeployStagingDirectory \$work\s*\$work=\$null\s*Write-Ok '[^']+'\s*exit 0\s*}", code)
+    assert re.search(r'if\(Test-Path -LiteralPath \$TargetDir\)\{ throw', code)
+    assert code.index('Assert-NewDatabase $psql $dbName $dbUser') < code.index('CREATE ROLE')
+    assert not re.search(r'DROP\s+DATABASE|ALTER\s+ROLE|Stop-Service|/PURGE|/MIR|Remove-Item[^\n]*-Recurse', code, re.I)
+    service_install = '\n'.join(_code_lines(DEPLOY_LIB)).split('function Install-NssmService(', 1)[1]
+    assert re.search(r'if\(\$null -ne \(Get-ServiceStatus \$name\)\)\{ throw', service_install)
+    assert "@('remove'" not in service_install
 
 
-def test_installer_keeps_local_credentials_when_purging() -> None:
-    """评审 Med3：清理代码目录时**必须**保留 `config` / `settings`。
-
-    这是本改动自己引入又自己修掉的一个破坏：`build_package.ps1` 打 `app\\` 时
-    排除了 `config\\pgbouncer`（userlist.txt 是真凭据，只在部署机），并把
-    `config\\jwt` 另存为 `settings\\jwt`。若把 `config` 当「包内有的代码目录」
-    删掉，部署机会同时失去 pgbouncer 凭据（包内没有，删了就不恢复）和 TLS 私钥。
-    """
-    code = '\n'.join(_code_lines(INSTALLER))
-    m = re.search(r'\$runtimeDirNames\s*=\s*@\(([^)]*)\)', code, re.S)
-    assert m, '没找到 $runtimeDirNames 定义 —— 保留名单的结构已变'
-    body = m.group(1).lower()
-    for must in ('config', 'settings'):
-        assert f"'{must}'" in body, (
-            f'$runtimeDirNames 里没有 {must} —— 清理代码目录会删掉部署机的本地凭据'
-            f'（config\\pgbouncer\\userlist.txt、config\\tls\\*.key）。当前名单：{m.group(1)}'
-        )
-    for must in ('logs', 'backups', 'static'):
-        assert f"'{must}'" in body, f'$runtimeDirNames 里没有 {must} —— 运行期数据会被删'
+def test_installer_requires_trusted_tls_and_package_before_mutations() -> None:
+    lines = _code_lines(INSTALLER)
+    tls = _first_line_matching(lines, r'^\s*Assert-DeploymentTls \$OpenSsl \$TlsCertificate ')
+    stage = _first_line_matching(lines, r'^\s*\$work=New-DeployStagingDirectory$')
+    verify = _first_line_matching(lines, r'^\s*Unprotect-File .* -ExpectedSha256 \$ExpectedSha256 ')
+    unpack = _first_line_matching(lines, r'^\s*& \$tar -xzf ')
+    build_db = _first_line_matching(lines, r'CREATE\s+ROLE')
+    assert 0 < tls < stage < verify < unpack < build_db
+    code = '\n'.join(lines)
+    assert 'https://$hUrl/api/health' in code and 'SkipCertificateCheck' not in code
+    assert not re.search(r'\s(?:-k|--insecure)\b', code)
+    assert not re.search(r'\.sha256["\']', code, re.I)
 
 
-def test_installer_clears_stale_code_before_robocopy() -> None:
-    """P1-28：代码复制段的 robocopy 之前必须先删旧目录，否则新旧混合代码树。
-
-    注意本文件里还有其它 robocopy（nginx 静态资源在更早的步骤），所以基准是
-    「`$copies` 之后的第一个 robocopy」。
-    """
-    lines = _lines(INSTALLER)
-    copies_at = _first_line_matching(lines, r'^\s*\$copies\s*=')
-    assert copies_at > 0, '没找到 $copies 定义 —— 部署步骤结构已变'
-    first_robocopy = _first_line_matching(lines[copies_at:], r'^\s*robocopy\s')
-    assert first_robocopy > 0, '$copies 之后没找到 robocopy'
-    first_robocopy += copies_at
-
-    before = '\n'.join(
-        ln for ln in lines[copies_at: first_robocopy - 1]
-        if not ln.strip().startswith('#')
-    )
-    # 「配置了」与「真的会执行」必须同时成立 —— 只断言出现 Remove-Item 不够：
-    # 把 `if($c.PurgeCode){` 改成 `if($false){` 时它仍在，清目录却不会发生。
-    assert re.search(r'PurgeCode\s*=\s*\$true', before), '`app` 那条没有标 PurgeCode=$true'
-    assert re.search(r'PurgeWhole\s*=\s*\$true', before), '产物目录没有标 PurgeWhole=$true'
-    assert re.search(r'if\s*\(\s*\$c\.PurgeCode\s*\)', before), \
-        '标记了 PurgeCode 但没有对应的 if($c.PurgeCode){...} 实现'
-    assert re.search(r'if\s*\(\s*\$c\.PurgeWhole\b', before), \
-        '标记了 PurgeWhole 但没有对应的 if($c.PurgeWhole...){...} 实现'
-    # 删除目标必须是「目标目录 + 包内子目录名」，不能是根目录本身
-    # （评审 Med6：`$dstChild = $c.Dst` 会删掉整个安装根，六条断言全绿）
-    assert re.search(r'\$dstChild\s*=\s*Join-Path\s+\$c\.Dst\s+\$item\.Name', before), (
-        '删除目标的表达式不再是「$c.Dst + 子目录名」—— 若改成 $c.Dst 本身，'
-        '会把整个安装根（logs/backups/.env/static）删掉'
-    )
-    assert 'Remove-Item' in before, 'robocopy 之前没有删除动作 —— /E 会留下旧文件'
-
-
-def test_installer_purge_whole_keeps_a_rollback_point() -> None:
-    """评审 Med5：清空产物目录前必须先留回滚点。
-
-    直接 `Remove-Item` 等于「五服务已 remove + 产物半份 + 无回滚点」：
-    robocopy 中途失败时，`runtime` 目录里既没有完整的新运行时也没有旧运行时。
-    """
-    code = '\n'.join(_code_lines(INSTALLER))
-    assert 'Move-Item' in code and '.bak-' in code, (
-        'PurgeWhole 没有先改名留档 —— 清空后若复制失败，产物目录无法回滚'
-    )
-    assert re.search(r'\$purgeBaks\s*\+?=', code), '没有收集回滚点清单'
-    # 回滚点必须在成功后才清（不能和清空同步做）
-    assert re.search(r'foreach\s*\(\s*\$bak\s+in\s+\$purgeBaks\s*\)', code), \
-        '没有「复制成功后清理回滚点」的收尾步骤'
-
-
-def test_installer_never_purges_whole_target_root() -> None:
-    """防回归：可执行行里不得出现 `/PURGE`（安装根同时是运行期数据目录）。
-
-    注释里讨论「为什么不用 /PURGE」是必要说明，不算违规。
-    """
-    offenders = [ln.strip() for ln in _code_lines(INSTALLER) if '/PURGE' in ln]
-    assert not offenders, (
-        'install_package.ps1 的可执行行里出现了 /PURGE —— 安装根同时是运行期数据目录'
-        '（logs/backups/.env/static/uploads），/PURGE 会把它们删掉：\n  '
-        + '\n  '.join(offenders)
-    )
+def test_builder_creates_only_encrypted_outputs_and_hides_temporary_data() -> None:
+    code = '\n'.join(_code_lines(BUILD_PACKAGE))
+    assert not re.search(r'Remove-Item[^\n]*-Recurse', code, re.I)
+    assert code.index('$stage=New-DeployStagingDirectory') < code.index('& $pgDump')
+    assert code.index('Protect-File -InPath $tgz') < code.index('[IO.File]::Copy($enc,$published,$false)')
+    assert re.search(r'} finally \{\s*Remove-Item Env:PGPASSWORD[^\n]*\n\s*if\(\$stage\)\{ Remove-DeployStagingDirectory \$stage \}', code)
 
 
 # --- restart_erp_prod.bat --------------------------------------------------
@@ -198,8 +141,7 @@ def test_build_package_refuses_non_main_branch() -> None:
 
     原实现只查「工作区脏」不查分支 —— 而 NSSM 的 AppDirectory 就是本仓库工作区，
     从特性分支打出来的包会被当作发布版本（2026-10-14 已有 75 分钟实害事故）。
-    `-DryRun` 是演练（`deploy/tests/e2e_dryrun.ps1` 会 clone 当前分支后再跑），
-    因此分支不符只 WARN —— 这条降级必须留着，否则演练在特性分支上就废了。
+    `-DryRun` 只做前置检查且无产物；只有分支不符降为警告。
     """
     code = '\n'.join(_code_lines(BUILD_PACKAGE))
 

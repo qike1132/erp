@@ -21,10 +21,10 @@ if not exist "%SCRIPT%" (
   exit /b 1
 )
 echo === ERP portable INSTALL (install_package.ps1) ===
-echo You will be prompted for the package path (-Package) and the package password.
-echo See deploy\README.md for the switches (-Force / -Blank / -ServerIP ...).
+echo Installation is disabled. Use -PreflightOnly with a trusted hash and TLS inputs.
+echo See deploy\README.md for required parameters and preinstalled components.
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
+powershell -NoProfile -File "%SCRIPT%" %*
 set "RC=%ERRORLEVEL%"
 echo.
 echo === done (exit=%RC%) ===

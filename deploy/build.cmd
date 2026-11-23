@@ -13,10 +13,10 @@ if not exist "%SCRIPT%" (
   exit /b 1
 )
 echo === ERP portable BUILD (build_package.ps1) ===
-echo Tip: dry-run = run "build.cmd -DryRun"  ^(needs nothing in deploy\binaries^)
-echo      real build requires the 6 installers in deploy\binaries\ (see deploy\README.md)
+echo DryRun checks prerequisites only. Real builds require approval and Administrator access.
+echo See deploy\README.md for the trusted release process.
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
+powershell -NoProfile -File "%SCRIPT%" %*
 set "RC=%ERRORLEVEL%"
 echo.
 echo === done (exit=%RC%) ===

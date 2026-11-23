@@ -1,7 +1,29 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-expect-error 脚本是无类型的 .mjs（纯函数由本用例锁定）
-import { IGNORES, unwaivedVulnerabilities } from '../../scripts/audit-with-ignore.mjs'
+import { IGNORES, parseAuditResult, unwaivedVulnerabilities } from '../../scripts/audit-with-ignore.mjs'
+
+const emptyCounts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 }
+const cleanReport = { auditReportVersion: 2, vulnerabilities: {}, metadata: { vulnerabilities: emptyCounts } }
+
+it('distinguishes valid findings from malformed or unavailable audit results', () => {
+  expect(parseAuditResult({ status: 0, stdout: JSON.stringify(cleanReport) })).toEqual({ report: cleanReport })
+  const report = {
+    ...cleanReport,
+    vulnerabilities: { foo: { severity: 'high', via: [{ url: 'https://example.invalid/advisory' }] } },
+    metadata: { vulnerabilities: { ...emptyCounts, high: 1, total: 1 } },
+  }
+  expect(parseAuditResult({ status: 1, stdout: JSON.stringify(report) })).toEqual({ report })
+  expect(parseAuditResult({ status: 0, stdout: JSON.stringify({ ...report, metadata: cleanReport.metadata }) })).toHaveProperty('error')
+  for (const source of ['missing', 'foo']) {
+    const invalid = { ...report, vulnerabilities: { foo: { severity: 'high', via: [source] } } }
+    expect(parseAuditResult({ status: 1, stdout: JSON.stringify(invalid) })).toHaveProperty('error')
+  }
+  expect(parseAuditResult({ status: 1, stdout: JSON.stringify({ error: { code: 'E503' } }) })).toHaveProperty('error')
+  expect(parseAuditResult({ status: 0, stdout: JSON.stringify({ auditReportVersion: 2 }) })).toHaveProperty('error')
+  expect(parseAuditResult({ status: 1, stdout: JSON.stringify(cleanReport) })).toHaveProperty('error')
+  expect(parseAuditResult({ status: null, error: new Error('spawn failed'), stdout: '' })).toHaveProperty('error')
+})
 
 /**
  * 回归锁（2026-11-18 CI 修复）：npm audit 的**具名豁免**闸门。

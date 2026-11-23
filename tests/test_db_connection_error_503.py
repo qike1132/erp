@@ -23,7 +23,7 @@ def _conn_error() -> OperationalError:
 async def test_activities_connection_error_is_503(async_client, auth_headers, monkeypatch):
     import fastapi_app.api.v1.endpoints.dashboard as dash_ep
 
-    async def _boom(db):
+    async def _boom(db, scope):
         raise _conn_error()
 
     monkeypatch.setattr(dash_ep, "fetch_dashboard_activities", _boom)

@@ -757,3 +757,77 @@ async def test_concurrent_manual_and_import_stockout_no_deadlock(
     assert product_row.current_stock == 80
     assert stockouts == 2
     assert net_log == -20
+
+
+@pytest.mark.parametrize('action', ['edit_note', 'edit_quantity', 'delete'])
+async def test_stockout_waiter_uses_committed_row(async_db_session, test_engine, monkeypatch, action):
+    """两条真实连接：后写请求预载 8，前写改为 12；净库存和流水必须基于 12。"""
+    product_id, order_id, customer = await _seed_competition(async_db_session, stock=50, order_qty=30)
+    original_date = datetime(2026, 10, 20, 3, 17, 45, tzinfo=UTC)
+    row = StockOut(
+        stockout_no=f'SO-{uuid4().hex[:12]}', product_id=product_id, order_id=order_id,
+        customer=customer, quantity=8, stockout_date=original_date, note='原备注',
+    )
+    # 期初库存 50，预置已出货 8；后续出货修改/删除流水从 42 开始对账。
+    product = await async_db_session.get(Product, product_id)
+    product.current_stock = 42
+    async_db_session.add(row)
+    await async_db_session.flush()
+    row_id = row.id
+    await async_db_session.commit()
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
+    waiter_entered = asyncio.Event()
+    real_lock = stock_service.get_product_for_update
+
+    async with factory() as writer, factory() as waiter:
+        async def mark_waiter_lock(db, pid):
+            if db is waiter:
+                waiter_entered.set()
+            return await real_lock(db, pid)
+
+        monkeypatch.setattr(stock_service, 'get_product_for_update', mark_waiter_lock)
+        stale = await waiter.get(StockOut, row_id)
+        assert stale.quantity == 8
+        await stock_out_service.update_stockout(writer, row_id, new_quantity=12, note='前写备注')
+
+        async def apply_waiting_action():
+            if action == 'delete':
+                await stock_out_service.delete_stockout(waiter, row_id)
+            elif action == 'edit_quantity':
+                await stock_out_service.update_stockout(waiter, row_id, new_quantity=10)
+            else:
+                await stock_out_service.update_stockout(waiter, row_id, note='后写备注')
+            await waiter.commit()
+
+        async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+            tasks.create_task(apply_waiting_action())
+            await waiter_entered.wait()
+            await writer.commit()
+
+    async with factory() as check:
+        saved = await check.get(StockOut, row_id)
+        order_status = await check.scalar(select(Order.status).where(Order.id == order_id))
+        current_stock = await check.scalar(select(Product.current_stock).where(Product.id == product_id))
+        logs = (await check.execute(select(
+            InventoryLog.change_type, InventoryLog.change_quantity,
+            InventoryLog.quantity_before, InventoryLog.quantity_after,
+        ).where(InventoryLog.product_id == product_id).order_by(InventoryLog.id))).all()
+
+    assert logs[0] == ('出库修改', -4, 42, 38)
+    if action == 'delete':
+        assert saved is None
+        assert order_status == '待备货'
+        assert current_stock == 50
+        assert logs[1:] == [('出库删除', 12, 38, 50)]
+    else:
+        assert order_status == '待出货'
+        assert saved.order_id == order_id
+        assert saved.stockout_date == original_date
+        assert saved.customer == customer
+        if action == 'edit_quantity':
+            assert (saved.quantity, saved.note, current_stock) == (10, '前写备注', 40)
+            assert logs[1:] == [('出库修改', 2, 38, 40)]
+        else:
+            assert (saved.quantity, saved.note, current_stock) == (12, '后写备注', 38)
+            assert logs[1:] == []

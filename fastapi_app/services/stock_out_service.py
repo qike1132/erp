@@ -194,7 +194,7 @@ async def _assert_deduction_within_stockin(db: AsyncSession, stockout: StockOut,
         raise ValueError('抵扣数量超过该备货可用量！')
 
 
-async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantity: int, customer: str, stockout_date: datetime, note: str, operator_id: int | None = None) -> StockOut:
+async def update_stockout_core(db: AsyncSession, stockout: StockOut, new_quantity: int, customer: str, stockout_date: datetime | None, note: str | None, operator_id: int | None = None) -> StockOut:
     # 独立出货（stockin_id IS NULL）与备货抵扣（stockin_id 非空）都走这里：
     # 抵扣行的客户/产品由订单与备货带出（客户不可改），数量变更需保证不超过所属备货可用量。
     is_deduction = stockout.stockin_id is not None
@@ -338,19 +338,35 @@ async def create_stockout(db: AsyncSession, product_id: int, quantity: int, cust
     return {'quantity': quantity}
 
 
-async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int, customer: str, stockout_date_str: str, note: str, operator_id: int | None = None) -> None:
-    """更新出库记录"""
+async def _lock_stockout(db: AsyncSession, stockout_id: int) -> StockOut:
+    """按 Product → StockOut 顺序加锁，刷新请求预读写入身份映射的旧出库行。"""
     pid_result = await db.execute(select(StockOut.product_id).where(StockOut.id == stockout_id))
     pid_row = pid_result.one_or_none()
     if not pid_row:
         raise ValueError('出库记录不存在')
     await stock_service.get_product_for_update(db, pid_row[0])
-    result = await db.execute(select(StockOut).where(StockOut.id == stockout_id).with_for_update())
-    stockout_obj = result.scalar_one_or_none()
-    if not stockout_obj:
+    result = await db.execute(
+        select(StockOut).where(StockOut.id == stockout_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    stockout = result.scalar_one_or_none()
+    if stockout is None:
         raise ValueError('出库记录不存在')
-    stockout_date = _parse_date_preserve_time(stockout_date_str)
+    return stockout
+
+
+async def update_stockout(
+    db: AsyncSession, stockout_id: int, new_quantity: int | None = None,
+    customer: str | None = None, stockout_date_str: str | None = None,
+    note: str | None = None, operator_id: int | None = None,
+) -> None:
+    """更新出库记录，未指定字段使用锁内读取的当前值。"""
+    stockout_obj = await _lock_stockout(db, stockout_id)
     old_quantity = stockout_obj.quantity
+    new_quantity = old_quantity if new_quantity is None else new_quantity
+    customer = (stockout_obj.customer or '') if customer is None else customer
+    stockout_date = _parse_date_preserve_time(stockout_date_str) if stockout_date_str is not None else stockout_obj.stockout_date
+    note = stockout_obj.note if note is None else note
     old_stockout_no = stockout_obj.stockout_no
     old_order_id = stockout_obj.order_id  # P1-5：改客户会迁移 order_id，旧订单也要重算状态
     await update_stockout_core(db, stockout_obj, new_quantity, customer, stockout_date, note, operator_id=operator_id)
@@ -380,7 +396,7 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
         domain='stock',
         payload={
             'product_id': stockout_obj.product_id,
-            'customer': customer,
+            'customer': stockout_obj.customer or '',
             'product_name': product.name if product is not None else '',
             'plan_month': plan_month,
         },
@@ -391,18 +407,7 @@ async def update_stockout(db: AsyncSession, stockout_id: int, new_quantity: int,
 
 async def delete_stockout(db: AsyncSession, stockout_id: int, operator_id: int | None = None) -> None:
     """删除出库记录"""
-    # 第十四轮：锁序统一为 Product→StockOut —— update_stockout 是 P→SO，本函数原为
-    # SO→P（先锁出库行、delete_stockout_core 内再锁产品），同张出库单「编辑 vs 删除」
-    # 并发会互等行锁死锁。与 cancel_stockreturn_core / update_stockin 的既修口径一致。
-    pid_result = await db.execute(select(StockOut.product_id).where(StockOut.id == stockout_id))
-    pid_row = pid_result.one_or_none()
-    if not pid_row:
-        raise ValueError('出库记录不存在')
-    await stock_service.get_product_for_update(db, pid_row[0])
-    result = await db.execute(select(StockOut).where(StockOut.id == stockout_id).with_for_update())
-    stockout_obj = result.scalar_one_or_none()
-    if not stockout_obj:
-        raise ValueError('出库记录不存在')
+    stockout_obj = await _lock_stockout(db, stockout_id)
     stockout_no = stockout_obj.stockout_no
     deleted_quantity = stockout_obj.quantity
     customer_name = stockout_obj.customer or ''

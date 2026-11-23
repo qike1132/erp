@@ -33,6 +33,7 @@ from scripts.prod_audit.base.layer_base import (
     LayerStatus,
     Severity,
 )
+from scripts.prod_audit.base.sql_context import SqlContext, is_string_expression
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
 """项目根目录(``D:\\erp_system``)。"""
@@ -557,9 +558,6 @@ class L6Security(LayerBase):
         if not SERVICES_DIR.exists():
             return issues, "services/ 不存在,跳过"
 
-        sql_context_kw = frozenset(
-            {"execute", "exec", "text", "raw", "query", "sql", "stmt", "statement"}
-        )
         for py_file in SERVICES_DIR.rglob("*.py"):
             if "__pycache__" in py_file.parts:
                 continue
@@ -572,7 +570,7 @@ class L6Security(LayerBase):
             rel = py_file.relative_to(PROJECT_ROOT).as_posix()
             lines = source.splitlines()
             visitor = _SqlInjectionRedTeamVisitor(
-                rel, self.layer_id, builder, lines, sql_context_kw
+                rel, self.layer_id, builder, lines, SqlContext(tree)
             )
             visitor.visit(tree)
             issues.extend(visitor.issues)
@@ -1038,13 +1036,13 @@ class _SqlInjectionRedTeamVisitor(ast.NodeVisitor):
         layer_id: str,
         builder: IssueBuilder,
         lines: list[str],
-        sql_keywords: frozenset[str],
+        context: SqlContext,
     ) -> None:
         self.file = file
         self.layer_id = layer_id
         self.builder = builder
         self.lines = lines
-        self.sql_keywords = sql_keywords
+        self.context = context
         self.issues: list[AuditIssue] = []
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -1052,8 +1050,8 @@ class _SqlInjectionRedTeamVisitor(ast.NodeVisitor):
         if (
             isinstance(func, ast.Attribute)
             and func.attr == "format"
-            and isinstance(func.value, ast.Constant | ast.JoinedStr)
-            and self._is_sql_context(node)
+            and is_string_expression(func.value)
+            and self._is_sql_context(node, func.value)
         ):
             self._add_issue(node.lineno, "SQL 上下文使用 .format() 拼接,存在注入风险")
         self.generic_visit(node)
@@ -1065,8 +1063,8 @@ class _SqlInjectionRedTeamVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
-        if isinstance(node.op, ast.Mod) and isinstance(node.left, ast.Constant | ast.JoinedStr):
-            if self._is_sql_context(node):
+        if isinstance(node.op, ast.Mod) and is_string_expression(node.left):
+            if self._is_sql_context(node, node.left):
                 self._add_issue(node.lineno, "SQL 上下文使用 % 拼接,存在注入风险")
         elif (
             isinstance(node.op, ast.Add)
@@ -1079,9 +1077,7 @@ class _SqlInjectionRedTeamVisitor(ast.NodeVisitor):
             self._add_issue(node.lineno, "SQL 上下文使用 + 拼接变量,存在注入风险")
         self.generic_visit(node)
 
-    def _is_sql_context(self, node: ast.AST) -> bool:
-        if node.lineno - 1 >= len(self.lines):
-            return False
+    def _is_sql_context(self, node: ast.expr, template: ast.expr | None = None) -> bool:
         # 豁免标记(任一命中即跳过):
         #   - nosec B608   bandit 标准豁免
         #   - noqa B608    ruff/noqa 豁免
@@ -1096,8 +1092,7 @@ class _SqlInjectionRedTeamVisitor(ast.NodeVisitor):
                 or ("sql-safe" in line_lower)
             ):
                 return False
-        line_lower = self.lines[node.lineno - 1].lower()
-        return any(kw in line_lower for kw in self.sql_keywords)
+        return self.context.matches(node, template)
 
     def _add_issue(self, line: int, desc: str) -> None:
         self.issues.append(

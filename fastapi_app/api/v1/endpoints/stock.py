@@ -310,18 +310,10 @@ async def edit_stockout(
     await assert_product_factory_scoped(db, stockout.product_id, _user, what='出库记录')
     is_deduction = stockout.stockin_id is not None
     _ensure_row_action_permission(_user, is_deduction=is_deduction, action='edit')
-    quantity = data.quantity if data.quantity is not None else stockout.quantity
-    # 抵扣行的客户由订单/备货带出，忽略前端传入值（改客户会与订单/备货脱钩）
-    if is_deduction:
-        customer = stockout.customer or ''
-    else:
-        customer = data.customer if data.customer is not None else stockout.customer or ''
-    stockout_date = data.stockout_date if data.stockout_date else fmt_business(stockout.stockout_date, '%Y-%m-%d') if stockout.stockout_date else ''
-    note = data.note if data.note is not None else stockout.note or ''
     async with db_transaction(db):
         await stock_service.update_stockout(
-            db, stockout_id=stockout_id, new_quantity=quantity, customer=customer,
-            stockout_date_str=stockout_date, note=note, operator_id=_user.id,
+            db, stockout_id=stockout_id, new_quantity=data.quantity, customer=data.customer,
+            stockout_date_str=data.stockout_date, note=data.note, operator_id=_user.id,
         )
     return StockActionResponse(success=True, message='出库编辑成功！')
 

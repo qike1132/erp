@@ -32,6 +32,7 @@ from scripts.prod_audit.base.layer_base import (
     LayerStatus,
     Severity,
 )
+from scripts.prod_audit.base.sql_context import SqlContext, is_string_expression
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
 FASTAPI_APP_DIR: Path = PROJECT_ROOT / "fastapi_app"
@@ -58,21 +59,6 @@ _N_PLUS_ONE_TIMEOUT: int = 300
 
 DEFAULT_OWNER: str = "data-access-reviewer"
 DEFAULT_DUE_DATE: str = "2026-09-30"
-
-# SQL 上下文关键词: 出现在这些关键词附近的字符串拼接视为 SQL 注入风险
-_SQL_CONTEXT_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "execute",
-        "exec",
-        "text",
-        "raw",
-        "query",
-        "sql",
-        "stmt",
-        "statement",
-    }
-)
-
 
 class L4DataAccess(LayerBase):
     """L4 数据访问层审核层执行器。"""
@@ -265,7 +251,7 @@ class L4DataAccess(LayerBase):
             except (SyntaxError, OSError, UnicodeDecodeError):
                 continue
             rel = py_file.relative_to(PROJECT_ROOT).as_posix()
-            visitor = _SqlInjectionVisitor(rel, self.layer_id, builder)
+            visitor = _SqlInjectionVisitor(rel, self.layer_id, builder, source.splitlines(), SqlContext(tree))
             visitor.visit(tree)
             issues.extend(visitor.issues)
         return issues
@@ -452,10 +438,14 @@ async def asyncio_to_thread_subprocess(
 class _SqlInjectionVisitor(ast.NodeVisitor):
     """检测 SQL 上下文中的字符串拼接(f-string / .format() / %)。"""
 
-    def __init__(self, file: str, layer_id: str, builder: IssueBuilder) -> None:
+    def __init__(
+        self, file: str, layer_id: str, builder: IssueBuilder, lines: list[str], context: SqlContext,
+    ) -> None:
         self.file = file
         self.layer_id = layer_id
         self.builder = builder
+        self.lines = lines
+        self.context = context
         self.issues: list[AuditIssue] = []
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -464,8 +454,8 @@ class _SqlInjectionVisitor(ast.NodeVisitor):
         if (
             isinstance(func, ast.Attribute)
             and func.attr == "format"
-            and self._is_string_like(func.value)
-            and self._is_in_sql_context(node)
+            and is_string_expression(func.value)
+            and self._is_in_sql_context(node, func.value)
         ):
             self._add_issue(
                 node.lineno,
@@ -485,8 +475,8 @@ class _SqlInjectionVisitor(ast.NodeVisitor):
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
         # 字符串 % 拼接: str % args
-        if isinstance(node.op, ast.Mod) and self._is_string_like(node.left):
-            if self._is_in_sql_context(node):
+        if isinstance(node.op, ast.Mod) and is_string_expression(node.left):
+            if self._is_in_sql_context(node, node.left):
                 self._add_issue(
                     node.lineno,
                     "SQL 上下文使用 % 拼接,存在注入风险",
@@ -508,34 +498,18 @@ class _SqlInjectionVisitor(ast.NodeVisitor):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _is_string_like(node: ast.AST) -> bool:
-        return isinstance(node, ast.Constant | ast.Str | ast.JoinedStr)
-
-    @staticmethod
     def _has_variable(node: ast.AST) -> bool:
         return isinstance(node, ast.Name | ast.Attribute | ast.Call | ast.Subscript)
 
-    def _is_in_sql_context(self, node: ast.AST) -> bool:
-        """启发式判断: 检查节点所在行的文本是否含 SQL 上下文关键词。
-
-        由于 AST 节点不直接携带父上下文,这里基于行号回查源文件。
-        为保持简单,采用宽松策略: 只要节点行文本含 SQL 关键词即视为 SQL 上下文。
-        """
-        try:
-            source = Path(PROJECT_ROOT / self.file).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return False
-        lines = source.splitlines()
-        if node.lineno - 1 >= len(lines):
-            return False
-        line_text = lines[node.lineno - 1].lower()
+    def _is_in_sql_context(self, node: ast.expr, template: ast.expr | None = None) -> bool:
+        line_text = self.lines[node.lineno - 1].lower()
         # 行内 nosec B608 / noqa: B608 标注豁免
         if "b608" in line_text and ("noqa" in line_text or "nosec" in line_text):
             return False
         # 行内 # sql-safe: 标注豁免(已确认安全: escape_like/绑定参数/常量片段)
         if "sql-safe:" in line_text:
             return False
-        return any(kw in line_text for kw in _SQL_CONTEXT_KEYWORDS)
+        return self.context.matches(node, template)
 
     def _add_issue(self, line: int, desc: str) -> None:
         self.issues.append(

@@ -6,8 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.schema import CreateTable
 
+from fastapi_app.api.v1.endpoints import stock
+from fastapi_app.schemas.stock import StockOutUpdate
 from fastapi_app.services import stock_out_service
+from fastapi_app.shared_models import Product, StockOut
 
 
 def _stockout(**kw):
@@ -152,3 +157,65 @@ async def test_update_stockout_recalcs_old_and_new_orders(monkeypatch) -> None:
 
     called_orders = [call.args[1] for call in recalc.await_args_list]
     assert called_orders == [100, 201]
+
+
+async def test_edit_stockout_does_not_pass_prelock_values_as_updates(monkeypatch) -> None:
+    db = AsyncMock()
+    db.info = {}
+    db.get.return_value = _stockout()
+    user = SimpleNamespace(id=1, factory=None, is_super=True, has_permission=lambda _: True)
+    update = AsyncMock()
+    monkeypatch.setattr(stock_out_service.stock_service, 'update_stockout', update)
+
+    result = await stock.edit_stockout(1, StockOutUpdate(note=''), db, user)
+
+    assert result.success
+    update.assert_awaited_once_with(
+        db, stockout_id=1, new_quantity=None, customer=None,
+        stockout_date_str=None, note='', operator_id=1,
+    )
+
+
+@pytest.mark.parametrize('action', ['edit', 'delete'])
+async def test_stockout_lock_refreshes_existing_orm_instance(monkeypatch, action) -> None:
+    """SQLite 仅验证真实 ORM 身份映射刷新，不用于验证 PostgreSQL 行锁。"""
+    engine = create_async_engine('sqlite+aiosqlite://')
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    product = SimpleNamespace(current_stock=88, name='产品P')
+    monkeypatch.setattr(stock_out_service.stock_service, 'get_product_for_update', AsyncMock(return_value=product))
+    deletion_guard = AsyncMock(side_effect=AssertionError('正数已退货量必须先于关联表检查拒绝删除'))
+    monkeypatch.setattr(stock_out_service, 'guard_stockout_deletion', deletion_guard)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(CreateTable(Product.__table__))
+            await conn.execute(CreateTable(StockOut.__table__))
+        async with factory() as reader, factory() as writer:
+            row = StockOut(stockout_no='SO-1', product_id=7, quantity=8, customer='客户A', note='原备注')
+            writer.add(row)
+            await writer.commit()
+            cached = await reader.get(StockOut, row.id)
+            assert cached.quantity == 8
+            row.quantity = 12
+            row.returned_quantity = 2
+            row.customer = '客户B'
+            row.note = '新备注'
+            await writer.commit()
+
+            if action == 'edit':
+                monkeypatch.setattr(
+                    stock_out_service.stock_service, 'calculate_available_shipment_quantity',
+                    AsyncMock(return_value=_summary([])),
+                )
+                monkeypatch.setattr(reader, 'get', AsyncMock(return_value=product))
+                monkeypatch.setattr(stock_out_service.cache_mgr, 'invalidate_stock_and_order', AsyncMock())
+                monkeypatch.setattr(stock_out_service, 'schedule_stock_changed', AsyncMock())
+                await stock_out_service.update_stockout(reader, row.id)
+                assert (cached.quantity, cached.returned_quantity, cached.customer, cached.note) == (
+                    12, 2, '客户B', '新备注',
+                )
+            else:
+                with pytest.raises(ValueError, match='已有退货关联'):
+                    await stock_out_service.delete_stockout(reader, row.id)
+                assert cached.returned_quantity == 2
+    finally:
+        await engine.dispose()

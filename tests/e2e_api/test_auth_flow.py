@@ -13,7 +13,8 @@
 
 from __future__ import annotations
 
-import contextlib
+from secrets import token_urlsafe
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -77,7 +78,7 @@ class TestAuthContract:
         """伪造 token 必须 401，不能 500（500 会让前端当成网络故障而非登录失效）。"""
         resp = await api.get(
             "/api/v1/auth/me",
-            headers={"Authorization": "Bearer not-a-real-token-at-all"},
+            headers={"Authorization": f"Bearer {token_urlsafe(24)}"},
         )
         assert resp.status_code == 401, (
             f"伪造 token 返回 {resp.status_code}，应为 401。body={resp.text[:200]}"
@@ -113,7 +114,7 @@ class TestAuthEndpointsAlive:
         """
         resp = await api.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "__definitely_wrong_password__"},
+            json={"username": "admin", "password": token_urlsafe(32)},
         )
         assert resp.status_code == 401, (
             f"错误口令返回 {resp.status_code}，应为 401。body={resp.text[:200]}"
@@ -127,28 +128,27 @@ class TestAuthEndpointsAlive:
         前端 ``setUserInfo(null)`` 会构造出 id=0 的空壳身份。
         这里用现造临时用户来验证，避免依赖真实库里的口令。
         """
-        try:
-            created = await _create_temp_user(api)
-        except TempUserUnavailableError as exc:
-            pytest.skip(f'环境不具备造临时用户的前置条件：{exc}')
-        username, password = created
+        headers = await _temp_user_admin_headers(api)
+        username, password = await _create_temp_user(api, headers)
         try:
             resp = await api.post(
                 "/api/v1/auth/login", json={"username": username, "password": password}
             )
-            assert resp.status_code == 200, resp.text
+            assert resp.status_code == 200, f"临时用户登录失败：HTTP {resp.status_code}"
             body = resp.json()
 
-            assert body.get("access_token"), "登录成功却未返回 access_token"
-            assert body.get("user") is not None, (
+            assert resp.cookies.get("access_token"), "浏览器登录成功却未设置 access_token cookie"
+            if body.get("access_token") is not None:
+                pytest.fail("浏览器登录不应在响应体中暴露 access_token")
+            assert isinstance(body.get("user"), dict), (
                 "登录返回 user=null。前端 stores/auth.ts::setUserInfo 会因此构造 "
                 "id=0 的伪用户（已登录空壳）。后端必须回完整身份对象。"
             )
             user = body["user"]
             assert user.get("user_id"), f"登录返回的 user 缺少 user_id —— {user}"
-            assert user.get("username"), f"登录返回的 user 缺少 username —— {user}"
+            assert user.get("username") == username, "登录返回的用户不是本次创建的临时用户"
         finally:
-            await _delete_temp_user(api, username)
+            await _delete_temp_user(api, username, headers)
 
     async def test_refresh_requires_auth(self, api: httpx.AsyncClient) -> None:
         """``/auth/refresh`` 未鉴权必须被拒（不能靠它绕过登录）。
@@ -195,76 +195,52 @@ class TestAuthEndpointsAlive:
 _TEMP_PREFIX = "__e2e_api_tmp__"
 
 
-class TempUserUnavailableError(Exception):
-    """环境不具备造临时用户的前置条件（缺管理员 token / 端点在本环境不可用）。
-
-    只有这种「环境性缺失」才允许 skip；端点返回 5xx 或业务错误必须让用例变红——
-    否则「登录返回 user=null」这条唯一守卫可以被静默跳过（2026-10-30 审计 A-M46）。
-    """
-
-
-async def _create_temp_user(api: httpx.AsyncClient) -> tuple[str, str]:
-    """造一个临时用户。返回 (username, password)。
-
-    走 ``/api/v1/users/create`` 需要管理员 token，所以这里先用
-    admin token 覆盖 header，再还原 —— 保持 ``api`` fixture 的"无鉴权"语义。
-
-    Raises:
-        TempUserUnavailableError: 缺 admin token，或端点在当前环境不可用（401/403/404/405）。
-        AssertionError(pytest.fail): 端点可达但创建失败（4xx 业务错 / 5xx），属于真回归。
-    """
-    import time
-
+async def _temp_user_admin_headers(api: httpx.AsyncClient) -> dict[str, str]:
+    """与前端相同，使用服务端签发的 CSRF cookie 配合请求头。"""
     from tests.e2e_api.conftest import _mint_token
 
-    token = _mint_token("admin").token
-    if not token:
-        raise TempUserUnavailableError('无法铸造 admin token')
+    outcome = _mint_token("admin")
+    if not outcome.token:
+        cause = "测试库缺少 admin" if outcome.db_reachable else "无法从隔离测试库获取 admin token"
+        pytest.fail(f"登录正向用例无法准备临时用户：{cause}")
 
-    username = f"{_TEMP_PREFIX}{int(time.time())}"
-    # 脱敏夹具：每次运行现造的临时用户口令，用完即弃（不存在于任何环境），
-    # 仅用于验证「登录返回 user=null」这条守卫。属定义而非凭据，逐行豁免扫描。
-    password = "E2eApiTmp!2026"  # secret-scan:allow
+    response = await api.get("/api/health")
+    assert response.status_code == 200, f"CSRF 初始化失败：HTTP {response.status_code}"
+    csrf = api.cookies.get("fastapi_csrf_token")
+    assert csrf, "隔离后端未签发 CSRF cookie"
+    return {"Authorization": f"Bearer {outcome.token}", "X-CSRF-Token": csrf}
 
-    try:
-        resp = await api.post(
-            "/api/v1/users/create",
-            json={"username": username, "password": password, "is_super": False},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-    except httpx.HTTPError as exc:
-        raise TempUserUnavailableError(f'创建用户请求失败: {exc}') from exc
 
-    if resp.status_code in (401, 403, 404, 405):
-        # 环境/权限边界：端点不可达或该环境不允许造用户
-        raise TempUserUnavailableError(f'/users/create 不可用: HTTP {resp.status_code}')
-    if resp.status_code not in (200, 201):
-        pytest.fail(
-            f'创建临时用户失败（端点可达但返回 {resp.status_code}）: {resp.text[:300]}'
-        )
+async def _create_temp_user(
+    api: httpx.AsyncClient, headers: dict[str, str],
+) -> tuple[str, str]:
+    """已启用 E2E 时，临时用户创建失败就是测试失败。"""
+    username = f"{_TEMP_PREFIX}{uuid4().hex}"
+    password = token_urlsafe(24)
+    resp = await api.post(
+        "/api/v1/users/create",
+        json={"username": username, "password": password, "is_super": False},
+        headers=headers,
+    )
+    assert resp.status_code in (200, 201), f"创建临时用户失败：HTTP {resp.status_code}"
     return username, password
 
 
-async def _delete_temp_user(api: httpx.AsyncClient, username: str) -> None:
-    """按 username 查 id 后删除。失败静默 —— 清理失败不应让用例变红，但会留痕。"""
+async def _delete_temp_user(
+    api: httpx.AsyncClient, username: str, headers: dict[str, str],
+) -> None:
+    """按本次创建的唯一用户名查找并清理。"""
     from sqlalchemy import create_engine, text
 
-    from tests.e2e_api.conftest import _mint_token, real_database_url
+    from tests.e2e_api.conftest import real_database_url
 
-    token = _mint_token("admin").token
-    if not token:
-        return
-    headers = {"Authorization": f"Bearer {token}"}
-
-    # 清理尽力而为：失败不应让用例变红
-    with contextlib.suppress(Exception):
-        # real_database_url()：不能用 settings.DATABASE_URL（已被 autouse fixture
-        # 改成空测试库），否则查不到刚创建的用户，临时用户会留在真实库里。
-        engine = create_engine(real_database_url())
+    engine = create_engine(real_database_url())
+    try:
         with engine.connect() as conn:
-            row = conn.execute(
+            user_id = conn.execute(
                 text('SELECT id FROM "user" WHERE username = :u'), {"u": username}
-            ).fetchone()
-        if row is None:
-            return
-        await api.delete(f"/api/v1/users/delete/{row[0]}", headers=headers)
+            ).scalar_one()
+    finally:
+        engine.dispose()
+    resp = await api.delete(f"/api/v1/users/delete/{user_id}", headers=headers)
+    assert resp.status_code == 200, f"清理临时用户失败：HTTP {resp.status_code}"

@@ -175,20 +175,49 @@ describe('出货 / 备货抵扣流水：按 record_id 直连', () => {
     expect(api.stockoutEditForm.value).toMatchObject({ id: 22, stockoutNo: 'SO-D1', quantity: 100, note: '出货备注' })
   })
 
-  it('抵扣编辑保存：回写毛量而非净量（不把出货量改错）', async () => {
+  it('抵扣编辑保存：提交改后的毛量，不发送客户或清空的日期', async () => {
     const api = makeActions()
     await api.onRowAction('deduction', 'edit', DEDUCTION_ROW)
+    Object.assign(api.stockoutEditForm.value!, { quantity: 101, customer: '其他客户', date: '' })
     await api.saveStockoutEdit()
 
-    expect(mocks.editStockout).toHaveBeenCalledWith(22, expect.objectContaining({ quantity: 100 }))
+    expect(mocks.editStockout).toHaveBeenCalledExactlyOnceWith(22, { quantity: 101 })
   })
 
-  it('出货编辑保存：客户随表单下发', async () => {
+  it('出货仅清空备注：不把弹窗快照中的数量、客户和日期回写', async () => {
     const api = makeActions()
     await api.onRowAction('stockout', 'edit', STOCKOUT_ROW)
+    api.stockoutEditForm.value!.note = ''
     await api.saveStockoutEdit()
 
-    expect(mocks.editStockout).toHaveBeenCalledWith(21, expect.objectContaining({ quantity: 12, customer: 'MINISO国际' }))
+    expect(mocks.editStockout).toHaveBeenCalledExactlyOnceWith(21, { note: '' })
+    expect(mocks.invalidateQueries).toHaveBeenCalled()
+    expect(api.stockoutEditVisible.value).toBe(false)
+  })
+
+  it('出货同时修改数量、客户、日期：下发改动的值，不回写备注', async () => {
+    const api = makeActions()
+    await api.onRowAction('stockout', 'edit', STOCKOUT_ROW)
+    Object.assign(api.stockoutEditForm.value!, { quantity: 16, customer: '新客户', date: '2026-10-02' })
+    await api.saveStockoutEdit()
+
+    expect(mocks.editStockout).toHaveBeenCalledExactlyOnceWith(21, {
+      quantity: 16, customer: '新客户', stockout_date: '2026-10-02',
+    })
+  })
+
+  it('重新打开时刷新比较快照；编辑后恢复原值不发请求', async () => {
+    const api = makeActions()
+    await api.onRowAction('stockout', 'edit', STOCKOUT_ROW)
+    api.stockoutEditVisible.value = false
+    await api.onRowAction('stockout', 'edit', { ...STOCKOUT_ROW, quantity: 15, note: '并发修改' })
+    api.stockoutEditForm.value!.quantity = 16
+    api.stockoutEditForm.value!.quantity = 15
+    await api.saveStockoutEdit()
+
+    expect(mocks.editStockout).not.toHaveBeenCalled()
+    expect(mocks.invalidateQueries).not.toHaveBeenCalled()
+    expect(api.stockoutEditVisible.value).toBe(false)
   })
 })
 
