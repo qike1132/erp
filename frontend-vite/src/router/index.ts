@@ -80,7 +80,8 @@ const pcRoutes: RouteRecordRaw[] = [
 ]
 
 // ==================== 移动端路由====================
-// 所有路径与 PC 端一致（无前缀），通过设备检测路由级别二选一
+// 2026-11-23：移动端收敛为「概览 / 登录 / 我的」三个页面，其余页面与路由已下线。
+// 已删路径（/product、/stock、/shipment 等）由通配路由回到 /dashboard，而不是 404。
 const mobileRoutes: RouteRecordRaw[] = [
   {
     path: '/login',
@@ -95,23 +96,11 @@ const mobileRoutes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'MDashboard', component: () => import('@/mobile/views/dashboard/DashboardMobile.vue'), meta: { navExempt: true } },
-      { path: 'product', name: 'MProduct', component: () => import('@/mobile/views/product/MProductView.vue') },
-      { path: 'stock', name: 'MStock', component: () => import('@/mobile/views/stock/MStockView.vue') },
-      // 移动端 tab（出货 / 来料登记 / 我的）：入口由 MobileLayout 客户端定义，不在后端导航数据里，
-      // 因此显式声明 navExempt，避免非超管用户被守卫重定向回 /dashboard
-      { path: 'shipment', name: 'MShipment', component: () => import('@/mobile/views/shipment/MShipmentView.vue'), meta: { navExempt: true } },
-      { path: 'customer-order', name: 'MOrders', component: () => import('@/mobile/views/customer-order/MCustomerOrderView.vue') },
+      // 「我的」不在后端导航数据里，显式 navExempt，避免非超管用户被守卫重定向回 /dashboard
       { path: 'profile', name: 'MProfile', component: () => import('@/mobile/views/profile/MProfileView.vue'), meta: { navExempt: true } },
-      { path: 'purchase', name: 'MPurchase', component: () => import('@/mobile/views/purchase/MPurchaseView.vue') },
-      { path: 'material-calculator', name: 'MMaterialCalculator', component: () => import('@/mobile/views/material-calculator/MMaterialCalculatorView.vue') },
-      { path: 'incoming', name: 'MIncoming', component: () => import('@/mobile/views/incoming/MIncomingView.vue'), meta: { navExempt: true } },
-      { path: 'production', name: 'MProduction', component: () => import('@/mobile/views/production/MProductionView.vue') },
-      { path: 'batch', name: 'MBatch', component: () => import('@/mobile/views/batch/MBatchView.vue') },
-      { path: 'case', name: 'MCase', component: () => import('@/mobile/views/case/MCaseView.vue') },
-      { path: 'notifications', name: 'MNotifications', component: () => import('@/views/notifications/NotificationCenterView.vue'), meta: { navExempt: true } },
     ],
   },
-  { path: '/:pathMatch(.*)*', redirect: '/' },
+  { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
 ]
 
 // ==================== 设备自适应路由选择 ====================

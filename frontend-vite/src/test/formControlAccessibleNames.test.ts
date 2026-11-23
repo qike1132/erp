@@ -55,12 +55,5 @@ describe('搜索类控件的可访问名', () => {
     expect(uiSearch).toContain(':aria-label="placeholder"')
   })
 
-  const mSearch = read('src/mobile/components/MSearchBar.vue')
-
-  it('MSearchBar 输入框有名字，清空按钮的标签描述真实动作', () => {
-    expect(mSearch).toContain(':aria-label="placeholder || \'搜索\'"')
-    expect(mSearch).toContain('aria-label="清空搜索"')
-    // 历史写法「操作按钮」对读屏毫无信息量
-    expect(mSearch).not.toContain('aria-label="操作按钮"')
-  })
+  // 2026-11-23：移动端 MSearchBar 已随页面删除，相关断言一并移除。
 })

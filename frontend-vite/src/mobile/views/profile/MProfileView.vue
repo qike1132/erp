@@ -13,11 +13,8 @@
       </div>
 
       <MList header="设置" style="margin-bottom: 16px">
-        <!-- F-FE-MOBILE-08：原「账号信息」无 to 无 click 是死行，已删；
-             「权限管理」原 to=/notifications 文案误导，改为如实「通知中心」。 -->
-        <MListItem title="通知中心" subtitle="查看通知" to="/notifications">
-          <template #icon><div class="m-menu-icon" style="background:rgba(175,82,222,0.08)"><svg viewBox="0 0 24 24" fill="none" stroke="#AF52DE" stroke-width="2" width="16" height="16"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg></div></template>
-        </MListItem>
+        <!-- 2026-11-23：移动端通知中心路由已下线，「通知中心」入口同步移除，
+             避免点击后被通配路由兜回同页面。 -->
         <MListItem title="网络状态" :subtitle="networkInfo">
           <template #icon><div class="m-menu-icon" :style="{ background: networkConnected ? 'rgba(48,209,88,0.08)' : 'rgba(255,45,85,0.08)' }"><svg viewBox="0 0 24 24" fill="none" :stroke="networkConnected ? '#30D158' : '#FF2D55'" stroke-width="2" width="16" height="16"><path d="M5 12.55a11 11 0 0 1 14.08 0" /><path d="M1.42 9a16 16 0 0 1 21.16 0" /><path d="M8.53 16.11a6 6 0 0 1 6.95 0" /><line x1="12" y1="20" x2="12.01" y2="20" /></svg></div></template>
         </MListItem>

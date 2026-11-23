@@ -2,7 +2,7 @@
  * 通知中心 composable
  *
  * 封装未读数轮询、通知列表加载、单条/全部已读等逻辑，供桌面端 NotificationBell
- * 与移动端 MobileNotificationBell 共用。
+ * 使用（移动端通知铃铛已于 2026-11-23 随移动端通知路由一起下线）。
  *
  * 轮询策略：组件 onMounted 启动 setInterval（默认 30s），onUnmounted 清理。
  * 多个组件同时挂载时各自轮询，去重由 request.ts 的 GET inflight 缓存兜底。

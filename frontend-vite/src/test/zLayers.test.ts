@@ -167,7 +167,6 @@ describe('Z 层级令牌化：新的层级必须走 --z-*，不得再裸写数�
       'src/App.vue',
       'src/layouts/DefaultLayout.vue',
       'src/layouts/components/AppSidebar.vue',
-      'src/mobile/components/MBottomSheet.vue',
       'src/mobile/layouts/MobileLayout.vue',
     ]
     for (const file of shellFiles) {

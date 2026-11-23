@@ -1,14 +1,15 @@
 /**
  * 移动端可交互元素的键盘可达性（2026-10-30 审计 A-M39）
  *
- * 现场：MListItem / MCard / MBadge 以及材料计算器的分类折叠头都是 div/span + @click，
- * 没有 role、没有 tabindex、没有键盘处理——外接键盘与读屏用户完全无法操作（域内
- * 标为严重）。修复后统一成 role=button + tabindex=0 + Enter/Space 等价点击，
- * 并给 :focus-visible 焦点环。
+ * 现场：MListItem 等移动端交互元素是 div/span + @click，没有 role、没有
+ * tabindex、没有键盘处理——外接键盘与读屏用户完全无法操作（域内标为严重）。
+ * 修复后统一成 role=button + tabindex=0 + Enter/Space 等价点击，并给
+ * :focus-visible 焦点环。
+ *
+ * 2026-11-23：移动端收敛为「概览 / 登录 / 我的」，MCard / MBadge / 材料计算器
+ * 已随页面删除；本文件只保留仍在用的 MListItem 部分。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
 
 const mocks = vi.hoisted(() => ({ pushMock: vi.fn() }))
@@ -18,8 +19,6 @@ vi.mock('vue-router', () => ({
 }))
 
 import MListItem from '@/mobile/components/MListItem.vue'
-import MCard from '@/mobile/components/MCard.vue'
-import MBadge from '@/mobile/components/MBadge.vue'
 
 describe('MListItem 键盘可达', () => {
   beforeEach(() => {
@@ -67,61 +66,5 @@ describe('MListItem 键盘可达', () => {
 
     expect(root.attributes('role')).toBeUndefined()
     expect(root.attributes('tabindex')).toBeUndefined()
-  })
-})
-
-describe('MCard 键盘可达', () => {
-  it('clickable：Enter 发出 click 事件', async () => {
-    const wrapper = mount(MCard, { props: { clickable: true } })
-    const root = wrapper.find('.m-card')
-
-    expect(root.attributes('role')).toBe('button')
-    expect(root.attributes('tabindex')).toBe('0')
-
-    await root.trigger('keydown', { key: 'Enter' })
-    expect(wrapper.emitted('click')).toHaveLength(1)
-  })
-
-  it('非 clickable：不可聚焦，也不发事件', async () => {
-    const wrapper = mount(MCard, {})
-    const root = wrapper.find('.m-card')
-
-    expect(root.attributes('role')).toBeUndefined()
-    await root.trigger('keydown', { key: 'Enter' })
-    expect(wrapper.emitted('click')).toBeUndefined()
-  })
-})
-
-describe('MBadge 键盘可达', () => {
-  it('interactive：Space 发出 click 事件', async () => {
-    const wrapper = mount(MBadge, { props: { interactive: true }, slots: { default: '待审核' } })
-    const root = wrapper.find('.m-badge')
-
-    expect(root.attributes('role')).toBe('button')
-    await root.trigger('keydown', { key: ' ' })
-    expect(wrapper.emitted('click')).toHaveLength(1)
-  })
-
-  it('非 interactive：不可聚焦', () => {
-    const wrapper = mount(MBadge, { slots: { default: '已通过' } })
-    expect(wrapper.find('.m-badge').attributes('tabindex')).toBeUndefined()
-  })
-})
-
-describe('材料计算器折叠头的键盘可达（结构锁）', () => {
-  const src = readFileSync(
-    resolve(process.cwd(), 'src/mobile/views/material-calculator/MMaterialCalculatorView.vue'),
-    'utf-8',
-  )
-
-  it('三个折叠头都带 role/tabindex/aria-expanded/键盘处理', () => {
-    const headers = src.match(/class="m-result-cat"[\s\S]{0,260}?@keydown="onCatKeydown/g) ?? []
-    expect(headers).toHaveLength(3)
-    expect(src.match(/class="m-result-cat"\s*\n\s*role="button"/g)).toHaveLength(3)
-    expect(src.match(/aria-expanded=/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
-  })
-
-  it('折叠头不再只有 @click（必须有键盘等价路径）', () => {
-    expect(src).not.toMatch(/class="m-result-cat"\s+@click="toggle\(/)
   })
 })

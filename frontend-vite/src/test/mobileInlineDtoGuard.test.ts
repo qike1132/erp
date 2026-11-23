@@ -50,19 +50,8 @@ describe('移动端内联匿名 DTO 禁令（F1-3）', () => {
     ).toEqual([])
   })
 
-  it('订单查询页与来料登记页都改用 API 签名推导（不再自抄一份字段表）', () => {
-    const customerOrder = readFileSync(
-      resolve(root, 'src', 'mobile', 'views', 'customer-order', 'MCustomerOrderView.vue'),
-      'utf-8',
-    )
-    const incoming = readFileSync(
-      resolve(root, 'src', 'mobile', 'views', 'incoming', 'MIncomingView.vue'),
-      'utf-8',
-    )
-    expect(customerOrder).toContain("Awaited<ReturnType<typeof orderApi.list>>")
-    expect(incoming).toContain("Awaited<ReturnType<typeof materialApi.overview>>")
-    expect(incoming).toContain("Awaited<ReturnType<typeof materialApi.registrations>>")
-  })
+  // 2026-11-23：移动端订单查询页与来料登记页已随页面删除，原「两页改用
+  // API 签名推导」的结构断言失去被测对象；内联 DTO 禁令（上一条）继续生效。
 })
 
 describe('共享订单类型不得丢字段（F1-3 的根因侧）', () => {

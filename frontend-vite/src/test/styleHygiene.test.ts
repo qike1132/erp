@@ -1,7 +1,7 @@
 /**
  * 样式卫生棘轮：行内 style 只降不升。
  *
- * 为什么不直接清零：2026-11-14 审核逐类核查后确认，存量的 223 处里绝大多数是
+ * 为什么不直接清零：2026-11-14 审核逐类核查后确认，存量的 215 处里绝大多数是
  * 合理用法，硬替换会引入真实回归 ——
  *   · `style="width: 100%"`（23 处）几乎都用在 UiSelect/UiDatePicker 上：这些组件
  *     默认宽度不是 100%，换 `class="w-full"` 会因特异性(0,1,0)低于组件 scoped 样式
@@ -16,8 +16,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-/** 静态行内样式基线（2026-11-14 实测）。只降不升。 */
-const BASELINE_TOTAL = 223
+/** 静态行内样式基线（2026-11-23 移动端收敛后实测 215）。只降不升。 */
+const BASELINE_TOTAL = 215
 /** 其中装饰类基线：这类应走 class 或设计令牌，不该出现在行内。 */
 const BASELINE_DECO = 58
 

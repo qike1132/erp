@@ -19,7 +19,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  * `[]`，于是 `src/mobile` 改名/整体挪层时脚本仍打印「✓ 移动端所有 API 调用均通过共享 API 层」
  * 并 exit 0 —— 门禁静默退化成空转。下限取当前实测值的 ~80%。
  */
-const MIN_MOBILE_FILES = 28
+// 2026-11-23：移动端收敛为「概览 / 登录 / 我的」后，src/mobile 只剩 13 个
+// .ts/.vue（3 页 + 2 个共享组件 + 布局/导航 + dashboard 子组件）。
+// 下限随这次有意收敛从 28 下调到 10：再缩到 10 以下仍视为扫描集合异常。
+const MIN_MOBILE_FILES = 10
 /**
  * 判定基准 `src/api` 也必须保底（2026-11-18 评审 M1）。
  *

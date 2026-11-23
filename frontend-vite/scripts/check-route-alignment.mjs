@@ -167,10 +167,16 @@ function main() {
   }
 
   // 2026-10-17 审计 F2-1：扫描/配对集合异常缩小 → 退出码 2（与「有漂移 = 1」区分）。
-  // 现状：PC 路由 32 条、移动端 15 条、按「移动端 name = M + PC name」配出 10 对。
+  // 现状（2026-11-23）：PC 路由 32 条；移动端收敛为「概览 / 登录 / 我的」，
+  // 解析到 6 条原始记录（/login、父路由 /、空路径 redirect、/dashboard、/profile、通配），
+  // 其中可比路径 4 条；按「移动端 name = M + PC name」配出 MLogin / MDashboard 2 对。
   // 移动端一旦改用别的命名约定，pairs 会缩到 0 而脚本照样打 ✓ —— 门禁静默空转。
+  // 下限随这次有意收敛从 10 下调到 6，且必须按**原始记录数**比较：
+  // mobileRoutes.length 才是 extractRoutes 的完整输出，脚本打印的「移动端路由数」
+  // 是过滤掉空路径/通配后的 mobilePaths.size（4）——按下限 4 比较会允许再删
+  // /profile 或通配仍 exit 0（2026-11-23 OCR 实测）。
   const MIN_PC_ROUTES = 25
-  const MIN_MOBILE_ROUTES = 10
+  const MIN_MOBILE_ROUTES = 6
   if (pcRoutes.length < MIN_PC_ROUTES || mobileRoutes.length < MIN_MOBILE_ROUTES) {
     console.error(
       `[ERROR] 路由集合异常缩小：pcRoutes=${pcRoutes.length}（下限 ${MIN_PC_ROUTES}）、`
