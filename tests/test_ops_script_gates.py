@@ -22,6 +22,8 @@ RESTART_BAT = PROJECT_ROOT / 'scripts' / 'restart_erp_prod.bat'
 RESTART_PY = PROJECT_ROOT / 'scripts' / 'restart_backend.py'
 BUILD_PACKAGE = PROJECT_ROOT / 'deploy' / 'build_package.ps1'
 DEPLOY_LIB = PROJECT_ROOT / 'deploy' / '_lib.ps1'
+INSTALL_CMD = PROJECT_ROOT / 'deploy' / 'install.cmd'
+BUILD_CMD = PROJECT_ROOT / 'deploy' / 'build.cmd'
 
 
 def _lines(path: Path) -> list[str]:
@@ -50,8 +52,25 @@ def _first_line_matching(lines: list[str], pattern: str) -> int:
 
 def test_files_exist() -> None:
     """守卫对象必须存在 —— 改名不能让下面的断言静默空转。"""
-    for p in (INSTALLER, RESTART_BAT, RESTART_PY):
+    for p in (INSTALLER, RESTART_BAT, RESTART_PY, INSTALL_CMD, BUILD_CMD):
         assert p.is_file(), f'守卫对象不存在（改名/挪走后请同步本文件）：{p}'
+
+
+def test_cmd_launchers_bypass_execution_policy() -> None:
+    """T-03（2026-11-24 真机验证）：.cmd 入口必须带 -ExecutionPolicy Bypass。
+
+    便携包目标机是全新 Windows 客户端机，Windows PowerShell 5.1 默认策略
+    Restricted/RemoteSigned 会拦下无签名 .ps1 —— 实测本机 5.1 RemoteSigned
+    对 D: 盘所有本地脚本报 UnauthorizedAccess（C: 盘同内容放行，非 MotW，
+    D: 为 Fixed NTFS）。2026-10-08 设计意图即「自动 Bypass + pause」，pause
+    落地了、Bypass 漏了。README 的 powershell.exe 示例同样缺该参数。
+    """
+    for cmd in (INSTALL_CMD, BUILD_CMD):
+        code = '\n'.join(_code_lines(cmd))
+        assert re.search(r'powershell(\.exe)?\s+-NoProfile\s+-ExecutionPolicy\s+Bypass\s+-File', code), (
+            f'{cmd.name} 调用 powershell 未带 -ExecutionPolicy Bypass —— '
+            '全新目标机默认执行策略会拦下无签名脚本，双击入口直接 UnauthorizedAccess'
+        )
 
 
 # --- install_package.ps1 ---------------------------------------------------

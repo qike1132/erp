@@ -647,7 +647,9 @@ jobs:
         cache-dependency-path: frontend-vite/package-lock.json
     - name: Verify portable deployment helpers without installing services
       shell: pwsh
-      run: ./deploy/tests/test_lib.ps1
+      # e2e_dryrun 是 test_lib 的超集：先对 build/install 两个入口脚本做语法解析
+      # （CI 此前零覆盖它们的解析错误），再跑 test_lib 全部辅助函数断言。
+      run: ./deploy/tests/e2e_dryrun.ps1
     - name: Install Windows frontend dependencies
       working-directory: frontend-vite
       run: npm ci

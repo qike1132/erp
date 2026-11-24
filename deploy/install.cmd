@@ -24,7 +24,7 @@ echo === ERP portable INSTALL (install_package.ps1) ===
 echo Installation is disabled. Use -PreflightOnly with a trusted hash and TLS inputs.
 echo See deploy\README.md for required parameters and preinstalled components.
 echo.
-powershell -NoProfile -File "%SCRIPT%" %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
 set "RC=%ERRORLEVEL%"
 echo.
 echo === done (exit=%RC%) ===

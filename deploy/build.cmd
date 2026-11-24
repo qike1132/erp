@@ -16,7 +16,7 @@ echo === ERP portable BUILD (build_package.ps1) ===
 echo DryRun checks prerequisites only. Real builds require approval and Administrator access.
 echo See deploy\README.md for the trusted release process.
 echo.
-powershell -NoProfile -File "%SCRIPT%" %*
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*
 set "RC=%ERRORLEVEL%"
 echo.
 echo === done (exit=%RC%) ===

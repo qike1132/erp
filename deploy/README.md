@@ -11,7 +11,7 @@
 - 默认交互式隐藏输入包口令；不接受明文口令参数。`-SkipZip` 已禁用；`-DryRun` 只做前置检查，不连库、不组装、不写文件，不等于构建或安装验收。
 
 ```powershell
-powershell.exe -NoProfile -File deploy\build_package.ps1 -OutDir D:\erp_portable
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\build_package.ps1 -OutDir D:\erp_portable
 ```
 
 构建与安装均在 `%ProgramData%\erp-stage-<随机 ID>` 使用专用 NTFS ACL 暂存（仅当前执行身份、Administrators 和 SYSTEM）。常规成功/失败会清理本次目录；清理失败会报错并给出位置，须隔离残留并由有权限的运维人工处理。断电、强制退出仍可留下该目录；这不是存储介质安全擦除，敏感场景须使用加密卷，监控残留，不得按名称通配符批量删除。
@@ -33,7 +33,7 @@ powershell.exe -NoProfile -File deploy\build_package.ps1 -OutDir D:\erp_portable
 在目标机以管理员执行（替换参数中的占位值）：
 
 ```powershell
-powershell.exe -NoProfile -File deploy\install_package.ps1 `
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\install_package.ps1 `
     -PreflightOnly -Package D:\incoming\erp_portable_release.tar.gz.enc `
     -ExpectedSha256 $TrustedReleaseHash -ServerIP erp.example.test `
     -TlsCertificate D:\tls\server-chain.pem -TlsPrivateKey D:\tls\server.key `
@@ -44,4 +44,4 @@ powershell.exe -NoProfile -File deploy\install_package.ps1 `
 
 ## 验证范围
 
-`powershell.exe -NoProfile -File deploy\tests\e2e_dryrun.ps1` 现只做语法解析、合成文件与辅助函数测试，不调用安装/构建脚本，不连库。真正放行前仍须在隔离 Windows VM 验证可信 TLS（含反例）、端口隔离、ACL/残留、物料完整性、五服务、新装失败恢复及可计时回切；**当前不应据这套自动化检查宣布生产迁机或原地升级可用**。
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy\tests\e2e_dryrun.ps1` 现只做语法解析、合成文件与辅助函数测试，不调用安装/构建脚本，不连库。真正放行前仍须在隔离 Windows VM 验证可信 TLS（含反例）、端口隔离、ACL/残留、物料完整性、五服务、新装失败恢复及可计时回切；**当前不应据这套自动化检查宣布生产迁机或原地升级可用**。
