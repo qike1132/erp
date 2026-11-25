@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * PC 端 API 层绕过检查（补 check-api-alignment.mjs 的盲区）。
  *

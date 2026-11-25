@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * API 契约跨端一致性检查
  * 扫描 src/api/ 中定义的 API 端点，以及 src/mobile/ 中的直接 API 调用
