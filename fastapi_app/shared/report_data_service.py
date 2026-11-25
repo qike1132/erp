@@ -9,12 +9,12 @@
 退货）的源表本身就是 SKU 粒度（``product_id`` 在主表上），无需展开。
 """
 import logging
-from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from fastapi_app.core.business_time import business_day_range
 from fastapi_app.services.business_time import fmt_business
 from fastapi_app.shared_models import Order, OrderItem, Product, StockIn, StockOut, StockReturn
 from fastapi_app.shared_models.order import (
@@ -95,11 +95,21 @@ def _apply_date_filters(query, date_field, start_date, end_date):
     `2026/10/01`、`2026-13-01` 这类脏值时会拿到「全量」Excel 却以为已按日期筛选，
     对账多行/缺行都无法察觉。改为与屏幕侧同源（services/report_service 用的
     parse_date_strict），让 ValueError 冒泡到导出端点映射 400。
+
+    日期窗统一业务时区 aware 边界（V-02，2026-11-23 审计）：与屏幕侧
+    ``_append_biz_date_window`` 同源绑 ``business_day_range()``。此前绑 naive
+    值（``parse_date_strict + timedelta(days=1)``），窗口正确性耦合在「会话
+    时区恰为 Asia/Shanghai」（生产靠 postgresql.conf 钉住）；会话时区一旦为
+    UTC（迁移/新集群/PgBouncer 池变更），导出 Excel 会静默漏掉北京
+    00:00–07:59 的流水，而屏幕正常。aware 边界与会话时区解耦，且在
+    Asia/Shanghai 会话下与原 naive 绑定语义等价（生产行为不变）。
     """
     if start_date:
-        query = query.where(date_field >= parse_date_strict(start_date, '开始'))
+        start, _ = business_day_range(parse_date_strict(start_date, '开始').date())
+        query = query.where(date_field >= start)
     if end_date:
-        query = query.where(date_field < parse_date_strict(end_date, '结束') + timedelta(days=1))
+        _, end = business_day_range(parse_date_strict(end_date, '结束').date())
+        query = query.where(date_field < end)
     return query
 
 
