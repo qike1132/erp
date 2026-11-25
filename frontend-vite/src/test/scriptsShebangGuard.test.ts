@@ -14,7 +14,7 @@
  * CI（Node 22）与本地（Node 24）的 vitest 都会执行。
  *
  * 为什么全域禁（不只锁被测试 import 的 4 个脚本）：全部脚本都只经
- * `node scripts/...` 调用（package.json 12 处 + CI + 各脚本的用法注释），shebang
+ * `node scripts/...` 调用（package.json 16 处 + CI + 各脚本的用法注释），shebang
  * 从未被当可执行标记用，纯残留；全域禁最简单，新增文件自动纳入。
  */
 import { describe, it, expect } from 'vitest'
