@@ -8,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from fastapi_app.services.material_registration_service import get_supplier_detail
-from fastapi_app.services.purchase_order_crud import complete_purchase_order
+from fastapi_app.services.purchase_order_crud import (
+    batch_complete_purchase_orders,
+    complete_purchase_order,
+)
 from fastapi_app.shared_models import (
     Base,
     MaterialRegistration,
@@ -129,6 +132,47 @@ async def test_complete_purchase_order_backfills_bom_rows_with_item_supplier(db)
     assert float(by_key[('1.0超柔', '16#')]['ordered_quantity']) == 10
     # BOM 补全行没有采购明细关联
     assert by_key[('1.0超柔', '16#')]['order_item_id'] is None
+
+
+async def test_complete_purchase_order_bumps_items_version(db):
+    """完成也改变明细语义（登记的 ordered_quantity 是完成时快照）→ 版本必须递增。
+
+    E-H1 第二道保险：即使将来有别的写路径漏读 status，打开汇总弹窗的并发客户端
+    也会因完成时的版本递增而拿到 409，而不是用相同版本写回已完成单。
+    """
+    order = await _seed(db)
+    assert (order.items_version or 0) == 0
+
+    await complete_purchase_order(db, order.id)
+    await db.commit()
+    await db.refresh(order)
+
+    assert order.items_version == 1
+
+
+async def test_batch_complete_purchase_orders_bumps_items_version(db):
+    """批量完成与单条同口径：每张被完成的单各自 +1。"""
+    first = await _seed(db, order_no='PO-TEST-0101')
+    second = PurchaseOrder(
+        order_no='PO-TEST-0102', supplier_name='三虎', customer_name='测试客户',
+        product_name='无BOM产品', product_quantity=10,
+        status=PurchaseOrderStatus.PENDING,
+    )
+    db.add(second)
+    await db.flush()
+    db.add(PurchaseOrderItem(
+        order_id=second.id, material_name='布料X', unit='码', quantity=5,
+    ))
+    await db.flush()
+
+    result = await batch_complete_purchase_orders(db, [first.id, second.id])
+    await db.commit()
+    await db.refresh(first)
+    await db.refresh(second)
+
+    assert result == {'completed': 2, 'errors': []}
+    assert first.items_version == 1
+    assert second.items_version == 1
 
 
 async def test_supplier_detail_groups_by_item_supplier(db):

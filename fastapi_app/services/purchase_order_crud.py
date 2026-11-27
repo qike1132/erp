@@ -677,6 +677,9 @@ async def complete_purchase_order(
 
     order.status = PurchaseOrderStatus.COMPLETED
     order.completed_at = now
+    # 完成同样改变明细语义（来料登记 ordered_quantity 是完成时快照）：
+    # 递增 items_version，让持有旧快照的汇总弹窗保存时 409（E-H1 第二道保险）。
+    order.items_version = (getattr(order, 'items_version', 0) or 0) + 1
     # 携带损耗率则覆盖写备品；None 时保留该单已存值（PRD Q1）
     if spare_rate is not None:
         _apply_spare_rate(order, spare_rate)
@@ -735,6 +738,8 @@ async def batch_complete_purchase_orders(
 
             order.status = PurchaseOrderStatus.COMPLETED
             order.completed_at = now
+            # 同单条完成：完成也改变明细语义，递增版本作并发保护第二道保险
+            order.items_version = (getattr(order, 'items_version', 0) or 0) + 1
             # 携带损耗率则对该单覆盖写备品（沿用批量取回的 orders，无新增逐单查询）
             if spare_rate is not None:
                 _apply_spare_rate(order, spare_rate)
@@ -754,55 +759,47 @@ async def batch_complete_purchase_orders(
 
 
 def _items_version_lock_stmt(po_ids: list[int]):
-    """构造版本校验 + 行锁语句（PG 下 ``FOR UPDATE``）。
+    """构造「状态 + 版本」写前校验语句（PG 下 ``FOR UPDATE``）。
 
-    用途：在读取客户端持有版本的同一语句里对相关 ``purchase_order`` 行加锁，
-    使「比对 → 写入」与 BOM 同步的「加锁 → 递增版本 → 重写明细」互斥，
-    关闭比对后、flush 前被同步提交顶掉的 TOCTOU 窗口。锁范围与
+    用途：在读取目标采购单的同一语句里对相关 ``purchase_order`` 行加锁，
+    使「校验 → 写入」与完成 / BOM 同步的「加锁 → 改状态或递增版本 → 重写明细」
+    互斥，关闭比对后、flush 前被并发提交顶掉的 TOCTOU 窗口。锁范围与
     ``bom_sync.sync_purchase_order_items`` 一致（仅单表 PO 行）；``ORDER BY id``
     给多行加锁以确定顺序，降低并发保存互相死锁的可能。
     """
     return (
-        select(PurchaseOrder.id, PurchaseOrder.items_version)
+        select(
+            PurchaseOrder.id,
+            PurchaseOrder.order_no,
+            PurchaseOrder.status,
+            PurchaseOrder.items_version,
+        )
         .where(PurchaseOrder.id.in_(po_ids))
         .order_by(PurchaseOrder.id)
         .with_for_update()
     )
 
 
-async def _ensure_items_versions_match(
-    db: AsyncSession, po_ids: set[int], items_versions: dict[int, int] | None,
-) -> None:
-    """乐观锁前置校验：客户端持有的明细版本与库内不一致即抛 ``ItemsVersionConflict``。
-
-    必须在**任何写入之前**调用（否则冲突时已写了一半）。只校验 ``items_versions``
-    中显式给出的采购单：None / 空 dict（旧客户端）不校验；给出但不在本次涉及集合
-    内的采购单也不会被写入，不参与比对（避免无关单的版本变化造成假 409）。
-    单次 ``WHERE id IN (...)`` 取回版本并 ``FOR UPDATE`` 锁行，避免逐单查询（N+1）。
-    """
-    if not items_versions:
-        return
-    check_ids = sorted(oid for oid in po_ids if oid in items_versions)
-    if not check_ids:
-        return
-    result = await db.execute(_items_version_lock_stmt(check_ids))
-    versions = {row.id: row.items_version for row in result.all()}
-    for po_id in check_ids:
-        if po_id in versions and (versions[po_id] or 0) != items_versions[po_id]:
-            raise ItemsVersionConflict()
-
-
-async def _validate_factory_edit_versions(
+async def _validate_factory_edit_targets(
     db: AsyncSession, data: list, order_ids: list[int] | None,
     items_versions: dict[int, int] | None,
 ) -> None:
-    """按「order_ids ∪ 将被编辑明细所属采购单」做写前版本校验（见上函数）。
+    """写前锁住本次会写入的采购单，校验状态（仅 pending 可改）与客户端版本。
+
+    状态校验**无条件执行**：旧客户端不传 ``items_versions`` 时版本校验整段跳过，
+    而「下单完成」会冻结明细语义（来料登记 ``ordered_quantity`` 是完成时快照，
+    全仓没有跟随更新语句，收货上限会按旧值永久卡死 —— E-H1，2026-11-27 审计）。
+    口径与 ``bom_sync.py``「写明细前显式冻结非 pending」一致；``CONFIRMED`` 仅为
+    存量历史状态，现行写路径不产生，是否放行留给 owner 决策（见 PR 描述）。
+
+    版本校验只比对 ``items_versions`` 中显式给出的采购单：None / 空 dict
+    （旧客户端）不校验；给出但不在本次涉及集合内的单不参与比对（避免无关单
+    的版本变化造成假 409）。
 
     明细归属需先查库（只读），故批量取一次 item_id → order_id；跳过口径与服务层
-    主循环一致（无 item_ids、或 quantity/loss_rate 均为 None 的条目不会写任何单）。
+    主循环一致（无 item_ids、或 quantity/loss_rate 均为 None 的条目不会写任何单，
+    也不参与校验）。
     """
-    if not items_versions:
-        return
     edited_item_ids: set[int] = set()
     for entry in data:
         if not entry.get('item_ids'):
@@ -818,7 +815,24 @@ async def _validate_factory_edit_versions(
             )
         )
         scope_po_ids.update(row.order_id for row in rows.all())
-    await _ensure_items_versions_match(db, scope_po_ids, items_versions)
+    if not scope_po_ids:
+        return
+
+    result = await db.execute(_items_version_lock_stmt(sorted(scope_po_ids)))
+    rows = {row.id: row for row in result.all()}
+    for po_id in sorted(scope_po_ids):
+        row = rows.get(po_id)
+        # 不存在的 id 保持旧行为：静默跳过（写路径零命中，不会产生任何写入）
+        if row is None:
+            continue
+        if row.status != PurchaseOrderStatus.PENDING:
+            raise ConflictError(
+                f'采购单{row.order_no}状态为{row.status}，'
+                f'仅待完成（pending）的采购单可修改数量/损耗率'
+            )
+        if items_versions and po_id in items_versions:
+            if (row.items_version or 0) != items_versions[po_id]:
+                raise ItemsVersionConflict()
 
 
 def _apply_quantity_edit(
@@ -964,11 +978,14 @@ async def save_factory_summary_edits(
     - `spare_rate` 非 None 时，对「被编辑明细所属采购单 ∪ order_ids」覆盖写率与备品。
     - `items_versions`：客户端持有的（采购单 ID → 明细版本）快照；非空时在
       **任何写入之前**逐单比对，过期即抛 ``ItemsVersionConflict``（409）。
+    - **非 pending 的采购单整体拒绝**（409，``ConflictError``）：完成后明细语义
+      已按来料登记快照冻结，改数量/损耗率会让收货上限永久对不上（E-H1）。
+      该守卫在任何写入之前执行，且不依赖 `items_versions`（旧客户端同样拦）。
 
     返回值额外带 ``items_versions``（本次实际递增过版本的采购单 → 新版本）：
     客户端保存成功后用它前移本地版本快照，避免同一弹窗内连续保存第二次带旧版本 409。
     """
-    await _validate_factory_edit_versions(db, data, order_ids, items_versions)
+    await _validate_factory_edit_targets(db, data, order_ids, items_versions)
 
     # 实际发生明细变更的采购单（数量/损耗率写前比对，同值重发不算）。
     changed_po_ids: set[int] = set()

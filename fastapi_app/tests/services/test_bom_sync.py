@@ -13,6 +13,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.services.purchase.bom_sync import (
     ItemsVersionConflict,
     find_pending_po_ids_for_product,
@@ -404,6 +405,52 @@ async def test_factory_save_partial_items_versions_skips_uncovered_orders(db):
     assert result['updated_count'] == 1
     item = await db.get(PurchaseOrderItem, 1)
     assert float(item.quantity) == 60.0
+
+
+# ============================================================
+# E-H1（2026-11-27 审计）：完成即冻结明细——汇总保存不得改写已完成单
+# ============================================================
+
+async def test_factory_save_rejects_completed_order(db):
+    """已完成单不得再被汇总保存改写数量。
+
+    完成时 `_create_material_registration` 按当时明细把 `ordered_quantity`
+    落成快照，而全仓没有任何语句跟随后续数量变化 → 修复前本用例 200 写回 60，
+    收货上限永远按 50 卡死（E-H1，普通 UI 路径可达）。
+    """
+    await _seed(db, status='completed')
+    with pytest.raises(ConflictError) as exc:
+        await save_factory_summary_edits(
+            db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+            order_ids=[8101], items_versions={8101: 0},
+        )
+    assert exc.value.status_code == 409
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 50.0
+
+
+async def test_factory_save_rejects_completed_order_without_items_versions(db):
+    """旧客户端不传 items_versions 时版本校验整段跳过，状态守卫必须独立生效。
+
+    这条是 E-H1 的关键缺口：只靠 `_ensure_items_versions_match` 的修复在
+    「客户端没带版本」时完全不设防，所以守卫不能挂在版本分支里。
+    """
+    await _seed(db, status='completed')
+    with pytest.raises(ConflictError):
+        await save_factory_summary_edits(
+            db, [{'item_ids': [1], 'quantity': 60}], 'tester', order_ids=[8101],
+        )
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 50.0
+
+
+async def test_factory_save_spare_rate_rejects_completed_order(db):
+    """仅改订单级损耗率/备品（edits=[] + order_ids）同样不得改写已完成单。"""
+    await _seed(db, status='completed')
+    with pytest.raises(ConflictError):
+        await save_factory_summary_edits(
+            db, [], 'tester', spare_rate=30, order_ids=[8101],
+        )
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.spare_rate is None
 
 
 # ============================================================
