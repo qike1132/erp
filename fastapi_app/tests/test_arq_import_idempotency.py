@@ -116,10 +116,16 @@ def _tmp_upload() -> str:
 
 
 def _patch_env(monkeypatch, rows: list, session: _FakeSession) -> None:
-    """替换解析 / 会话工厂 / 产品解析 / 取号 / 库存增量，隔离 DB 与 Redis。"""
+    """替换解析 / 会话工厂 / 产品解析 / 客户主数据 / 取号 / 库存增量 / 外发工序。"""
+    from fastapi_app.services import batch_import_core as bic
+
     monkeypatch.setattr(bt, '_parse_rows_async', AsyncMock(return_value=(True, rows, '')))
     monkeypatch.setattr(bt, '_open_import_session', AsyncMock(return_value=session))
     monkeypatch.setattr(bt, '_resolve_product_locked', AsyncMock(return_value=_product()))
+    # D-H2 收敛后订单行会校验客户主数据并生成外发工序；假会话不查库。
+    monkeypatch.setattr(bic, '_pre_load_customer_names', AsyncMock(return_value={'客户A'}))
+    monkeypatch.setattr(
+        'fastapi_app.services.outsource_service.auto_generate_for_order', AsyncMock())
     monkeypatch.setattr(
         'fastapi_app.services.numbering.generate_order_number',
         AsyncMock(return_value='SO-ARQ-0001'),

@@ -28,6 +28,7 @@ from fastapi_app.services.numbering import (
     generate_stockin_number,
     generate_stockout_number,
 )
+from fastapi_app.services.order.import_creation import create_imported_order
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.services.signed_urls import strip_upload_signature
 from fastapi_app.services.xlsx_cell_images import guess_image_extension, parse_dispimg_id
@@ -39,13 +40,11 @@ from fastapi_app.shared.stock_concurrency import (
 from fastapi_app.shared_models import (
     Customer,
     InventoryLog,
-    Order,
     Product,
     ProductCustomer,
     StockIn,
     StockOut,
 )
-from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 logger = logging.getLogger(__name__)
 
@@ -859,18 +858,14 @@ async def import_orders_from_data(
 
         order_no = await deps.generate_order_number(db)
         order_date = datetime.now(UTC)  # aware UTC：order_date 列为 timestamptz
-        order = Order(
-            order_no=order_no,
-            customer=customer,
-            order_date=order_date,
-            product_id=product_id,
-            quantity=qty,
-            note=str(note).strip() if note else '',
-            status=ORDER_STATUS_PENDING_STOCK
-        )
-        db.add(order)
-        await db.flush()
 
+        # 抵扣解析口径只在 batch_import_parser._parse_deduct_flag 一份
+        # （审计 Z04-R3③：原先此处与 batch_import_service 各内嵌一份 if/elif，
+        # 「是」一度折算 1 件、'3.0' 一度静默丢弃 —— 同一列多种语义）。
+        deduct_on, deduct_value = _parse_deduct_flag(deduct_flag, qty)
+
+        # 建单收敛到唯一服务（审计 O-30 / D-H2）：Order + OrderItem + InventoryLog +
+        # 外发工序一并写入。此前这里内联建单且漏 OrderItem → 湖北页看不到导入订单。
         # 订单**不影响物理库存** —— 与另外三条下单路径一致：
         #   order/commands.py 的 create_order（docstring 明示「不影响物理库存」）、
         #   order_batch_create.py（0 处 current_stock）、
@@ -878,22 +873,23 @@ async def import_orders_from_data(
         # 此处原为 `locked_product.current_stock += qty`，疑为把备货模板
         # （见下方 import_stockins_from_data 的同名行 —— 那里才是对的）复制到订单时漏删，
         # 会让导入来的订单被系统性计入物理库存、并绕过负库存闸门。
-        # 产品存在性已由 _resolve_row_identity 校验，故此处连行锁也不再需要。
-        log = InventoryLog(
+        order = await create_imported_order(
+            db,
+            order_no=order_no,
             product_id=product_id,
-            change_type='订单',
-            change_quantity=qty,
-            related_id=order_no,
+            product_name=product.name,
+            product_barcode=getattr(product, 'barcode', None),
+            customer=customer,
+            quantity=qty,
+            order_date=order_date,
+            note=str(note).strip() if note else '',
+            deduct_stock=deduct_on,
+            deduct_quantity=deduct_value,
             idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
-            note='综合导入订单：' + order_no
+            log_prefix='综合导入订单',
         )
-        db.add(log)
 
-        # 处理抵扣备货逻辑。解析口径只在 batch_import_parser._parse_deduct_flag 一份
-        # （审计 Z04-R3③：原先此处与 batch_import_service 各内嵌一份 if/elif，
-        # 「是」一度折算 1 件、'3.0' 一度静默丢弃 —— 同一列多种语义）。
         try:
-            deduct_on, deduct_value = _parse_deduct_flag(deduct_flag, qty)
             if deduct_on:
                 # 2026-10-18 OCR 评审：与 batch_import_service.import_orders_service
                 # 同款修正——第 4 个位置参数是 `order_quantity`（订单数量），

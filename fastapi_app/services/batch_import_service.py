@@ -50,6 +50,7 @@ from fastapi_app.services.numbering import (
     generate_stockin_number,
     generate_stockout_number,
 )
+from fastapi_app.services.order.import_creation import create_imported_order
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.services.xlsx_cell_images import (
     extract_cell_images,
@@ -64,12 +65,10 @@ from fastapi_app.shared.stock_concurrency import (
 from fastapi_app.shared_models import (
     CaseMovement,
     InventoryLog,
-    Order,
     Product,
     StockIn,
     StockOut,
 )
-from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 from fastapi_app.utils import validate_customer_name as _shared_validate_customer_name
 
 logger = logging.getLogger(__name__)
@@ -431,26 +430,35 @@ async def import_orders_service(
             # 工厂闸门（H1）：厂绑定用户不能借导入给他厂产品建单
             if _row_factory_rejected(scoped_factory, factory_by_id.get(product_id)):
                 return False, '产品不在你的工厂范围，已拒绝该条'
+            # A-M1（2026-11-27 顺带修正，属范围外）：锁必须早于建单。原先先 flush
+            # Order、再取产品锁 —— 子行/抵扣路径对 Product 的 FK KEY SHARE 与其余
+            # 下单路径的 FOR UPDATE 会在此交错成 40P01 死锁环。统一锁序 Product → Order。
+            locked_product = await get_product_for_update(db, product_id)
             order_no = await generate_order_number(db)
             order_date = datetime.now(UTC)
-            order = Order(
-                order_no=order_no, customer=customer, order_date=order_date,
-                product_id=product_id, quantity=qty,
-                note=str(note).strip() if note else '', status=ORDER_STATUS_PENDING_STOCK,
-            )
-            db.add(order)
-            await db.flush()
-            locked_product = await get_product_for_update(db, product_id)
-            log = InventoryLog(
-                product_id=product_id, change_type='订单', change_quantity=qty,
-                related_id=order_no, note=f'批量导入订单：{order_no}',
-                idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
-            )
-            db.add(log)
             # 解析口径只在 batch_import_parser._parse_deduct_flag 一份（审计 Z04-R3③）。
             # 2026-10-17 审计 P2-02 曾在此将「数字 = 抵扣数量；是/yes = 整单数量」
             # 与 core 对齐，本次把两份 if/elif 合成同一函数。
             deduct_on, deduct_value = _parse_deduct_flag(deduct_flag, qty)
+            # 建单收敛到唯一服务（审计 O-30 / D-H2）：Order + OrderItem + InventoryLog +
+            # 外发工序一并写入。此前这里内联建单且漏 OrderItem → 湖北页看不到导入订单。
+            # SKU 快照取**已加锁**的产品行（get_product_for_update 带 populate_existing，
+            # 比循环前预加载的 map 新）。
+            order = await create_imported_order(
+                db,
+                order_no=order_no,
+                product_id=product_id,
+                product_name=locked_product.name,
+                product_barcode=getattr(locked_product, 'barcode', None),
+                customer=customer,
+                quantity=qty,
+                order_date=order_date,
+                note=str(note).strip() if note else '',
+                deduct_stock=deduct_on,
+                deduct_quantity=deduct_value,
+                idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
+                log_prefix='批量导入订单',
+            )
             if deduct_on:
                 # 2026-10-18 OCR 评审：第 4 个位置参数是 `order_quantity`（订单数量），
                 # 抵扣量必须走 `custom_deduct_quantity`。此前把 `deduct_value` 按位置塞进

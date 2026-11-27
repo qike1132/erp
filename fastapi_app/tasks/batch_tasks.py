@@ -24,7 +24,6 @@ from sqlalchemy.exc import IntegrityError
 
 from fastapi_app.core.logger import logger
 from fastapi_app.shared_models import Product
-from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 # 每批提交条数。值保持 P1-7 前的 50：fastapi_app/tests/test_batch_tasks_semantics.py 的
 # test_fifty_row_batch_commit_semantics 用 110 行断言 ``session.commits >= 3`` 锁定了它；
@@ -88,13 +87,26 @@ async def _open_import_session():
 
 
 async def _resolve_product_locked(db, product_identifier: str) -> Product | None:
-    """按名称/条码查找产品并加行锁，未找到返回 None。"""
+    """按名称/条码查找产品并加行锁，未找到返回 None。
+
+    D-M4（2026-11-27）：名称与条码是两列、各有一个产品命中时，原
+    ``scalar_one_or_none`` 抛 ``MultipleResultsFound``，整批任务直接失败。
+    改为只取前两条判定：多条命中按**行级** ``ValueError`` 报错（``_import_rows``
+    已有该语义），其余行照常导入。
+    """
     result = await db.execute(
         sa_select(Product).where(
             or_(Product.name == product_identifier, Product.barcode == product_identifier)
-        ).with_for_update()
+        ).order_by(Product.id).limit(2).with_for_update()
     )
-    return result.scalar_one_or_none()
+    products = result.scalars().all()
+    if not products:
+        return None
+    if len(products) > 1:
+        raise ValueError(
+            f"产品标识 '{product_identifier}' 同时命中多个产品（名称/条码），"
+            '无法确定唯一产品，请改用唯一标识')
+    return products[0]
 
 
 def _row_factory_gate(scoped_factory: str | None, product: Product) -> str | None:
@@ -294,39 +306,60 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
         dict: 导入结果 {success, imported_count, errors, task_id}
     """
     job_id = ctx['job_id']
+    # 客户主数据集合：整批只查一次（与同步导入路径 _pre_load_order_context 同口径）。
+    # 首行惰性加载，无行可导时不多查一次库。
+    customer_names: set | None = None
 
     async def _orders_row(db, row: dict, i: int) -> str | None:
         from datetime import UTC, datetime
 
-        from fastapi_app.services.batch_import_core import _import_idem_key
+        from fastapi_app.services.batch_import_core import (
+            _import_idem_key,
+            _pre_load_customer_names,
+            validate_customer_name,
+        )
+        from fastapi_app.services.batch_import_service import _reject_unknown_customer
         from fastapi_app.services.numbering import generate_order_number
-        from fastapi_app.shared_models import InventoryLog, Order
+        from fastapi_app.services.order.import_creation import create_imported_order
+
+        nonlocal customer_names
+
         product, row_error = await _resolve_row_product(db, row, scoped_factory)
         if row_error:
             return row_error
         # row_error 为 None ⇒ 产品必然存在
         assert product is not None  # noqa: S101
         customer = row.get('客户名称', '')
+        # 客户主数据校验（D-H2 收敛）：ARQ 路径原先完全不校验，会静默建出
+        # 永远关联不到客户的孤儿订单（core/service 两条路径早已校验）。
+        is_valid, error_msg = validate_customer_name(customer)
+        if not is_valid:
+            return f'客户验证失败 - {error_msg}'
+        if customer_names is None:
+            customer_names = await _pre_load_customer_names(db)
+        if (cust_err := _reject_unknown_customer(customer, customer_names)) is not None:
+            return cust_err
         quantity = int(row.get('数量', 0))
         # 订单导入无日期列（与 batch_import_core.import_orders_from_data 同口径）：
         # 业务日取导入当日。
         order_date = datetime.now(UTC)  # aware UTC：order_date 为 timestamptz
-        order = Order(
+        # 建单收敛到唯一服务（审计 O-30 / D-H2）：Order + OrderItem + InventoryLog +
+        # 外发工序。产品行锁已由 _resolve_row_product 在建单前取得（Product → Order）。
+        await create_imported_order(
+            db,
             order_no=await generate_order_number(db),
-            product_id=product.id, customer=customer,
+            product_id=product.id,
+            product_name=product.name,
+            product_barcode=getattr(product, 'barcode', None),
+            customer=customer,
             quantity=quantity,
             order_date=order_date,
-            status=ORDER_STATUS_PENDING_STOCK, note=row.get('备注', ''))
-        db.add(order)
-        await db.flush()
-        log = InventoryLog(product_id=product.id, change_type='订单创建',
-                           change_quantity=quantity,
-                           change_date=order_date, customer=customer,
-                           related_id=str(order.id), note=f'批量导入订单 {order.order_no}',
-                           # Z06-R6：接第 2 层行级幂等——同一文件重传时同键撞
-                           # uq_inventory_log_idem，该行被跳过而非重复建单。
-                           idem_key=_import_idem_key('order', customer, product.id, quantity, order_date))
-        db.add(log)
+            note=row.get('备注', ''),
+            # Z06-R6：接第 2 层行级幂等——同一文件重传时同键撞
+            # uq_inventory_log_idem，该行被跳过而非重复建单。
+            idem_key=_import_idem_key('order', customer, product.id, quantity, order_date),
+            log_prefix='批量导入订单',
+        )
         return None
 
     from fastapi_app.core.arq_app import IDEMPOTENCY_NAMESPACE_BATCH_IMPORT, job_idempotency
