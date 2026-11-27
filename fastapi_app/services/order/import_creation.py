@@ -27,9 +27,13 @@
 ## 契约
 
 - 本函数**不加锁**。需要库存抵扣/并发敏感的调用方必须先锁产品再调用
-  （锁序 Product → Order；ARQ 与单 Sheet 路径已在调用前取锁）。综合导入路径沿用
-  其历史语义：订单不改物理库存，循环内不额外加锁（抵扣时由
-  ``process_order_deduction`` 自行取锁）。
+  （锁序 Product → Order；ARQ 与单 Sheet 路径已在调用前取锁）。
+- **综合导入路径仍是「先建单、后抵扣时取锁」**（A-M1 残留，2026-11-27 评审）：
+  订单插入会对 ``Product`` 持 FK ``KEY SHARE``，随后 ``process_order_deduction``
+  里的 ``get_product_for_update`` 要升级成 ``FOR UPDATE``——与另一条同时持
+  ``FOR UPDATE`` 的路径交错即成 40P01 死锁环。本函数**不能**替调用方补锁
+  （无锁版本被单 Sheet/ARQ 依赖），综合导入的 deduct 行处理器需自己先
+  ``get_product_for_update`` 再建单。现有测试无法覆盖锁序，勿删本说明。
 - ``auto_generate_for_order`` 在本函数内调用（失败自身吞掉、不影响建单），
   这样三条路径不会再有「忘记带出外发工序」的分支。
 """
@@ -57,7 +61,7 @@ async def create_imported_order(
     deduct_quantity: int = 0,
     idem_key: str | None = None,
     log_prefix: str = '批量导入订单',
-) -> Order:
+) -> tuple[Order, OrderItem]:
     """写一笔导入订单：``Order`` + ``OrderItem`` + ``InventoryLog`` + 外发工序。
 
     Args:
@@ -65,13 +69,16 @@ async def create_imported_order(
         product_name/product_barcode: SKU 快照；调用方手头已有产品对象，避免本函数再查库
             （导入行处理器跑在 savepoint 内，多余查询会被假会话测试直接拒绝）。
         order_date: aware UTC；同时作为库存流水的 ``change_date`` 与幂等键业务日。
-        deduct_stock/deduct_quantity: 抵扣意图；明细落库值按订单数量收口
-            （P1-17：明细与实扣同口径），实际扣减仍由调用方调 ``process_order_deduction``。
+        deduct_stock/deduct_quantity: 抵扣意图；明细先按订单数量收口落库，
+            **实际扣减由调用方调 ``process_order_deduction`` 后按实扣回写**
+            （P1-17：明细必须与实扣同口径，备货不足时实扣 < 申请量）。
         idem_key: 行级幂等键（``batch_import_core._import_idem_key`` 口径），
             由调用方计算以保留各路径的打桩点。
         log_prefix: 流水备注前缀，保留各路径既有文案。
 
-    返回已 flush、``id`` 可用的 ``Order``。
+    返回 ``(order, order_item)``：两者均已 flush、``id`` 可用。调用方在
+    ``process_order_deduction`` 之后必须把返回的实扣量写回
+    ``order_item.deduct_quantity``（先例：``order_batch_create.py:303-312``）。
     """
     order = Order(
         order_no=order_no,
@@ -85,7 +92,7 @@ async def create_imported_order(
     db.add(order)
     await db.flush()
 
-    db.add(OrderItem(
+    order_item = OrderItem(
         order_id=order.id,
         product_id=product_id,
         product_name=product_name,
@@ -96,7 +103,8 @@ async def create_imported_order(
             clamp_deduct_to_quantity(deduct_quantity, quantity) if deduct_stock else 0
         ),
         note=note,
-    ))
+    )
+    db.add(order_item)
     db.add(InventoryLog(
         product_id=product_id,
         change_type='订单',
@@ -113,4 +121,4 @@ async def create_imported_order(
     # 延迟导入：测试与调用方都通过 ``fastapi_app.services.outsource_service`` 打桩。
     from fastapi_app.services.outsource_service import auto_generate_for_order
     await auto_generate_for_order(db, order)
-    return order
+    return order, order_item

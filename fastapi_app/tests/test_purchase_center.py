@@ -1026,6 +1026,31 @@ class TestPurchaseCenterEndpoints:
         assert resp.status_code == 409, f'版本冲突应映射 409，实测 {resp.status_code}: {resp.text}'
 
     @pytest.mark.asyncio
+    async def test_factory_save_409_carries_machine_readable_code(self, client):
+        """两种 409 必须可区分（2026-11-27 跨层评审 High）。
+
+        前端对它们的恢复动作完全不同：``ITEMS_VERSION_CONFLICT`` 重开汇总即可，
+        ``CONFLICT``（状态冲突）重开同一 id 集合会永远 409。``db_transaction``
+        降级成 HTTPException 时原先丢弃 ``e.code``，此处锁定「code 经响应体透出」。
+        """
+        from fastapi_app.core.exceptions import ConflictError, ItemsVersionConflict
+
+        target = ('fastapi_app.api.v1.endpoints.purchase_center.order_routes'
+                  '.svc.save_factory_summary_edits')
+        payload = {'edits': [], 'order_ids': [1], 'spare_rate': 1}
+
+        with patch(target, AsyncMock(side_effect=ItemsVersionConflict())):
+            version_resp = await client.post(
+                '/api/v1/purchase-center/orders/factory-summary/save', json=payload)
+        with patch(target, AsyncMock(side_effect=ConflictError('采购单PO-1状态为completed'))):
+            status_resp = await client.post(
+                '/api/v1/purchase-center/orders/factory-summary/save', json=payload)
+
+        assert version_resp.json().get('code') == 'ITEMS_VERSION_CONFLICT', version_resp.text
+        assert status_resp.json().get('code') == 'CONFLICT', status_resp.text
+        assert 'completed' in status_resp.json().get('detail', ''), status_resp.text
+
+    @pytest.mark.asyncio
     async def test_supplier_summary_empty(self, client):
         resp = await client.post("/api/v1/purchase-center/orders/supplier-summary", json={})
         assert resp.status_code == 422, f"缺 ids 应 422，实测 {resp.status_code}: {resp.text}"

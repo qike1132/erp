@@ -329,7 +329,12 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
             return row_error
         # row_error 为 None ⇒ 产品必然存在
         assert product is not None  # noqa: S101
-        customer = row.get('客户名称', '')
+        # 客户名归一（D-L1，2026-11-27 评审 Low）：Excel 客户列可能是数字/日期等
+        # 非字符串单元格，而 ``validate_customer_name`` 直接 ``.strip()`` 会抛
+        # ``AttributeError``——它不在 ``_import_rows`` 的行级 except 里（只兜
+        # ValueError/TypeError/OSError），整批任务失败。core/service 两条路径都已
+        # ``str(...).strip()``，此处与它们同口径。
+        customer = str(row.get('客户名称', '') or '').strip()
         # 客户主数据校验（D-H2 收敛）：ARQ 路径原先完全不校验，会静默建出
         # 永远关联不到客户的孤儿订单（core/service 两条路径早已校验）。
         is_valid, error_msg = validate_customer_name(customer)
@@ -345,6 +350,7 @@ async def batch_import_orders_task(ctx, file_path: str, original_filename: str, 
         order_date = datetime.now(UTC)  # aware UTC：order_date 为 timestamptz
         # 建单收敛到唯一服务（审计 O-30 / D-H2）：Order + OrderItem + InventoryLog +
         # 外发工序。产品行锁已由 _resolve_row_product 在建单前取得（Product → Order）。
+        # ARQ 订单导入不抵扣备货，故无需回写实扣量（另两条路径会写回）。
         await create_imported_order(
             db,
             order_no=await generate_order_number(db),

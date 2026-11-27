@@ -873,7 +873,7 @@ async def import_orders_from_data(
         # 此处原为 `locked_product.current_stock += qty`，疑为把备货模板
         # （见下方 import_stockins_from_data 的同名行 —— 那里才是对的）复制到订单时漏删，
         # 会让导入来的订单被系统性计入物理库存、并绕过负库存闸门。
-        order = await create_imported_order(
+        order, order_item = await create_imported_order(
             db,
             order_no=order_no,
             product_id=product_id,
@@ -897,19 +897,31 @@ async def import_orders_from_data(
                 # 塞进 order_quantity、不传 custom_deduct_quantity，两列语义在此路径
                 # 碰巧一致（数字=抵扣量、是/yes=整单量）所以没暴露；一旦分叉
                 # （部分抵扣），备货不足告警会拿抵扣量当订单量报错数。改为显式关键字。
-                await deps.process_order_deduction(
+                #
+                # P1-17 同口径（2026-11-27 评审 Medium）：实扣受可用备货收口，
+                # 可能小于申请量——必须把实扣量回写明细（先例 order_batch_create.py:303-312），
+                # 否则该列虚高，明细展示与订单数量下限都会用错值。
+                deducted_amount, _details = await deps.process_order_deduction(
                     db, order, product_id, qty,
                     deduct_stock=True,
                     custom_deduct_quantity=deduct_value,
                     product=product,
                 )
+                order_item.deduct_quantity = int(deducted_amount)
         except (ValueError, TypeError, SQLAlchemyError) as e:
             # 第八轮审计：原仅 logger.error 后仍 return True —— 该行计入 imported，
-            # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为 return False：
-            # 抵扣失败 = 该行失败（savepoint 回滚本行），用户在错误清单里可见。
-            logger.error(f"订单导入 - 行{idx}: 抵扣处理失败，本行按失败处理: {e}", exc_info=True)
-            debug_messages.append(f"行{idx}: 抵扣备货处理失败: {e}")
-            return False
+            # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为抛出让
+            # 骨架回滚本行 savepoint。
+            #
+            # 2026-11-27 跨层评审 Medium（X-M3）：原先 `return False` 只让骨架把行
+            # 计入 skipped——`_run_import_row` 的 `async with db.begin_nested()` 在
+            # handler **正常返回**时会提交 savepoint，订单/明细/流水/外发工序全部
+            # 落库，用户却看到该行失败（与单 Sheet 路径的抛异常语义不一致）。
+            # 抛出后骨架统一回滚本行并记行级错误消息。
+            logger.error(f"订单导入 - 行{idx}: 抵扣处理失败，本行回滚: {e}", exc_info=True)
+            # 包一层保留用户可见语义：骨架会把异常原文写进行级错误清单，
+            # 裸抛 ``e`` 时用户只看到底层驱动/业务原文，看不出是抵扣环节失败。
+            raise ValueError(f'抵扣备货处理失败: {e}') from e
 
         return True
 

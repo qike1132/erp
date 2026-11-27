@@ -1,6 +1,6 @@
 import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
-import { getErrorStatus } from '@/types/errors'
+import { getErrorCode, getErrorMessage, getErrorStatus } from '@/types/errors'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
 import { summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, allocateOrderDisplayQuantities, parseQtyInput, computeDiffSnapshot } from './perSkuRows'
@@ -562,7 +562,16 @@ export function useSummaryModal() {
       } catch (err) {
         cancelQtyEdit(gi, si, fi)
         if (qtyEpoch !== epochAtSend) return
-        if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        if (getErrorStatus(err) === 409) {
+          // 两种 409 的恢复动作不同（2026-11-27 跨层评审 High）：
+          // - ITEMS_VERSION_CONFLICT（BOM/明细被并发改）→ 重开汇总拉新版本即可；
+          // - CONFLICT（采购单已非 pending/confirmed）→ 重开同一个 id 集合永远
+          //   继续 409（汇总接口不按状态过滤），必须把已完成单从重试集合里剔除，
+          //   否则用户被锁死在「BOM 已更新」的假提示里无法保存同选的其他单。
+          if (getErrorCode(err) === 'CONFLICT') {
+            toast.warning(getErrorMessage(err, '选中的采购单中有已完成单据，请取消勾选后重试'))
+            return
+          }
           toast.warning('BOM 已更新，采购明细已刷新，请重新编辑')
           if (open.value && orderIds.value.length > 0) {
             lossRateEpoch += 1
@@ -973,6 +982,14 @@ export function useSummaryModal() {
         if (lastSentEpoch !== lossRateEpoch) return
         lossRateSaveState.value = 'error'
         if (getErrorStatus(err) === 409) {
+          // 与数量保存同口径：状态冲突（CONFLICT）不适合同 id 集合重开——已完成单
+          // 会继续留在汇总里，重试永远 409；直接把后端 detail 给用户（含单号）。
+          if (getErrorCode(err) === 'CONFLICT') {
+            const conflictError = new Error(
+              getErrorMessage(err, '选中的采购单中有已完成单据，请取消勾选后重试'))
+            conflictError.cause = err
+            throw conflictError
+          }
           // 行级率现在带 items_version：弹窗期间任一采购单的 BOM 被同步就会 409。
           // 不刷新快照的话，之后每次改行级率都会继续 409，只能关掉重开。
           // 刷新前先作废本轮待发值：否则刷新窗口内输入的行级率会留在队列里，

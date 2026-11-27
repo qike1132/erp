@@ -8,7 +8,7 @@
 export interface ApiError {
   response?: {
     status?: number
-    data?: { detail?: string; message?: string }
+    data?: { detail?: string; message?: string; code?: string }
   }
   message?: string
 }
@@ -56,6 +56,18 @@ export function getErrorMessage(err: unknown, fallback = '操作失败，请重�
     || err.response?.data?.message
     || localizeNetworkMessage(err.message || '')
     || fallback
+}
+
+/**
+ * 从 API 错误中提取机器可读错误码（后端 ``code`` 字段）
+ *
+ * 只有后端显式提供时才存在（``db_transaction`` 降级的 AppError 经
+ * ``X-Error-Code`` → 响应体 ``code``）；普通 HTTPException 无此字段，
+ * 调用方必须按 undefined 处理。
+ */
+export function getErrorCode(err: unknown): string | undefined {
+  if (!isApiError(err)) return undefined
+  return err.response?.data?.code
 }
 
 /**

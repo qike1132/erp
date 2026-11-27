@@ -444,7 +444,7 @@ async def import_orders_service(
             # 外发工序一并写入。此前这里内联建单且漏 OrderItem → 湖北页看不到导入订单。
             # SKU 快照取**已加锁**的产品行（get_product_for_update 带 populate_existing，
             # 比循环前预加载的 map 新）。
-            order = await create_imported_order(
+            order, order_item = await create_imported_order(
                 db,
                 order_no=order_no,
                 product_id=product_id,
@@ -466,12 +466,18 @@ async def import_orders_service(
                 # （都是扣这么多），但「是/yes」折算成 qty 后 order_quantity 与订单
                 # 真实数量相等、掩盖了差异；一旦两列语义分叉（如部分抵扣），
                 # 备货不足的告警会拿抵扣量当订单量报错数。改为显式关键字，按签名传。
-                await process_order_deduction(
+                #
+                # P1-17 同口径（2026-11-27 评审 Medium）：实扣受可用备货收口，
+                # 可能小于申请量——必须把实扣量回写明细，否则 purchase/_unprocessed
+                # 把该列当「已抵扣」展示、订单明细数量下限按虚高值卡住用户改数量
+                # （先例：order_batch_create.py:303-312）。
+                deducted_amount, _details = await process_order_deduction(
                     db, order, product_id, qty,
                     deduct_stock=True,
                     custom_deduct_quantity=deduct_value,
                     product=locked_product,
                 )
+                order_item.deduct_quantity = int(deducted_amount)
             return True, None
 
         return await _run_sheet_rows(

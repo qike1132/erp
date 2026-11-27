@@ -453,6 +453,58 @@ async def test_factory_save_spare_rate_rejects_completed_order(db):
     assert po.spare_rate is None
 
 
+async def test_factory_save_allows_pending_edit_when_unwritten_completed_order_selected(db):
+    """状态校验只覆盖**真正会写入**的单（2026-11-27 跨层评审 High）。
+
+    复现：待生产列表勾选 A、B → 单独完成 B → 汇总里改 A 的数量。前端仍带着
+    ``order_ids=[A,B]``（回显集合）且 ``spare_rate=None``（不写损耗率），
+    但只有 A 的明细被编辑。修复前状态守卫对 B 也要求 pending → 整次保存 409，
+    且前端用同一 id 集合重开汇总后永远自愈不了（汇总接口不按状态过滤）。
+    """
+    await _seed(db)                                    # 8101 pending，明细 1/2
+    await _seed(db, po_id=8102, status='completed')    # 已完成，仅作为回显集合成员
+
+    result = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+        order_ids=[8101, 8102], spare_rate=None,
+    )
+
+    assert result['updated_count'] == 1
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 60.0
+    # 未被写入的 completed 单保持原状
+    assert float((await db.get(PurchaseOrderItem, 11)).quantity) == 50.0
+
+
+async def test_factory_save_spare_rate_still_rejects_completed_order_in_order_ids(db):
+    """``spare_rate`` 非 None 时 order_ids 会被真实写入 → 其中含 completed 单必须 409。
+
+    这是上一条的对照组：收窄范围只放行「不会被写」的单，不能把真实写入也放掉。
+    """
+    await _seed(db)
+    await _seed(db, po_id=8102, status='completed')
+
+    with pytest.raises(ConflictError) as exc:
+        await save_factory_summary_edits(
+            db, [], 'tester', spare_rate=30, order_ids=[8101, 8102],
+        )
+    assert exc.value.status_code == 409
+    assert (await db.get(PurchaseOrder, 8101)).spare_rate is None
+
+
+async def test_factory_save_allows_confirmed_order(db):
+    """CONFIRMED 放行（owner 2026-11-27 裁决）：它与待生产列表口径一致
+    （``usePurchaseOrders`` 查询 pending,confirmed），完成路径也接受它。"""
+    await _seed(db, status='confirmed')
+
+    result = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+        order_ids=[8101], items_versions={8101: 0},
+    )
+
+    assert result['updated_count'] == 1
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 60.0
+
+
 # ============================================================
 # 终审修复：审计删除行快照 / 用户编辑递增 items_version / 大批量告警
 # ============================================================

@@ -110,6 +110,11 @@ export function usePurchaseOrders(options?: {
   async function completeOrder(orderId: number, spareRate?: number) {
     const res = (await purchaseApi.completeOrder(orderId, spareRate)) as ApiResponse
     if (res.success) {
+      // 完成后该单离开 pending,confirmed 列表但仍留在 selectedIds 里 → 汇总请求
+      // 会带着它（order_ids 回显集合），触发服务端状态冲突 409（2026-11-27 跨层
+      // 评审 High 的入口）。完成即从选中集合剪枝，与批量完成路径同口径。
+      const idx = selectedIds.value.indexOf(orderId)
+      if (idx >= 0) selectedIds.value.splice(idx, 1)
       await load()
       return true
     }

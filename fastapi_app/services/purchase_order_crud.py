@@ -782,15 +782,25 @@ def _items_version_lock_stmt(po_ids: list[int]):
 
 async def _validate_factory_edit_targets(
     db: AsyncSession, data: list, order_ids: list[int] | None,
-    items_versions: dict[int, int] | None,
+    items_versions: dict[int, int] | None, spare_rate: float | None = None,
 ) -> None:
-    """写前锁住本次会写入的采购单，校验状态（仅 pending 可改）与客户端版本。
+    """写前锁住本次会写入的采购单，校验状态（pending/confirmed 可改）与客户端版本。
 
     状态校验**无条件执行**：旧客户端不传 ``items_versions`` 时版本校验整段跳过，
     而「下单完成」会冻结明细语义（来料登记 ``ordered_quantity`` 是完成时快照，
     全仓没有跟随更新语句，收货上限会按旧值永久卡死 —— E-H1，2026-11-27 审计）。
-    口径与 ``bom_sync.py``「写明细前显式冻结非 pending」一致；``CONFIRMED`` 仅为
-    存量历史状态，现行写路径不产生，是否放行留给 owner 决策（见 PR 描述）。
+    ``CONFIRMED`` 放行：它是待生产列表的正式口径（``usePurchaseOrders`` 查询
+    ``pending,confirmed``），完成路径也接受它（owner 2026-11-27 裁决）。
+
+    **状态只校验真正会被写入的单**（2026-11-27 跨层评审 High）：
+    - 编辑项命中的明细所属单（``_apply_item_edit_entries`` 只写这些单）；
+    - 仅当 ``spare_rate is not None`` 时才包含 ``order_ids``——该参数在
+      ``_write_spare_rate_to_orders`` 里 None 直接 return 0，此时 ``order_ids``
+      只是前端回显的选中集合（含已 completed 的历史单），校验它会让「待生产列表
+      勾选 A、B → 完成 B → 汇总里改 A 数量」整次保存 409，且前端按同一 id 集合
+      重开汇总后永远无法自愈。
+    锁与版本校验仍覆盖**全部**涉及单（``order_ids`` ∪ 编辑项所属单），保持既有
+    乐观锁语义——版本快照来自同一次汇总请求，包含哪些单就该校验哪些单。
 
     版本校验只比对 ``items_versions`` 中显式给出的采购单：None / 空 dict
     （旧客户端）不校验；给出但不在本次涉及集合内的单不参与比对（避免无关单
@@ -807,14 +817,20 @@ async def _validate_factory_edit_targets(
         if entry.get('quantity') is None and entry.get('loss_rate') is None:
             continue
         edited_item_ids.update(entry['item_ids'])
-    scope_po_ids: set[int] = {oid for oid in (order_ids or []) if oid}
+    edited_po_ids: set[int] = set()
     if edited_item_ids:
         rows = await db.execute(
             select(PurchaseOrderItem.id, PurchaseOrderItem.order_id).where(
                 PurchaseOrderItem.id.in_(edited_item_ids)
             )
         )
-        scope_po_ids.update(row.order_id for row in rows.all())
+        edited_po_ids.update(row.order_id for row in rows.all())
+
+    # 锁/版本范围：全部涉及单。状态范围：只有真正会写的单。
+    scope_po_ids: set[int] = {oid for oid in (order_ids or []) if oid} | edited_po_ids
+    status_po_ids: set[int] = set(edited_po_ids)
+    if spare_rate is not None:
+        status_po_ids.update(oid for oid in (order_ids or []) if oid)
     if not scope_po_ids:
         return
 
@@ -825,10 +841,12 @@ async def _validate_factory_edit_targets(
         # 不存在的 id 保持旧行为：静默跳过（写路径零命中，不会产生任何写入）
         if row is None:
             continue
-        if row.status != PurchaseOrderStatus.PENDING:
+        if po_id in status_po_ids and row.status not in (
+            PurchaseOrderStatus.PENDING, PurchaseOrderStatus.CONFIRMED,
+        ):
             raise ConflictError(
                 f'采购单{row.order_no}状态为{row.status}，'
-                f'仅待完成（pending）的采购单可修改数量/损耗率'
+                f'仅待完成（pending）或已确认待生产（confirmed）的采购单可修改数量/损耗率'
             )
         if items_versions and po_id in items_versions:
             if (row.items_version or 0) != items_versions[po_id]:
@@ -978,14 +996,18 @@ async def save_factory_summary_edits(
     - `spare_rate` 非 None 时，对「被编辑明细所属采购单 ∪ order_ids」覆盖写率与备品。
     - `items_versions`：客户端持有的（采购单 ID → 明细版本）快照；非空时在
       **任何写入之前**逐单比对，过期即抛 ``ItemsVersionConflict``（409）。
-    - **非 pending 的采购单整体拒绝**（409，``ConflictError``）：完成后明细语义
-      已按来料登记快照冻结，改数量/损耗率会让收货上限永久对不上（E-H1）。
-      该守卫在任何写入之前执行，且不依赖 `items_versions`（旧客户端同样拦）。
+    - **会被写入的采购单**若状态不是 pending/confirmed 则整体拒绝（409，
+      ``ConflictError``）：完成后明细语义已按来料登记快照冻结，改数量/损耗率会让
+      收货上限永久对不上（E-H1）。该守卫在任何写入之前执行，且不依赖
+      ``items_versions``（旧客户端同样拦）。状态校验范围严格等于写入范围——
+      ``spare_rate is None`` 时 ``order_ids`` 不写入，故也不参与状态校验
+      （2026-11-27 跨层评审 High：否则前端回显的已完成单会拖死同选的其他单）。
 
     返回值额外带 ``items_versions``（本次实际递增过版本的采购单 → 新版本）：
     客户端保存成功后用它前移本地版本快照，避免同一弹窗内连续保存第二次带旧版本 409。
     """
-    await _validate_factory_edit_targets(db, data, order_ids, items_versions)
+    await _validate_factory_edit_targets(
+        db, data, order_ids, items_versions, spare_rate)
 
     # 实际发生明细变更的采购单（数量/损耗率写前比对，同值重发不算）。
     changed_po_ids: set[int] = set()

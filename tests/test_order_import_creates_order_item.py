@@ -27,6 +27,7 @@ Red（修复前）：三个用例在断言 1 即失败（无明细）。
 """
 import os
 import tempfile
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -44,6 +45,8 @@ from fastapi_app.shared_models import (
     OrderOutsourceProcess,
     OutsourceProcessType,
     Product,
+    StockIn,
+    StockOut,
 )
 
 _HUBEI = '湖北'
@@ -152,6 +155,133 @@ async def test_sheet_import_endpoint_creates_order_item(async_db_session, monkey
 
     assert result.imported == 1, result.message
     await _assert_created(async_db_session, order_no, product)
+
+
+# ============================================================
+# D-M1（2026-11-27 评审 Medium）：导入抵扣必须按**实扣**回写
+# ============================================================
+
+_DEDUCT_WANT = 5      # 申请抵扣 5 件
+_DEDUCT_AVAILABLE = 2  # 实际可用备货只有 2 件 → 实扣被收口到 2
+
+
+async def _seed_stockin(db, product: Product, customer: str) -> None:
+    """只备 ``_DEDUCT_AVAILABLE`` 件 → ``process_order_deduction`` 实扣 < 申请量。
+
+    备货归属客户的匹配键是 ``StockIn.customer == order.customer``（见
+    ``order_deduction_service``），故必须传入订单客户。抵扣同时走
+    ``update_stock_with_optimistic_lock`` 的负库存闸门，故产品 ``current_stock``
+    必须不小于实扣量（备货入库本身不自动加库存）。
+    """
+    product.current_stock = _DEDUCT_AVAILABLE
+    db.add(StockIn(
+        stockin_no=f'SI-DM1-{product.id}', product_id=product.id,
+        quantity=_DEDUCT_AVAILABLE, customer=customer,
+        stockin_date=datetime(2026, 11, 27, tzinfo=UTC),
+    ))
+    await db.flush()
+
+
+async def _assert_deduct_writeback(db, order_no: str, product: Product) -> None:
+    order = (await db.execute(
+        select(Order).where(Order.order_no == order_no)
+    )).scalar_one()
+    item = (await db.execute(
+        select(OrderItem).where(OrderItem.order_id == order.id)
+    )).scalar_one()
+    # 修复前落 clamp(申请 5, 订单量) = 5，而 StockOut 实扣只有 2 → 明细虚高
+    assert item.deduct_quantity == _DEDUCT_AVAILABLE, (
+        f'OrderItem.deduct_quantity 必须等于实扣 {_DEDUCT_AVAILABLE}，'
+        f'实际 {item.deduct_quantity}（P1-17 同口径，先例 order_batch_create.py:303-312）')
+    stockouts = (await db.execute(
+        select(StockOut).where(StockOut.order_id == order.id)
+    )).scalars().all()
+    assert sum(s.quantity for s in stockouts) == _DEDUCT_AVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_comprehensive_import_writes_back_actual_deducted_quantity(
+    app_on_test_db, async_db_session, monkeypatch,
+):
+    """综合导入：申请 5、可用 2 → 明细必须落 2 而非 5（D-M1）。
+
+    ``app_on_test_db``：取号内核（``generate_stockout_number``）走独立短事务 +
+    全局引擎，必须先把它重定向到测试库（先例 test_batch_deduction_writeback.py）。
+    """
+    from fastapi_app.core.database import ensure_engine_for_current_loop
+    await ensure_engine_for_current_loop()
+    customer, product = await _seed(async_db_session, 'dwcore')
+    await _seed_stockin(async_db_session, product, customer)
+    _isolate_post_commit_hooks(monkeypatch)
+    order_no = 'SO-DM1-CORE'
+
+    deps = bic.ImportDeps(generate_order_number=AsyncMock(return_value=order_no))
+    count, messages = await bic.import_orders_from_data(
+        async_db_session,
+        [{'客户名称': customer, '产品名称': product.name, '数量': _QTY,
+          '抵扣备货': _DEDUCT_WANT}],
+        deps=deps,
+    )
+
+    assert count == 1, messages
+    await _assert_deduct_writeback(async_db_session, order_no, product)
+
+
+@pytest.mark.asyncio
+async def test_sheet_import_writes_back_actual_deducted_quantity(
+    app_on_test_db, async_db_session, monkeypatch,
+):
+    """单 Sheet 端点：申请 5、可用 2 → 明细必须落 2 而非 5（D-M1）。"""
+    from fastapi_app.core.database import ensure_engine_for_current_loop
+    await ensure_engine_for_current_loop()
+    customer, product = await _seed(async_db_session, 'dwsheet')
+    await _seed_stockin(async_db_session, product, customer)
+    _isolate_post_commit_hooks(monkeypatch)
+    order_no = 'SO-DM1-SHEET'
+
+    async def _read_rows(_file, _keywords, _missing):
+        return [{'客户名称': customer, '产品名称': product.name, '订单数量': _QTY,
+                 '抵扣备货': _DEDUCT_WANT}], None
+
+    monkeypatch.setattr(bis, '_validate_xlsx_file', lambda _f: None)
+    monkeypatch.setattr(bis, '_read_excel_sheets', _read_rows)
+    monkeypatch.setattr(bis, 'generate_order_number', AsyncMock(return_value=order_no))
+
+    result = await bis.import_orders_service(
+        async_db_session, SimpleNamespace(filename='orders.xlsx'))
+
+    assert result.imported == 1, result.message
+    await _assert_deduct_writeback(async_db_session, order_no, product)
+
+
+@pytest.mark.asyncio
+async def test_comprehensive_import_deduction_failure_rolls_back_row(async_db_session, monkeypatch):
+    """抵扣失败必须回滚整行（X-M3）：修复前 ``return False`` 只计 skipped，
+    savepoint 正常提交 → 订单/明细/流水已落库，用户却看到该行失败。"""
+    customer, product = await _seed(async_db_session, 'rollback')
+    _isolate_post_commit_hooks(monkeypatch)
+    failing_order_no = 'SO-DM1-ROLLBACK'
+
+    async def _boom(*_args, **_kwargs):
+        raise ValueError('模拟抵扣失败')
+
+    deps = bic.ImportDeps(
+        generate_order_number=AsyncMock(return_value=failing_order_no),
+        process_order_deduction=_boom,
+    )
+    count, messages = await bic.import_orders_from_data(
+        async_db_session,
+        [{'客户名称': customer, '产品名称': product.name, '数量': _QTY,
+          '抵扣备货': _DEDUCT_WANT}],
+        deps=deps,
+    )
+
+    assert count == 0, messages
+    assert any('抵扣备货处理失败' in m for m in messages), messages
+    orphan = (await async_db_session.execute(
+        select(Order).where(Order.order_no == failing_order_no)
+    )).scalars().all()
+    assert orphan == [], '抵扣失败的行不得留下订单（savepoint 必须回滚）'
 
 
 def _arq_rows(customer: str, product: Product) -> list[dict]:
