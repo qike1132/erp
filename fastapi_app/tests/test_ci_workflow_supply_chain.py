@@ -40,3 +40,19 @@ def test_ci_workflow_declares_minimal_permissions() -> None:
     text = (WF / 'ci-cd.yml').read_text(encoding='utf-8')
     assert re.search(r'^permissions:', text, re.MULTILINE), '未声明顶层 permissions'
     assert 'contents: read' in text
+
+
+def test_refresh_workflow_only_skips_on_open_pr() -> None:
+    """刷新机器人独占的分支上会累积已 MERGED 的历史 PR（本仓 #26）。
+
+    2026-11-27：旧实现用 ``gh pr view "$branch" --json number`` 判断「已有 PR」，
+    会命中已合并的旧 PR 而跳过创建，导致每周推送的新提交永远没有 PR、跑不了 CI
+    （aee8027e 因此悬空）。只允许 state=OPEN 走跳过分支。
+    """
+    text = (WF / 'refresh-requirements-lock.yml').read_text(encoding='utf-8')
+    assert '--json state' in text, '必须按 PR 状态判断，而非「该分支上存在任意 PR」'
+    assert re.search(r'if \[ "\$pr_state" = "OPEN" \]; then', text), \
+        '只有 OPEN 状态才允许跳过创建 PR'
+    assert re.search(r"--json state --jq '\.state'[^\n]*\|\| true", text), \
+        '必须用 --jq 取纯状态值，并用 || true 兜住「无 PR 时 gh 非零退出」（set -e 会杀 job）'
+    assert '--json number' not in text, '旧判断（--json number）会把已合并 PR 误当打开中'

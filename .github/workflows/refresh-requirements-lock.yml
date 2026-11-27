@@ -78,7 +78,12 @@ jobs:
           # 机器人独占的临时分支：用 --force 覆盖上一轮未合并的刷新结果
           git push --force origin "$branch"
 
-          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+          # 2026-11-27：`gh pr view <branch>` 会匹配到该分支上已 MERGED/CLOSED 的
+          # 历史 PR（本仓 #26 即如此），旧判断据此误以为「已有打开的 PR」而跳过创建，
+          # 结果机器人每周推的新提交永远不建 PR、不跑 CI（aee8027e 就是这么悬空的）。
+          # 只有 state=OPEN 才算「已有 PR」；已合并/已关闭的一律新建。
+          pr_state="$(gh pr view "$branch" --json state --jq '.state' 2>/dev/null || true)"
+          if [ "$pr_state" = "OPEN" ]; then
             echo "已有打开的刷新 PR，分支内容已更新（无需重复创建）"
           elif gh pr create --base main --head "$branch" \
               --title "chore(deps): 刷新 requirements 锁（上游漂移）" \
