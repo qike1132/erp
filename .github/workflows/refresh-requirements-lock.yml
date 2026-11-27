@@ -16,6 +16,13 @@ name: Refresh requirements locks
 # 若仓库未开启「Allow GitHub Actions to create and approve pull requests」，
 # PR 创建会失败——此时分支已推送，job 打 warning 并给出一键开 PR 的地址，
 # 主分支仍然不受影响。
+#
+# 2026-11-27 修正：判定「已存在 PR」曾用 `gh pr view <branch>`，它会命中该分支
+# 历史上**任意状态**的 PR（本仓实测解析到已 MERGED 的 #26）→ 机器人每周把新
+# 提交推上分支却永远跳过创建，这些提交既不触发 CI 也不会被评审合并。现只认
+# OPEN（`gh pr list --state open`）。历史 MERGED/CLOSED 的旧 PR 与同一 head
+# 分支不冲突：分支由本工作流独占并每轮 force-push 重建，GitHub 只拒绝同一
+# head+base 已存在 OPEN PR 的情况。
 
 on:
   schedule:
@@ -78,15 +85,24 @@ jobs:
           # 机器人独占的临时分支：用 --force 覆盖上一轮未合并的刷新结果
           git push --force origin "$branch"
 
-          if gh pr view "$branch" --json number >/dev/null 2>&1; then
-            echo "已有打开的刷新 PR，分支内容已更新（无需重复创建）"
+          # 只认 OPEN 状态的 PR。`gh pr view <branch>` 会解析该分支上任意状态的
+          # PR（实测解析到已 MERGED 的 #26），据此跳过创建会让新提交永不进 CI；
+          # 用 `pr list --state open --base main` 显式限定（与下方 pr create 的
+          # base 对齐，避免同分支指向其它 base 的 OPEN PR 造成误跳过），未命中
+          # 时再创建（旧 MERGED/CLOSED PR 不影响以同一 head 分支开新 PR，见文件头）。
+          open_pr="$(gh pr list --head "$branch" --state open --base main \
+            --json number,url --jq '(.[0] // empty) | "#\(.number) \(.url)"')"
+
+          if [ -n "$open_pr" ]; then
+            echo "已有打开的刷新 PR（${open_pr}），分支内容已更新（无需重复创建）"
           elif gh pr create --base main --head "$branch" \
               --title "chore(deps): 刷新 requirements 锁（上游漂移）" \
               --body "由 Refresh requirements locks 工作流自动生成。
 
           - 变更范围：仅 \`requirements/*.lock\`（uv pip compile 重新解析）
           - 本 PR 会跑完整 CI，其中「Check requirements lock freshness」确认锁与声明一致
-          - 合并由人评审：新版本进入 main 前必须有人看过 diff"; then
+          - 合并由人评审：新版本进入 main 前必须有人看过 diff
+          - head 分支为机器人独占，历次刷新 PR 复用同一分支名；旧 PR 即使已 merged/closed 也不妨碍本 PR 创建"; then
             echo "已创建 PR"
           else
             echo "::warning::无法自动创建 PR（仓库可能未允许 Actions 创建 PR）。分支 $branch 已推送，请手动开 PR：https://github.com/${{ github.repository }}/compare/main...$branch?expand=1"
