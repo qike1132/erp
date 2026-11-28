@@ -6,7 +6,6 @@ export const iconMap: Record<string, string> = {
   stock: 'fas fa-warehouse',
   customer: 'fas fa-user',
   supplier: 'fas fa-truck',
-  approval: 'fas fa-clipboard-check',
   purchase: 'fas fa-store',
   material: 'fas fa-cubes',
   batch: 'fas fa-table-cells',

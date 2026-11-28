@@ -49,7 +49,7 @@ function apiResponse(path) {
   if (path === '/api/v1/dashboard/stats') {
     return { status: 200, body: { success: true, data: {
       order_today: 7, order_yesterday: 5, stockin_today: 3, stockin_yesterday: 2,
-      stockout_today: 4, stockout_yesterday: 1, pending_approvals: 0, low_stock_count: 0,
+      stockout_today: 4, stockout_yesterday: 1, low_stock_count: 0,
       pending_purchases: 0, pending_materials: 0,
     } } }
   }

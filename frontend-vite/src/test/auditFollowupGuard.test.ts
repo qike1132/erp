@@ -1,14 +1,12 @@
 /**
- * AUD-10/11/12（2026-10-24 上线前审计）前端回归锁：
+ * AUD-10/12（2026-10-24 上线前审计）前端回归锁：
  * 1. useSamplingProject 三函数重入守卫——双击「创建」曾并发发出两个 createProject
  *    建出两个重复打样项目（按钮/hook/函数三层均无防护）；
- * 2. useApproval.handleApprove 失败后必须复位 actionId——原先该行按钮永久
- *    禁用显示「处理中…」直到刷新；
- * 3. DashboardMobile Hero 标签与数据一致——orders.total_qty 是全历史累计，
+ * 2. DashboardMobile Hero 标签与数据一致——orders.total_qty 是全历史累计，
  *    原标签「本月订单」恒显示累计值（AUD-12）。
+ * （AUD-11 useApproval 失败复位已随审批系统下线移除，2026-11-28。）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref } from 'vue'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -54,44 +52,6 @@ describe('AUD-10 useSamplingProject 重入守卫', () => {
     await create({} as never)
     await create({} as never)
     expect(createProjectMock).toHaveBeenCalledTimes(2)
-  })
-})
-
-describe('AUD-11 useApproval.handleApprove 失败复位', () => {
-  const { approveMock, invalidateMock } = vi.hoisted(() => ({
-    approveMock: vi.fn(),
-    invalidateMock: vi.fn(),
-  }))
-
-  vi.mock('@/api', () => ({
-    approvalApi: { approve: approveMock },
-  }))
-  vi.mock('@/composables/useToast', () => ({ showToast: vi.fn() }))
-  vi.mock('@/composables/useDebouncedSearch', () => ({
-    useDebouncedSearch: () => ({ debounced: ref('') }),
-  }))
-  vi.mock('@tanstack/vue-query', () => ({
-    useQuery: () => ({ data: ref([]), isFetching: ref(false) }),
-    useQueryClient: () => ({ invalidateQueries: invalidateMock }),
-  }))
-
-  it('approve 抛错后 actionIds 移除该行（按钮不得永久卡「处理中…」）', async () => {
-    approveMock.mockRejectedValue({ response: { data: { detail: '网络错误' } } })
-    const { useApproval } = await import('../views/approval/composables/useApproval')
-    const { handleApprove, actionIds } = useApproval()
-    await handleApprove({ id: 42 } as never)
-    // L-19（2026-11-21 审计）：actionId 单值改 Set，复位 = 从集合删除该行 id
-    expect(actionIds.value.has(42)).toBe(false)
-    expect(actionIds.value.size).toBe(0)
-  })
-
-  it('approve 成功路径同样复位', async () => {
-    approveMock.mockResolvedValue({ success: true })
-    const { useApproval } = await import('../views/approval/composables/useApproval')
-    const { handleApprove, actionIds } = useApproval()
-    await handleApprove({ id: 43 } as never)
-    expect(actionIds.value.has(43)).toBe(false)
-    expect(actionIds.value.size).toBe(0)
   })
 })
 

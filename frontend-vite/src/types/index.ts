@@ -145,8 +145,6 @@ export interface OrderItem {
   customer?: string
   /** 产品对象（列表接口 include_product=True 时返回 { id, name, barcode, image }） */
   product?: { id?: number; name?: string; barcode?: string; image?: string }
-  is_locked?: boolean
-  locked_by_name?: string
   /** 主订单下的 SKU 明细列表（多 SKU 聚合时 >1） */
   items?: OrderSKU[]
 }
@@ -347,25 +345,6 @@ export interface OneClickGenerateResponse {
   idempotent: boolean
   orders: GeneratedOrderRef[]
   missing_bom: MissingBomProduct[]
-}
-
-export interface ApprovalItem {
-  id: number
-  order_id: number
-  order_no: string | null
-  requester_id: number
-  requester_name: string | null
-  operation_type: string
-  operation_type_display: string
-  operation_data: string | null
-  status: string
-  status_display: string
-  request_time: string | null
-  approver_id: number | null
-  approver_name: string | null
-  approval_time: string | null
-  rejection_reason: string | null
-  lock_time: string | null
 }
 
 export interface User {
@@ -705,10 +684,9 @@ export interface OrderBatchItem {
   status: string | null
   batch_no: string | null
   batch_completed_at: string | null
-  is_locked: boolean | null
 }
 
-export type BatchQueryItem = WithRequired<GenBatchQueryItem, 'order_date' | 'product_name' | 'product_barcode' | 'deducted_qty' | 'shipped_qty' | 'status' | 'computed_status' | 'batch_no' | 'batch_completed_at' | 'is_locked'>
+export type BatchQueryItem = WithRequired<GenBatchQueryItem, 'order_date' | 'product_name' | 'product_barcode' | 'deducted_qty' | 'shipped_qty' | 'status' | 'computed_status' | 'batch_no' | 'batch_completed_at'>
 
 export interface BatchNoUpdatePayload {
   batch_no: string | null
@@ -723,15 +701,6 @@ export interface BatchAssignPayload {
 
 export interface BatchCompletePayload {
   batch_no: string
-}
-
-export interface ApprovalListResult {
-  success: boolean
-  data: ApprovalItem[]
-  total: number
-  pending_count: number
-  approved_count: number
-  rejected_count: number
 }
 
 export interface Registration {

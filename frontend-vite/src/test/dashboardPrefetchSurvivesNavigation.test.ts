@@ -29,7 +29,7 @@ function mockAxiosHonoringAbort() {
   return vi.spyOn(service, 'get').mockImplementation(((_url: string, config?: { signal?: AbortSignal }) => {
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(
-        () => resolve({ success: true, data: { order_today: 5, stockin_today: 3, pending_approvals: 1 } }),
+        () => resolve({ success: true, data: { order_today: 5, stockin_today: 3 } }),
         50,
       )
       config?.signal?.addEventListener('abort', () => {

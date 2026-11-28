@@ -163,7 +163,7 @@ export function useReportRowActions() {
     }
     const ok = await confirmDialog.confirm(
       `确定删除明细「${rowStr(row, 'product_name')}」吗？`,
-      '若这是该订单的最后一个 SKU，将删除整张订单（非管理员需走审批）。此操作不可撤销。',
+      '若这是该订单的最后一个 SKU，将删除整张订单。此操作不可撤销。',
       'danger',
     )
     if (!ok) return

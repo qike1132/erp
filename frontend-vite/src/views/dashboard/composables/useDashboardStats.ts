@@ -41,7 +41,7 @@ const FALLBACK_STATS: Record<string, number> = {
   order_today: 0, order_yesterday: 0,
   stockin_today: 0, stockin_yesterday: 0,
   stockout_today: 0, stockout_yesterday: 0,
-  pending_approvals: 0, low_stock_count: 0,
+  low_stock_count: 0,
   pending_purchases: 0, pending_materials: 0,
 }
 
@@ -53,7 +53,7 @@ async function fetchStats(): Promise<Record<string, number>> {
   if (resp && typeof resp === 'object') {
     if ('data' in resp && resp.data && typeof resp.data === 'object') {
       raw = resp.data as Record<string, number>
-    } else if ('order_today' in resp || 'stockin_today' in resp || 'pending_approvals' in resp) {
+    } else if ('order_today' in resp || 'stockin_today' in resp) {
       raw = resp as Record<string, number>
     }
   }
@@ -69,7 +69,6 @@ async function fetchStats(): Promise<Record<string, number>> {
     stockin_yesterday: Number(raw.stockin_yesterday) || 0,
     stockout_today: Number(raw.stockout_today) || 0,
     stockout_yesterday: Number(raw.stockout_yesterday) || 0,
-    pending_approvals: Number(raw.pending_approvals) || 0,
     low_stock_count: Number(raw.low_stock_count) || 0,
     pending_purchases: Number(raw.pending_purchases) || 0,
     pending_materials: Number(raw.pending_materials) || 0,

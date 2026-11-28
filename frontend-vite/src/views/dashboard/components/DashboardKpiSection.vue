@@ -61,15 +61,6 @@ const kpiCards = computed(() => [
     accent: 'amber' as const,
   },
   {
-    key: 'pending',
-    label: '待审批',
-    value: props.stats?.pending_approvals ?? 0,
-    trend: 0,
-    trendText: '',
-    icon: 'fa-clipboard-check',
-    accent: 'red' as const,
-  },
-  {
     key: 'material',
     label: '待备料',
     value: props.stats?.pending_materials ?? 0,
