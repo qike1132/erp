@@ -188,11 +188,17 @@ describe('useSummaryLeaveGuard：未保存修改离开确认', () => {
     expect(summary.close).toHaveBeenCalled()
   })
 
-  it('脏态（损耗率在途）+ 用户取消 → 拦截（false）、不 close', async () => {
-    const { guard, confirm, summary } = setup({ lossRateTouched: true }, false)
+  it('损耗率失败残留（error）+ 用户取消 → 拦截（false）、不 close（F-B2 口径：仅失败残留算 dirty）', async () => {
+    const { guard, confirm, summary } = setup({ lossRateTouched: true, lossRateSaveState: 'error' }, false)
     await expect(guard()).resolves.toBe(false)
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(summary.close).not.toHaveBeenCalled()
+  })
+
+  it('损耗率在途（touched/saving）→ 放行不弹确认（在途保存照发会落库，说「将丢弃」语义相反）', async () => {
+    const { guard, confirm } = setup({ lossRateTouched: true, lossRateSaveState: 'saving' })
+    await expect(guard()).resolves.toBe(true)
+    expect(confirm).not.toHaveBeenCalled()
   })
 
   it('弹窗未打开（open=false）即使脏字段残留也放行', async () => {
