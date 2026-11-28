@@ -117,11 +117,17 @@ def _rows(tag: str, flag) -> list[dict]:
 
 
 def _recorder() -> tuple[list[dict], object]:
-    """把抵扣实现换成记录器 —— 本文件验「传了什么参数」，抵扣算法另有测试。"""
+    """把抵扣实现换成记录器 —— 本文件验「传了什么参数」，抵扣算法另有测试。
+
+    返回值必须模仿真实契约 ``tuple[int, list]``（e19c3597 起主代码会解包实扣量
+    回写明细）——返回 None 会让主代码 unpack 炸、行被回滚，测试假红
+    （CI 2026-11-28 首跑实测）。"""
     calls: list[dict] = []
 
     async def _record(_db, _order, _product_id, _order_qty, **kwargs):
         calls.append(kwargs)
+        # 返回值模仿真实契约 tuple[int, list]（主代码解包实扣量回写明细）
+        return 0, []
 
     return calls, _record
 

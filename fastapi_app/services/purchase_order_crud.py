@@ -835,9 +835,11 @@ async def _validate_factory_edit_targets(
         return
 
     result = await db.execute(_items_version_lock_stmt(sorted(scope_po_ids)))
-    rows = {row.id: row for row in result.all()}
+    # 变量名不能用 rows：上文同名变量已被 mypy 推断为 Result[tuple[int, int]]，
+    # 同名赋 dict 会报 incompatible assignment（CI lint job 2026-11-28 实测）。
+    locked_rows = {row.id: row for row in result.all()}
     for po_id in sorted(scope_po_ids):
-        row = rows.get(po_id)
+        row = locked_rows.get(po_id)
         # 不存在的 id 保持旧行为：静默跳过（写路径零命中，不会产生任何写入）
         if row is None:
             continue
