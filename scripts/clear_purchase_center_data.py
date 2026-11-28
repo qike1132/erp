@@ -68,7 +68,6 @@ def count_product_data(db: Session) -> dict:
 def count_customer_order_data(db: Session) -> dict:
     counts = {}
     counts['order'] = db.execute(text("SELECT COUNT(*) FROM \"order\"")).scalar()
-    counts['approval'] = db.execute(text("SELECT COUNT(*) FROM approval_request WHERE order_id IN (SELECT id FROM \"order\")")).scalar()
     counts['stock_out'] = db.execute(text("SELECT COUNT(*) FROM stock_out WHERE order_id IN (SELECT id FROM \"order\")")).scalar()
     counts['order_sync'] = db.execute(text("SELECT COUNT(*) FROM order_sync_record")).scalar()
     counts['order_status_log'] = db.execute(text(
@@ -190,8 +189,6 @@ def clear_customer_order_data(db: Session, dry_run: bool = True) -> dict:
     else:
         print("\n[EXECUTE] 开始清空客户订单数据...")
 
-    results['approval'] = affected_rows(db, "DELETE FROM approval_request WHERE order_id IN (SELECT id FROM \"order\")", dry_run=dry_run)
-    deleted_approval = results['approval']
 
     results['stock_out'] = affected_rows(db, "DELETE FROM stock_out WHERE order_id IN (SELECT id FROM \"order\")", dry_run=dry_run)
     deleted_stock_out = results['stock_out']
@@ -209,21 +206,18 @@ def clear_customer_order_data(db: Session, dry_run: bool = True) -> dict:
         db.commit()
         print("已清空数据:")
         print(f"  - 客户订单: {deleted_orders} 条")
-        print(f"  - 审批记录: {deleted_approval} 条")
         print(f"  - 出库记录: {deleted_stock_out} 条")
         print(f"  - 订单同步记录: {deleted_sync} 条")
         print(f"  - 状态日志: {deleted_status} 条")
     else:
         print("将清空数据:")
         print(f"  - 客户订单: {deleted_orders} 条")
-        print(f"  - 审批记录: {deleted_approval} 条")
         print(f"  - 出库记录: {deleted_stock_out} 条")
         print(f"  - 订单同步记录: {deleted_sync} 条")
         print(f"  - 状态日志: {deleted_status} 条")
 
     return {
         'orders': deleted_orders,
-        'approvals': deleted_approval,
         'stock_outs': deleted_stock_out,
         'sync_records': deleted_sync,
         'status_logs': deleted_status
@@ -286,7 +280,6 @@ def main():
             print("\n========== 客户订单数据统计 ==========")
             counts = count_customer_order_data(db)
             print(f"  - 客户订单: {counts['order']} 条")
-            print(f"  - 审批记录: {counts['approval']} 条")
             print(f"  - 出库记录: {counts['stock_out']} 条")
             print(f"  - 订单同步记录: {counts['order_sync']} 条")
             print(f"  - 状态日志: {counts['order_status_log']} 条")
