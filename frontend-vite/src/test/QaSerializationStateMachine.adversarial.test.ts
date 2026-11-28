@@ -206,7 +206,9 @@ describe('C. 状态机（独立复核）', () => {
 
     expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
     expect(m.lossRateSaveState).toBe('idle')
-    expect(m.lossRateTouched).toBe(true)
+    // F-B1（2026-11-28 评审）：空目标 = 零副作用——不置 lossRateTouched/lossRate，
+    // 否则 close() 后残留的 flush 会把陈旧率复活并随无关订单落库。
+    expect(m.lossRateTouched).toBe(false)
   })
 
   it('C4 close() → idle（成功态 / 失败态两条路径）', async () => {

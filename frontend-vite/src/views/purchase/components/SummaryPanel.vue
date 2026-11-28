@@ -35,7 +35,7 @@
         <button
           class="sm-back-btn"
           :title="hasUnsavedQtyEdits ? '有未保存修改，返回需确认' : '返回订单列表'"
-          @click="$emit('close')"
+          @click="onBackClick"
         >
           <FontAwesomeIcon icon="arrow-left" aria-hidden="true" /> 返回订单列表
         </button>
@@ -97,6 +97,8 @@
         @save-qty-row="(gi, si, fi) => $emit('saveQtyRow', gi, si, fi)"
         @loss-rate-input="applyLossRateDebounced"
         @fabric-loss-rate-input="applyFabricLossRateDebounced"
+        @loss-rate-commit="flushLossRate"
+        @fabric-loss-rate-commit="(gi, si, fi) => flushFabricLossRate(gi, si, fi)"
       />
 
       <!-- Supplier Tab -->
@@ -126,6 +128,7 @@
 import { ref, onUnmounted } from 'vue'
 import SummaryFactoryTab from './SummaryFactoryTab.vue'
 import SummarySupplierTab from './SummarySupplierTab.vue'
+import { useSummaryRateFlush } from '../composables/useSummaryRateFlush'
 import type { FactorySummaryData, SupplierSummaryData, MaterialItem } from '../composables/useSummaryModal'
 
 defineProps<{
@@ -176,37 +179,35 @@ const activeTab = ref<'factory' | 'supplier'>('factory')
 /**
  * P1-4: 损耗率输入防抖 300ms，避免每次按键触发全量 groups×suppliers×fabrics×materials 重算。
  * 定时器归属本组件（整页外壳）而非页签子组件，确保防抖窗口内切换页签不丢输入。
- * 不用 useDebounceFn：当前 @vueuse 版本的返回值没有 cancel，取消编辑时无法作废挂起值。
+ * 防抖/挂起值/flush 实现在 useSummaryRateFlush（2026-11-28 抽出，守 SFC 行数门禁）；
+ * 那次事故的修复：防抖窗口内刷新/关闭不再静默丢值——失焦/Enter/返回都立即 flush。
  */
-let lossRateTimer: ReturnType<typeof setTimeout> | null = null
-function applyLossRateDebounced(v: number) {
-  if (lossRateTimer) clearTimeout(lossRateTimer)
-  lossRateTimer = setTimeout(() => {
-    lossRateTimer = null
-    emit('applyLossRate', v)
-  }, 300)
+const {
+  applyLossRateDebounced,
+  applyFabricLossRateDebounced,
+  flushLossRate,
+  flushFabricLossRate,
+  flushAllPendingRateEdits,
+  cancelPendingRateEdits,
+} = useSummaryRateFlush({
+  onUnified: (v) => emit('applyLossRate', v),
+  onFabric: (gi, si, fi, v) => emit('applyFabricLossRate', gi, si, fi, v),
+})
+
+function onBackClick() {
+  // 先 flush 挂起的损耗率再关闭：emit 是同步的，父级 handler 此刻仍持有
+  // 有效的 orderIds（close() 会在其后才作废快照），save 请求能正常带单发出。
+  flushAllPendingRateEdits()
+  emit('close')
 }
 
-/** 单个布料行损耗率输入防抖：按行独立计时，快速连续改多行时不能互相取消。 */
-const fabricLossRateTimers = new Map<string, ReturnType<typeof setTimeout>>()
-function applyFabricLossRateDebounced(gi: number, si: number, fi: number, v: number) {
-  const key = `${gi}-${si}-${fi}`
-  const timer = fabricLossRateTimers.get(key)
-  if (timer) clearTimeout(timer)
-  fabricLossRateTimers.set(key, setTimeout(() => {
-    fabricLossRateTimers.delete(key)
-    emit('applyFabricLossRate', gi, si, fi, v)
-  }, 300))
-}
-
-function cancelPendingRateEdits() {
-  if (lossRateTimer) { clearTimeout(lossRateTimer); lossRateTimer = null }
-  fabricLossRateTimers.forEach((timer) => clearTimeout(timer))
-  fabricLossRateTimers.clear()
-}
-
-// 整页视图卸载（关闭/路由离开）时作废尚未到点的损耗率防抖，避免 emit 到已卸载的父级
-onUnmounted(cancelPendingRateEdits)
+// 整页视图卸载（路由离开等 close 之外的路径）时，先尽力 flush 再作废定时器：
+// 父级 PurchaseView 未卸载，emit 仍可达；若 close() 已先作废快照（orderIds 清空），
+// composable 的空目标早退使其自然无害。
+onUnmounted(() => {
+  flushAllPendingRateEdits()
+  cancelPendingRateEdits()
+})
 </script>
 
 <style scoped>

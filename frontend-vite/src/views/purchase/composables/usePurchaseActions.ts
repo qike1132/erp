@@ -6,6 +6,7 @@ import { usePurchaseOrders } from './usePurchaseOrders'
 import { useCompletedOrders, type CompletedOrderFilters } from './useCompletedOrders'
 import { useSummaryModal } from './useSummaryModal'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { getErrorMessage } from '@/types/errors'
 
 /**
  * usePurchaseActions — 采购页面业务动作（完成/汇总/筛选/导出）
@@ -117,7 +118,9 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     try {
       await summary.applyLossRateAndSave(rate)
     } catch (err: unknown) {
-      showToast((err as Error).message || '损耗率保存失败', 'error')
+      // getErrorMessage：409 时 err.message 是 Axios 英文原文，后端 detail
+      // （含哪个单、什么状态）在这一层才能取到（2026-11-27 跨层评审 High）。
+      showToast(getErrorMessage(err, '损耗率保存失败'), 'error')
     }
   }
 
@@ -129,7 +132,7 @@ export function usePurchaseActions(deps: PurchaseActionDeps) {
     try {
       await summary.applyFabricLossRateAndSave(gi, si, fi, rate)
     } catch (err: unknown) {
-      showToast((err as Error).message || '布料损耗率保存失败', 'error')
+      showToast(getErrorMessage(err, '布料损耗率保存失败'), 'error')
     }
   }
 

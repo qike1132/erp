@@ -12,12 +12,11 @@ ERP系统全板块测试数据生成器 v3 - 直接写入数据库
   5. orders         客户订单（依赖 products, users）
   6. stock_in       入库管理（依赖 products）
   7. stock_out      出库管理（依赖 products, orders, stock_in）
-  8. approval_request  审批管理（依赖 orders, users）
-  9. purchase_orders    采购中心（依赖 suppliers, customers, users）
- 10. purchase_order_items  采购明细（依赖 purchase_orders）
- 11. material_registrations  来料登记（依赖 purchase_orders, suppliers, users）
- 12. material_registration_items  来料明细（依赖 material_registrations, purchase_order_items）
- 13. purchase_plans     采购计划（依赖 customers）
+  8. purchase_orders    采购中心（依赖 suppliers, customers, users）
+  9. purchase_order_items  采购明细（依赖 purchase_orders）
+ 10. material_registrations  来料登记（依赖 purchase_orders, suppliers, users）
+ 11. material_registration_items  来料明细（依赖 material_registrations, purchase_order_items）
+ 12. purchase_plans     采购计划（依赖 customers）
  14. purchase_plan_details  采购计划明细（依赖 purchase_plans, products）
  15. daily_production_records  生产报表
  16. production_plans   出货计划/排产计划
@@ -47,7 +46,6 @@ from fastapi_app.core.config import settings
 from fastapi_app.core.float_utils import round_money
 from fastapi_app.core.security import hash_password
 from fastapi_app.shared_models import (
-    ApprovalRequest,
     Case,
     Customer,
     DailyProductionRecord,
@@ -224,7 +222,6 @@ def insert_orders(session, count, product_ids, user_ids):
                 note=fake.sentence()[:200] if random.random() < 0.5 else None,
                 order_type=otype,
                 country=random.choice(countries) if otype == "custom" else None,
-                is_locked=False,
                 is_deleted=False,
             ))
         session.add_all(objs)
@@ -281,35 +278,6 @@ def insert_stock_out(session, count, product_ids, order_ids, stockin_ids):
         session.flush()
         ids.extend([o.id for o in objs])
         print(f"    出库批次 {batch_start // BATCH_SIZE + 1}/{(count - 1) // BATCH_SIZE + 1} 完成")
-    return ids
-
-
-def insert_approvals(session, count, order_ids, user_ids):
-    print(f"  生成 {count} 条审批请求...")
-    statuses = ["pending", "approved", "rejected", "cancelled"]
-    operations = ["edit", "delete"]
-    ids = []
-    for batch_start in range(0, count, BATCH_SIZE):
-        batch_count = min(BATCH_SIZE, count - batch_start)
-        objs = []
-        for i in range(batch_count):
-            batch_start + i
-            status = random.choice(statuses)
-            objs.append(ApprovalRequest(
-                order_id=random.choice(order_ids),
-                requester_id=random.choice(user_ids),
-                operation_type=random.choice(operations),
-                operation_data=None,
-                status=status,
-                request_time=_rand_datetime(365),
-                approver_id=random.choice(user_ids) if status != "pending" else None,
-                approval_time=_rand_datetime(365) if status in ("approved", "rejected") else None,
-                rejection_reason=fake.sentence()[:200] if status == "rejected" else None,
-            ))
-        session.add_all(objs)
-        session.flush()
-        ids.extend([o.id for o in objs])
-        print(f"    审批批次 {batch_start // BATCH_SIZE + 1}/{(count - 1) // BATCH_SIZE + 1} 完成")
     return ids
 
 
@@ -584,61 +552,55 @@ def main():
         print(f"  每板块: {PER_MODULE:,} 条 | 共 14 个板块")
         print("=" * 70)
 
-        print("\n[1/17] 插入产品清单...")
+        print("\n[1/16] 插入产品清单...")
         t0 = time.time()
         product_ids = insert_products(session, PER_MODULE)
         session.commit()
         print(f"  完成: {len(product_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[2/17] 插入客户管理...")
+        print("\n[2/16] 插入客户管理...")
         t0 = time.time()
         customer_ids = insert_customers(session, PER_MODULE)
         session.commit()
         print(f"  完成: {len(customer_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[3/17] 插入供应商管理...")
+        print("\n[3/16] 插入供应商管理...")
         t0 = time.time()
         supplier_ids = insert_suppliers(session, PER_MODULE)
         session.commit()
         print(f"  完成: {len(supplier_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[4/17] 插入用户管理（含密码哈希）...")
+        print("\n[4/16] 插入用户管理（含密码哈希）...")
         t0 = time.time()
         user_ids = insert_users(session, PER_MODULE)
         session.commit()
         print(f"  完成: {len(user_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[5/17] 插入客户订单...")
+        print("\n[5/16] 插入客户订单...")
         t0 = time.time()
         order_ids = insert_orders(session, PER_MODULE, product_ids, user_ids)
         session.commit()
         print(f"  完成: {len(order_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[6/17] 插入入库管理...")
+        print("\n[6/16] 插入入库管理...")
         t0 = time.time()
         stockin_ids = insert_stock_in(session, PER_MODULE, product_ids)
         session.commit()
         print(f"  完成: {len(stockin_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[7/17] 插入出库管理...")
+        print("\n[7/16] 插入出库管理...")
         t0 = time.time()
         stockout_ids = insert_stock_out(session, PER_MODULE, product_ids, order_ids, stockin_ids)
         session.commit()
         print(f"  完成: {len(stockout_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[8/17] 插入审批管理...")
-        t0 = time.time()
-        approval_ids = insert_approvals(session, PER_MODULE, order_ids, user_ids)
-        session.commit()
-        print(f"  完成: {len(approval_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
-
-        print("\n[9/17] 插入采购订单...")
+        print("\n[8/16] 插入采购订单...")
         t0 = time.time()
         po_ids = insert_purchase_orders(session, PER_MODULE, supplier_ids, customer_ids, user_ids)
         session.commit()
         print(f"  完成: {len(po_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[10/17] 插入采购订单明细...")
+        print("\n[9/16] 插入采购订单明细...")
         t0 = time.time()
         insert_purchase_order_items(session, PER_MODULE, po_ids)
         session.commit()
@@ -646,43 +608,43 @@ def main():
 
         po_item_ids = [row[0] for row in session.execute(text("SELECT id FROM purchase_order_item LIMIT 20000")).fetchall()]
 
-        print("\n[11/17] 插入来料登记...")
+        print("\n[10/16] 插入来料登记...")
         t0 = time.time()
         reg_ids = insert_material_registrations(session, PER_MODULE, po_ids, supplier_ids, user_ids)
         session.commit()
         print(f"  完成: {len(reg_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[12/17] 插入来料登记明细...")
+        print("\n[11/16] 插入来料登记明细...")
         t0 = time.time()
         insert_material_registration_items(session, PER_MODULE, reg_ids, po_item_ids)
         session.commit()
         print(f"  完成: {PER_MODULE:,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[13/17] 插入采购计划...")
+        print("\n[12/16] 插入采购计划...")
         t0 = time.time()
         plan_ids = insert_purchase_plans(session, PER_MODULE, customer_ids)
         session.commit()
         print(f"  完成: {len(plan_ids):,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[14/17] 插入采购计划明细...")
+        print("\n[13/16] 插入采购计划明细...")
         t0 = time.time()
         insert_purchase_plan_details(session, PER_MODULE, plan_ids, product_ids)
         session.commit()
         print(f"  完成: {PER_MODULE:,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[15/17] 插入生产报表...")
+        print("\n[14/16] 插入生产报表...")
         t0 = time.time()
         insert_daily_production_records(session, PER_MODULE, product_ids)
         session.commit()
         print(f"  完成: {PER_MODULE:,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[16/17] 插入排产计划（出货计划）...")
+        print("\n[15/16] 插入排产计划（出货计划）...")
         t0 = time.time()
         insert_production_plans(session, PER_MODULE)
         session.commit()
         print(f"  完成: {PER_MODULE:,} 条, 耗时 {time.time() - t0:.1f}s")
 
-        print("\n[17/17] 插入皮套管理...")
+        print("\n[16/16] 插入皮套管理...")
         t0 = time.time()
         insert_cases(session, PER_MODULE, product_ids)
         session.commit()

@@ -28,7 +28,6 @@ DISTRIBUTION = {
     "orders": 4000,
     "stock_in": 3000,
     "stock_out": 2500,
-    "approvals": 1000,
     "users": 500,
     "cases": 2000,
     "material_registration": 1000,
@@ -118,20 +117,6 @@ def generate_stock_out(count):
     return rows
 
 
-def generate_approvals(count):
-    rows = []
-    types = ["订单审批", "入库审批", "出库审批", "采购审批", "退款审批"]
-    statuses = ["待审批", "已通过", "已驳回"]
-    for _i in range(count):
-        rows.append({
-            "approval_type": random.choice(types),
-            "status": random.choice(statuses),
-            "applicant": fake.name(),
-            "apply_date": fake.date_between(start_date="-1y", end_date="today"),
-        })
-    return rows
-
-
 def generate_users(count):
     rows = []
     roles = ["admin", "manager", "operator", "viewer"]
@@ -202,7 +187,6 @@ if __name__ == "__main__":
         "orders": generate_orders(DISTRIBUTION["orders"]),
         "stock_in": generate_stock_in(DISTRIBUTION["stock_in"]),
         "stock_out": generate_stock_out(DISTRIBUTION["stock_out"]),
-        "approvals": generate_approvals(DISTRIBUTION["approvals"]),
         "users": generate_users(DISTRIBUTION["users"]),
         "cases": generate_cases(DISTRIBUTION["cases"]),
         "material_registration": generate_material_registration(DISTRIBUTION["material_registration"]),

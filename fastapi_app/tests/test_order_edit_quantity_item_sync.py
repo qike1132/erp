@@ -111,35 +111,3 @@ async def test_multi_item_order_items_left_untouched():
 
     assert [i.quantity for i in items] == [100, 200], "多 SKU 订单的明细不应被静默改写"
 
-
-@pytest.mark.asyncio
-async def test_approval_edit_quantity_syncs_item():
-    """非超管的编辑走审批：审批通过后应用修改时，明细同样必须被同步。
-
-    与直改（_update_order_directly）是同一类问题——只写 order.quantity 会让
-    列表页继续显示旧数量。
-    """
-    import json as _json
-
-    from fastapi_app.services import approval_service
-
-    order = _make_order(3, 10000)
-    item = _make_item(31, 3, 10000)
-    db = _mock_db_for(order, [item])
-
-    approval = MagicMock()
-    approval.operation_data = _json.dumps({"quantity": 8888, "customer": "客户"})
-    user = MagicMock(id=99)  # 第 4 参：注册表统一按 4 参派发（B1 修复后与 delete 侧对称）
-
-    with patch(
-        "fastapi_app.services.approval_service.get_product_for_update",
-        new_callable=AsyncMock, return_value=MagicMock(id=1, current_stock=100),
-    ), patch(
-        # 出货计划联动由 test_shipment_plan_sku_purge 覆盖；这里只验证明细数量同步
-        "fastapi_app.services.approval_service.purge_shipment_plan_details_for_sku",
-        new_callable=AsyncMock,
-    ):
-        await approval_service._handle_edit_approval(db, approval, order, user)
-
-    assert order.quantity == 8888
-    assert item.quantity == 8888, "审批通过的改数量未同步明细，列表页仍显示旧数量"

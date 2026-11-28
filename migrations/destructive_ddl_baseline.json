@@ -635,6 +635,15 @@
       "drop_index:idx_order_create_attempt_created_at",
       "drop_table:order_create_attempt"
     ],
+    "migrations/versions/pg_standalone_123_remove_approval_system.py": [
+      "drop_column:is_locked",
+      "drop_column:lock_time",
+      "drop_column:locked_by_id",
+      "drop_constraint:order_locked_by_id_fkey",
+      "drop_index:idx_order_locked_by",
+      "drop_table:approval_log",
+      "drop_table:approval_request"
+    ],
     "migrations/versions/rebuild_po_dedup_index.py": [
       "execute:DROP INDEX IF EXISTS uq_po_pending_dedup"
     ],

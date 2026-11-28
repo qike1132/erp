@@ -46,7 +46,7 @@ import { buildFactoryHtml, useSummaryModal } from '@/views/purchase/composables/
 import { usePurchaseActions } from '@/views/purchase/composables/usePurchaseActions'
 import SummaryPanel from '@/views/purchase/components/SummaryPanel.vue'
 import SummaryFactoryTab from '@/views/purchase/components/SummaryFactoryTab.vue'
-import { showToast } from '@/composables/useToast'
+import { showToast, toast } from '@/composables/useToast'
 import { purchaseApi } from '@/api'
 import type { FactorySummaryData, SupplierSummaryData } from '@/views/purchase/composables/useSummaryModal'
 
@@ -501,7 +501,8 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
 
     expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
     expect(m.lossRateSaveState).toBe('idle')
-    expect(m.lossRateTouched).toBe(true)
+    // F-B1（2026-11-28 评审）：空目标 = 零副作用（不置 touched），见 useSummaryModal.applyLossRateAndSave
+    expect(m.lossRateTouched).toBe(false)
   })
 
   it('C5 openSummary 后状态复位为 idle', async () => {
@@ -514,15 +515,17 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
     expect(m.lossRateSaveState).toBe('idle')
   })
 
-  it('C6 组件按状态渲染内联提示（saving/error/mixed 显示，saved/idle 不渲染）', () => {
+  it('C6 组件按状态渲染内联提示（saving/saved/error/mixed 显示，idle 不渲染）', () => {
+    // 2026-11-28 契约变更：saved 从「不渲染」改为渲染「已保存」——同值保存零反馈
+    // 曾让用户以为没存上而反复重输（生产事故根因之一）。
     const cases: { state: 'idle' | 'saving' | 'saved' | 'error'; mixed?: boolean; text: string | null }[] = [
       { state: 'saving', text: '保存中…' },
-      { state: 'saved', text: null },
+      { state: 'saved', text: '已保存' },
       { state: 'error', text: '保存失败' },
       { state: 'idle', mixed: true, text: '各订单损耗率不一致' },
       { state: 'idle', text: null },
     ]
-    const known = ['保存中…', '保存失败', '各订单损耗率不一致']
+    const known = ['保存中…', '已保存', '保存失败', '各订单损耗率不一致']
 
     for (const c of cases) {
       const wrapper = mount(SummaryPanel, {
@@ -622,12 +625,15 @@ describe('C. 在途落库与关闭/取消编辑', () => {
       expect(ok.emitted('applyLossRate')).toEqual([[50]])
       ok.unmount()
 
-      // 卸载（关闭整页视图）→ 挂起值被丢弃，不得 emit 到已卸载的父级
+      // 2026-11-28 契约变更：卸载不再「丢弃挂起值」而是「立即 flush」——
+      // 防抖窗口内关闭/刷新丢过用户输入的最终值（生产事故）。父级 PurchaseView
+      // 在面板 v-if 卸载时仍然存活，emit 可达；close() 先行作废 orderIds 的路径
+      // 由返回按钮的「先 flush 后 close」保证，此处晚到 flush 自然无害。
       const unmounted = mountModal()
       unmounted.findComponent(SummaryFactoryTab).vm.$emit('lossRateInput', 50)
       unmounted.unmount()
       vi.advanceTimersByTime(400)
-      expect(unmounted.emitted('applyLossRate')).toBeUndefined()
+      expect(unmounted.emitted('applyLossRate')).toEqual([[50]])
     } finally {
       vi.useRealTimers()
     }
@@ -657,5 +663,38 @@ describe('C. 在途落库与关闭/取消编辑', () => {
     await unifiedP
     // 行级响应已结算，后续统一率响应也不能把该行改回统一率
     expect(m.fabricLossRates[0]?.[0]?.[0]).toBe(100)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D. 无落库明细的行级率保存不得静默（2026-11-28 生产事故）
+// ---------------------------------------------------------------------------
+describe('D. 空 itemIds 的行级率保存显式提示（曾静默 return 零写入）', () => {
+  it('D1 fabric 无 item_ids：toast.warning + 不发请求 + 展示值仍更新', async () => {
+    // 无 item_ids 的布料行：legacy 旧数据 / BOM 新增物料
+    vi.mocked(purchaseApi.factorySummary).mockResolvedValue({
+      success: true,
+      order_count: 1,
+      groups: [{
+        customer_name: '客户A',
+        product_name: '产品1',
+        product_quantity: 100,
+        suppliers: [{
+          supplier_name: '供应商1',
+          fabrics: [{ fabric_name: '布料A', specification: 'S1', quantity: 10, unit: '米' }],
+        }],
+      }],
+    } as never)
+    const m = useSummaryModal()
+    await m.openSummary([7, 8])
+    vi.mocked(purchaseApi.saveFactoryEdits).mockClear()
+
+    await m.applyFabricLossRateAndSave(0, 0, 0, 50)
+
+    // 展示值照常更新（本地所见），但绝不发请求
+    expect(m.fabricLossRates[0]?.[0]?.[0]).toBe(50)
+    expect(vi.mocked(purchaseApi.saveFactoryEdits)).not.toHaveBeenCalled()
+    // 必须明确告知而不是装作成功
+    expect(vi.mocked(toast.warning)).toHaveBeenCalledWith('该行物料不在采购明细中，损耗率无法保存')
   })
 })

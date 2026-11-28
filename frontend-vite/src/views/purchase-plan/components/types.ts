@@ -115,3 +115,9 @@ export interface RiskItem {
   kind: 'overdue' | 'due';
   lbl: string;
 }
+
+/** 月历格子的当日元信息：客户数量分布（按数量降序）+ 当日去重 SKU 数 */
+export interface DayCellMeta {
+  custs: { name: string; qty: number }[];
+  skuN: number;
+}

@@ -91,10 +91,10 @@ export const orderApi = {
   /** 编辑单个订单明细（SKU）：数量/备注（报表流水行内编辑，2026-10-13） */
   updateItem: (id: number, data: { quantity?: number; note?: string }) =>
     put<OrderItem>(`/orders/items/${id}`, data),
-  /** 删除单个订单明细（SKU）；删到空等价删整单（走整单删除的审批/备份） */
+  /** 删除单个订单明细（SKU）；删到空等价删整单（复用整单删除的备份路径） */
   deleteItem: (id: number) => del(`/orders/items/${id}`),
   // 说明：后端没有 /orders/lock、/orders/unlock、/orders/deduct-stock 三个路由
-  // （锁定只由审批流内部置位，抵扣走 PUT /orders/deduct/{id}），此前声明的
+  // （抵扣走 PUT /orders/deduct/{id}），此前声明的
   // lock/unlock/deductStock 属死方法，已删除以免调用方点了没反应。
   updateDeduct: (id: number, deductQuantity: number) => put(`/orders/deduct/${id}?deduct_quantity=${deductQuantity}`),
   confirmBeileOrder: (id: number) => post<ConfirmOrderResponse>(`/orders/${id}/confirm`),

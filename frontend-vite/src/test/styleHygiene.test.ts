@@ -16,8 +16,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-/** 静态行内样式基线（2026-11-23 移动端收敛后实测 215）。只降不升。 */
-const BASELINE_TOTAL = 215
+/** 静态行内样式基线（2026-11-28 审批控制台下线后实测 213）。只降不升。 */
+const BASELINE_TOTAL = 213
 /** 其中装饰类基线：这类应走 class 或设计令牌，不该出现在行内。 */
 const BASELINE_DECO = 58
 

@@ -86,7 +86,6 @@ def cleanup():
                 f'DELETE FROM daily_production_record WHERE product_id IN {pset}',
                 'DELETE FROM stock_out WHERE customer=:c', 'DELETE FROM stock_in WHERE customer=:c',
                 f'DELETE FROM order_item WHERE order_id IN {oset}',
-                f'DELETE FROM approval_request WHERE order_id IN {oset}',
                 'DELETE FROM "order" WHERE customer=:c',
                 f'DELETE FROM product_customer WHERE product_id IN {pset}',
                 f'DELETE FROM product WHERE id IN {pset}', 'DELETE FROM customer WHERE name=:c'):

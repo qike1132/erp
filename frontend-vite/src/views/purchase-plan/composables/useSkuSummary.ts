@@ -7,9 +7,8 @@ export function useSkuSummary(opts: {
   skuDateIndex: ComputedRef<Record<string, SkuDateItem[]>>;
   custFilter: Ref<string>;
   globalKw: Ref<string>;
-  viewTab: Ref<'daily' | 'summary'>;
 }) {
-  const { skuSummary, skuDateIndex, custFilter, globalKw, viewTab } = opts;
+  const { skuSummary, skuDateIndex, custFilter, globalKw } = opts;
 
   const skuSortField = ref('customer');
   const skuSortDir = ref<'asc' | 'desc'>('desc');
@@ -23,7 +22,7 @@ export function useSkuSummary(opts: {
     if (custFilter.value) {
       list = list.filter(s => s.customer_name === custFilter.value);
     }
-    if (globalKw.value && viewTab.value === 'summary') {
+    if (globalKw.value) {
       const k = globalKw.value.toLowerCase();
       list = list.filter(s =>
         s.barcode.toLowerCase().includes(k) ||

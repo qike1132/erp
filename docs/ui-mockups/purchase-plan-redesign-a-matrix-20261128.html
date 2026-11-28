@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-zcode-design data-variant="matrix">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出货计划 · 方案A 客户×SKU×日 透视矩阵（效果图 · 脱敏演示数据）</title>
+<style>
+/* ===== 调参 token（对齐 app.css 真实色板；圆角全站方角基准=0） ===== */
+:root{
+  --accent:#5b8def; --accent-deep:#2d5ab8;
+  --accent-50:#eff5ff; --accent-100:#d6e4ff; --accent-200:#b8ccff; --accent-300:#8babf5;
+  --ink:#1a1a2e; --ink-2:#475569; --muted:#64748b; --faint:#94a3b8;
+  --line:#e4e7ed; --line-light:#f0f2f5; --page:#f4f6fa; --panel:#ffffff; --slate-50:#f8fafc;
+  --ok:#28c76f; --ok-bg:#e6f9ef; --warn:#ff9f43; --warn-bg:#fff3e6; --danger:#ea5455; --danger-bg:#fdeaea;
+  --heat-1:#eef3fe; --heat-2:#dce8fd; --heat-3:#c5d8fb; --heat-4:#abc5f8;
+  --day-w:36px;
+}
+*{box-sizing:border-box;margin:0;padding:0;border-radius:0 !important}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;background:var(--page);color:var(--ink);font-size:14px;line-height:1.5}
+.num{font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+button{font-family:inherit;cursor:pointer}
+svg{display:block}
+
+/* ===== 效果图声明条 ===== */
+.demo-note{display:flex;align-items:center;gap:8px;padding:5px 16px;background:var(--slate-50);border-bottom:1px dashed var(--line);color:var(--muted);font-size:12px}
+.demo-note b{color:var(--accent-deep);font-weight:700}
+
+/* ===== 顶部区 ===== */
+.wrap{max-width:1560px;margin:0 auto;padding:14px 20px 28px}
+.top-card{background:var(--panel);border:1px solid var(--line);padding:12px 16px 0}
+.top-r1{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-bottom:12px}
+.top-r2{display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-top:1px solid var(--line-light);padding:10px 0}
+.page-title{font-size:20px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;margin-right:4px}
+.page-title svg{color:var(--accent-deep)}
+
+/* 工厂药丸（方角） */
+.fact-group{display:flex;border:1px solid var(--line)}
+.fact-pill{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--panel);border:none;border-right:1px solid var(--line);font-size:13px;font-weight:600;color:var(--ink-2)}
+.fact-pill:last-child{border-right:none}
+.fact-pill .n{font-weight:700;color:var(--muted)}
+.fact-pill.on{background:var(--accent-50);color:var(--accent-deep);box-shadow:inset 0 -2px 0 var(--accent)}
+.fact-pill.on .n{color:var(--accent-deep)}
+.fact-pill:hover:not(.on){background:var(--slate-50)}
+
+/* 月份导航 */
+.mon-nav{display:flex;align-items:center;gap:10px}
+.mon-nav .arrow{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--line);background:var(--panel);color:var(--ink-2)}
+.mon-nav .arrow:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-50)}
+.mon-label{font-size:18px;font-weight:800;min-width:120px;text-align:center}
+
+/* 一行信息条（约 40px，禁大卡片） */
+.info-strip{display:flex;align-items:center;flex:1;min-width:0;height:40px;border:1px solid var(--line);background:var(--panel);overflow-x:auto}
+.info-cell{display:flex;align-items:center;gap:6px;padding:0 14px;height:100%;border-right:1px solid var(--line-light);white-space:nowrap;font-size:12px;color:var(--muted);font-weight:600}
+.info-cell:last-child{border-right:none}
+.info-cell .v{font-size:15px;font-weight:800;color:var(--ink)}
+.info-cell.risk .v{color:var(--danger)}
+.info-cell .sub{color:var(--faint);font-weight:600}
+.info-cell svg{flex:none}
+
+/* 搜索与按钮 */
+.search-box{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);padding:6px 10px;min-width:220px;color:var(--faint)}
+.search-box input{border:none;outline:none;font-family:inherit;font-size:13px;flex:1;color:var(--ink);background:transparent}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink-2)}
+.btn:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-50)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-deep);border-color:var(--accent-deep);color:#fff}
+.spacer{flex:1}
+
+/* ===== 矩阵卡片 ===== */
+.m-card{margin-top:14px;background:var(--panel);border:1px solid var(--line)}
+.m-toolbar{display:flex;align-items:center;gap:16px;padding:9px 16px;border-bottom:1px solid var(--line-light);font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend{display:flex;gap:14px;align-items:center}
+.legend span{display:inline-flex;align-items:center;gap:5px;font-weight:600}
+.dot{width:7px;height:7px;flex:none}
+.dot-r{background:var(--danger)} .dot-a{background:var(--warn)} .dot-t{background:var(--accent)}
+.hint{margin-left:auto;color:var(--faint)}
+.hint b{color:var(--accent-deep)}
+
+.table-scroll{overflow-x:auto}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1340px}
+th,td{border-bottom:1px solid var(--line-light);padding:0;text-align:center;white-space:nowrap}
+/* 左冻结两列 */
+.th-fix,.td-fix{position:sticky;left:0;background:var(--panel);z-index:3;text-align:left}
+.th-fix2,.td-fix2{position:sticky;left:118px;background:var(--panel);z-index:3;text-align:left}
+.th-fix,.th-fix2{z-index:5}
+.td-fix,.td-fix2,.th-fix,.th-fix2{box-shadow:1px 0 0 var(--line)}
+thead th{font-size:12px;font-weight:700;color:var(--muted);background:var(--slate-50);border-bottom:1px solid var(--line)}
+.th-day{cursor:pointer;min-width:var(--day-w);padding:6px 2px 5px}
+.th-day:hover{background:var(--accent-50);color:var(--accent-deep)}
+.th-day .d{font-size:13px;font-weight:800;color:var(--ink)}
+.th-day .w{font-size:10px;font-weight:600;color:var(--faint);margin-top:1px}
+.th-day.we .w{color:var(--warn)}
+.th-day .rk{display:inline-block;width:6px;height:6px;margin-left:3px;vertical-align:2px}
+.th-day.today .d{color:var(--accent-deep)}
+.th-day.today::after{content:'今';display:inline-block;font-size:9px;font-weight:800;color:#fff;background:var(--accent);padding:1px 3px;margin-left:3px;vertical-align:2px}
+.th-sum,.th-fix,.th-fix2{padding:6px 10px}
+.th-sum{min-width:64px}
+
+tbody tr:hover td{background:#f7faff}
+tbody tr:hover td.td-fix,tbody tr:hover td.td-fix2{background:#f7faff}
+/* 客户组行 */
+tr.grp td{background:var(--accent-50);border-top:1px solid var(--accent-200);border-bottom:1px solid var(--accent-200);padding:6px 10px}
+tr.grp:hover td{background:var(--accent-50)}
+.grp-cust{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;color:var(--accent-deep)}
+.grp-tag{font-size:10px;font-weight:700;color:var(--muted);border:1px solid var(--line);background:var(--panel);padding:1px 6px}
+.grp-sub{font-size:13px;font-weight:800;color:var(--accent-deep)}
+.grp-share{display:inline-block;height:5px;background:var(--accent-300);vertical-align:middle}
+/* SKU 行 */
+td.cell{padding:5px 2px;font-size:12px;font-weight:600;color:var(--ink)}
+td.cell .q{padding:2px 4px;display:inline-block;min-width:28px}
+td.cell.h1 .q{background:var(--heat-1)} td.cell.h2 .q{background:var(--heat-2)}
+td.cell.h3 .q{background:var(--heat-3)} td.cell.h4 .q{background:var(--heat-4);color:var(--accent-deep)}
+td.grp-cell{font-weight:800;font-size:12px;color:var(--ink);padding:4px 2px}
+.cust-name{font-size:13px;font-weight:700;color:var(--ink)}
+.sku-name{font-size:13px;font-weight:600;color:var(--ink);padding:6px 10px 2px}
+.sku-bc{font-size:11px;color:var(--faint);padding:0 10px 6px;font-weight:400}
+.td-sum{font-size:13px;font-weight:800;color:var(--ink);padding:6px 10px;background:#fbfcfe}
+/* 日合计行 */
+tfoot td{background:var(--slate-50);border-top:1px solid var(--line);font-size:12px;font-weight:800;color:var(--ink);padding:7px 2px}
+tfoot .td-fix,tfoot .td-fix2{color:var(--muted);font-weight:700}
+tfoot .td-sum{color:var(--accent-deep);background:var(--slate-50)}
+tfoot th{cursor:pointer}
+/* 选中列 */
+td.sel-col,th.sel-col{background:var(--accent-50) !important;box-shadow:inset 1px 0 0 var(--accent-300),inset -1px 0 0 var(--accent-300)}
+th.sel-col{background:var(--accent-100) !important}
+th.sel-col .d{color:var(--accent-deep)}
+tr.grp td.sel-col{background:var(--accent-100) !important}
+tr.grp:hover td.sel-col{background:var(--accent-100) !important}
+tbody tr:hover td.sel-col{background:var(--accent-100) !important}
+.dim-col{opacity:.45}
+
+/* 当日快照条 */
+.snap{display:flex;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid var(--line);background:var(--accent-50);flex-wrap:wrap;min-height:40px}
+.snap-title{font-size:13px;font-weight:800;color:var(--accent-deep);white-space:nowrap}
+.snap-meta{font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap}
+.snap-chips{display:flex;gap:6px;flex-wrap:wrap}
+.snap-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--accent-200);background:var(--panel);padding:3px 9px;font-size:12px;color:var(--ink-2);font-weight:600}
+.snap-chip .n{font-weight:800;color:var(--ink)}
+.snap-empty{font-size:12px;color:var(--muted)}
+
+.foot-note{margin-top:10px;font-size:12px;color:var(--faint);display:flex;gap:8px;align-items:flex-start}
+.foot-note svg{flex:none;margin-top:2px;color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="demo-note">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+  <span>UI <b>效果图 · 方案A / 共3案</b> —— 客户×SKU×日 透视矩阵 · 全部为<b>脱敏演示数据</b> · 2026-11-28</span>
+</div>
+
+<div class="wrap">
+  <!-- 顶部：行1 工厂/搜索/操作，行2 月份 + 一行信息条 -->
+  <div class="top-card">
+    <div class="top-r1">
+      <div class="page-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="0"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        出货计划
+      </div>
+      <div class="fact-group" id="factGroup"></div>
+      <div class="spacer"></div>
+      <label class="search-box">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="搜索客户 / 产品 / 条码" aria-label="搜索">
+      </label>
+      <button class="btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        导出
+      </button>
+      <button class="btn btn-primary">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        新建计划
+      </button>
+    </div>
+    <div class="top-r2">
+      <div class="mon-nav">
+        <button class="arrow" aria-label="上一月"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></button>
+        <span class="mon-label">2026年11月</span>
+        <button class="arrow" aria-label="下一月"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
+      </div>
+      <div class="info-strip" id="infoStrip"></div>
+    </div>
+  </div>
+
+  <!-- 透视矩阵 -->
+  <div class="m-card">
+    <div class="m-toolbar">
+      <div class="legend">
+        <span><i class="dot dot-r"></i>逾期未出</span>
+        <span><i class="dot dot-t"></i>今天</span>
+        <span><i class="dot dot-a"></i>临期≤3天</span>
+      </div>
+      <span>数字 = 计划数量（件）· 色深随数量</span>
+      <span class="hint">点击<b>日期列头</b>或<b>日合计行</b>选中当天，选中列即当日「客户 × SKU × 数量」</span>
+    </div>
+    <div class="table-scroll">
+      <table aria-label="客户×SKU×日 透视矩阵">
+        <!-- 静态占位表头（S5256）：运行时 renderMatrix() 会整体重写 thead -->
+        <thead id="thead"><tr><th>客户</th><th>产品 / 条码</th><th>1</th><th>31</th><th>月合计</th></tr></thead>
+        <tbody id="tbody"></tbody>
+        <tfoot id="tfoot"></tfoot>
+      </table>
+    </div>
+    <div class="snap" id="snap"></div>
+  </div>
+
+  <div class="foot-note">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+    <span>方案要点：一张表同时回答两级问题——<b>月维度</b>：行（客户→SKU）+ 月合计列 = 当月谁有什么货、各多少；<b>日维度</b>：选中列自上而下读 = 当天客户×SKU×数量，底部日合计行给全天总量。数据全部来自现有 /plans/monthly-aggregated（rows.plans 明细），无需新增端点。</span>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ===== 脱敏演示数据（口径与 /plans/monthly-aggregated 对齐：客户×SKU×日 计划数量，件） ===== */
+var SKUS = {
+  S1:{name:'经典保温杯 500ml', bc:'6901234500017'},
+  S2:{name:'咖啡随行杯 380ml', bc:'6901234500024'},
+  S3:{name:'保温饭盒 1L',      bc:'6901234500031'},
+  S4:{name:'儿童吸管杯 300ml', bc:'6901234500048'},
+  S5:{name:'玻璃水杯 400ml',   bc:'6901234500055'},
+  S6:{name:'双层玻璃杯 450ml', bc:'6901234500062'}
+};
+var DATA = [
+  {cust:'华东商超连锁', factory:'东莞', sku:'S1', qty:{3:400,5:400,10:600,12:600,17:800,19:800,24:1000,28:600}},
+  {cust:'华东商超连锁', factory:'东莞', sku:'S2', qty:{6:300,13:300,20:500,27:500,28:400}},
+  {cust:'华东商超连锁', factory:'东莞', sku:'S3', qty:{11:200,18:300,26:300}},
+  {cust:'金贝母婴',     factory:'东莞', sku:'S4', qty:{4:500,11:500,18:600,25:600,28:300}},
+  {cust:'金贝母婴',     factory:'东莞', sku:'S5', qty:{9:400,16:400,23:400,28:200}},
+  {cust:'华南贸易',     factory:'东莞', sku:'S1', qty:{7:300,14:400,21:400,29:500}},
+  {cust:'华南贸易',     factory:'东莞', sku:'S2', qty:{10:200,24:200,30:300}},
+  {cust:'星辰优选',     factory:'东莞', sku:'S5', qty:{5:200,15:300,28:250}},
+  {cust:'星辰优选',     factory:'东莞', sku:'S3', qty:{12:150,26:100}},
+  {cust:'恒达百货',     factory:'湖北', sku:'S4', qty:{8:800,15:800,22:800,28:500}},
+  {cust:'恒达百货',     factory:'湖北', sku:'S6', qty:{9:400,16:300,23:300}}
+];
+var YEAR = 2026, MONTH = 11, DAYS = 30, TODAY = 28;
+var RISK = {26:'r', 29:'a', 30:'a'};          // 26 逾期未出；29/30 临期
+var WD = ['日','一','二','三','四','五','六'];
+var state = { factory:'东莞', sel:TODAY };
+
+function fmt(n){ return n.toLocaleString('zh-Hans-CN'); }
+function wd(d){ return WD[new Date(YEAR, MONTH-1, d).getDay()]; }
+function isWe(d){ var k = new Date(YEAR, MONTH-1, d).getDay(); return k===0 || k===6; }
+function rows(){ return DATA.filter(function(r){ return r.factory===state.factory; }); }
+function qtyAt(r,d){ return r.qty[d]||0; }
+function heat(v){ return v<=0 ? '' : v<400 ? 'h1' : v<700 ? 'h2' : v<1100 ? 'h3' : 'h4'; }
+function custOrder(list){ // 按客户月合计降序
+  var t = {}; list.forEach(function(r){ t[r.cust]=(t[r.cust]||0)+rowSum(r); });
+  return Object.keys(t).sort(function(a,b){ return t[b]-t[a]; });
+}
+function rowSum(r){ var s=0; for(var d in r.qty) s+=r.qty[d]; return s; }
+function daySum(list,d){ var s=0; list.forEach(function(r){ s+=qtyAt(r,d); }); return s; }
+function dayCusts(list,d){ var s={}; list.forEach(function(r){ if(qtyAt(r,d)>0) s[r.cust]=(s[r.cust]||0)+qtyAt(r,d); }); return s; }
+function daySkus(list,d){ var s={}; list.forEach(function(r){ if(qtyAt(r,d)>0) s[r.sku]=1; }); return Object.keys(s).length; }
+
+/* ===== 工厂药丸 ===== */
+function renderPills(){
+  var fs = ['东莞','湖北'];
+  document.getElementById('factGroup').innerHTML = fs.map(function(f){
+    var list = DATA.filter(function(r){ return r.factory===f; });
+    var total = 0; list.forEach(function(r){ total+=rowSum(r); });
+    return '<button class="fact-pill'+(state.factory===f?' on':'')+'" data-f="'+f+'">'+f
+      +' <span class="n num">'+fmt(total)+'</span></button>';
+  }).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('.fact-pill'), function(b){
+    b.addEventListener('click', function(){ state.factory=b.getAttribute('data-f'); render(); });
+  });
+}
+
+/* ===== 一行信息条 ===== */
+function renderInfo(){
+  var list = rows();
+  var total=0, custs={}, skus={}, days={}, peak=0, peakD=0, risk=0, riskLate=0, riskDue=0;
+  list.forEach(function(r){ total+=rowSum(r); custs[r.cust]=1; skus[r.sku]=1;
+    for(var d in r.qty){ days[d]=1; if(r.qty[d]>peak){peak=r.qty[d];peakD=+d;} } });
+  for(var d in RISK){ if(daySum(list,+d)>0){ RISK[d]==='r' ? riskLate++ : riskDue++; } }
+  risk = riskLate + riskDue;
+  var skuN = Object.keys(skus).length;
+  document.getElementById('infoStrip').innerHTML =
+    cell('本月计划', fmt(total)+'<small style="font-size:12px;color:var(--muted)"> 件</small>') +
+    cell('客户', Object.keys(custs).length+' 家') +
+    cell('SKU', skuN+' 个') +
+    cell('排产日', Object.keys(days).length+' 天') +
+    cell('峰值日', peakD+' 日 <span class="sub num">'+fmt(peak)+'件</span>') +
+    '<div class="info-cell risk">风险 <span class="v num">'+risk+' 天</span><span class="sub">逾期 '+riskLate+' · 临期 '+riskDue+'</span></div>';
+  function cell(l,v){ return '<div class="info-cell">'+l+' <span class="v num">'+v+'</span></div>'; }
+}
+
+/* ===== 矩阵渲染 ===== */
+function renderMatrix(){
+  var list = rows();
+  var cOrder = custOrder(list);
+  var cTotal = {}; list.forEach(function(r){ cTotal[r.cust]=(cTotal[r.cust]||0)+rowSum(r); });
+  var grand = 0; for(var c in cTotal) grand += cTotal[c];
+
+  /* thead */
+  var h = '<tr><th class="th-fix" style="min-width:118px">客户</th><th class="th-fix2" style="min-width:150px">产品 / 条码</th>';
+  for(var d=1; d<=DAYS; d++){
+    var cls = 'th-day'+(isWe(d)?' we':'')+(d===TODAY?' today':'')+(d===state.sel?' sel-col':'');
+    var rk = RISK[d] ? '<i class="rk dot dot-'+(RISK[d]==='r'?'r':'a')+'"></i>' : '';
+    h += '<th class="'+cls+'" data-day="'+d+'" title="'+MONTH+'月'+d+'日 周'+wd(d)+'"><div class="d num">'+d+'</div><div class="w">'+wd(d)+'</div>'+rk+'</th>';
+  }
+  h += '<th class="th-sum">月合计</th></tr>';
+  document.getElementById('thead').innerHTML = h;
+
+  /* tbody：客户组行（含每日小计）+ SKU 行 */
+  var b = '';
+  cOrder.forEach(function(c){
+    var crs = list.filter(function(r){ return r.cust===c; });
+    var share = grand>0 ? Math.round(cTotal[c]/grand*100) : 0;
+    b += '<tr class="grp"><td class="td-fix" colspan="2"><div class="grp-cust">'+c
+      +'<span class="grp-tag">'+crs[0].factory+'</span><i class="grp-share" style="width:'+Math.max(share*0.6,6)+'px" title="占本月 '+share+'%"></i></div></td>';
+    for(var d=1; d<=DAYS; d++){
+      var v = daySum(crs,d);
+      b += '<td class="grp-cell num'+(d===state.sel?' sel-col':'')+(v>0&&d!==state.sel?' dim-col':'')+'">'+(v>0?fmt(v):'')+'</td>';
+    }
+    b += '<td class="td-sum num">'+fmt(cTotal[c])+'</td></tr>';
+    crs.sort(function(a2,b2){ return rowSum(b2)-rowSum(a2); }).forEach(function(r){
+      b += '<tr><td class="td-fix"></td><td class="td-fix2"><div class="sku-name">'+SKUS[r.sku].name+'</div><div class="sku-bc num">'+SKUS[r.sku].bc+'</div></td>';
+      for(var d=1; d<=DAYS; d++){
+        var v = qtyAt(r,d);
+        b += '<td class="cell '+heat(v)+(d===state.sel?' sel-col':'')+'">'+(v>0?'<span class="q num">'+fmt(v)+'</span>':'')+'</td>';
+      }
+      b += '<td class="td-sum num">'+fmt(rowSum(r))+'</td></tr>';
+    });
+  });
+  document.getElementById('tbody').innerHTML = b;
+
+  /* tfoot：日合计 */
+  var f = '<tr><th class="td-fix" colspan="2" style="text-align:left;padding-left:10px">日合计（件）</th>';
+  for(var d=1; d<=DAYS; d++){
+    var v = daySum(list,d);
+    f += '<th class="'+(d===state.sel?'sel-col':'')+'" data-day="'+d+'" title="选中 '+MONTH+'月'+d+'日"><span class="num">'+(v>0?fmt(v):'·')+'</span></th>';
+  }
+  f += '<td class="td-sum num">'+fmt(grand)+'</td></tr>';
+  document.getElementById('tfoot').innerHTML = f;
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-day]'), function(el){
+    el.addEventListener('click', function(){ state.sel = +el.getAttribute('data-day'); render(); });
+  });
+}
+
+/* ===== 当日快照条 ===== */
+function renderSnap(){
+  var list = rows(), d = state.sel;
+  var total = daySum(list,d), custs = dayCusts(list,d), skuN = daySkus(list,d);
+  var el = document.getElementById('snap');
+  if(total<=0){ el.innerHTML = '<span class="snap-title">'+MONTH+'月'+d+'日 周'+wd(d)+'</span><span class="snap-empty">当日无出货计划</span>'; return; }
+  var chips = Object.keys(custs).sort(function(a,b){ return custs[b]-custs[a]; }).map(function(c){
+    return '<span class="snap-chip">'+c+' <span class="n num">'+fmt(custs[c])+'</span></span>';
+  }).join('');
+  el.innerHTML = '<span class="snap-title">当日快照 · '+MONTH+'月'+d+'日 周'+wd(d)+(d===TODAY?'（今天）':'')+'</span>'
+    +'<span class="snap-meta num">合计 '+fmt(total)+' 件 · 客户 '+Object.keys(custs).length+' 家 · SKU '+skuN+' 个</span>'
+    +'<div class="snap-chips">'+chips+'</div>';
+}
+
+function render(){ renderPills(); renderInfo(); renderMatrix(); renderSnap(); }
+render();
+</script>
+</body>
+</html>

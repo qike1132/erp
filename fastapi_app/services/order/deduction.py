@@ -19,7 +19,6 @@ from fastapi_app.core.cache_invalidation import (
 )
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
-from fastapi_app.core.state_machine import can_transition
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services import escape_like
 from fastapi_app.services.enhanced_pagination import (
@@ -51,8 +50,6 @@ from fastapi_app.shared.stock_concurrency import (
     update_stock_with_optimistic_lock,
 )
 from fastapi_app.shared_models import (
-    ApprovalLog,
-    ApprovalRequest,
     InventoryLog,
     Notification,
     Order,
@@ -70,9 +67,6 @@ logger = logging.getLogger(__name__)
 
 # L-10（2026-11-21 审计）：_invalidate_order_domains 原地删除——与 commands.py 的
 # 逐字重复实现收敛到 order/_common 单源（本文件顶部已改为从 _common 导入）
-
-
-from fastapi_app.services.order.approval_flow import _check_order_lock
 
 
 async def _increase_deduction(
@@ -298,8 +292,6 @@ async def update_deduct_quantity(
     order = result.scalar_one_or_none()
     if not order or order.is_deleted:
         raise ValueError('订单不存在')
-
-    await _check_order_lock(db, order_id, order, current_user, '修改抵扣')
 
     if new_deduct_quantity < 0:
         raise ValueError('抵扣数量不能为负数')

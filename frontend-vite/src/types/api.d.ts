@@ -27,49 +27,6 @@ export interface AddDetailsRequest {
   details: Array<PlanDetailInput>
 }
 
-export interface ApprovalActionRequest {
-  reason?: string | null
-}
-
-export interface ApprovalActionResponse {
-  success?: boolean
-  message: string
-}
-
-export interface ApprovalCancelResponse {
-  success: boolean
-  message: string
-}
-
-export interface ApprovalDetailResponse {
-  success?: boolean
-  data: Record<string, unknown>
-}
-
-export interface ApprovalItemSchema {
-  id: number
-  order_id: number
-  order_no?: string | null
-  requester_id: number
-  requester_name?: string | null
-  operation_type: string
-  operation_type_display: string
-  operation_data?: string | null
-  status: string
-  status_display: string
-  request_time?: string | null
-  approver_id?: number | null
-  approver_name?: string | null
-  approval_time?: string | null
-  rejection_reason?: string | null
-  lock_time?: string | null
-}
-
-export interface ApprovalPendingCountResponse {
-  success?: boolean
-  count?: number
-}
-
 export interface AsyncTaskResponse {
   success?: boolean
   task_id?: string
@@ -501,7 +458,6 @@ export interface BatchQueryItem {
   computed_status?: string | null
   batch_no?: string | null
   batch_completed_at?: string | null
-  is_locked?: boolean | null
   record_type?: string | null
 }
 
@@ -1072,7 +1028,6 @@ export interface DashboardStats {
   stockin_yesterday?: number
   stockout_today?: number
   stockout_yesterday?: number
-  pending_approvals?: number
   low_stock_count?: number
   pending_purchases?: number
   pending_materials?: number
@@ -1603,7 +1558,6 @@ export interface OrderBatchItemSchema {
   status?: string | null
   batch_no?: string | null
   batch_completed_at?: string | null
-  is_locked?: boolean | null
 }
 
 export interface OrderBatchListResponse {
@@ -1631,8 +1585,6 @@ export interface OrderDetailResponse {
   deduct_quantity?: number
   status: string
   note?: string
-  is_locked?: boolean | null
-  locked_by_name?: string | null
   items?: Array<OrderItemSchema>
 }
 
@@ -3255,16 +3207,6 @@ export interface schemas_BatchCompleteRequest {
   spare_rate?: number | null
 }
 
-export interface approval_ApprovalListResponse {
-  success?: boolean
-  data: Array<ApprovalItemSchema>
-  total?: number
-  pages?: number
-  pending_count?: number
-  approved_count?: number
-  rejected_count?: number
-}
-
 export interface customer_sampling_ActionResponse {
   success?: boolean
   message?: string
@@ -3294,12 +3236,6 @@ export interface material_registration_ActionResponse {
 export interface material_registration_TrendResponse {
   success?: boolean
   trend?: Array<Record<string, unknown>>
-}
-
-export interface order_ApprovalListResponse {
-  success?: boolean
-  data: Array<Record<string, unknown>>
-  total?: number
 }
 
 export interface order_OrderActionResponse {

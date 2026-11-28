@@ -494,7 +494,7 @@ describe('saveQtyRow 单行保存语义', () => {
  * 非编辑态输入损耗率（组件层 300ms 防抖后）必须自动把 spare_rate 落库到本次汇总
  * 涉及的全部采购单，形成「输入框 → 数据库」的持久化路径。断言点：
  *  1. 以空 edits 调用 purchaseApi.saveFactoryEdits，参数为 ([], <rate>, <orderIds>)；
- *  2. orderIds 为空时不发请求（且此时 lossRateTouched 仍为 true，说明已交互未落库）；
+ *  2. orderIds 为空时零副作用（不发请求、不置 touched——F-B1 防 close 后残留复活）；
  *  3. 落库成功后 lossRateTouched 复位为 false（避免后续完成下单重复提交）；
  *  4. 失败（reject 或 success:false）时抛出供上层 toast，不静默吞掉，本地展示保持可用。
  */
@@ -539,13 +539,13 @@ describe('applyLossRateAndSave 损耗率自动落库', () => {
     expect(magnifyByLossRate(m.factoryData!.groups[0]!.suppliers[0]!.fabrics[0]!.quantity, m.lossRate)).toBeCloseTo(10.05, 5)
   })
 
-  it('orderIds 为空 → 不发请求（lossRateTouched 仍为 true，表示已交互未落库）', async () => {
+  it('orderIds 为空 → 零副作用（不发请求、不置 touched——F-B1 防 close 后残留复活）', async () => {
     const m = useSummaryModal()
     // 未 openSummary：orderIds 仍为空数组
     await m.applyLossRateAndSave(5)
 
     expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
-    expect(m.lossRateTouched).toBe(true)
+    expect(m.lossRateTouched).toBe(false)
   })
 
   it('落库成功 → lossRateTouched 复位为 false（后续完成下单无需重复提交）', async () => {

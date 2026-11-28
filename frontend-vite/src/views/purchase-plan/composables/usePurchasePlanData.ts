@@ -14,7 +14,7 @@ export function getShipmentStatus(quantity: number, shippedQty: number): string 
   return 'pending';
 }
 
-export function usePurchasePlanData(y: Ref<number>, m: Ref<number>, _viewTab: Ref<'daily' | 'summary'>) {
+export function usePurchasePlanData(y: Ref<number>, m: Ref<number>) {
   // 单次聚合查询替代原 pp-monthly + pp-summary 两个查询
   // 后端完成 rows + sku_summary + sku_date_index + customers 聚合，不传输全量明细
   const { data: d, isLoading, isFetching, isError, refetch } = useQuery({

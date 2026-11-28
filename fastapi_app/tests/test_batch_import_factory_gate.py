@@ -230,9 +230,17 @@ def _patch_order_common(monkeypatch, products, rows):
     monkeypatch.setattr(batch_service, 'get_all_products', AsyncMock(return_value=products))
     monkeypatch.setattr(bis, '_pre_load_customer_names', AsyncMock(return_value={'客户A'}))
     monkeypatch.setattr(bis, 'generate_order_number', AsyncMock(return_value='SO-X'))
+    # D-H2 收敛后 SKU 快照取已加锁产品行，故 stub 需带 name/barcode 且按 id 返回
+    # 对应产品；建单服务还会生成外发工序（假 DB 不查库）。
+    async def _lock_product(_db, product_id):
+        product = next(p for p in products if p.id == product_id)
+        return SimpleNamespace(
+            id=product.id, name=product.name, barcode=product.barcode,
+            current_stock=100, version=0)
+
+    monkeypatch.setattr(bis, 'get_product_for_update', AsyncMock(side_effect=_lock_product))
     monkeypatch.setattr(
-        bis, 'get_product_for_update',
-        AsyncMock(return_value=SimpleNamespace(id=1, current_stock=100, version=0)))
+        'fastapi_app.services.outsource_service.auto_generate_for_order', AsyncMock())
 
 
 _ORDER_ROWS = [
@@ -294,6 +302,8 @@ async def test_comprehensive_order_sheet_rejects_other_factory_row(monkeypatch) 
         'fastapi_app.services.purchase._auto_generate.schedule_auto_generate_purchase_orders',
         lambda *a, **k: None,
     )
+    monkeypatch.setattr(
+        'fastapi_app.services.outsource_service.auto_generate_for_order', AsyncMock())
     db = _FakeDb()
     deps = bic.ImportDeps(generate_order_number=AsyncMock(return_value='SO-X'))
 
@@ -388,6 +398,10 @@ def _patch_arq_env(monkeypatch, session, product, rows):
     monkeypatch.setattr(bt, '_parse_rows_async', AsyncMock(return_value=(True, rows, '')))
     monkeypatch.setattr(bt, '_open_import_session', AsyncMock(return_value=session))
     monkeypatch.setattr(bt, '_resolve_product_locked', AsyncMock(return_value=product))
+    # D-H2 收敛后订单行校验客户主数据并生成外发工序；假会话不查库。
+    monkeypatch.setattr(bic, '_pre_load_customer_names', AsyncMock(return_value={'客户A'}))
+    monkeypatch.setattr(
+        'fastapi_app.services.outsource_service.auto_generate_for_order', AsyncMock())
     monkeypatch.setattr(
         'fastapi_app.services.numbering.generate_order_number',
         AsyncMock(return_value='SO-ARQ-1'))
@@ -440,7 +454,8 @@ async def test_arq_tasks_allow_unbound_factory_user(monkeypatch) -> None:
     orders_result = await bt.batch_import_orders_task(
         _job_ctx('job-orders-open'), _tmp_upload(), 'f.xlsx', 1, None)
     assert orders_result['imported_count'] == 1
-    assert [type(o).__name__ for o in session.added] == ['Order', 'InventoryLog']
+    # D-H2：建单服务同时写 SKU 明细（此前缺明细，湖北页不可见）。
+    assert [type(o).__name__ for o in session.added] == ['Order', 'OrderItem', 'InventoryLog']
 
     session2 = _ArqSession()
     delta2 = _patch_arq_env(monkeypatch, session2, _product(2, 'B厂'), [_ARQ_ROW])

@@ -126,8 +126,6 @@ def count_all_data(db: Session) -> dict:
 
     # 系统管理
     counts['customer'] = db.execute(text("SELECT COUNT(*) FROM customer")).scalar()
-    counts['approval_request'] = db.execute(text("SELECT COUNT(*) FROM approval_request")).scalar()
-    counts['approval_log'] = db.execute(text("SELECT COUNT(*) FROM approval_log")).scalar()
     counts['app_version'] = db.execute(text("SELECT COUNT(*) FROM app_version")).scalar()
     counts['user'] = db.execute(text("SELECT COUNT(*) FROM \"user\"")).scalar()
     counts['permission'] = db.execute(text("SELECT COUNT(*) FROM permission")).scalar()
@@ -252,8 +250,6 @@ def clear_core_business(db: Session, dry_run: bool = True) -> dict:
     # 订单相关
     results['order_sync_record'] = affected_rows(db, "DELETE FROM order_sync_record", dry_run=dry_run)
     results['sync_retry_queue'] = affected_rows(db, "DELETE FROM sync_retry_queue", dry_run=dry_run)
-    results['approval_log'] = affected_rows(db, "DELETE FROM approval_log", dry_run=dry_run)
-    results['approval_request'] = affected_rows(db, "DELETE FROM approval_request", dry_run=dry_run)
     results['order_status_log'] = affected_rows(db, "DELETE FROM order_status_log WHERE target_type = 'unprocessed_order'", dry_run=dry_run)
     # P1-35：订单明细显式删除（原先依赖 order 的外键级联；显式化后口径可见、dry-run 有数）
     # 幂等登记表：与订单同批清，避免清库后同键重放返回已删除订单的结果

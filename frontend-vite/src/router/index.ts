@@ -48,7 +48,6 @@ const pcRoutes: RouteRecordRaw[] = [
         meta: { hideHeader: true },
       },
       { path: 'supplier', name: 'Supplier', component: () => import('@/views/supplier/SupplierView.vue'), meta: { hideHeader: true } },
-      { path: 'approval', name: 'Approval', component: () => import('@/views/approval/ApprovalView.vue'), meta: { hideHeader: true } },
       { path: 'purchase', name: 'Purchase', component: () => import('@/views/purchase/PurchaseView.vue'), meta: { hideHeader: true } },
       {
         path: 'purchase-plan',

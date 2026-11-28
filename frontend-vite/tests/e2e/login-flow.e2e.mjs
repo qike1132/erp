@@ -149,7 +149,6 @@ beforeEach(async () => {
           stockin_yesterday: 2,
           stockout_today: 4,
           stockout_yesterday: 1,
-          pending_approvals: 0,
           low_stock_count: 0,
           pending_purchases: 0,
           pending_materials: 0,

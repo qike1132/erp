@@ -30,9 +30,16 @@ interface ConfirmFn {
   (msg: string, sub?: string, type?: 'danger' | 'warning'): Promise<boolean>
 }
 
-/** 「有未保存内容」的统一判定：路由守卫与返回按钮共用同一口径 */
+/** 「有未保存内容」的统一判定：路由守卫与返回按钮共用同一口径。
+ *
+ * 2026-11-28 推送前评审 F-B2 改口径：损耗率不再把 touched/saving 判为 dirty——
+ * 挂起值会由返回按钮 flush / 卸载兜底 flush 立即发出，且排空循环直接调 API
+ * 落库、不依赖组件存活（saving/touched 在途时离开，请求照发、最终会落库）；
+ * 此前把「已提交在途」说成「将丢弃」，用户确认离开后服务端照样保存，语义相反。
+ * 真正未保存的只有**失败残留**（state='error'，touched 保持 true）——此时丢弃
+ * 语义成立，弹确认。数量草稿（hasUnsavedQtyEdits）维持「宁弹勿丢」不变。 */
 function isSummaryDirty(summary: SummaryGuardTarget): boolean {
-  return summary.hasUnsavedQtyEdits || summary.lossRateTouched || summary.lossRateSaveState === 'saving'
+  return summary.hasUnsavedQtyEdits || summary.lossRateSaveState === 'error'
 }
 
 /** 守卫 + 返回按钮的一体化接线：挂路由守卫，返回 handleSummaryClose 给模板用 */

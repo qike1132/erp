@@ -66,8 +66,7 @@ async function mountView(inventoryDegraded: boolean) {
       plugins: [[VueQueryPlugin, { queryClient }]],
       stubs: {
         PurchasePlanHeader: true,
-        PurchasePlanDailyTab: true,
-        PurchasePlanMonthlySummary: true,
+        PurchasePlanBoard: true,
         CreateShipmentPlanDialog: true,
         SkuDetailDialog: true,
       },

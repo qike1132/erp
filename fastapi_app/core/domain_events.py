@@ -43,7 +43,6 @@ class DomainEventType(StrEnum):
     STOCK_RETURN_CANCELLED = 'stock_return.cancelled'
     PRODUCT_UPDATED = 'product.updated'
     PURCHASE_PLAN_UPDATED = 'purchase_plan.updated'
-    APPROVAL_DECISION = 'approval.decision'
     BACKUP_COMPLETED = 'backup.completed'
     USER_PERMISSION_CHANGED = 'user.permission_changed'
 

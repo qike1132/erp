@@ -17,7 +17,6 @@ class DashboardReadScope:
     inventory: bool = False
     warehouse: bool = False
     plans: bool = False
-    approvals: bool = False
     purchases: bool = False
     materials: bool = False
     amounts: bool = False
@@ -38,7 +37,6 @@ class DashboardReadScope:
             inventory=stockin or can('stock_view'),
             warehouse=can('case_manage'),
             plans=can('production_plan_view'),
-            approvals=bool(user.is_super),
             # 旧采购单与来料记录没有可证明的产品工厂归属，不给厂绑定用户返回全厂数据。
             purchases=not factory and (can('product_manage') or can('purchase_center_manage')),
             materials=not factory and (can('product_manage') or can('material_registration')),

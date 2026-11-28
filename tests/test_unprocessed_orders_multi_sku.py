@@ -2,7 +2,7 @@
 Unit tests for multi-SKU display in unprocessed orders list.
 
 Verifies the fix for the bug where only the first SKU was shown per order
-in the purchase approval page (http://192.168.0.95:3000/purchase 审核订单).
+in the purchase center page (http://192.168.0.95:3000/purchase 审核订单).
 """
 from __future__ import annotations
 

@@ -94,9 +94,8 @@ async def query_table_rows(tname: str, db: AsyncSession, since: str | None = Non
             # 必须捕 DBAPIError，不能捕 sqlalchemy.exc.DataError：asyncpg 实际抛出的是
             # sqlalchemy.dialects.postgresql.asyncpg.Error（它的父类是 DBAPIError），
             # 而 DataError 永远匹配不到它 —— 原先只捕 DataError 使本回退成为**死代码**，
-            # 于是 approval_request / approval_log（updated_at 为 varchar）在每一次增量
-            # 备份中被静默跳过（2026-09-30 修复；证据见 logs/erp-arq.log 的
-            # "增量备份表 approval_log 失败: ... (expected str, got datetime)"）。
+            # 于是 updated_at 为 varchar 的表在每一次增量备份中被静默跳过
+            # （2026-09-30 修复；当时证据见 logs/erp-arq.log 的增量备份报错）。
             # 事务已失败，必须先 rollback 才能在新事务中重试
             with contextlib.suppress(SQLAlchemyError):
                 await db.rollback()  # manual-tx: try/except 内显式事务控制

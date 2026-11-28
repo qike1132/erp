@@ -152,7 +152,6 @@ def _fix_other_nav_sections(session):
         'stockout_manage': {'url': 'stock.stockouts', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-shipping-fast'},
         'case_manage': {'url': 'case.case_management_page', 'section': 'core', 'section_name': '核心业务', 'icon': 'fa-box-open'},
         'report_manage': {'url': 'report.reports', 'section': 'data', 'section_name': '订单查询', 'icon': 'fa-chart-bar'},
-        'approval_manage': {'url': 'approval.approval_list', 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-clipboard-check'},
         'customer_manage': {'url': 'customer.customers', 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-building'},
         'supplier_manage': {'url': 'supplier.suppliers', 'section': 'purchase', 'section_name': '采购管理', 'icon': 'fa-truck'},
         'user_manage': {'url': 'user.users', 'section': 'system', 'section_name': '系统管理', 'icon': 'fa-users-cog', 'is_nav': True},

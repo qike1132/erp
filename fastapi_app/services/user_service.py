@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
-from fastapi_app.shared_models import ApprovalRequest, Order, Permission, User
+from fastapi_app.shared_models import Permission, User
 
 logger = logging.getLogger(__name__)
 
@@ -187,33 +187,6 @@ async def delete_user(db: AsyncSession, user_id: int) -> None:
 
     if user.is_super:
         raise ValueError("超级用户不能删除")
-
-    # 审批记录（含历史）是 NO ACTION 外键：只查 pending 会漏掉已审批历史，
-    # 删除时在 flush 阶段炸成 500（2026-10-30 审计 A-M26）。有历史即拒绝，改用禁用。
-    approval_count = await db.scalar(
-        select(func.count()).select_from(ApprovalRequest).where(
-            (ApprovalRequest.requester_id == user_id)
-            | (ApprovalRequest.approver_id == user_id),
-        )
-    )
-    if approval_count and approval_count > 0:
-        raise ValueError(
-            f"该用户存在 {approval_count} 条审批历史，无法删除；请改为禁用"
-        )
-
-    # ⚠️ `not Order.is_deleted` 求值为 Python 布尔 False（不是 SQL 表达式），
-    #    会让整个 WHERE 恒假 → locked_order_count 永远为 0 → 本守卫永不触发。
-    #    必须用 SQLAlchemy 表达式（项目惯例 isnot(True)，列可空故 NULL 视为未删除）。
-    #    `Order.is_locked` 同理改用 `is_(True)`：裸列虽可运行，但列可空时语义不清晰。
-    locked_order_count = await db.scalar(
-        select(func.count()).select_from(Order).where(
-            Order.locked_by_id == user_id,
-            Order.is_locked.is_(True),
-            Order.is_deleted.isnot(True),
-        )
-    )
-    if locked_order_count and locked_order_count > 0:
-        raise ValueError(f"该用户锁定了 {locked_order_count} 个订单，无法删除")
 
     try:
         await db.delete(user)

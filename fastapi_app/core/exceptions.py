@@ -210,10 +210,23 @@ async def db_transaction(
             raise
     except NotFoundError as e:
         await db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message) from e
+        raise HTTPException(
+            status_code=e.status_code, detail=e.message,
+            headers={'X-Error-Code': e.code},
+        ) from e
     except AppError as e:
         await db.rollback()
-        raise HTTPException(status_code=e.status_code, detail=e.message) from e
+        # 保留机器可读的错误码（2026-11-27 跨层评审 High）：此前直接丢弃 e.code，
+        # 前端只能把「状态冲突」与「BOM 版本冲突」都当同一种 409 处理——两者
+        # 的恢复动作完全不同（前者需剔除已完成单，后者刷新版本快照即可），
+        # 文案也完全不同。放 header 而非改 detail 结构：``main.py`` 的
+        # StarletteHTTPException handler 只回显 detail，改 detail 形状会波及
+        # 所有走 db_transaction 的端点与既有客户端解析。
+        raise HTTPException(
+            status_code=e.status_code,
+            detail=e.message,
+            headers={'X-Error-Code': e.code},
+        ) from e
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e)) from e

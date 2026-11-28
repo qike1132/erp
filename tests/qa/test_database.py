@@ -49,7 +49,7 @@ class TestDatabaseConnection:
 
         # 当前 schema 表名（单数）；旧复数名（users/products/...）已随重构移除
         core_tables = ["user", "product", "order", "customer", "supplier",
-                       "stock_in", "stock_out", "approval_request",
+                       "stock_in", "stock_out",
                        "case", "material_registration", "purchase_order", "purchase_plans"]
         found = [t for t in core_tables if t in tables]
         assert len(found) >= 6, f"核心表发现不足: {len(found)}/{len(core_tables)} -> {found}"

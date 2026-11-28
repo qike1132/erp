@@ -21,6 +21,7 @@
       >
         <span v-if="lossRateSaveState === 'saving'" class="text-text-muted">保存中…</span>
         <span v-else-if="lossRateSaveState === 'error'" class="text-danger-500">保存失败</span>
+        <span v-else-if="lossRateSaveState === 'saved'" class="text-success-600">已保存</span>
         <span v-else-if="lossRateMixed" class="text-text-muted">各订单损耗率不一致</span>
       </span>
     </div>
@@ -62,6 +63,8 @@
                   aria-label="工厂内部订单统一损耗率（千分之几）"
                   @input="onLossRateInput"
                   @wheel="onRateWheel"
+                  @blur="emit('lossRateCommit')"
+                  @keydown.enter.prevent="emit('lossRateCommit')"
                 />
                 <span class="sm-rate-head__unit" aria-hidden="true">‰</span>
               </span>
@@ -144,15 +147,16 @@
                 <td v-if="item.row.isFirstSupplierRow" :rowspan="item.row.supplierRowSpan">{{ item.row.supplierName }}</td>
                 <td>{{ item.row.materialName }}</td>
                 <td>{{ item.row.specification || '' }}</td>
-                <!-- 损耗率：有落库坐标即可直接编辑（自动落库），与是否编辑数量无关；
-                     无坐标（BOM 新增物料）→ — 并说明原因 -->
+                <!-- 损耗率：有落库坐标且有可写明细才可编辑（自动落库）；无坐标/无明细 → — 并说明原因 -->
                 <td>
-                  <template v-if="rowCoord(item)">
+                  <template v-if="canEditRate(item)">
                     <input
                       type="number" class="sm-inline-input text-right border border-border rounded focus:outline-none focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2 focus:border-primary-500"
                       :value="rowRate(item)" min="0" max="1000" step="any"
                       :title="sharedMaterialTitle(item)"
                       @input="onRowRateInput(item, $event)"
+                      @blur="onRowRateCommit(item)"
+                      @keydown.enter.prevent="onRowRateCommit(item)"
                     />
                     <span v-if="isRowRateMixed(item)" class="text-[12px] text-text-muted whitespace-nowrap">不一致</span>
                   </template>
@@ -279,8 +283,8 @@ const UNIFIED_RATE_TITLE =
 
 // 行模型与率/数量读写胶水（2026-09-30 抽到 useFactoryTableRows.ts，以守住单 .vue ≤ 400 行门禁）
 const {
-  flatRows, rowDiffMap, storedRowsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowCoord, rowRate,
-  displayRowQty, sharedMaterialTitle, qtyEditTitle, isRowRateMixed, onRowRateInput,
+  flatRows, rowDiffMap, storedRowsOf, isLastRowOfGroup, groupRowCounts, isGroupFirstRow, rowRate,
+  displayRowQty, sharedMaterialTitle, qtyEditTitle, isRowRateMixed, onRowRateInput, canEditRate, onRowRateCommit,
   canEditQty, qtyDraftOf, isQtyDraftDirty, isQtySaving, onQtyCellClick, onQtyDraftInput,
   onQtySave, onQtyEsc, onQtyBlur,
 } = useFactoryTableRows(props, emit)

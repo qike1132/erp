@@ -13,7 +13,7 @@ from fastapi_app.services.batch_import_core import _import_idem_key
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SVC = _REPO_ROOT / 'fastapi_app' / 'services'
-# 所有「导入来源」写 InventoryLog 的模块（手工/审批/建品等路径不在此列，
+# 所有「导入来源」写 InventoryLog 的模块（手工/建品等路径不在此列，
 # 它们本就不设 idem_key）。
 _IMPORT_MODULES = [
     _SVC / 'batch_import_service.py',
@@ -84,7 +84,11 @@ def test_every_import_inventory_log_sets_idem_key():
             kwargs = {kw.arg for kw in call.keywords}
             if 'idem_key' not in kwargs:
                 offenders.append(f'{path.name}:{call.lineno}')
-    assert total >= 9, f'预期至少 9 处导入 InventoryLog 构造，实际 {total}（盘点是否遗漏路径）'
+    # 2026-11-28 实测盘点：六个被扫模块合计 8 处 InventoryLog 构造
+    # （batch_import_service 2 / batch_import_core 2 / staging 三件套各 1 /
+    # batch_tasks 1）。旧阈值 9 是更早实现的漂移残留（基线 main 实际即 8 处，
+    # 该红灯先于审批下线批次存在，与本次改动无关）。
+    assert total >= 8, f'预期至少 8 处导入 InventoryLog 构造，实际 {total}（盘点是否遗漏路径）'
     assert not offenders, f'以下 InventoryLog 未设置 idem_key，将失去 DB 层幂等保护: {offenders}'
 
 

@@ -1,6 +1,6 @@
 """AUD-02（2026-10-24 审计 P1）回归锁：时间口径族——业务时区统一渲染与筛选。
 
-naive-UTC 列（completed_at/approval 时间列）裸 strftime 恒慢 8 小时、北京
+naive-UTC 列（completed_at 等时间列）裸 strftime 恒慢 8 小时、北京
 00:00–07:59 的记录落错天；timestamptz 列（create_time/order_date）裸 strftime
 按 UTC 墙钟渲染同病。修复后：naive-UTC 走 fmt_business_naive_utc、aware 走
 fmt_business、筛选边界走 business_day_bounds_utc_naive（北京日界→UTC 边界）。
@@ -77,12 +77,13 @@ def test_completed_order_serializes_beijing_times():
     assert result['create_time'] == '2026-10-24 10:30'
 
 
-def test_approval_fmt_dt_converts_naive_utc():
-    """审批时间（naive-UTC 列）经 to_dict 必须输出北京时间（F2-1 闭环）。"""
-    from fastapi_app.shared_models.approval import _fmt_dt
+def test_fmt_business_naive_utc_converts():
+    """naive-UTC 时间经 fmt_business_naive_utc 必须输出北京时间（F2-1 闭环）。"""
+    from fastapi_app.core.business_time import fmt_business_naive_utc
 
-    assert _fmt_dt(datetime(2026, 10, 24, 2, 30)) == '2026-10-24 10:30:00'
-    assert _fmt_dt(None) is None
+    assert fmt_business_naive_utc(datetime(2026, 10, 24, 2, 30), '%Y-%m-%d %H:%M:%S') == '2026-10-24 10:30:00'
+    # 该助手对 None 返回空串（调用方 _fmt_dt 以 `if value else None` 兜 None）
+    assert fmt_business_naive_utc(None, '%Y-%m-%d %H:%M:%S') == ''
 
 
 def test_order_serializer_order_date_is_beijing():

@@ -28,6 +28,7 @@ from fastapi_app.services.numbering import (
     generate_stockin_number,
     generate_stockout_number,
 )
+from fastapi_app.services.order.import_creation import create_imported_order
 from fastapi_app.services.order_deduction_service import process_order_deduction
 from fastapi_app.services.signed_urls import strip_upload_signature
 from fastapi_app.services.xlsx_cell_images import guess_image_extension, parse_dispimg_id
@@ -39,13 +40,11 @@ from fastapi_app.shared.stock_concurrency import (
 from fastapi_app.shared_models import (
     Customer,
     InventoryLog,
-    Order,
     Product,
     ProductCustomer,
     StockIn,
     StockOut,
 )
-from fastapi_app.shared_models.order import ORDER_STATUS_PENDING_STOCK
 
 logger = logging.getLogger(__name__)
 
@@ -859,18 +858,24 @@ async def import_orders_from_data(
 
         order_no = await deps.generate_order_number(db)
         order_date = datetime.now(UTC)  # aware UTC：order_date 列为 timestamptz
-        order = Order(
-            order_no=order_no,
-            customer=customer,
-            order_date=order_date,
-            product_id=product_id,
-            quantity=qty,
-            note=str(note).strip() if note else '',
-            status=ORDER_STATUS_PENDING_STOCK
-        )
-        db.add(order)
-        await db.flush()
 
+        # 抵扣解析口径只在 batch_import_parser._parse_deduct_flag 一份
+        # （审计 Z04-R3③：原先此处与 batch_import_service 各内嵌一份 if/elif，
+        # 「是」一度折算 1 件、'3.0' 一度静默丢弃 —— 同一列多种语义）。
+        deduct_on, deduct_value = _parse_deduct_flag(deduct_flag, qty)
+
+        # A-M1 残留收口（2026-11-28 推送前评审 F-A3）：抵扣行在建单前先取产品行锁。
+        # 契约见 order/import_creation.py：综合导入原先「先 INSERT Order（对 Product 持
+        # FK KEY SHARE）→ 再 process_order_deduction 升级 FOR UPDATE」，与单 Sheet /
+        # create_order 的「先 FOR UPDATE 再建单」在同一产品行交错即成 40P01 死锁环。
+        # 仅抵扣行需要升级锁；非抵扣行只持 KEY SHARE、从不升级，不构成环。
+        # get_product_for_update 带 populate_existing，重绑 product 让下游 SKU 快照
+        # 读到的是已加锁行（与 batch_import_service 单 Sheet 路径同构）。
+        if deduct_on:
+            product = await deps.get_product_for_update(db, product_id)
+
+        # 建单收敛到唯一服务（审计 O-30 / D-H2）：Order + OrderItem + InventoryLog +
+        # 外发工序一并写入。此前这里内联建单且漏 OrderItem → 湖北页看不到导入订单。
         # 订单**不影响物理库存** —— 与另外三条下单路径一致：
         #   order/commands.py 的 create_order（docstring 明示「不影响物理库存」）、
         #   order_batch_create.py（0 处 current_stock）、
@@ -878,22 +883,23 @@ async def import_orders_from_data(
         # 此处原为 `locked_product.current_stock += qty`，疑为把备货模板
         # （见下方 import_stockins_from_data 的同名行 —— 那里才是对的）复制到订单时漏删，
         # 会让导入来的订单被系统性计入物理库存、并绕过负库存闸门。
-        # 产品存在性已由 _resolve_row_identity 校验，故此处连行锁也不再需要。
-        log = InventoryLog(
+        order, order_item = await create_imported_order(
+            db,
+            order_no=order_no,
             product_id=product_id,
-            change_type='订单',
-            change_quantity=qty,
-            related_id=order_no,
+            product_name=product.name,
+            product_barcode=getattr(product, 'barcode', None),
+            customer=customer,
+            quantity=qty,
+            order_date=order_date,
+            note=str(note).strip() if note else '',
+            deduct_stock=deduct_on,
+            deduct_quantity=deduct_value,
             idem_key=_import_idem_key('order', customer, product_id, qty, order_date),
-            note='综合导入订单：' + order_no
+            log_prefix='综合导入订单',
         )
-        db.add(log)
 
-        # 处理抵扣备货逻辑。解析口径只在 batch_import_parser._parse_deduct_flag 一份
-        # （审计 Z04-R3③：原先此处与 batch_import_service 各内嵌一份 if/elif，
-        # 「是」一度折算 1 件、'3.0' 一度静默丢弃 —— 同一列多种语义）。
         try:
-            deduct_on, deduct_value = _parse_deduct_flag(deduct_flag, qty)
             if deduct_on:
                 # 2026-10-18 OCR 评审：与 batch_import_service.import_orders_service
                 # 同款修正——第 4 个位置参数是 `order_quantity`（订单数量），
@@ -901,19 +907,31 @@ async def import_orders_from_data(
                 # 塞进 order_quantity、不传 custom_deduct_quantity，两列语义在此路径
                 # 碰巧一致（数字=抵扣量、是/yes=整单量）所以没暴露；一旦分叉
                 # （部分抵扣），备货不足告警会拿抵扣量当订单量报错数。改为显式关键字。
-                await deps.process_order_deduction(
+                #
+                # P1-17 同口径（2026-11-27 评审 Medium）：实扣受可用备货收口，
+                # 可能小于申请量——必须把实扣量回写明细（先例 order_batch_create.py:303-312），
+                # 否则该列虚高，明细展示与订单数量下限都会用错值。
+                deducted_amount, _details = await deps.process_order_deduction(
                     db, order, product_id, qty,
                     deduct_stock=True,
                     custom_deduct_quantity=deduct_value,
                     product=product,
                 )
+                order_item.deduct_quantity = int(deducted_amount)
         except (ValueError, TypeError, SQLAlchemyError) as e:
             # 第八轮审计：原仅 logger.error 后仍 return True —— 该行计入 imported，
-            # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为 return False：
-            # 抵扣失败 = 该行失败（savepoint 回滚本行），用户在错误清单里可见。
-            logger.error(f"订单导入 - 行{idx}: 抵扣处理失败，本行按失败处理: {e}", exc_info=True)
-            debug_messages.append(f"行{idx}: 抵扣备货处理失败: {e}")
-            return False
+            # 用户看到"成功导入"但抵扣未发生，订单与库存长期不符。改为抛出让
+            # 骨架回滚本行 savepoint。
+            #
+            # 2026-11-27 跨层评审 Medium（X-M3）：原先 `return False` 只让骨架把行
+            # 计入 skipped——`_run_import_row` 的 `async with db.begin_nested()` 在
+            # handler **正常返回**时会提交 savepoint，订单/明细/流水/外发工序全部
+            # 落库，用户却看到该行失败（与单 Sheet 路径的抛异常语义不一致）。
+            # 抛出后骨架统一回滚本行并记行级错误消息。
+            logger.error(f"订单导入 - 行{idx}: 抵扣处理失败，本行回滚: {e}", exc_info=True)
+            # 包一层保留用户可见语义：骨架会把异常原文写进行级错误清单，
+            # 裸抛 ``e`` 时用户只看到底层驱动/业务原文，看不出是抵扣环节失败。
+            raise ValueError(f'抵扣备货处理失败: {e}') from e
 
         return True
 

@@ -4563,28 +4563,6 @@
         }
       }
     },
-    "/api/v1/orders/my-approvals": {
-      "get": {
-        "tags": [
-          "订单管理"
-        ],
-        "summary": "My Approvals",
-        "description": "查看当前用户提交的审批请求列表。\n\nArgs:\n    db: 异步数据库会话（只读副本）。\n    user: 当前登录用户，用于筛选其提交的审批。\n\nReturns:\n    ApprovalListResponse: 包含审批列表和总数的响应。",
-        "operationId": "my_approvals_api_v1_orders_my_approvals_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/fastapi_app__schemas__order__ApprovalListResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/orders/records": {
       "get": {
         "tags": [
@@ -4924,7 +4902,7 @@
           "订单管理"
         ],
         "summary": "Edit Order",
-        "description": "编辑订单（管理员直接编辑，非管理员提交审批）。\n\n未提供的字段沿用订单原值，实现部分更新语义。\n\nArgs:\n    order_id: 订单 ID。\n    data: 订单更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限判断和审批流程。\n\nReturns:\n    OrderActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 订单不存在时抛出 404。",
+        "description": "编辑订单（未提供的字段沿用原值，实现部分更新语义）。\n\nArgs:\n    order_id: 订单 ID。\n    data: 订单更新参数（仅包含需要修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限判断。\n\nReturns:\n    OrderActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 订单不存在时抛出 404。",
         "operationId": "edit_order_api_v1_orders_edit__order_id__put",
         "parameters": [
           {
@@ -4977,7 +4955,7 @@
           "订单管理"
         ],
         "summary": "Edit Order Item",
-        "description": "编辑单个订单明细（SKU）：改数量/备注后重算订单兼容数量与状态。\n\n报表流水行内编辑（2026-10-13）：item 级直改、不走审批（owner 裁决），\n但仍过 `_check_order_lock`（被他人锁定/审批中的订单不可改）。\nValueError（订单/明细不存在、数量越界）由 db_transaction 默认映射为 400。\n\nArgs:\n    item_id: 订单明细 ID。\n    data: 明细更新参数（仅含需修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限与锁定判断。\n\nReturns:\n    OrderActionResponse: 含成功标志与提示消息的响应。",
+        "description": "编辑单个订单明细（SKU）：改数量/备注后重算订单兼容数量与状态。\n\n报表流水行内编辑（2026-10-13）：item 级直改（owner 裁决）。\nValueError（订单/明细不存在、数量越界）由 db_transaction 默认映射为 400。\n\nArgs:\n    item_id: 订单明细 ID。\n    data: 明细更新参数（仅含需修改的字段）。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限与锁定判断。\n\nReturns:\n    OrderActionResponse: 含成功标志与提示消息的响应。",
         "operationId": "edit_order_item_api_v1_orders_items__item_id__put",
         "parameters": [
           {
@@ -5028,7 +5006,7 @@
           "订单管理"
         ],
         "summary": "Delete Order Item",
-        "description": "删除单个订单明细（SKU）。\n\n删到空等价删整张订单（复用整单删除的审批/锁定/备份，非超管会变成提交审批）；\n已被备货抵扣的 SKU 拒删。error_map 与整单删除端点同口径。\n\nArgs:\n    item_id: 订单明细 ID。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限与锁定判断。\n\nReturns:\n    OrderActionResponse: 含成功标志与提示消息的响应（末项删除时透传 delete_order 的真实返回）。\n\nRaises:\n    HTTPException: 明细/订单不存在返回 400；权限不足 403；关联数据冲突 409；\n        删除前备份失败或数据库异常返回 500。",
+        "description": "删除单个订单明细（SKU）。\n\n删到空等价删整张订单（复用整单删除的备份路径）；\n已被备货抵扣的 SKU 拒删。error_map 与整单删除端点同口径。\n\nArgs:\n    item_id: 订单明细 ID。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限与锁定判断。\n\nReturns:\n    OrderActionResponse: 含成功标志与提示消息的响应（末项删除时透传 delete_order 的真实返回）。\n\nRaises:\n    HTTPException: 明细/订单不存在返回 400；权限不足 403；关联数据冲突 409；\n        删除前备份失败或数据库异常返回 500。",
         "operationId": "delete_order_item_api_v1_orders_items__item_id__delete",
         "parameters": [
           {
@@ -5071,7 +5049,7 @@
           "订单管理"
         ],
         "summary": "Delete Order",
-        "description": "删除订单（管理员直接删除，非管理员提交审批）。\n\n事务模式：db_transaction + error_map（TRANSACTION_BOUNDARY_GUIDE §2.3：\n端点层无 commit 例外）。提交在响应返回前完成，200 与「已落库」保持一致；\nIntegrityError→409 经 error_map 映射（端点无需手动 commit/catch），\n缓存失效与实时广播由 service 注册的 post-commit 回调在提交成功后自动执行。\n\nArgs:\n    order_id: 订单 ID。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限判断。\n\nReturns:\n    OrderActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 关联数据冲突返回 409；权限不足返回 403；\n        参数错误返回 400；订单删除前备份失败或数据库异常返回 500。",
+        "description": "删除订单（备份→级联清理→软删除，同事务完成）。\n\n事务模式：db_transaction + error_map（TRANSACTION_BOUNDARY_GUIDE §2.3：\n端点层无 commit 例外）。提交在响应返回前完成，200 与「已落库」保持一致；\nIntegrityError→409 经 error_map 映射（端点无需手动 commit/catch），\n缓存失效与实时广播由 service 注册的 post-commit 回调在提交成功后自动执行。\n\nArgs:\n    order_id: 订单 ID。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限判断。\n\nReturns:\n    OrderActionResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 关联数据冲突返回 409；权限不足返回 403；\n        参数错误返回 400；订单删除前备份失败或数据库异常返回 500。",
         "operationId": "delete_order_api_v1_orders_delete__order_id__delete",
         "parameters": [
           {
@@ -5091,49 +5069,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/fastapi_app__schemas__order__OrderActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/orders/cancel-approval/{approval_id}": {
-      "post": {
-        "tags": [
-          "订单管理"
-        ],
-        "summary": "Cancel Approval",
-        "description": "取消审批请求（仅审批发起者或超级用户可取消）。\n\nArgs:\n    approval_id: 审批记录 ID。\n    db: 异步数据库会话（读写主库）。\n    user: 当前登录用户，用于权限校验。\n\nReturns:\n    ApprovalCancelResponse: 包含成功标志和提示消息的响应。\n\nRaises:\n    HTTPException: 权限不足时抛出 403。",
-        "operationId": "cancel_approval_api_v1_orders_cancel_approval__approval_id__post",
-        "parameters": [
-          {
-            "name": "approval_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Approval Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApprovalCancelResponse"
                 }
               }
             }
@@ -9175,254 +9110,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/approvals/list": {
-      "get": {
-        "tags": [
-          "审批管理"
-        ],
-        "summary": "Approval List",
-        "description": "获取审批列表（分页）。\n\n支持按状态筛选和关键词搜索，返回各状态计数。\n\nArgs:\n    status: 状态筛选，可选 pending/approved/rejected/all。\n    search: 搜索关键词（订单号、用户名、操作类型）。\n    page: 页码，从 1 开始。\n    per_page: 每页条数，1-100。\n    _current_user: 当前操作者（用于权限校验）。\n    db: 只读数据库会话。\n\nReturns:\n    ApprovalListResponse: 审批列表及各状态计数。",
-        "operationId": "approval_list_api_v1_approvals_list_get",
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "enum": [
-                "pending",
-                "approved",
-                "rejected",
-                "all"
-              ],
-              "type": "string",
-              "description": "状态筛选: pending/approved/rejected/all",
-              "default": "pending",
-              "title": "Status"
-            },
-            "description": "状态筛选: pending/approved/rejected/all"
-          },
-          {
-            "name": "search",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "搜索关键词",
-              "default": "",
-              "title": "Search"
-            },
-            "description": "搜索关键词"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "per_page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 20,
-              "title": "Per Page"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/fastapi_app__schemas__approval__ApprovalListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/approvals/detail/{approval_id}": {
-      "get": {
-        "tags": [
-          "审批管理"
-        ],
-        "summary": "Approval Detail",
-        "description": "获取审批详情（含操作日志和关联订单信息）。\n\nArgs:\n    approval_id: 审批请求 ID。\n    _current_user: 当前操作者（用于权限校验）。\n    db: 只读数据库会话。\n\nReturns:\n    ApprovalDetailResponse: 审批详情数据。\n\nRaises:\n    HTTPException 404: 审批请求不存在时抛出。",
-        "operationId": "approval_detail_api_v1_approvals_detail__approval_id__get",
-        "parameters": [
-          {
-            "name": "approval_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Approval Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApprovalDetailResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/approvals/approve/{approval_id}": {
-      "post": {
-        "tags": [
-          "审批管理"
-        ],
-        "summary": "Approve",
-        "description": "同意审批请求。\n\n根据审批类型执行订单编辑或删除操作，事务提交后发布缓存失效、\n库存事件及领域事件。事件发布失败不影响审批结果。\n\nArgs:\n    approval_id: 审批请求 ID。\n    user: 当前操作者（审批人）。\n    db: 读写数据库会话。\n\nReturns:\n    ApprovalActionResponse: 操作结果消息。",
-        "operationId": "approve_api_v1_approvals_approve__approval_id__post",
-        "parameters": [
-          {
-            "name": "approval_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Approval Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApprovalActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/approvals/reject/{approval_id}": {
-      "post": {
-        "tags": [
-          "审批管理"
-        ],
-        "summary": "Reject",
-        "description": "拒绝审批请求。\n\n解除订单锁定，记录拒绝原因。\n\nArgs:\n    approval_id: 审批请求 ID。\n    data: 拒绝请求参数（含拒绝原因）。\n    user: 当前操作者（审批人）。\n    db: 读写数据库会话。\n\nReturns:\n    ApprovalActionResponse: 操作结果消息。",
-        "operationId": "reject_api_v1_approvals_reject__approval_id__post",
-        "parameters": [
-          {
-            "name": "approval_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Approval Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApprovalActionRequest",
-                "default": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApprovalActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/approvals/pending-count": {
-      "get": {
-        "tags": [
-          "审批管理"
-        ],
-        "summary": "Pending Count",
-        "description": "获取待处理审批数量（带缓存）。\n\n使用本地+远程双层缓存减轻数据库压力。\n\nArgs:\n    _current_user: 当前操作者（用于权限校验）。\n    db: 只读数据库会话。\n\nReturns:\n    ApprovalPendingCountResponse: 待处理审批数量。",
-        "operationId": "pending_count_api_v1_approvals_pending_count_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApprovalPendingCountResponse"
                 }
               }
             }
@@ -20618,239 +20305,6 @@
         "title": "AddDetailsRequest",
         "description": "追加明细请求"
       },
-      "ApprovalActionRequest": {
-        "properties": {
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason",
-            "description": "拒绝原因"
-          }
-        },
-        "type": "object",
-        "title": "ApprovalActionRequest"
-      },
-      "ApprovalActionResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message"
-        ],
-        "title": "ApprovalActionResponse"
-      },
-      "ApprovalCancelResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "success",
-          "message"
-        ],
-        "title": "ApprovalCancelResponse",
-        "description": "取消审批响应"
-      },
-      "ApprovalDetailResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "data": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Data"
-          }
-        },
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "title": "ApprovalDetailResponse"
-      },
-      "ApprovalItemSchema": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "order_id": {
-            "type": "integer",
-            "title": "Order Id"
-          },
-          "order_no": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Order No"
-          },
-          "requester_id": {
-            "type": "integer",
-            "title": "Requester Id"
-          },
-          "requester_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Requester Name"
-          },
-          "operation_type": {
-            "type": "string",
-            "title": "Operation Type"
-          },
-          "operation_type_display": {
-            "type": "string",
-            "title": "Operation Type Display"
-          },
-          "operation_data": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Operation Data"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "status_display": {
-            "type": "string",
-            "title": "Status Display"
-          },
-          "request_time": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Request Time"
-          },
-          "approver_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Approver Id"
-          },
-          "approver_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Approver Name"
-          },
-          "approval_time": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Approval Time"
-          },
-          "rejection_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rejection Reason"
-          },
-          "lock_time": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lock Time"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "order_id",
-          "requester_id",
-          "operation_type",
-          "operation_type_display",
-          "status",
-          "status_display"
-        ],
-        "title": "ApprovalItemSchema"
-      },
-      "ApprovalPendingCountResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "count": {
-            "type": "integer",
-            "title": "Count",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "title": "ApprovalPendingCountResponse"
-      },
       "AsyncTaskResponse": {
         "properties": {
           "success": {
@@ -23273,17 +22727,6 @@
               }
             ],
             "title": "Batch Completed At"
-          },
-          "is_locked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Locked"
           },
           "record_type": {
             "anyOf": [
@@ -26112,11 +25555,6 @@
             "title": "Stockout Yesterday",
             "default": 0
           },
-          "pending_approvals": {
-            "type": "integer",
-            "title": "Pending Approvals",
-            "default": 0
-          },
           "low_stock_count": {
             "type": "integer",
             "title": "Low Stock Count",
@@ -28802,17 +28240,6 @@
               }
             ],
             "title": "Batch Completed At"
-          },
-          "is_locked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Locked"
           }
         },
         "type": "object",
@@ -28951,28 +28378,6 @@
             "type": "string",
             "title": "Note",
             "default": ""
-          },
-          "is_locked": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Locked"
-          },
-          "locked_by_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Locked By Name"
           },
           "items": {
             "items": {
@@ -38233,52 +37638,6 @@
         "title": "BatchCompleteRequest",
         "description": "批量完成订单请求\n\n`spare_rate`：批量确认时对所有涉及采购单统一覆盖的损耗率（千分之几）；`None` 表示不覆盖。"
       },
-      "fastapi_app__schemas__approval__ApprovalListResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/ApprovalItemSchema"
-            },
-            "type": "array",
-            "title": "Data"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "default": 0
-          },
-          "pages": {
-            "type": "integer",
-            "title": "Pages",
-            "default": 0
-          },
-          "pending_count": {
-            "type": "integer",
-            "title": "Pending Count",
-            "default": 0
-          },
-          "approved_count": {
-            "type": "integer",
-            "title": "Approved Count",
-            "default": 0
-          },
-          "rejected_count": {
-            "type": "integer",
-            "title": "Rejected Count",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "title": "ApprovalListResponse"
-      },
       "fastapi_app__schemas__customer_sampling__ActionResponse": {
         "properties": {
           "success": {
@@ -38460,34 +37819,6 @@
         },
         "type": "object",
         "title": "TrendResponse"
-      },
-      "fastapi_app__schemas__order__ApprovalListResponse": {
-        "properties": {
-          "success": {
-            "type": "boolean",
-            "title": "Success",
-            "default": true
-          },
-          "data": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Data"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "default": 0
-          }
-        },
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "title": "ApprovalListResponse",
-        "description": "审批列表响应"
       },
       "fastapi_app__schemas__order__OrderActionResponse": {
         "properties": {

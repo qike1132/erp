@@ -7,10 +7,8 @@
 - 改某 SKU 数量 → 计划仍是旧数量，采购按旧量下单（超采购）。
 
 修复：明细删除/改量时按「本订单 + 本 SKU」精确清理同步明细，被删空的主单一起删。
-本文件锁定作用域（不能误删同客户其它订单/其它 SKU）与各调用点（A-M10：直改三路径；
-H-1 2026-11-21：审批通过改量这条第四写路径）。
+本文件锁定作用域（不能误删同客户其它订单/其它 SKU）与各调用点（A-M10：直改三路径）。
 """
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -135,7 +133,6 @@ async def test_update_order_item_purges_plan_details_on_quantity_change():
     db.flush = AsyncMock()
 
     with patch.object(order_commands, 'get_product_for_update', new=AsyncMock()), \
-         patch.object(order_commands, '_check_order_lock', new=AsyncMock()), \
          patch.object(order_commands, 'compute_order_status_from_db', new=AsyncMock(return_value='待备货')), \
          patch.object(order_commands, 'dispatch_factory_notifications', new=AsyncMock()), \
          patch.object(order_commands, 'cache_mgr', MagicMock(invalidate=AsyncMock())), \
@@ -158,7 +155,6 @@ async def test_update_order_item_does_not_purge_when_quantity_unchanged():
     db.flush = AsyncMock()
 
     with patch.object(order_commands, 'get_product_for_update', new=AsyncMock()), \
-         patch.object(order_commands, '_check_order_lock', new=AsyncMock()), \
          patch.object(order_commands, 'compute_order_status_from_db', new=AsyncMock(return_value='待备货')), \
          patch.object(order_commands, 'dispatch_factory_notifications', new=AsyncMock()), \
          patch.object(order_commands, 'cache_mgr', MagicMock(invalidate=AsyncMock())), \
@@ -191,7 +187,6 @@ async def test_delete_order_item_purges_that_sku_only():
     db.add = MagicMock()
 
     with patch.object(order_commands, '_prelock_order_products', new=AsyncMock()), \
-         patch.object(order_commands, '_check_order_lock', new=AsyncMock()), \
          patch.object(order_commands, 'compute_order_status_from_db', new=AsyncMock(return_value='待备货')), \
          patch.object(order_commands, 'dispatch_factory_notifications', new=AsyncMock()), \
          patch.object(order_commands, 'cache_mgr', MagicMock(invalidate=AsyncMock())), \
@@ -223,82 +218,8 @@ async def test_delete_order_item_rejects_when_outsource_ledger_exists():
     db.delete = AsyncMock()
     db.flush = AsyncMock()
 
-    with patch.object(order_commands, '_prelock_order_products', new=AsyncMock()), \
-         patch.object(order_commands, '_check_order_lock', new=AsyncMock()):
+    with patch.object(order_commands, '_prelock_order_products', new=AsyncMock()):
         with pytest.raises(ValueError, match='外发'):
             await order_commands.delete_order_item(db, 11, MagicMock(is_super=True))
 
     db.delete.assert_not_awaited()
-
-
-# ============================================================================
-# 调用点：审批通过改量（H-1，2026-11-21 审计）
-# ============================================================================
-def _edit_order(no='PO-1', product_id=5, quantity=100):
-    o = MagicMock()
-    o.id = 1
-    o.order_no = no
-    o.quantity = quantity
-    o.customer = '客户A'
-    o.note = ''
-    o.is_locked = True
-    o.locked_by_id = 7
-    o.product_id = product_id
-    return o
-
-
-def _edit_approval(quantity):
-    r = MagicMock()
-    r.operation_data = json.dumps({'quantity': quantity, 'customer': '客户A'})
-    return r
-
-
-@pytest.mark.asyncio
-async def test_approval_edit_purges_plan_details_on_quantity_change():
-    """审批通过改量必须与直改三路径同口径：按「本订单 + 本 SKU」清理同步明细。
-
-    拦的错（H-1）：非管理员提交「改数量」审批、管理员批准后，只写 InventoryLog +
-    sync_single_item_quantity，不碰按 remark 溯源同步出的采购计划明细 → 月历/
-    采购计划继续按旧量备料（超采购），与 A-M10 修直改路径前的后果逐字同源。
-    """
-    from fastapi_app.services import approval_service
-
-    order = _edit_order()
-    db = MagicMock()
-    db.add = MagicMock()
-
-    with patch.object(approval_service, 'get_product_for_update', new=AsyncMock()), \
-         patch.object(approval_service, 'compute_order_status_from_db',
-                      new=AsyncMock(return_value='待备货')), \
-         patch.object(approval_service, 'sync_single_item_quantity', new=AsyncMock()), \
-         patch.object(approval_service, 'purge_shipment_plan_details_for_sku',
-                      new=AsyncMock(), create=True) as m_purge:
-        await approval_service._handle_edit_approval(
-            db, _edit_approval(120), order, MagicMock(id=99),
-        )
-
-    m_purge.assert_awaited_once()
-    assert m_purge.await_args.args[1] == 'PO-1'
-    assert m_purge.await_args.args[2] == 5
-
-
-@pytest.mark.asyncio
-async def test_approval_edit_does_not_purge_when_quantity_unchanged():
-    """数量没变就不得清：纯改客户/备注的审批不能误触发计划明细清理。"""
-    from fastapi_app.services import approval_service
-
-    order = _edit_order()
-    db = MagicMock()
-
-    with patch.object(approval_service, 'get_product_for_update', new=AsyncMock()) as m_lock, \
-         patch.object(approval_service, 'compute_order_status_from_db',
-                      new=AsyncMock(return_value='待备货')), \
-         patch.object(approval_service, 'sync_single_item_quantity', new=AsyncMock()), \
-         patch.object(approval_service, 'purge_shipment_plan_details_for_sku',
-                      new=AsyncMock(), create=True) as m_purge:
-        await approval_service._handle_edit_approval(
-            db, _edit_approval(100), order, MagicMock(id=99),
-        )
-
-    m_purge.assert_not_awaited()
-    m_lock.assert_not_awaited()

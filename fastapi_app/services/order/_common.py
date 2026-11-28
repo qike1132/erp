@@ -22,7 +22,7 @@ _pending_tasks: set[asyncio.Task] = set()
 _STOCK_TO_DOMAIN_EVENT_MAP = {
     StockEvent.ORDER_CREATED: DomainEventType.ORDER_CREATED,
     StockEvent.ORDER_UPDATED: DomainEventType.ORDER_STATUS_CHANGED,
-    # ORDER_DELETED 领域事件由 endpoint 层在事务提交后直接发布（order.py/approval.py），此处不映射
+    # ORDER_DELETED 领域事件由 endpoint 层在事务提交后直接发布（order.py），此处不映射
 }
 
 
@@ -67,7 +67,7 @@ def schedule_post_commit_event(session, event_type: str, data: dict) -> None:
     必须在 commit 之后广播：客户端收到事件会立刻重取列表，若事件先于提交发出，
     重取读到的是**尚未提交**的旧数据（订单仍在），并以前端该次读取的时间戳作为
     dataUpdatedAt 缓存，staleTime 内不再回取——表现为「删除/改数量后关联页面
-    延迟约 30 秒才更新」。审批路径（endpoints/approval.py）即为提交后发布。
+    延迟约 30 秒才更新」。
 
     仅在使用 db_transaction 的调用链上生效（其 commit 成功后执行回调）；
     自行 commit 的入口需在提交后调用 run_post_commit_callbacks。

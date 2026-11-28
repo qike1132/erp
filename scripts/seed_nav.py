@@ -50,7 +50,6 @@ NAV_SEED: list[dict] = [
     {'code': 'material_registration', 'name': '来料登记', 'icon': 'fa-truck-loading', 'url': 'material_registration.index', 'section': 'purchase', 'section_name': '采购中心', 'sort_order': 13, 'is_nav': True},
     {'code': 'user_manage', 'name': '用户管理', 'icon': 'fa-users-cog', 'url': 'user.users', 'section': 'system', 'section_name': '系统管理', 'sort_order': 1, 'is_nav': True},
     {'code': 'customer_manage', 'name': '客户管理', 'icon': 'fa-building', 'url': 'customer.customers', 'section': 'system', 'section_name': '系统管理', 'sort_order': 3, 'is_nav': True},
-    {'code': 'approval_manage', 'name': '审批管理', 'icon': 'fa-clipboard-check', 'url': 'approval.approval_list', 'section': 'system', 'section_name': '系统管理', 'sort_order': 4, 'is_nav': True},
     {'code': 'backup_manage', 'name': '数据备份', 'icon': 'fa-database', 'url': '/backup', 'section': 'system', 'section_name': '系统管理', 'sort_order': 14, 'is_nav': True},
     {'code': 'production_plan_manage', 'name': '管理出货计划', 'icon': None, 'url': None, 'section': None, 'section_name': None, 'sort_order': 0, 'is_nav': False},
     {'code': 'production_summary_manage', 'name': '管理生产报表', 'icon': None, 'url': None, 'section': None, 'section_name': None, 'sort_order': 0, 'is_nav': False},

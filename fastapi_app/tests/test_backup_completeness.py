@@ -66,9 +66,9 @@ class TestEvaluateBackupCompleteness:
         assert evaluate_backup_completeness(manifest) == (STATUS_SUCCESS, '')
 
     def test_failed_tables_make_partial(self):
-        status, detail = evaluate_backup_completeness({'failed_tables': ['approval_log']})
+        status, detail = evaluate_backup_completeness({'failed_tables': ['case_inventory_log']})
         assert status == STATUS_PARTIAL
-        assert 'approval_log' in detail
+        assert 'case_inventory_log' in detail
         assert '缺失/失败表' in detail
 
     def test_missing_tables_make_partial(self):
@@ -101,11 +101,11 @@ class TestEvaluateBackupCompleteness:
             'success': True,
             'filename': 'erp_backup_20260930_020503.zip',
             'total_rows': 10,
-            'failed_tables': ['approval_request', 'approval_log'],
+            'failed_tables': ['case_stock_in', 'case_inventory_log'],
         }
         status, detail = evaluate_backup_completeness(result)
         assert status == STATUS_PARTIAL
-        assert 'approval_request' in detail and 'approval_log' in detail
+        assert 'case_stock_in' in detail and 'case_inventory_log' in detail
 
     def test_many_tables_are_truncated(self):
         names = [f'table_{i:02d}' for i in range(25)]

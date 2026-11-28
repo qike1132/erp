@@ -6,7 +6,7 @@
 一直持续到 TTL 到期；更危险的是前端据此还能再点一次「完成批次」。
 
 对照 `stock_in_service.create_stockin`（提交前 await 失效 + 提交后回调）与
-`approval.py` 提交后的 `cache_mgr.invalidate(DOMAIN, ORDER|...|REPORT)`。
+`db_transaction` 收口后的 `cache_mgr.invalidate(DOMAIN, ORDER|...|REPORT)`。
 
 本组用例锁死三件事：
   1) 服务侧 flush 后立刻失效 ORDER + REPORT（覆盖不经 db_transaction 的调用方）；

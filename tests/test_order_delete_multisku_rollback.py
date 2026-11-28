@@ -1,18 +1,17 @@
 """多 SKU 订单删除的库存回滚必须逐 SKU 归位（P0-1 回归，2026-10-18 审计）。
 
-背景：``_rollback_order_stock_deduction``（直删）与 ``_rollback_deduction_for_approval``
-（审批删）原先把「整张订单全部 SKU 的净扣减量」一次性加回 ``order.product_id``
-（首 SKU 兼容值）锁定的单行 Product 上，InventoryLog 也全记首 SKU——
-每删一张多 SKU 订单必然导致：首 SKU 库存虚增、其余 SKU 漏回滚、
-流水无法还原真实变动。本文件锁定**逐 SKU 回滚**语义：
+背景：旧直删实现把「整张订单全部 SKU 的净扣减量」一次性加回
+``order.product_id``（首 SKU 兼容值）锁定的单行 Product 上，InventoryLog
+也全记首 SKU——每删一张多 SKU 订单必然导致：首 SKU 库存虚增、其余 SKU
+漏回滚、流水无法还原真实变动。本文件锁定**逐 SKU 回滚**语义：
 按 ``stockout.product_id`` 分组，各自加回净扣减量并记各自流水。
 
 五件套：
-- 文件:行号：services/order/commands.py::_rollback_order_stock_deduction（直删）、
-  services/approval_service.py::_rollback_deduction_for_approval（审批删）
+- 文件:行号：shared/order_stock_rollback.py::rollback_order_stock_by_sku
+  （order/commands._delete_order_directly 调用）
 - 根因：回滚目标取 order.product_id（首 SKU 兼容值），与多 SKU 出库行的
   真实 product 归属（StockOut.product_id 非空 FK）不一致
-- 触发：删除任一含 OrderItem 明细 + 多 SKU 抵扣出库的订单（直删或审批删）
+- 触发：删除任一含 OrderItem 明细 + 多 SKU 抵扣出库的订单
 - 复现：2 SKU 各抵扣 10 → 删除订单 → 旧实现首 SKU +20、次 SKU +0
 - 修法：按 stockout.product_id 分组逐行回滚，InventoryLog 逐产品记录
 """
@@ -22,11 +21,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 
-from fastapi_app.services.approval_service import approve_request
 from fastapi_app.services.order.commands import delete_order
 from fastapi_app.shared_models import (
-    ApprovalLog,
-    ApprovalRequest,
     InventoryLog,
     Order,
     OrderItem,
@@ -78,11 +74,6 @@ async def msrb_cleanup(async_db_session):
     """
     yield
     order_ids = select(Order.id).where(Order.order_no.like(f'{_ORDER_PREFIX}%'))
-    approval_ids = select(ApprovalRequest.id).where(ApprovalRequest.order_id.in_(order_ids))
-    await async_db_session.execute(
-        delete(ApprovalLog).where(ApprovalLog.approval_request_id.in_(approval_ids)))
-    await async_db_session.execute(
-        delete(ApprovalRequest).where(ApprovalRequest.order_id.in_(order_ids)))
     await async_db_session.execute(
         delete(StockOut).where(StockOut.order_id.in_(order_ids)))
     await async_db_session.execute(
@@ -138,23 +129,6 @@ async def _assert_single_summary(session, order_no, expected_total):
         '多写或漏写都会让按 product 聚合 change_quantity 的对账口径失真')
 
 
-async def _assert_approval_summary_only(session, order_no, expected_total):
-    """断言审批删的汇总口径（2026-10-19 OCR 第二轮 M3）。
-
-    审批路径自写一条「订单删除(审批)」（值=实际回滚量），共享实现传
-    write_summary=False 不再写「订单删除」——否则同一笔回滚两条汇总，
-    inventory_reconcile 按 product 聚合 change_quantity 会重复计数。
-    """
-    rows = await _order_summary_rows(session, order_no, '订单删除(审批)')
-    assert rows == [expected_total], (
-        f'审批删应恰写一条「订单删除(审批)」汇总（值=实际回滚量 '
-        f'{expected_total}），实际 {rows}')
-    plain = await _order_summary_rows(session, order_no, '订单删除')
-    assert plain == [], (
-        f'审批删不得再写「订单删除」汇总（write_summary=False），实际 {plain}——'
-        '双汇总会让按 product 聚合的对账重复计数')
-
-
 class TestDirectDeleteMultiSkuRollback:
     """直删路径（超管 delete_order → _delete_order_directly）。"""
 
@@ -173,37 +147,6 @@ class TestDirectDeleteMultiSkuRollback:
         assert order.is_deleted is True, '订单应被软删除'
         await _assert_per_sku_rollback(
             async_db_session, f'{_ORDER_PREFIX}001', pa, pb)
-        # 直删汇总（write_summary 默认 True）：恰一条「订单删除」，值=实际回滚量
+        # 直删汇总：恰一条「订单删除」，值=实际回滚量
         await _assert_single_summary(
             async_db_session, f'{_ORDER_PREFIX}001', _QUANTITY * 2)
-
-
-class TestApprovalDeleteMultiSkuRollback:
-    """审批删路径（approve_request → _handle_delete_approval）。"""
-
-    async def test_approval_delete_rolls_back_each_sku(
-        self, async_db_session, admin_user, normal_user, test_customer, msrb_cleanup,
-    ):
-        pa, pb = _make_products(async_db_session)
-        await async_db_session.flush()
-        order = await _make_multi_sku_order(
-            async_db_session, pa, pb, f'{_ORDER_PREFIX}002', test_customer.name)
-        await async_db_session.flush()
-        approval = ApprovalRequest(
-            order_id=order.id, requester_id=normal_user.id,
-            operation_type=ApprovalRequest.OPERATION_DELETE,
-            status=ApprovalRequest.STATUS_PENDING,
-        )
-        async_db_session.add(approval)
-        await async_db_session.flush()
-
-        await approve_request(async_db_session, approval.id, admin_user)
-        await async_db_session.flush()
-
-        assert order.is_deleted is True, '审批通过后订单应被软删除'
-        await _assert_per_sku_rollback(
-            async_db_session, f'{_ORDER_PREFIX}002', pa, pb)
-        # 审批删汇总口径（M3）：仅一条「订单删除(审批)」（值=实际回滚量），
-        # 不得再有「订单删除」——双汇总会让 inventory_reconcile 重复计数
-        await _assert_approval_summary_only(
-            async_db_session, f'{_ORDER_PREFIX}002', _QUANTITY * 2)

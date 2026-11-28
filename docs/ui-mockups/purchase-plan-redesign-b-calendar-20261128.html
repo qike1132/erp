@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-zcode-design data-variant="calendar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出货计划 · 方案B 月历热力+当日明细主区（效果图 · 脱敏演示数据）</title>
+<style>
+:root{
+  --accent:#5b8def; --accent-deep:#2d5ab8;
+  --accent-50:#eff5ff; --accent-100:#d6e4ff; --accent-200:#b8ccff; --accent-300:#8babf5;
+  --ink:#1a1a2e; --ink-2:#475569; --muted:#64748b; --faint:#94a3b8;
+  --line:#e4e7ed; --line-light:#f0f2f5; --page:#f4f6fa; --panel:#ffffff; --slate-50:#f8fafc;
+  --ok:#28c76f; --ok-bg:#e6f9ef; --warn:#ff9f43; --warn-bg:#fff3e6; --danger:#ea5455; --danger-bg:#fdeaea;
+}
+*{box-sizing:border-box;margin:0;padding:0;border-radius:0 !important}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;background:var(--page);color:var(--ink);font-size:14px;line-height:1.5}
+.num{font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+button{font-family:inherit;cursor:pointer}
+svg{display:block}
+
+.demo-note{display:flex;align-items:center;gap:8px;padding:5px 16px;background:var(--slate-50);border-bottom:1px dashed var(--line);color:var(--muted);font-size:12px}
+.demo-note b{color:var(--accent-deep);font-weight:700}
+
+.wrap{max-width:1560px;margin:0 auto;padding:14px 20px 28px}
+.top-card{background:var(--panel);border:1px solid var(--line);padding:12px 16px 0}
+.top-r1{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-bottom:12px}
+.top-r2{display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-top:1px solid var(--line-light);padding:10px 0}
+.page-title{font-size:20px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;margin-right:4px}
+.page-title svg{color:var(--accent-deep)}
+.fact-group{display:flex;border:1px solid var(--line)}
+.fact-pill{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--panel);border:none;border-right:1px solid var(--line);font-size:13px;font-weight:600;color:var(--ink-2)}
+.fact-pill:last-child{border-right:none}
+.fact-pill .n{font-weight:700;color:var(--muted)}
+.fact-pill.on{background:var(--accent-50);color:var(--accent-deep);box-shadow:inset 0 -2px 0 var(--accent)}
+.fact-pill.on .n{color:var(--accent-deep)}
+.fact-pill:hover:not(.on){background:var(--slate-50)}
+.mon-nav{display:flex;align-items:center;gap:10px}
+.mon-nav .arrow{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--line);background:var(--panel);color:var(--ink-2)}
+.mon-nav .arrow:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-50)}
+.mon-label{font-size:18px;font-weight:800;min-width:120px;text-align:center}
+.info-strip{display:flex;align-items:center;flex:1;min-width:0;height:40px;border:1px solid var(--line);background:var(--panel);overflow-x:auto}
+.info-cell{display:flex;align-items:center;gap:6px;padding:0 14px;height:100%;border-right:1px solid var(--line-light);white-space:nowrap;font-size:12px;color:var(--muted);font-weight:600}
+.info-cell:last-child{border-right:none}
+.info-cell .v{font-size:15px;font-weight:800;color:var(--ink)}
+.info-cell.risk .v{color:var(--danger)}
+.info-cell .sub{color:var(--faint);font-weight:600}
+.search-box{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);padding:6px 10px;min-width:220px;color:var(--faint)}
+.search-box input{border:none;outline:none;font-family:inherit;font-size:13px;flex:1;color:var(--ink);background:transparent}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink-2)}
+.btn:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-50)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-deep);border-color:var(--accent-deep);color:#fff}
+.spacer{flex:1}
+
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:14px;margin-top:14px;align-items:start}
+@media (max-width:1280px){ .layout{grid-template-columns:minmax(0,1fr)} }
+.card{background:var(--panel);border:1px solid var(--line)}
+.card-head{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line-light);font-size:14px;font-weight:700}
+.card-head .xs{font-size:12px;font-weight:600;color:var(--faint)}
+
+/* ===== 月历 ===== */
+.cal-head{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;padding:12px 14px 6px}
+.cal-head span{font-size:12px;font-weight:700;color:var(--muted);text-align:center}
+.cal-head span.we{color:var(--warn)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;padding:0 14px 14px}
+.cal-cell{position:relative;min-height:86px;border:1px solid var(--line-light);background:var(--panel);padding:8px 9px;display:flex;flex-direction:column;gap:4px;cursor:pointer;text-align:left}
+.cal-cell.empty{background:var(--slate-50);cursor:default}
+.cal-cell.empty .d,.cal-cell.empty .q{visibility:hidden}
+.cal-cell:hover{border-color:var(--accent-300);background:var(--accent-50)}
+.cal-cell.sel{outline:2px solid var(--accent);outline-offset:-1px}
+.cal-cell.today .d{background:var(--accent);color:#fff;padding:1px 6px}
+.cell-top{display:flex;align-items:center;gap:5px}
+.cell-top .d{font-size:14px;font-weight:800;line-height:1.2}
+.cell-top .wd{font-size:10px;font-weight:600;color:var(--faint)}
+.cell-top .rk{margin-left:auto;width:7px;height:7px}
+.rk-r{background:var(--danger)} .rk-a{background:var(--warn)} .rk-t{background:var(--accent)}
+.cal-cell .q{font-size:16px;font-weight:800;color:var(--ink)}
+.cal-cell .q small{font-size:11px;font-weight:600;color:var(--muted)}
+.cell-meta{font-size:11px;color:var(--muted);font-weight:600}
+.cell-bar{margin-top:auto;height:4px;display:flex}
+.cell-bar i{height:100%}
+.cal-foot{display:flex;gap:10px;flex-wrap:wrap;padding:0 14px 14px;font-size:12px;color:var(--muted)}
+.risk-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel);padding:3px 9px;font-size:12px;font-weight:600;color:var(--ink-2);cursor:pointer}
+.risk-chip:hover{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-50)}
+.risk-chip .dot{width:7px;height:7px}
+
+/* ===== 日明细 ===== */
+.day-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid var(--line-light)}
+.day-title{font-size:16px;font-weight:800}
+.day-total{font-size:13px;color:var(--muted);font-weight:600}
+.day-total b{font-size:16px;color:var(--accent-deep)}
+.day-groups{padding:6px 16px 14px;max-height:640px;overflow-y:auto}
+.grp{padding:9px 0 4px}
+.grp + .grp{border-top:1px solid var(--line-light)}
+.grp-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.grp-name{font-size:13px;font-weight:800}
+.grp-qty{font-size:13px;font-weight:800;color:var(--accent-deep);margin-left:auto}
+.grp-bar{height:4px;background:var(--line-light);width:100%;margin-bottom:6px}
+.grp-bar i{display:block;height:100%}
+.sku-row{display:flex;align-items:center;gap:8px;padding:4px 0}
+.st{width:8px;height:8px;flex:none}
+.st-ok{background:var(--ok)} .st-partial{background:var(--warn)} .st-pending{background:var(--faint)}
+.sku-name{font-size:13px;font-weight:600;color:var(--ink)}
+.sku-bc{font-size:11px;color:var(--faint)}
+.sku-qty{margin-left:auto;font-size:13px;font-weight:800}
+.day-legend{display:flex;gap:14px;padding:10px 16px;border-top:1px solid var(--line-light);font-size:12px;color:var(--muted);font-weight:600}
+.day-legend span{display:inline-flex;align-items:center;gap:5px}
+.day-empty{padding:40px 16px;text-align:center;color:var(--faint);font-size:13px}
+
+/* 客户 chips + SKU 月度小表 */
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:12px 14px 4px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);padding:4px 11px;font-size:12px;font-weight:600;color:var(--ink-2)}
+.chip i{width:9px;height:9px;flex:none}
+.chip .n{font-weight:800;color:var(--ink)}
+table.mini{width:100%;border-collapse:collapse}
+.mini th{font-size:12px;font-weight:700;color:var(--muted);text-align:left;padding:7px 14px;border-bottom:1px solid var(--line-light);background:var(--slate-50)}
+.mini td{font-size:13px;padding:6px 14px;border-bottom:1px solid var(--line-light)}
+.mini td:last-child,.mini th:last-child{text-align:right;font-weight:800}
+.mini tr:hover td{background:#f7faff}
+.mini .bc{font-size:11px;color:var(--faint);margin-left:6px}
+.mini-wrap{margin-top:8px}
+
+.foot-note{margin-top:10px;font-size:12px;color:var(--faint);display:flex;gap:8px;align-items:flex-start}
+.foot-note svg{flex:none;margin-top:2px;color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="demo-note">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+  <span>UI <b>效果图 · 方案B / 共3案</b> —— 月历热力 + 当日明细主区 · 全部为<b>脱敏演示数据</b> · 2026-11-28</span>
+</div>
+
+<div class="wrap">
+  <div class="top-card">
+    <div class="top-r1">
+      <div class="page-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="0"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        出货计划
+      </div>
+      <div class="fact-group" id="factGroup"></div>
+      <div class="spacer"></div>
+      <label class="search-box">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="搜索客户 / 产品 / 条码" aria-label="搜索">
+      </label>
+      <button class="btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        导出
+      </button>
+      <button class="btn btn-primary">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        新建计划
+      </button>
+    </div>
+    <div class="top-r2">
+      <div class="mon-nav">
+        <button class="arrow" aria-label="上一月"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></button>
+        <span class="mon-label">2026年11月</span>
+        <button class="arrow" aria-label="下一月"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
+      </div>
+      <div class="info-strip" id="infoStrip"></div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- 左：月历热力 + 月维度客户/SKU 汇总 -->
+    <div class="card">
+      <div class="card-head">排产月历 <span class="xs">格子 = 当日总量 · 底条 = 客户占比</span></div>
+      <div class="cal-head" id="calHead"></div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-foot" id="calFoot"></div>
+      <div class="card-head" style="border-top:1px solid var(--line-light)">本月客户 <span class="xs">点客户名查看其 SKU</span></div>
+      <div class="chips" id="chips"></div>
+      <div class="mini-wrap">
+        <table class="mini" aria-label="SKU 月度汇总">
+          <thead><tr><th>客户 / 产品</th><th>条码</th><th style="text-align:right">月合计（件）</th></tr></thead>
+          <tbody id="skuMini"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 右：当日明细（下钻态） -->
+    <div class="card">
+      <div class="day-head" id="dayHead"></div>
+      <div class="day-groups" id="dayGroups"></div>
+      <div class="day-legend">
+        <span><i class="st st-ok"></i>已出清</span>
+        <span><i class="st st-partial"></i>部分出</span>
+        <span><i class="st st-pending"></i>未出</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot-note">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+    <span>方案要点：保留「月历」心智但补齐两级信息——月历格从「只有总量」升级为<b>总量 + 客户数·SKU数 + 客户占比条</b>，当日明细从 336px 窄栏升为 430px 主区；月维度以客户 chips（含月合计）+ SKU 月度小表落在左卡下部。点风险条可跳到对应日。</span>
+  </div>
+</div>
+
+<script>
+'use strict';
+var SKUS = {
+  S1:{name:'经典保温杯 500ml', bc:'6901234500017'},
+  S2:{name:'咖啡随行杯 380ml', bc:'6901234500024'},
+  S3:{name:'保温饭盒 1L',      bc:'6901234500031'},
+  S4:{name:'儿童吸管杯 300ml', bc:'6901234500048'},
+  S5:{name:'玻璃水杯 400ml',   bc:'6901234500055'},
+  S6:{name:'双层玻璃杯 450ml', bc:'6901234500062'}
+};
+var DATA = [
+  {cust:'华东商超连锁', factory:'东莞', sku:'S1', qty:{3:400,5:400,10:600,12:600,17:800,19:800,24:1000,28:600}},
+  {cust:'华东商超连锁', factory:'东莞', sku:'S2', qty:{6:300,13:300,20:500,27:500,28:400}},
+  {cust:'华东商超连锁', factory:'东莞', sku:'S3', qty:{11:200,18:300,26:300}},
+  {cust:'金贝母婴',     factory:'东莞', sku:'S4', qty:{4:500,11:500,18:600,25:600,28:300}},
+  {cust:'金贝母婴',     factory:'东莞', sku:'S5', qty:{9:400,16:400,23:400,28:200}},
+  {cust:'华南贸易',     factory:'东莞', sku:'S1', qty:{7:300,14:400,21:400,29:500}},
+  {cust:'华南贸易',     factory:'东莞', sku:'S2', qty:{10:200,24:200,30:300}},
+  {cust:'星辰优选',     factory:'东莞', sku:'S5', qty:{5:200,15:300,28:250}},
+  {cust:'星辰优选',     factory:'东莞', sku:'S3', qty:{12:150,26:100}},
+  {cust:'恒达百货',     factory:'湖北', sku:'S4', qty:{8:800,15:800,22:800,28:500}},
+  {cust:'恒达百货',     factory:'湖北', sku:'S6', qty:{9:400,16:300,23:300}}
+];
+var CUST_COLORS = {'华东商超连锁':'#5b8def','金贝母婴':'#28c76f','华南贸易':'#ff9f43','星辰优选':'#8b7cf6','恒达百货':'#0ea5b5'};
+var YEAR=2026, MONTH=11, DAYS=30, TODAY=28;
+var RISK = {26:'r', 29:'a', 30:'a'};
+var WD = ['日','一','二','三','四','五','六'];
+var state = { factory:'东莞', sel:TODAY };
+
+function fmt(n){ return n.toLocaleString('zh-Hans-CN'); }
+function wd(d){ return WD[new Date(YEAR,MONTH-1,d).getDay()]; }
+function rows(){ return DATA.filter(function(r){ return r.factory===state.factory; }); }
+function qtyAt(r,d){ return r.qty[d]||0; }
+function rowSum(r){ var s=0; for(var k in r.qty) s+=r.qty[k]; return s; }
+function daySum(list,d){ var s=0; list.forEach(function(r){ s+=qtyAt(r,d); }); return s; }
+function dayCusts(list,d){ var s={}; list.forEach(function(r){ if(qtyAt(r,d)>0) s[r.cust]=(s[r.cust]||0)+qtyAt(r,d); }); return s; }
+function daySkus(list,d){ var s={}; list.forEach(function(r){ if(qtyAt(r,d)>0) s[r.sku]=1; }); return Object.keys(s).length; }
+/* 出货状态演示口径：<28 已出清（26 部分出=逾期源），28 两行部分出，29+ 未出 */
+function statusFor(cust,sku,d){
+  if(d>28) return 'pending';
+  if(d===28) return (cust==='华东商超连锁'&&sku==='S1')||(cust==='金贝母婴'&&sku==='S4') ? 'partial' : 'pending';
+  if(d===26) return 'partial';
+  return 'completed';
+}
+function riskLabel(k){ return k==='r' ? '逾期' : '临期'; }
+
+function renderPills(){
+  var html = ['东莞','湖北'].map(function(f){
+    var total=0; DATA.forEach(function(r){ if(r.factory===f) total+=rowSum(r); });
+    return '<button class="fact-pill'+(state.factory===f?' on':'')+'" data-f="'+f+'">'+f+' <span class="n num">'+fmt(total)+'</span></button>';
+  }).join('');
+  document.getElementById('factGroup').innerHTML = html;
+  Array.prototype.forEach.call(document.querySelectorAll('.fact-pill'), function(b){
+    b.addEventListener('click', function(){ state.factory=b.getAttribute('data-f'); render(); });
+  });
+}
+
+function renderInfo(){
+  var list=rows(), total=0, custs={}, skus={}, days={}, peak=0, peakD=0, riskLate=0, riskDue=0;
+  list.forEach(function(r){ total+=rowSum(r); custs[r.cust]=1; skus[r.sku]=1;
+    for(var d in r.qty){ days[d]=1; if(r.qty[d]>peak){ peak=r.qty[d]; peakD=+d; } } });
+  for(var d in RISK){ if(daySum(list,+d)>0){ RISK[d]==='r'?riskLate++:riskDue++; } }
+  document.getElementById('infoStrip').innerHTML =
+    cell('本月计划', fmt(total)+' <small style="font-size:12px;color:var(--muted)">件</small>')+
+    cell('客户', Object.keys(custs).length+' 家')+cell('SKU', Object.keys(skus).length+' 个')+
+    cell('排产日', Object.keys(days).length+' 天')+
+    cell('峰值日', peakD+' 日 <span class="sub num">'+fmt(peak)+'件</span>')+
+    '<div class="info-cell risk">风险 <span class="v num">'+(riskLate+riskDue)+' 天</span><span class="sub">逾期 '+riskLate+' · 临期 '+riskDue+'</span></div>';
+  function cell(l,v){ return '<div class="info-cell">'+l+' <span class="v num">'+v+'</span></div>'; }
+}
+
+function renderCalendar(){
+  var list = rows();
+  var maxDay = 0; for(var d=1; d<=DAYS; d++) maxDay = Math.max(maxDay, daySum(list,d));
+  document.getElementById('calHead').innerHTML =
+    ['一','二','三','四','五','六','日'].map(function(w,i){
+      return '<span class="'+(i>=5?'we':'')+'">'+w+'</span>';
+    }).join('');
+  var lead = (new Date(YEAR,MONTH-1,1).getDay()+6)%7;   // 周一为 0
+  var html = '';
+  for(var i=0;i<lead;i++) html += '<div class="cal-cell empty"></div>';
+  for(var d=1; d<=DAYS; d++){
+    var total = daySum(list,d);
+    if(total<=0){ html += '<div class="cal-cell empty"><div class="cell-top"><span class="d num">'+d+'</span><span class="wd">'+wd(d)+'</span></div><span class="q">0</span></div>'; continue; }
+    var custs = dayCusts(list,d);
+    var names = Object.keys(custs);
+    var bar = names.sort(function(a,b){ return custs[b]-custs[a]; }).map(function(c){
+      return '<i style="width:'+Math.max(6,Math.round(custs[c]/total*100))+'%;background:'+ (CUST_COLORS[c]||'#94a3b8') +'"></i>';
+    }).join('');
+    var rk = RISK[d] ? '<i class="rk rk-'+RISK[d]+'"></i>' : (d===TODAY?'<i class="rk rk-t"></i>':'');
+    html += '<button class="cal-cell'+(d===state.sel?' sel':'')+(d===TODAY?' today':'')+'" data-day="'+d+'"'
+      +' aria-label="'+d+'日 周'+wd(d)+'，'+fmt(total)+'件，'+names.length+'家客户" title="'+MONTH+'月'+d+'日 周'+wd(d)+' · '+fmt(total)+'件">'
+      +'<div class="cell-top"><span class="d num">'+d+'</span><span class="wd">周'+wd(d)+'</span>'+rk+'</div>'
+      +'<span class="q num">'+fmt(total)+'<small> 件</small></span>'
+      +'<span class="cell-meta num">'+names.length+' 客户 · '+daySkus(list,d)+' SKU</span>'
+      +'<div class="cell-bar">'+bar+'</div></button>';
+  }
+  document.getElementById('calGrid').innerHTML = html;
+  Array.prototype.forEach.call(document.querySelectorAll('.cal-cell[data-day]'), function(el){
+    el.addEventListener('click', function(){ state.sel=+el.getAttribute('data-day'); render(); });
+  });
+  /* 风险条 */
+  var risks = Object.keys(RISK).filter(function(d){ return daySum(list,+d)>0; });
+  document.getElementById('calFoot').innerHTML = risks.length
+    ? '<span style="font-weight:700;color:var(--muted)">风险：</span>'+risks.map(function(d){
+        return '<button class="risk-chip" data-day="'+d+'"><i class="dot rk-'+RISK[d]+'"></i>'+d+'日 '+riskLabel(RISK[d])+' · <span class="num">'+fmt(daySum(list,+d))+'件</span></button>';
+      }).join('')+'<span style="color:var(--faint)">点击跳到该日</span>'
+    : '<span style="color:var(--ok);font-weight:700">本月无逾期与临期</span>';
+  Array.prototype.forEach.call(document.querySelectorAll('.risk-chip'), function(el){
+    el.addEventListener('click', function(){ state.sel=+el.getAttribute('data-day'); render(); });
+  });
+}
+
+function renderMonthSummary(){
+  var list = rows();
+  var t = {}; list.forEach(function(r){ t[r.cust]=(t[r.cust]||0)+rowSum(r); });
+  var order = Object.keys(t).sort(function(a,b){ return t[b]-t[a]; });
+  var grand = 0; for(var c in t) grand+=t[c];
+  document.getElementById('chips').innerHTML = order.map(function(c){
+    return '<span class="chip"><i style="background:'+(CUST_COLORS[c]||'#94a3b8')+'"></i>'+c
+      +'<span class="n num">'+fmt(t[c])+'</span><span style="color:var(--faint)">'+(grand>0?Math.round(t[c]/grand*100):0)+'%</span></span>';
+  }).join('');
+  var trs='';
+  order.forEach(function(c){
+    list.filter(function(r){ return r.cust===c; }).sort(function(a,b){ return rowSum(b)-rowSum(a); }).forEach(function(r){
+      trs += '<tr><td><span style="display:inline-block;width:8px;height:8px;margin-right:7px;background:'+(CUST_COLORS[c]||'#94a3b8')+'"></span>'
+        + c+' · '+SKUS[r.sku].name+'</td><td class="num" style="color:var(--faint);font-size:11px">'+SKUS[r.sku].bc+'</td><td class="num">'+fmt(rowSum(r))+'</td></tr>';
+    });
+  });
+  document.getElementById('skuMini').innerHTML = trs;
+}
+
+function renderDay(){
+  var list = rows(), d = state.sel;
+  var total = daySum(list,d);
+  document.getElementById('dayHead').innerHTML =
+    '<span class="day-title">'+MONTH+'月'+d+'日 周'+wd(d)+(d===TODAY?'（今天）':'')+'</span>'
+    +(total>0 ? '<span class="day-total num">合计 <b>'+fmt(total)+'</b> 件 · '+Object.keys(dayCusts(list,d)).length+' 家客户 · '+daySkus(list,d)+' 个 SKU</span>'
+              : '<span class="day-total">当日无出货计划</span>');
+  var g = document.getElementById('dayGroups');
+  if(total<=0){ g.innerHTML='<div class="day-empty">——</div>'; return; }
+  var custs = dayCusts(list,d);
+  var order = Object.keys(custs).sort(function(a,b){ return custs[b]-custs[a]; });
+  var html = '';
+  order.forEach(function(c){
+    var crs = list.filter(function(r){ return r.cust===c && qtyAt(r,d)>0; });
+    html += '<div class="grp"><div class="grp-head"><i class="st" style="width:9px;height:9px;background:'+(CUST_COLORS[c]||'#94a3b8')+'"></i>'
+      +'<span class="grp-name">'+c+'</span><span class="grp-qty num">'+fmt(custs[c])+' 件</span></div>'
+      +'<div class="grp-bar"><i style="width:'+Math.max(4,Math.round(custs[c]/total*100))+'%;background:'+(CUST_COLORS[c]||'#94a3b8')+'"></i></div>';
+    crs.sort(function(a,b){ return qtyAt(b,d)-qtyAt(a,d); }).forEach(function(r){
+      var st = statusFor(c,r.sku,d);
+      html += '<div class="sku-row"><i class="st st-'+st+'"></i><span class="sku-name">'+SKUS[r.sku].name+'</span>'
+        +'<span class="sku-bc num">'+SKUS[r.sku].bc+'</span><span class="sku-qty num">'+fmt(qtyAt(r,d))+'</span></div>';
+    });
+    html += '</div>';
+  });
+  g.innerHTML = html;
+}
+
+function render(){ renderPills(); renderInfo(); renderCalendar(); renderMonthSummary(); renderDay(); }
+render();
+</script>
+</body>
+</html>

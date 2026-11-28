@@ -52,10 +52,9 @@ def _default_inventory_balance():
 REPO = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------
-# 写域清单（t31 inScope 的 8 个 py 文件）
+# 写域清单（t31 inScope 的 7 个 py 文件）
 # ---------------------------------------------------------------------------
 IN_SCOPE_FILES = (
-    "fastapi_app/services/approval_service.py",
     "fastapi_app/services/batch_import_core.py",
     "fastapi_app/services/ocr/_import.py",
     "fastapi_app/services/order/commands.py",
@@ -68,16 +67,13 @@ IN_SCOPE_FILES = (
 # 每个文件期望的统一入口调用点数量（AST 统计 Call 节点，合计 9 处）。
 # 2026-10-18 P0-1（commit 82670b64）：两个删除路径的回滚收敛到
 # shared/order_stock_rollback.py → apply_stock_delta_locked（负库存守卫与
-# version 递增内置），approval_service.py 与 order/commands.py 的
-# assert_stock_available 调用点随实现移出，条目清零（2026-10-19 OCR 迭代）。
+# version 递增内置），删除路径的 assert_stock_available 调用点随实现移出，
+# 条目清零（2026-10-19 OCR 迭代）。
 # shared/order_stock_rollback.py 本身不入本清单：IN_SCOPE 判据是 t31 历史
 # 收敛名单（曾有内联判定的 service 文件），它无内联判定、不直写
 # current_stock（走 apply_stock_delta_locked），且已被下方两条全根扫描
 # （序关系比较 + 普通赋值直写）覆盖。
 EXPECTED_CALL_SITES = {
-    # 删除订单：回滚已收敛到 shared/order_stock_rollback.py（2026-10-18 P0-1），
-    # 原直写前的净变化量判定随之移出本文件。
-    "fastapi_app/services/approval_service.py": {},
     # 出货导入：按行静默跳过（返回 False）
     "fastapi_app/services/batch_import_core.py": {"check_stock_available": 1},
     # OCR 出货导入：只产出暂存行校验结论，不抛异常
@@ -109,13 +105,12 @@ EXPECTED_CALL_SITES = {
     "fastapi_app/services/stock_return_service.py": {"assert_stock_available": 1},
 }
 
-# 8 个文件内所有 `*.current_stock += / -=` 直写的静态台账（按文件路径分组）。
+# 7 个文件内所有 `*.current_stock += / -=` 直写的静态台账（按文件路径分组）。
 # 每一条都标注了它是「纯增量（不适用本任务）」还是「写入侧（负向由统一入口覆盖）」。
 DOCUMENTED_WRITES = {
     # 2026-10-18 P0-1：回滚收敛到 shared/order_stock_rollback.py 后，
-    # 两个删除路径的 `product.current_stock += total_deducted` 直写消失
+    # 删除路径的 `product.current_stock += total_deducted` 直写消失
     # （改走 apply_stock_delta_locked：带 version 守卫并递增），台账清零。
-    "fastapi_app/services/approval_service.py": [],
     "fastapi_app/services/order/commands.py": [],
     "fastapi_app/services/batch_import_core.py": [
         # ↑ 2026-10-17 审计修复：原有的两处直写（备货 `locked_product.current_stock += qty`、
@@ -477,10 +472,9 @@ def test_total_call_sites_is_eight():
 
     2026-10-17 审计 AUD-04 曾新增 2 处预检至 11；2026-10-18 P0-1 把两个
     删除路径的回滚收敛到 shared/order_stock_rollback.py（负向守卫内置在
-    apply_stock_delta_locked），approval_service.py 与 order/commands.py
-    的 2 处 assert_stock_available 调用点随之移出，降为 9；2026-10-24 审计
-    B1-04 把 staging 编辑路径的预检改为结余口径（get_inventory_balance），
-    再降为 8。
+    apply_stock_delta_locked），删除路径的 2 处 assert_stock_available
+    调用点随之移出，降为 9；2026-10-24 审计 B1-04 把 staging 编辑路径的
+    预检改为结余口径（get_inventory_balance），再降为 8。
     """
     total = sum(count for site in EXPECTED_CALL_SITES.values() for count in site.values())
     assert total == 8

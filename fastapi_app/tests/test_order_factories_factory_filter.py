@@ -27,7 +27,7 @@ def _order(item_factories):
     return types.SimpleNamespace(
         id=10, order_no="SO-1", customer="客户甲", order_date=datetime(2026, 11, 1, tzinfo=UTC),
         product=types.SimpleNamespace(id=100, name="P1", barcode="BC1", image=""),
-        quantity=5, status="pending", note="", is_locked=False, locked_by=None,
+        quantity=5, status="pending", note="",
         items=[_item(f) for f in item_factories],
     )
 

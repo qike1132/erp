@@ -1,10 +1,9 @@
 /**
- * PurchasePlanHeader —— 采购计划页头部两行。
+ * PurchasePlanHeader —— 出货计划页头部两行（方案B，2026-11-28 owner 拍板合并两 Tab 后重写）。
  *
- * 本任务把 PurchasePlanView.vue 的 .sp-head 抽成本组件，并顺势把工厂 Tab
- * 放到第一行左侧（视图 Tab 在其右）。这里固化两条结构诉求：
- *   1. 工厂 Tab 组（含 data-f='东莞'）在视图 Tab 组之左；
- *   2. 头部内所有交互（视图切换 / 翻月 / 导出 / 新建）都只上抛事件，不自作主张。
+ * 结构固化两条：
+ *   1. 头部只剩工厂 Tab 组一个 Tab 组（视图 Tab 已随两 Tab 合并消失）；
+ *   2. 头部内所有交互（翻月 / 导出 / 新建）都只上抛事件，不自作主张。
  */
 import { describe, it, expect } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
@@ -12,10 +11,11 @@ import PurchasePlanHeader from '@/views/purchase-plan/components/PurchasePlanHea
 
 const KPI = {
   planQty: 22815,
-  producedQty: 14065,
-  remainQty: 8750,
-  pct: 61.6,
   planDays: 11,
+  custN: 3,
+  skuN: 5,
+  peakDay: 24,
+  peakQty: 1200,
   riskDays: 6,
   riskOverdue: 4,
   riskExpiring: 2,
@@ -30,7 +30,6 @@ function mountHeader(over: Record<string, unknown> = {}): VueWrapper {
       factories: ['东莞', '湖北'],
       factoryTotals: { 东莞: 100, 湖北: 50 },
       kpi: KPI,
-      viewTab: 'daily',
       factory: '东莞',
       globalKw: '',
       ...over,
@@ -46,27 +45,25 @@ function mountHeader(over: Record<string, unknown> = {}): VueWrapper {
   })
 }
 
-describe('PurchasePlanHeader：工厂 Tab 左置', () => {
-  it('工厂 Tab 在视图 Tab 左侧', () => {
+describe('PurchasePlanHeader：工厂 Tab 独存', () => {
+  it('头部只剩工厂 Tab 组（原视图 Tab 组已随两 Tab 合并消失）', () => {
     const w = mountHeader()
     const groups = w.findAll('.sp-tab-group')
-    expect(groups).toHaveLength(2)
-    // 第 0 组是工厂 Tab 组：含 data-f='东莞'
+    expect(groups).toHaveLength(1)
     expect(groups[0]?.find("[data-f='东莞']").exists()).toBe(true)
-    // 第 1 组是视图 Tab：排产日历 / 月度汇总
-    expect(groups[1]?.text()).toContain('排产日历')
-    expect(groups[1]?.text()).toContain('月度汇总')
+    expect(w.text()).not.toContain('排产日历')
+    expect(w.text()).not.toContain('月度汇总')
+  })
+
+  it('一行信息条渲染五格（本月计划/客户/SKU/峰值日/风险）', () => {
+    const w = mountHeader()
+    expect(w.findAll('.sp-kpi')).toHaveLength(5)
+    expect(w.text()).toContain('22,815')
+    expect(w.text()).toContain('24日')
   })
 })
 
 describe('PurchasePlanHeader：交互只上抛', () => {
-  it('点「月度汇总」上抛 update:viewTab', async () => {
-    const w = mountHeader()
-    const tab = w.findAll('.sp-tab').find(t => t.text() === '月度汇总')
-    await tab?.trigger('click')
-    expect(w.emitted('update:viewTab')?.[0]).toEqual(['summary'])
-  })
-
   it('点月份前后各自上抛 prev/next', async () => {
     const w = mountHeader()
     const btns = w.findAll('.sp-nav-btn')

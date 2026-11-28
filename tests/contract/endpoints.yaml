@@ -8,7 +8,7 @@
 # 只收录满足以下条件的端点：
 #   - 只读 GET（不产生副作用，可随时重复调用）
 #   - 响应结构稳定（不含"随时会变"的顶层形态）
-#   - 覆盖核心业务链路（订单/库存/采购/BOM/仪表盘/审批）
+#   - 覆盖核心业务链路（订单/库存/采购/BOM/仪表盘）
 #
 # 用法：
 #   python scripts/contract_snapshot.py --record   # 录制基线（改代码前）
@@ -113,12 +113,7 @@ endpoints:
       orders:
         - { product_id: 1, quantity: 1 }
 
-  # ---- 审批 / 通知 ----
-  - name: approvals_list
-    path: /api/v1/approvals/list
-    query: { page: 1, per_page: 2 }
-  - name: approvals_pending_count
-    path: /api/v1/approvals/pending-count
+  # ---- 通知 ----
   - name: notifications_unread_count
     path: /api/v1/notifications/unread-count
 

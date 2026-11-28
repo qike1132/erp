@@ -74,7 +74,6 @@ def _patched_write_path(invalidate: Any, sched_invalid: Any, sched_event: Any):
     schedule_post_commit_* 是同步函数，用普通函数记录器（AsyncMock 会吞掉真实调用时序）。"""
     return (
         patch.object(order_commands, 'get_product_for_update', new=AsyncMock()),
-        patch.object(order_commands, '_check_order_lock', new=AsyncMock()),
         patch.object(order_commands, 'compute_order_status_from_db',
                      new=AsyncMock(return_value='待备货')),
         patch.object(order_commands, 'dispatch_factory_notifications', new=AsyncMock()),
@@ -101,7 +100,7 @@ async def test_update_order_item_invalidates_inventory_domain():
     patches = _patched_write_path(
         _recorder(invalidate_calls), _recorder(sched_invalid_calls), lambda *a, **k: None)
     with patches[0], patches[1], patches[2], patches[3], patches[4], \
-         patches[5], patches[6], patches[7], patches[8]:
+         patches[5], patches[6], patches[7]:
         await order_commands.update_order_item(db, 11, 120, None, MagicMock(is_super=True))
 
     assert invalidate_calls, 'update_order_item 未失效任何缓存域（/stock 将最长 120s 旧数据）'
@@ -128,7 +127,7 @@ async def test_update_order_item_schedules_order_updated_after_commit():
     patches = _patched_write_path(
         lambda *a, **k: None, lambda *a, **k: None, _recorder(sched_event_calls))
     with patches[0], patches[1], patches[2], patches[3], patches[4], \
-         patches[5], patches[6], patches[7], patches[8]:
+         patches[5], patches[6], patches[7]:
         await order_commands.update_order_item(db, 11, 120, None, MagicMock(is_super=True))
 
     assert sched_event_calls, 'update_order_item 未注册 ORDER_UPDATED 事件（/stock WS 永不触发）'
@@ -164,7 +163,6 @@ async def test_update_order_admin_direct_path_invalidates_and_publishes():
 
     with patch.object(order_commands, 'get_product_for_update',
                       new=AsyncMock(return_value=product)), \
-         patch.object(order_commands, '_check_order_lock', new=AsyncMock()), \
          patch.object(order_commands, 'compute_order_status_from_db',
                       new=AsyncMock(return_value='待备货')), \
          patch.object(order_commands, 'cache_mgr',
@@ -174,14 +172,12 @@ async def test_update_order_admin_direct_path_invalidates_and_publishes():
          patch.object(order_commands, 'schedule_post_commit_event',
                       side_effect=_recorder(sched_event_calls)), \
          patch.object(order_commands, '_purge_synced_plan_details', new=AsyncMock()), \
-         patch.object(order_commands, '_submit_edit_approval') as m_submit, \
          patch.object(order_commands, 'sync_single_item_quantity', new=AsyncMock()), \
          patch.object(order_commands, 'InventoryLog', MagicMock()), \
          patch.object(order_commands, 'dispatch_factory_notifications', new=AsyncMock()):
         await order_commands.update_order(
             db, order_id=1, quantity=200, customer='客', note='注', current_user=user)
 
-    m_submit.assert_not_awaited()  # 超管走直改
     domains = [c[1] for c in invalidate_calls if len(c) > 1]
     assert any(d & CacheDomain.INVENTORY for d in domains), \
         f'update_order 直改分支失效域未覆盖 INVENTORY: {domains}'

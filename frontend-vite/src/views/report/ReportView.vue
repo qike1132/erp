@@ -143,7 +143,7 @@ function commitFilters() {
 }
 
 /**
- * 键入静默防抖提交（统一走 useDebouncedSearch，与 approval/customer 等视图同一口径）：
+ * 键入静默防抖提交（统一走 useDebouncedSearch，与 customer 等视图同一口径）：
  * 连续键入只提交最终值。已显式提交后防抖才到期时，先判快照是否真有变化再提交（OCR-3 M5）：
  * 显式提交/重置后 300ms 内翻页，挂起的防抖不得把页码无条件打回第 1 页。
  */

@@ -1,6 +1,6 @@
 <template>
   <!-- KPI 指标卡片区（自 DashboardView.vue 原样搬移） -->
-  <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
     <KpiCard
       v-for="(card, index) in kpiCards"
       :key="card.key"
@@ -59,15 +59,6 @@ const kpiCards = computed(() => [
     trendText: trendText(props.stats?.stockout_today, props.stats?.stockout_yesterday),
     icon: 'fa-truck-fast',
     accent: 'amber' as const,
-  },
-  {
-    key: 'pending',
-    label: '待审批',
-    value: props.stats?.pending_approvals ?? 0,
-    trend: 0,
-    trendText: '',
-    icon: 'fa-clipboard-check',
-    accent: 'red' as const,
   },
   {
     key: 'material',

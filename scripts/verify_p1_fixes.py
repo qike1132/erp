@@ -28,8 +28,6 @@ FIXED_FILES = [
     ('P1-5',  'fastapi_app/services/ocr_service.py',              '时区不一致 (stockout_date)'),
     ('P1-5',  'fastapi_app/services/notification_service.py',     '时区不一致 (timestamp)'),
     ('P1-6',  'fastapi_app/services/stock_service.py',            'deduct_quantity 死代码'),
-    ('P1-8',  'fastapi_app/services/approval_service.py',         'None 检查缺失'),
-    ('P1-14', 'fastapi_app/services/approval_service.py',         '审批并发竞态 (with_for_update)'),
     ('P1-15', 'fastapi_app/services/order_deduction_service.py',  'process_order_deduction 未锁定备货'),
 ]
 
@@ -198,21 +196,7 @@ check(
     '防止并发抵扣超额',
 )
 
-# 3b. approval_service.py _get_pending_approval 使用 with_for_update
-apv_path = FASTAPI_APP / 'services' / 'approval_service.py'
-apv_src = apv_path.read_text(encoding='utf-8')
-check(
-    'approval_service.py _get_pending_approval 包含 with_for_update()',
-    'with_for_update()' in apv_src and '_get_pending_approval' in apv_src,
-    '防止并发审批同一请求',
-)
-
-# 3c. approval_service.py _handle_delete_approval 有 None 检查
-check(
-    'approval_service.py _handle_delete_approval 包含 product None 检查',
-    'if not product:' in apv_src and '_handle_delete_approval' in apv_src,
-    '防止 product 为 None 时 AttributeError',
-)
+# 3b/3c（approval_service 检查项）已随审批系统下线移除（2026-11-28）
 
 
 # ═══════════════════════════════════════════════════

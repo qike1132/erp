@@ -74,7 +74,7 @@ def _dependency_for(prefix: str) -> str | None:
 _EXPECTED_PREFIXES = {
     '/purchase-center', '/batch', '/staging-orders', '/staging-stockins',
     '/staging-stockouts', '/products', '/orders', '/outsource', '/order-batch',
-    '/stock', '/stock-returns', '/users', '/customers', '/suppliers', '/approvals',
+    '/stock', '/stock-returns', '/users', '/customers', '/suppliers',
     '/reports', '/cases', '/material-registrations', '/aux', '/tasks', '/auth',
     '/ocr-import', '/production-plans', '/plans', '/daily-production',
     '/production-summary', '/dashboard', '/permissions', '/backup', '/monitoring',

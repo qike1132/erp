@@ -440,16 +440,22 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         "HTTP异常: status=%d request_id=%s path=%s detail=%s",
         exc.status_code, request_id, request.url.path, exc.detail,
     )
-    return MsgspecResponse(
-        content={
-            "success": False,
-            "detail": exc.detail,
-            "status_code": exc.status_code,
-            "request_id": request_id,
-            "timestamp": current_iso_timestamp(),
-        },
-        status_code=exc.status_code,
-    )
+    content = {
+        "success": False,
+        "detail": exc.detail,
+        "status_code": exc.status_code,
+        "request_id": request_id,
+        "timestamp": current_iso_timestamp(),
+    }
+    # 机器可读错误码（2026-11-27 跨层评审 High）：``db_transaction`` 把 AppError
+    # 降级成 HTTPException 时经 ``X-Error-Code`` header 携带原始 code；在此转进
+    # 响应体，前端才能区分「状态冲突（CONFLICT）」与「BOM 版本冲突
+    # （ITEMS_VERSION_CONFLICT）」——两者恢复动作完全不同。无该 header 的
+    # 普通 HTTPException 响应体形状不变（不新增 key，向后兼容）。
+    error_code = (exc.headers or {}).get('X-Error-Code')
+    if error_code:
+        content["code"] = error_code
+    return MsgspecResponse(content=content, status_code=exc.status_code)
 
 
 @app.exception_handler(OperationalError)

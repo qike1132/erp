@@ -13,6 +13,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from fastapi_app.core.exceptions import ConflictError
 from fastapi_app.services.purchase.bom_sync import (
     ItemsVersionConflict,
     find_pending_po_ids_for_product,
@@ -404,6 +405,104 @@ async def test_factory_save_partial_items_versions_skips_uncovered_orders(db):
     assert result['updated_count'] == 1
     item = await db.get(PurchaseOrderItem, 1)
     assert float(item.quantity) == 60.0
+
+
+# ============================================================
+# E-H1（2026-11-27 审计）：完成即冻结明细——汇总保存不得改写已完成单
+# ============================================================
+
+async def test_factory_save_rejects_completed_order(db):
+    """已完成单不得再被汇总保存改写数量。
+
+    完成时 `_create_material_registration` 按当时明细把 `ordered_quantity`
+    落成快照，而全仓没有任何语句跟随后续数量变化 → 修复前本用例 200 写回 60，
+    收货上限永远按 50 卡死（E-H1，普通 UI 路径可达）。
+    """
+    await _seed(db, status='completed')
+    with pytest.raises(ConflictError) as exc:
+        await save_factory_summary_edits(
+            db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+            order_ids=[8101], items_versions={8101: 0},
+        )
+    assert exc.value.status_code == 409
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 50.0
+
+
+async def test_factory_save_rejects_completed_order_without_items_versions(db):
+    """旧客户端不传 items_versions 时版本校验整段跳过，状态守卫必须独立生效。
+
+    这条是 E-H1 的关键缺口：只靠 `_ensure_items_versions_match` 的修复在
+    「客户端没带版本」时完全不设防，所以守卫不能挂在版本分支里。
+    """
+    await _seed(db, status='completed')
+    with pytest.raises(ConflictError):
+        await save_factory_summary_edits(
+            db, [{'item_ids': [1], 'quantity': 60}], 'tester', order_ids=[8101],
+        )
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 50.0
+
+
+async def test_factory_save_spare_rate_rejects_completed_order(db):
+    """仅改订单级损耗率/备品（edits=[] + order_ids）同样不得改写已完成单。"""
+    await _seed(db, status='completed')
+    with pytest.raises(ConflictError):
+        await save_factory_summary_edits(
+            db, [], 'tester', spare_rate=30, order_ids=[8101],
+        )
+    po = await db.get(PurchaseOrder, 8101)
+    assert po.spare_rate is None
+
+
+async def test_factory_save_allows_pending_edit_when_unwritten_completed_order_selected(db):
+    """状态校验只覆盖**真正会写入**的单（2026-11-27 跨层评审 High）。
+
+    复现：待生产列表勾选 A、B → 单独完成 B → 汇总里改 A 的数量。前端仍带着
+    ``order_ids=[A,B]``（回显集合）且 ``spare_rate=None``（不写损耗率），
+    但只有 A 的明细被编辑。修复前状态守卫对 B 也要求 pending → 整次保存 409，
+    且前端用同一 id 集合重开汇总后永远自愈不了（汇总接口不按状态过滤）。
+    """
+    await _seed(db)                                    # 8101 pending，明细 1/2
+    await _seed(db, po_id=8102, status='completed')    # 已完成，仅作为回显集合成员
+
+    result = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+        order_ids=[8101, 8102], spare_rate=None,
+    )
+
+    assert result['updated_count'] == 1
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 60.0
+    # 未被写入的 completed 单保持原状
+    assert float((await db.get(PurchaseOrderItem, 11)).quantity) == 50.0
+
+
+async def test_factory_save_spare_rate_still_rejects_completed_order_in_order_ids(db):
+    """``spare_rate`` 非 None 时 order_ids 会被真实写入 → 其中含 completed 单必须 409。
+
+    这是上一条的对照组：收窄范围只放行「不会被写」的单，不能把真实写入也放掉。
+    """
+    await _seed(db)
+    await _seed(db, po_id=8102, status='completed')
+
+    with pytest.raises(ConflictError) as exc:
+        await save_factory_summary_edits(
+            db, [], 'tester', spare_rate=30, order_ids=[8101, 8102],
+        )
+    assert exc.value.status_code == 409
+    assert (await db.get(PurchaseOrder, 8101)).spare_rate is None
+
+
+async def test_factory_save_allows_confirmed_order(db):
+    """CONFIRMED 放行（owner 2026-11-27 裁决）：它与待生产列表口径一致
+    （``usePurchaseOrders`` 查询 pending,confirmed），完成路径也接受它。"""
+    await _seed(db, status='confirmed')
+
+    result = await save_factory_summary_edits(
+        db, [{'item_ids': [1], 'quantity': 60}], 'tester',
+        order_ids=[8101], items_versions={8101: 0},
+    )
+
+    assert result['updated_count'] == 1
+    assert float((await db.get(PurchaseOrderItem, 1)).quantity) == 60.0
 
 
 # ============================================================

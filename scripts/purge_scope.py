@@ -88,8 +88,6 @@ CORE_CLEAR_TABLES = (
     'case',
     # 核心业务 - 订单附属
     'notification',
-    'approval_log',
-    'approval_request',
     # 湖北订单 - 湖北外发
     'outsource_shipment_item',
     'outsource_shipment',

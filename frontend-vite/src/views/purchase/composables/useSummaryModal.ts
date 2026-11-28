@@ -1,8 +1,9 @@
 import { ref, computed, reactive, toRaw } from 'vue'
 import { purchaseApi } from '@/api'
-import { getErrorStatus } from '@/types/errors'
+import { getErrorCode, getErrorMessage, getErrorStatus } from '@/types/errors'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
+import { sendLossRate, sendFabricLossRate } from './useSummaryRateFlush'
 import { summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, allocateOrderDisplayQuantities, parseQtyInput, computeDiffSnapshot } from './perSkuRows'
 import type { QuantityDiff } from './perSkuRows'
 
@@ -562,7 +563,16 @@ export function useSummaryModal() {
       } catch (err) {
         cancelQtyEdit(gi, si, fi)
         if (qtyEpoch !== epochAtSend) return
-        if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        if (getErrorStatus(err) === 409) {
+          // 两种 409 的恢复动作不同（2026-11-27 跨层评审 High）：
+          // - ITEMS_VERSION_CONFLICT（BOM/明细被并发改）→ 重开汇总拉新版本即可；
+          // - CONFLICT（采购单已非 pending/confirmed）→ 重开同一个 id 集合永远
+          //   继续 409（汇总接口不按状态过滤），必须把已完成单从重试集合里剔除，
+          //   否则用户被锁死在「BOM 已更新」的假提示里无法保存同选的其他单。
+          if (getErrorCode(err) === 'CONFLICT') {
+            toast.warning(getErrorMessage(err, '选中的采购单中有已完成单据，请取消勾选后重试'))
+            return
+          }
           toast.warning('BOM 已更新，采购明细已刷新，请重新编辑')
           if (open.value && orderIds.value.length > 0) {
             lossRateEpoch += 1
@@ -719,24 +729,8 @@ export function useSummaryModal() {
    *
    * `edits` 恒空的理由：数量落库只走编辑态「保存修改」，
    * 自动落库只负责把用户输入的损耗率持久化到本次汇总涉及的采购单。
+   * HTTP 发送封装已随提交链路拆到 useSummaryRateFlush（2026-11-28，TS 体积棘轮）。
    */
-  async function sendLossRateToOrders(
-    rate: number, targetOrderIds: number[],
-  ): Promise<SaveFactoryEditsResponse> {
-    const res = await purchaseApi.saveFactoryEdits(
-      [],
-      rate,
-      targetOrderIds,
-    ) as unknown as SaveFactoryEditsResponse
-    if (!res.success) {
-      throw new Error(res.message || '损耗率保存失败')
-    }
-    return res
-  }
-
-  async function sendLossRate(rate: number): Promise<SaveFactoryEditsResponse> {
-    return sendLossRateToOrders(rate, orderIds.value)
-  }
 
   /**
    * 把「刚成功落库的损耗率」同步为新的已落库基线。
@@ -826,10 +820,14 @@ export function useSummaryModal() {
    * 并发调用者共享同一个「排空循环」句柄，故本轮成败对全部参与者一致。
    */
   async function applyLossRateAndSave(rate: number) {
+    // 无目标采购单时**零副作用**早退（2026-11-28 推送前评审 F-B1）：close()/快照
+    // 作废后残留的 flush（卸载兜底）会走到这里——若先 applyLossRate 置
+    // lossRateTouched/lossRate，会把 close() 刚清掉的陈旧率复活，用户随后对
+    // 无关订单点完成会把上个会话的率随 spare_rate 落库。故先于一切状态写入返回。
+    if (orderIds.value.length === 0) return
     // 1) 先更新本地展示所依赖的率状态（数量为派生值，无需改写数据）
     applyLossRate(rate)
     // 2) 无目标采购单时不打网络，也不改变保存状态
-    if (orderIds.value.length === 0) return
 
     // 3) 已有排空循环在跑：合并为最新待发值，复用同一句柄等待本轮结束
     if (drainPromise) {
@@ -850,7 +848,7 @@ export function useSummaryModal() {
           const sentEpoch = lossRateEpoch
           const versionsAtSend = new Map(fabricRateVersions)
           const busyAtSend = currentBusyFabricKeys()
-          const res = await sendLossRate(sent)
+          const res = await sendLossRate(sent, orderIds.value)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得回写（取消编辑不增代数，仍正常回写）
@@ -888,26 +886,8 @@ export function useSummaryModal() {
   /**
    * 单次布料损耗率落库请求：只提交该布料行对应明细的 loss_rate。
    * 数量落库仍只走编辑态「保存修改」，此处不携带 quantity。
+   * HTTP 发送封装已随提交链路拆到 useSummaryRateFlush（2026-11-28，TS 体积棘轮）。
    */
-  async function sendFabricLossRate(
-    itemIds: number[], rate: number,
-  ): Promise<SaveFactoryEditsResponse> {
-    // 版本快照必须随行级损耗率一起带上：BOM 同步会「删旧行 + 插新行」换掉明细 id，
-    // 只带旧 id 时后端逐条跳过、仍返回 200，用户以为存上了其实零写入。
-    const versions = { ...itemsVersions.value }
-    const versionArgs: [Record<string, number>?] =
-      Object.keys(versions).length > 0 ? [versions] : []
-    const res = await purchaseApi.saveFactoryEdits(
-      [{ item_ids: itemIds, loss_rate: rate }],
-      undefined,
-      orderIds.value,
-      ...versionArgs,
-    ) as unknown as SaveFactoryEditsResponse
-    if (!res.success) {
-      throw new Error(res.message || '布料损耗率保存失败')
-    }
-    return res
-  }
 
   /**
    * 单独修改某个布料行的损耗率：仅更新该行展示值（不触碰全局/其它行）。
@@ -927,9 +907,19 @@ export function useSummaryModal() {
    * 成功后同步该行的「已落库基线」（供取消编辑时恢复）。
    */
   async function applyFabricLossRateAndSave(gi: number, si: number, fi: number, rate: number) {
+    // F-B1 同口径：close()/快照作废后残留的 flush 静默返回——既不更新行展示值，
+    // 也不弹「物料不在采购明细中」（close 清态后该提示只会误导）。正常路径
+    // orderIds 非空、明细兜底 toast 保持原语义。
+    if (orderIds.value.length === 0) return
     applyFabricLossRate(gi, si, fi, rate)
     const targetItemIds = fabricItemIds.value?.[gi]?.[si]?.[fi] || []
-    if (targetItemIds.length === 0) return
+    if (targetItemIds.length === 0) {
+      // 2026-11-28 生产事故：无落库明细的行曾静默 return（展示值更新、零写入、零提示），
+      // 用户以为存上了，刷新后回到旧值。输入框已按 canEditRate 收紧到有明细的行，
+      // 此处兜底（坐标越界/异常数据仍可能走到）：明确告知而不是装作成功。
+      toast.warning('该行物料不在采购明细中，损耗率无法保存')
+      return
+    }
 
     const key = fabricKey(gi, si, fi)
     const existing = fabricDrainPromises.get(key)
@@ -948,7 +938,7 @@ export function useSummaryModal() {
           lossRateSaveState.value = 'saving'
           const sent = next
           const sentEpoch = lossRateEpoch
-          const res = await sendFabricLossRate(ids, sent)
+          const res = await sendFabricLossRate(ids, sent, { ...itemsVersions.value }, orderIds.value)
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得复活已清空的基线
           if (sentEpoch === lossRateEpoch) {
             // 逐行损耗率编辑同样递增 items_version（spec 同步算法-7），版本快照前移
@@ -973,6 +963,14 @@ export function useSummaryModal() {
         if (lastSentEpoch !== lossRateEpoch) return
         lossRateSaveState.value = 'error'
         if (getErrorStatus(err) === 409) {
+          // 与数量保存同口径：状态冲突（CONFLICT）不适合同 id 集合重开——已完成单
+          // 会继续留在汇总里，重试永远 409；直接把后端 detail 给用户（含单号）。
+          if (getErrorCode(err) === 'CONFLICT') {
+            const conflictError = new Error(
+              getErrorMessage(err, '选中的采购单中有已完成单据，请取消勾选后重试'))
+            conflictError.cause = err
+            throw conflictError
+          }
           // 行级率现在带 items_version：弹窗期间任一采购单的 BOM 被同步就会 409。
           // 不刷新快照的话，之后每次改行级率都会继续 409，只能关掉重开。
           // 刷新前先作废本轮待发值：否则刷新窗口内输入的行级率会留在队列里，
