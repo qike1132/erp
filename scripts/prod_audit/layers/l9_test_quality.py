@@ -60,7 +60,6 @@ _MODULE_TIER_MAP: list[tuple[str, str]] = [
     ("fastapi_app/services/stock", "core"),
     ("fastapi_app/services/customer_order", "core"),
     ("fastapi_app/services/backup", "backup"),
-    ("fastapi_app/services/approval", "backup"),
     ("fastapi_app/services/user", "backup"),
     ("fastapi_app/services/customer", "backup"),
     ("fastapi_app/services/incoming", "incoming"),
@@ -75,7 +74,6 @@ _MODULE_TIER_MAP: list[tuple[str, str]] = [
 _CRITICAL_PATHS: dict[str, list[str]] = {
     "order_creation": ["test_order", "test_order_management", "test_order_routes"],
     "stock_deduction": ["test_stock", "test_stock_management", "test_stock_concurrency"],
-    "approval_flow": ["test_approval", "test_approval_management"],
     "backup_restore": ["test_backup"],
 }
 

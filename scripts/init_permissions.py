@@ -88,12 +88,6 @@ PERMISSIONS_CONFIG = {
             {'code': 'return_delete', 'name': '删除退货流水'},
         ]
     },
-    'approval': {
-        'module_name': '审批管理',
-        'icon': 'fa-clipboard-check',
-        'parent': {'code': 'approval_manage', 'name': '审批管理'},
-        'children': []
-    },
     'customer': {
         'module_name': '客户管理',
         'icon': 'fa-building',

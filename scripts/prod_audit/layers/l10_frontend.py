@@ -49,7 +49,6 @@ _REFACTORED_COMPONENTS: tuple[str, ...] = (
     "CompletedOrdersPanel",
     "ProjectDetailPanel",
     "ProjectFormDialog",
-    "ApprovalView",
     "ProductionEntryDrawer",
 )
 
