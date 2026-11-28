@@ -2,10 +2,7 @@
   <div class="sp-container">
     <div class="page-card page-card-main">
       <div class="page-card-header">
-        <!-- 外层必须是纵向容器：.page-card-header 是 flex-wrap:nowrap 的横向 flex，
-             两行直接放进去会被并排摆开。 -->
         <PurchasePlanHeader
-          v-model:view-tab="viewTab"
           v-model:factory="factory"
           v-model:global-kw="globalKw"
           :y="y"
@@ -16,7 +13,7 @@
           :can-manage="canManage"
           @prev="prevMonth"
           @next="nextMonth"
-          @export="viewTab === 'daily' ? exportCSV() : exportSkuCSV()"
+          @export="exportCSV"
           @create="showCreate = true"
         />
       </div>
@@ -31,9 +28,12 @@
         本次生产进度分配失败，下方「已生产 / 待生产」显示为 0 不代表真的没生产，请稍后重试。
       </div>
 
-      <PurchasePlanDailyTab
-        v-if="viewTab === 'daily'"
+      <!-- 方案B（2026-11-28 owner 拍板）：单视图合并原「排产日历/月度汇总」两 Tab ——
+           月维度看客户 chips + SKU 月度统计，日维度看月历格子与当日明细主区。 -->
+      <PurchasePlanBoard
         v-model:sel="sel"
+        v-model:cust-filter="custFilter"
+        v-model:sku-page="skuPage"
         :y="y"
         :m="m"
         :factory="factory"
@@ -43,27 +43,17 @@
         :rows="rows"
         :filtered="filtered"
         :sku-date-index="skuDateIndex"
-        @refetch="refetch()"
-      />
-
-      <PurchasePlanMonthlySummary
-        v-else
-        v-model:cust-filter="custFilter"
-        v-model:sku-page="skuPage"
-        :loading="isLoading && !d"
-        :error="isError"
-        :fetching="isFetching"
-        :has-data="summaryCustomers.length > 0"
         :customers="allCustomers"
-        :factory="factory"
+        :risk-items="riskItems"
         :sorted-sku-list="sortedSkuList"
         :paginated-sku-list="paginatedSkuList"
         :sku-total-pages="skuTotalPages"
         :sku-sort-field="skuSortField"
         :sku-sort-dir="skuSortDir"
+        @refetch="refetch"
         @toggle-sku-sort="toggleSkuSort"
         @open-sku-detail="openSkuDetail"
-        @refetch="refetch"
+        @export-sku="exportSkuCSV"
       />
 
       <SkuDetailDialog v-model:open="skuDetailOpen" :barcode="skuDetailBarcode" :name="skuDetailName" :date-detail="skuDateDetail" />
@@ -86,15 +76,15 @@ import { useDebounceFn } from '@vueuse/core';
 import { showToast } from '@/composables/useToast';
 import { useExport } from '@/composables/useExport';
 import { downloadCsv, buildCsvRow } from '@/utils/csv';
-import PurchasePlanMonthlySummary from './components/PurchasePlanMonthlySummary.vue';
-import PurchasePlanDailyTab from './components/PurchasePlanDailyTab.vue';
 import PurchasePlanHeader from './components/PurchasePlanHeader.vue';
+import PurchasePlanBoard from './components/PurchasePlanBoard.vue';
 import { usePurchasePlanData } from './composables/usePurchasePlanData';
 import { useSkuSummary } from './composables/useSkuSummary';
 import { useAuthStore } from '@/stores/auth';
 import { useFactorySplit, type FactoryFilter } from './composables/useFactorySplit';
 import { useDefaultTodaySelection } from './composables/useDefaultTodaySelection';
-import type { CustSumItem } from './components/types';
+import { daysFromToday, startOfToday } from './components/dayStatus';
+import type { CustSumItem, RiskItem, Row } from './components/types';
 
 // 弹窗组件懒加载，减少首屏 chunk 体积（仅在用户交互时才加载）
 const CreateShipmentPlanDialog = defineAsyncComponent(() => import('./components/CreateShipmentPlanDialog.vue'));
@@ -116,23 +106,21 @@ const _flushDebounced = useDebounceFn((v: string) => { debouncedKw.value = v; },
 watch(globalKw, (v) => _flushDebounced(v));
 const sel = ref('');
 const showCreate = ref(false);
-const viewTab = ref<'daily' | 'summary'>('daily');
 const custFilter = ref('');
 // 工厂筛选（作用于整页）：默认东莞，当月无东莞数据时回落到当月首个工厂
 const factory = ref<FactoryFilter>('东莞');
 
-watch(globalKw, () => { if (viewTab.value === 'daily') sel.value = ''; });
+watch(globalKw, () => { sel.value = ''; });
 watch([y, m], () => { globalKw.value = ''; debouncedKw.value = ''; });
-watch(viewTab, () => { globalKw.value = ''; debouncedKw.value = ''; });
 // 切工厂后，原来选中的客户可能在新工厂下无数据，清掉避免空白页
 // （选中的日期交给 useDefaultTodaySelection 决定，不再这里清）
 watch(factory, () => { custFilter.value = ''; });
 
 const {
-  d, isLoading, isFetching, isError, refetch,
+  isLoading, isFetching, isError, refetch,
   rows: rawRows, skuSummary: rawSkuSummary, skuDateIndex: rawSkuDateIndex, customers: rawCustomers,
   inventoryDegraded, fifoDegraded,
-} = usePurchasePlanData(y, m, viewTab);
+} = usePurchasePlanData(y, m);
 
 // 工厂维度拆分：一次性拿到整月聚合后本地切换，切换零延迟（见 useFactorySplit）。
 // 下游的 rows / skuSummary / skuDateIndex / customers 全部是「已按工厂过滤」的视图。
@@ -158,79 +146,58 @@ const allCustomers = computed<CustSumItem[]>(() => {
   return [...customers.value].sort((a, b) => b.remaining_qty - a.remaining_qty);
 });
 
-const summaryCustomers = computed<CustSumItem[]>(() => {
-  if (!custFilter.value) return allCustomers.value;
-  return allCustomers.value.filter(c => c.customer_name === custFilter.value);
+// 使用防抖后的搜索值，避免每次按键触发全量过滤（月历淡化未命中日 + SKU 表过滤同源）
+const filtered = computed(() => {
+  if (!debouncedKw.value) return rows.value;
+  const k = debouncedKw.value.toLowerCase();
+  return rows.value.filter(r => r.date.includes(k) || r.customerNames.some(n => n.toLowerCase().includes(k)));
 });
 
-const sKpi = computed(() => {
-  const cs = summaryCustomers.value;
-  let planQty = 0, prodQty = 0, remainQty = 0;
-  for (const c of cs) {
-    planQty += Number(c.plan_qty || 0);
-    prodQty += Number(c.produced_qty || 0);
-    remainQty += Number(c.remaining_qty || 0);
+// 风险汇总：延期 / 临期(≤3天)且尚未出完。信息条给天数，明细交给月历下方风险条与格子标记。
+const TODAY_MS = startOfToday();
+const riskItems = computed<RiskItem[]>(() => {
+  const list: RiskItem[] = [];
+  for (const r of rows.value) {
+    if (r._producedPct === 100 || r._pendingCount <= 0) continue;
+    const diff = daysFromToday(r.date, TODAY_MS);
+    if (diff < 0) {
+      list.push({ date: r.date, qty: r.totalQty, cust: r.customerNames[0] ?? '', kind: 'overdue', lbl: '延期 ' + Math.abs(diff) + '天' });
+    } else if (diff <= 3) {
+      list.push({ date: r.date, qty: r.totalQty, cust: r.customerNames[0] ?? '', kind: 'due', lbl: diff === 0 ? '今日出货' : '临期 ' + diff + '天' });
+    }
   }
-  const pct = planQty > 0 ? Math.floor(prodQty / planQty * 1000) / 10 : 0;
+  list.sort((a, b) => daysFromToday(a.date, TODAY_MS) - daysFromToday(b.date, TODAY_MS));
+  return list;
+});
+
+const planQtyNum = computed(() => allCustomers.value.reduce((n, c) => n + Number(c.plan_qty || 0), 0));
+
+// 打包一行信息条所需值（方案B 口径：计划 / 客户 / SKU / 峰值日 / 风险，全部数量口径）。
+const kpi = computed(() => {
+  const peak = rows.value.reduce<Row | null>((acc, r) => (!acc || r.totalQty > acc.totalQty ? r : acc), null);
   return {
-    allQty: String(planQty),
-    allProduced: String(prodQty),
-    allRemain: String(remainQty),
-    pct,
+    planQty: planQtyNum.value,
+    planDays: rows.value.length,
+    custN: allCustomers.value.length,
+    skuN: new Set(skuSummary.value.map(s => s.product_name)).size,
+    peakDay: peak ? Number(peak.date.slice(8)) : 0,
+    peakQty: peak ? peak.totalQty : 0,
+    riskDays: riskItems.value.length,
+    riskOverdue: riskItems.value.filter(i => i.kind === 'overdue').length,
+    riskExpiring: riskItems.value.filter(i => i.kind === 'due').length,
+    riskQty: riskItems.value.reduce((n, i) => n + i.qty, 0),
   };
 });
-
-const planQtyNum = computed(() => Number(sKpi.value.allQty || 0));
-const producedQtyNum = computed(() => Number(sKpi.value.allProduced || 0));
-const remainQtyNum = computed(() => Number(sKpi.value.allRemain || 0));
 
 const {
   skuSortField, skuSortDir, skuPage, skuTotalPages, paginatedSkuList, sortedSkuList,
   skuDateDetail, skuDetailOpen, skuDetailBarcode, skuDetailName,
   openSkuDetail, toggleSkuSort,
-} = useSkuSummary({ skuSummary, skuDateIndex, custFilter, globalKw: debouncedKw, viewTab });
+} = useSkuSummary({ skuSummary, skuDateIndex, custFilter, globalKw: debouncedKw });
 
 // 切工厂会整体换掉 SKU 列表，页码必须归位：停在第 2 页而新列表只有 1 页时，
 // 分页控件（totalPages<=1 时隐藏）会消失，表格整片空白且无法退回。
 watch(factory, () => { skuPage.value = 1; });
-
-// 使用防抖后的搜索值，避免每次按键触发全量过滤
-const filtered = computed(() => {
-  if (!debouncedKw.value || viewTab.value !== 'daily') return rows.value;
-  const k = debouncedKw.value.toLowerCase();
-  return rows.value.filter(r => r.date.includes(k) || r.customerNames.some(n => n.toLowerCase().includes(k)));
-});
-
-// 延期 / 临期风险汇总。原先在顶栏拆成「已延期」「临期≤3天」两格，与右栏风险清单
-// 报的是同一件事 —— 现合并为一格「风险 N 天」，明细交给右栏清单与月历格子上的标记。
-const risks = computed(() => {
-  const now = new Date(); now.setHours(0, 0, 0, 0);
-  const MS = 86400000;
-  const r = { delayedCount: 0, delayedQty: 0, maxDays: 0, expiringCount: 0, expiringQty: 0 };
-  for (const row of rows.value) {
-    if (row._producedPct === 100 || row._pendingCount <= 0) continue;
-    const diff = Math.round((new Date(row.date + 'T00:00:00').getTime() - now.getTime()) / MS);
-    if (diff < 0) { r.delayedCount++; r.delayedQty += row.totalQty; r.maxDays = Math.max(r.maxDays, -diff); }
-    else if (diff <= 3) { r.expiringCount++; r.expiringQty += row.totalQty; }
-  }
-  return r;
-});
-
-const riskDays = computed(() => risks.value.delayedCount + risks.value.expiringCount);
-const riskQty = computed(() => risks.value.delayedQty + risks.value.expiringQty);
-
-// 打包 KPI 条所需值传给头部组件（KpiStrip 的展示 props）。
-const kpi = computed(() => ({
-  planQty: planQtyNum.value,
-  producedQty: producedQtyNum.value,
-  remainQty: remainQtyNum.value,
-  pct: sKpi.value.pct,
-  planDays: rows.value.length,
-  riskDays: riskDays.value,
-  riskOverdue: risks.value.delayedCount,
-  riskExpiring: risks.value.expiringCount,
-  riskQty: riskQty.value,
-}));
 
 function exportSkuCSV() {
   const list = sortedSkuList.value;

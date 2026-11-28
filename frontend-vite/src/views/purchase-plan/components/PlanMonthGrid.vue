@@ -24,6 +24,17 @@
 
       <template v-if="c.row">
         <span class="sp-qty num">{{ fmt(c.row.totalQty) }}<small>件</small></span>
+        <!-- 方案B（2026-11-28 拍板）：格子补上「谁在出货」——客户数·SKU数 + 客户占比条 -->
+        <template v-if="c.meta">
+          <span class="sp-cell-meta num">{{ c.meta.custs.length }} 客户 · {{ c.meta.skuN }} SKU</span>
+          <div v-if="c.meta.custs.length" class="sp-share-bar" aria-hidden="true">
+            <i
+              v-for="seg in c.meta.custs"
+              :key="seg.name"
+              :style="{ flexGrow: seg.qty, background: custColor(seg.name) }"
+            />
+          </div>
+        </template>
       </template>
       <span v-else-if="c.isToday" class="sp-today-hint">今天 · 无排产</span>
     </div>
@@ -31,12 +42,11 @@
 </template>
 
 <script setup lang="ts">
-// 排产日历月视图 —— 取代原来的「有排产的日期」卡片列表。
-// 整月一次铺开（空格子代表当天无排产，本身也是信息），每格只放聚合值；
-// 当日完整明细在右侧栏，格子不再承担「既要概览又要明细」的双重职责。
+// 排产日历月视图 —— 每格：日总量 + 客户数·SKU数 + 客户占比条；
+// 当日完整明细在右侧栏，格子不承担「既要概览又要明细」的双重职责。
 import { computed } from 'vue'
 import { buildMonthCells, dayMarkFor, startOfToday, todayIso } from './dayStatus'
-import type { Row } from './types'
+import type { Row, DayCellMeta } from './types'
 import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 const props = defineProps<{
@@ -48,6 +58,10 @@ const props = defineProps<{
   /** 搜索是否正在生效（生效时未命中的日子淡化） */
   searching: boolean
   matchedDates: Set<string>
+  /** 当日客户数量分布与去重 SKU 数（父级从 skuDateIndex 派生） */
+  dayMeta?: Record<string, DayCellMeta>
+  /** 客户 → 展示色（父级按月度计划量排序分配，月历/明细/chips 三处同源） */
+  custColors?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -73,6 +87,7 @@ const cells = computed(() =>
     weekday: c.date ? weekdayOf(c.date) : '',
     isToday: c.date === TODAY,
     mark: c.row ? dayMarkFor(c.row, TODAY_MS) : null,
+    meta: c.date ? (props.dayMeta?.[c.date] ?? null) : null,
     dim: props.searching && c.date !== null && !props.matchedDates.has(c.date),
   })),
 )
@@ -93,12 +108,18 @@ function cellCls(c: (typeof cells.value)[number]): string[] {
 function aria(c: (typeof cells.value)[number]): string {
   const r = c.row
   if (!r) return ''
-  return `${c.day}日 周${c.weekday}，共 ${r.totalQty} 件，查看当日明细`
+  const meta = c.meta
+  const who = meta ? `，${meta.custs.length} 家客户 ${meta.skuN} 个 SKU` : ''
+  return `${c.day}日 周${c.weekday}，共 ${r.totalQty} 件${who}，查看当日明细`
 }
 
 function pick(c: (typeof cells.value)[number]): void {
   if (!c.date || !c.row) return
   emit('select', c.date)
+}
+
+function custColor(name: string): string {
+  return props.custColors?.[name] ?? 'var(--color-slate-400, #94a3b8)'
 }
 </script>
 
@@ -130,14 +151,14 @@ function pick(c: (typeof cells.value)[number]): void {
 
 .sp-cell {
   position: relative;
-  min-height: 76px;
+  min-height: 92px;
   border: 1px solid var(--color-border-light, #f0f2f5);
   border-radius: var(--radius-sm, 10px);
   background: white;
-  padding: 8px 9px 8px 11px;
+  padding: 8px 9px 9px 11px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
   box-sizing: border-box;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
@@ -239,7 +260,6 @@ function pick(c: (typeof cells.value)[number]): void {
 .st-g { background: var(--color-success-100); color: var(--color-success-700); }
 
 .sp-qty {
-  margin-top: auto;
   font-size: var(--fs-body);
   font-weight: 800;
   line-height: 1;
@@ -252,6 +272,30 @@ function pick(c: (typeof cells.value)[number]): void {
   font-weight: 600;
   color: var(--color-text-muted);
   margin-left: 1px;
+}
+
+.sp-cell-meta {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--color-text-muted, #8c96ad);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 客户占比条：flex-grow 按数量分配宽度，天然防溢出 */
+.sp-share-bar {
+  margin-top: auto;
+  height: 4px;
+  display: flex;
+  gap: 1px;
+  overflow: hidden;
+}
+
+.sp-share-bar i {
+  flex: 1 1 0;
+  min-width: 2px;
+  display: block;
 }
 
 .sp-today-hint {

@@ -7,19 +7,24 @@
     </div>
 
     <div class="sp-kpi">
-      <span class="sp-kpi-l">本月已生产</span>
-      <span class="sp-kpi-v num">{{ fmt(producedQty) }}</span>
-      <span class="sp-kpi-s num">件 · 待生产 {{ fmt(remainQty) }}</span>
+      <span class="sp-kpi-l">客户</span>
+      <span class="sp-kpi-v num">{{ custN }}</span>
+      <span class="sp-kpi-s">家</span>
     </div>
 
-    <div class="sp-kpi sp-kpi-rate">
-      <span class="sp-kpi-l">完成率</span>
-      <span class="sp-kpi-v num">{{ pct }}%</span>
-      <div class="sp-meter"><i :class="meterCls" :style="{ width: pct + '%' }" /></div>
+    <div class="sp-kpi">
+      <span class="sp-kpi-l">SKU</span>
+      <span class="sp-kpi-v num">{{ skuN }}</span>
+      <span class="sp-kpi-s">个</span>
     </div>
 
-    <!-- 风险只在这一格出现：原先 KPI 条的「已延期」「临期≤3天」两格与右栏风险清单
-         报的是同一件事，合并成一天数与明细两处（条上给天数，清单里给条目）。 -->
+    <div class="sp-kpi">
+      <span class="sp-kpi-l">峰值日</span>
+      <span class="sp-kpi-v num">{{ peakLabel }}</span>
+      <span v-if="peakQty > 0" class="sp-kpi-s num">{{ fmt(peakQty) }} 件</span>
+    </div>
+
+    <!-- 风险只在这一格出现：明细在月历下方的风险条与格子标记上，条上给天数 -->
     <div class="sp-kpi sp-kpi-risk">
       <span class="sp-kpi-l">风险</span>
       <span class="sp-kpi-v num">{{ riskDays }} 天</span>
@@ -29,30 +34,26 @@
 </template>
 
 <script setup lang="ts">
-// KPI 四格 —— 从 PurchasePlanView 抽出。
+// 一行信息条（方案B，2026-11-28 owner 拍板）：本月计划 / 客户 / SKU / 峰值日 / 风险 五格，
+// 约 40px 单行——替代原四格大数字 KPI（已生产/待生产/完成率仍在下方 SKU 月度统计表按行给）。
 // 只做展示：数值由父级传入，判定与聚合仍在原处，避免两处各算一遍。
 import { computed } from 'vue'
 import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
 const props = defineProps<{
   planQty: number
-  producedQty: number
-  remainQty: number
-  pct: number
   planDays: number
+  custN: number
+  skuN: number
+  peakDay: number
+  peakQty: number
   riskDays: number
   riskOverdue: number
   riskExpiring: number
   riskQty: number
 }>()
 
-/** 千分位：几十万位的计划量不分组的话，量级要靠数位数才看得出来 */
-
-const meterCls = computed(() => {
-  if (props.pct <= 0) return 'sp-meter-r'
-  if (props.pct < 100) return 'sp-meter-a'
-  return 'sp-meter-g'
-})
+const peakLabel = computed(() => (props.peakQty > 0 ? `${props.peakDay}日` : '—'))
 
 const riskBreakdown = computed(() => {
   if (props.riskDays <= 0) return '本月无逾期与临期'
@@ -71,26 +72,28 @@ const riskBreakdown = computed(() => {
   gap: 1px;
   background: var(--color-border-light, #e2e8f0);
   border: 1px solid var(--color-border-light, #e2e8f0);
-  border-radius: var(--radius-md, 14px);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-radius: var(--radius-sm, 10px);
   overflow: hidden;
 }
 
+/* 单行信息条：标签 + 大数字 + 补充说明排在一条基线上，整条约 40px 高 */
 .sp-kpi {
-  flex: 1 1 130px;
+  flex: 1 1 120px;
   min-width: 0;
-  padding: 10px 14px;
+  padding: 9px 14px;
   background: white;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 7px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .sp-kpi-l {
+  flex-shrink: 0;
   font-size: var(--fs-caption);
   font-weight: 600;
   color: var(--color-text-muted, #5a6b8c);
-  white-space: nowrap;
 }
 
 .sp-kpi-v {
@@ -98,39 +101,18 @@ const riskBreakdown = computed(() => {
   font-weight: 800;
   color: var(--color-heading);
   line-height: 1;
-  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
 }
 
 .sp-kpi-s {
   font-size: var(--fs-caption);
   color: var(--color-text-muted, #8c96ad);
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 3px;
 }
 
 .sp-kpi-risk .sp-kpi-l,
 .sp-kpi-risk .sp-kpi-v {
   color: var(--color-danger-600);
 }
-
-.sp-meter {
-  height: 6px;
-  border-radius: 3px;
-  background: #edf0f6;
-  overflow: hidden;
-  margin-top: 8px;
-  max-width: 200px;
-}
-
-.sp-meter > i {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-}
-
-.sp-meter-r { background: var(--color-danger-500, #ea5455); }
-.sp-meter-a { background: var(--color-warning-500, #ff9f43); }
-.sp-meter-g { background: var(--color-success-500, #28c76f); }
 </style>

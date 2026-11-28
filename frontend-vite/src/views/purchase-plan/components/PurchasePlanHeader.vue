@@ -1,25 +1,10 @@
 <template>
   <div class="sp-head">
     <div class="sp-head-row1">
-      <!-- 工厂 Tab 左置：与视图 Tab 同属「看哪些数据」的切换，排在一起比藏在第二行更直观 -->
+      <!-- 工厂 Tab 左置：限定「看哪些数据」的维度（方案B 合并两 Tab 后是头部唯一 Tab 组） -->
       <PurchasePlanFactoryFilter v-model="factory" :factories="factories" :totals="factoryTotals" />
-      <div class="sp-tab-group" role="tablist">
-        <button
-          role="tab"
-          :aria-selected="viewTab === 'daily'"
-          :class="['sp-tab', { 'sp-tab-active': viewTab === 'daily' }]"
-          @click="viewTab = 'daily'"
-        >排产日历</button>
-        <button
-          role="tab"
-          :aria-selected="viewTab === 'summary'"
-          :class="['sp-tab', { 'sp-tab-active': viewTab === 'summary' }]"
-          @click="viewTab = 'summary'"
-        >月度汇总</button>
-      </div>
       <PurchasePlanToolbar
         v-model:global-kw="globalKw"
-        :view-tab="viewTab"
         :can-manage="canManage"
         @export="emit('export')"
         @create="emit('create')"
@@ -27,7 +12,7 @@
     </div>
 
     <!-- 第二行：月份上下文 + 该月汇总。
-         切月作用于整页（KPI 与两个 Tab 都跟着变），所以与 KPI 同行。 -->
+         切月作用于整页（信息条与月历都跟着变），所以与信息条同行。 -->
     <div class="sp-head-row2">
       <PurchasePlanMonthNav :y="y" :m="m" @prev="emit('prev')" @next="emit('next')" @reset="emit('reset')" />
       <PurchasePlanKpiStrip v-bind="kpi" />
@@ -36,7 +21,7 @@
 </template>
 
 <script setup lang="ts">
-// 采购计划页头部两行 —— 从 PurchasePlanView.vue 抽出，使视图回到 400 行门禁之内。
+// 出货计划页头部两行（方案B，2026-11-28 owner 拍板合并两 Tab 后重写）——
 // 只负责布局与转发：数据由父级传入，交互一律上抛事件，判定/聚合仍在原处。
 import PurchasePlanFactoryFilter from './PurchasePlanFactoryFilter.vue'
 import PurchasePlanToolbar from './PurchasePlanToolbar.vue'
@@ -53,10 +38,11 @@ withDefaults(defineProps<{
   canManage?: boolean
   kpi: {
     planQty: number
-    producedQty: number
-    remainQty: number
-    pct: number
     planDays: number
+    custN: number
+    skuN: number
+    peakDay: number
+    peakQty: number
     riskDays: number
     riskOverdue: number
     riskExpiring: number
@@ -64,7 +50,6 @@ withDefaults(defineProps<{
   }
 }>(), { canManage: true })
 
-const viewTab = defineModel<'daily' | 'summary'>('viewTab', { required: true })
 const factory = defineModel<string>('factory', { required: true })
 const globalKw = defineModel<string>('globalKw', { required: true })
 
@@ -74,7 +59,7 @@ const emit = defineEmits<{ prev: []; next: []; reset: []; export: []; create: []
 <style scoped lang="scss">
 @use '../purchase-plan-common.scss' as *;
 
-/* 头部两行：第一行「看哪个工厂/Tab + 做什么」，第二行「看哪个月 + 这个月怎么样」。 */
+/* 头部两行：第一行「看哪个工厂 + 做什么」，第二行「看哪个月 + 这个月怎么样」。 */
 .sp-head {
   display: flex;
   flex-direction: column;

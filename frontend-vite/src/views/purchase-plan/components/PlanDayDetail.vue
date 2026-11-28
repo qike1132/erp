@@ -14,8 +14,13 @@
     <div class="sp-detail-groups">
       <div v-for="g in groups" :key="g.customer" class="sp-group">
         <div class="sp-group-head">
+          <i class="sp-group-dot" :style="{ background: custColor(g.customer) }" aria-hidden="true" />
           <span class="sp-group-name" :title="g.customer">{{ g.customer }}</span>
           <span class="sp-group-qty num">{{ fmt(g.qty) }}</span>
+        </div>
+        <!-- 客户当日占比条：与月历格子的占比条同一套配色 -->
+        <div class="sp-group-bar" aria-hidden="true">
+          <i :style="{ width: barPct(g) + '%', background: custColor(g.customer) }" />
         </div>
         <ul class="sp-prod-list">
           <li v-for="p in g.products" :key="p.product" class="sp-prod-row">
@@ -31,29 +36,40 @@
 </template>
 
 <script setup lang="ts">
-// 右栏的当日明细 —— 客户分组 + 全部产品，不截断，超出滚动。
+// 右栏的当日明细 —— 客户分组（色点 + 当日占比条）+ 全部产品，不截断，超出滚动。
 // 条目按产品行展示的是「该客户该产品当日」的出货状态，与后端 getShipmentStatus 同口径。
 import type { PlanDayCustomerGroup } from './types'
 import { formatNumber as fmt } from '@/utils/format' // L-15（2026-11-21 审计）：删除 8 处各自为政的本地 fmt，统一千分位口径
 
-defineProps<{
+const props = defineProps<{
   title: string
   groups: PlanDayCustomerGroup[]
   totalQty: number
   customerCount: number
   productCount: number
+  /** 客户 → 展示色（父级按月度计划量排序分配，与月历格子占比条同源） */
+  custColors?: Record<string, string>
 }>()
 
-const PENDING = { cls: 'st-wait', lbl: '待生产' }
+// 出货口径（getShipmentStatus 比对的是出货量，2026-11-28 方案B 落地时由「已生产」更正）
+const PENDING = { cls: 'st-wait', lbl: '未出' }
 
 const STATUS: Record<string, { cls: string; lbl: string }> = {
-  completed: { cls: 'st-ok', lbl: '已生产' },
-  partial: { cls: 'st-part', lbl: '部分生产' },
+  completed: { cls: 'st-ok', lbl: '已出清' },
+  partial: { cls: 'st-part', lbl: '部分出' },
   pending: PENDING,
 }
 
 function statusOf(s: string): { cls: string; lbl: string } {
   return STATUS[s] ?? PENDING
+}
+
+function custColor(name: string): string {
+  return props.custColors?.[name] ?? 'var(--color-slate-400, #94a3b8)'
+}
+
+function barPct(g: PlanDayCustomerGroup): number {
+  return props.totalQty > 0 ? Math.max(3, Math.round(g.qty / props.totalQty * 100)) : 0
 }
 
 </script>
@@ -100,7 +116,7 @@ function statusOf(s: string): { cls: string; lbl: string } {
 }
 
 .sp-detail-groups {
-  max-height: 396px;
+  max-height: 520px;
   overflow-y: auto;
 }
 
@@ -120,6 +136,14 @@ function statusOf(s: string): { cls: string; lbl: string } {
   margin-bottom: 6px;
 }
 
+.sp-group-dot {
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .sp-group-name {
   flex: 1;
   min-width: 0;
@@ -136,6 +160,18 @@ function statusOf(s: string): { cls: string; lbl: string } {
   font-size: var(--fs-caption);
   font-weight: 800;
   color: var(--color-text-secondary, #5a6b8c);
+}
+
+.sp-group-bar {
+  height: 4px;
+  margin-bottom: 7px;
+  background: var(--color-slate-100, #f1f5f9);
+  overflow: hidden;
+}
+
+.sp-group-bar i {
+  display: block;
+  height: 100%;
 }
 
 .sp-prod-list {

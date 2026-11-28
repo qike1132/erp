@@ -3,7 +3,7 @@
     <div class="sp-search">
       <UiSearchInput
         v-model="kw"
-        :placeholder="viewTab === 'daily' ? '搜索日期、客户...' : '搜索产品、SKU、客户...'"
+        placeholder="搜索客户、产品、条码..."
         @clear="kw = ''"
       />
     </div>
@@ -28,7 +28,6 @@ import UiSearchInput from '@/components/ui/UiSearchInput.vue'
 // Vue 会把缺省的 Boolean prop 转成 false，必须显式默认 true，否则旧调用方/单测里
 // 「新建」按钮会凭空消失。
 withDefaults(defineProps<{
-  viewTab: 'daily' | 'summary'
   /** 写权限（production_plan_manage）：由页面传入；缺省视为可写 */
   canManage?: boolean
 }>(), { canManage: true })
