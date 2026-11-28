@@ -113,13 +113,11 @@ async def test_stats_inventory_cold_and_warm_by_factory(monkeypatch):
     for scope, expected in ((dg_scope, 7), (hb_scope, 12), (dg_scope, 7), (hb_scope, 12)):
         result = await stats.fetch_dashboard_stats(db, scope)
         assert result['low_stock_count'] == expected
-        assert result['pending_approvals'] == 0
     db.execute.assert_not_awaited()
     for session, factory in ((dg, '东莞'), (hb, '湖北')):
         session.execute.assert_awaited_once()
         sql = _sql(session.execute.await_args.args[0])
         assert f"product.factory = '{factory}'" in sql
-        assert 'approval_request' not in sql
 
 
 @pytest.mark.asyncio

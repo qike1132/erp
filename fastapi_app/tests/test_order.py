@@ -8,21 +8,6 @@ from pydantic import ValidationError
 
 from fastapi_app.schemas.order import OrderCreate, OrderUpdate
 from fastapi_app.services import order_service
-from fastapi_app.services.order_service import PermissionDeniedError
-from fastapi_app.shared_models.approval import ApprovalRequest
-
-
-def _stub_approval_lookup(mock_db, approval):
-    """给 cancel_approval 的审批行查询打桩。
-
-    自 2026-10-02 起它改用 `select(...).with_for_update()` 取行（原先是 db.get），
-    以便与 approve_request / reject_request 用同一把行锁串行，消除
-    「管理员同意」与「申请人取消」并发时的状态覆盖。
-    """
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = approval
-    mock_db.execute = AsyncMock(return_value=result)
-
 
 # ==================== Schema 验证 ====================
 
@@ -153,7 +138,6 @@ class TestOrderService:
                 customer="新客户", note="新备注", current_user=user
             )
         assert result['success'] is True
-        assert result['requires_approval'] is False
 
     async def test_delete_order_not_found(self, mock_db):
         # 2026-10-18 P2-07：delete_order 改为「先无锁读 product_id（db.execute）→
@@ -165,72 +149,6 @@ class TestOrderService:
         user = MagicMock()
         with pytest.raises(ValueError, match="不存在"):
             await order_service.delete_order(mock_db, order_id=999, current_user=user)
-
-    async def test_cancel_approval_not_found(self, mock_db):
-        _stub_approval_lookup(mock_db, None)
-        user = MagicMock()
-        with pytest.raises(ValueError, match="不存在"):
-            await order_service.cancel_approval(mock_db, 999, user)
-
-    async def test_cancel_approval_already_processed(self, mock_db):
-        approval = MagicMock()
-        approval.requester_id = 1
-        approval.status = ApprovalRequest.STATUS_APPROVED
-        _stub_approval_lookup(mock_db, approval)
-        user = MagicMock()
-        user.id = 1
-        user.is_super = False
-        with pytest.raises(ValueError, match="无法取消"):
-            await order_service.cancel_approval(mock_db, 1, user)
-
-    async def test_cancel_approval_no_permission(self, mock_db):
-        approval = MagicMock()
-        approval.requester_id = 2
-        approval.status = ApprovalRequest.STATUS_PENDING
-        _stub_approval_lookup(mock_db, approval)
-        user = MagicMock()
-        user.id = 1
-        user.is_super = False
-        with pytest.raises(PermissionDeniedError, match="权限"):
-            await order_service.cancel_approval(mock_db, 1, user)
-
-    async def test_cancel_approval_success(self, mock_db):
-        approval = MagicMock()
-        approval.requester_id = 1
-        approval.status = ApprovalRequest.STATUS_PENDING
-        approval.order_id = 1
-
-        order = MagicMock()
-        order.is_locked = True
-        order.is_deleted = False
-
-        user = MagicMock()
-        user.id = 1
-        user.username = "test"
-        user.is_super = False
-
-        _stub_approval_lookup(mock_db, approval)
-        mock_db.get = AsyncMock(return_value=order)
-        mock_db.add = MagicMock()
-        mock_db.commit = AsyncMock()
-
-        with patch('fastapi_app.services.order.approval_flow._create_approval_log_obj'):
-            await order_service.cancel_approval(mock_db, 1, user)
-
-        assert approval.status == ApprovalRequest.STATUS_CANCELLED
-
-    async def test_get_my_approvals_empty(self, mock_db):
-        user = MagicMock()
-        user.id = 1
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_unique = MagicMock()
-        mock_unique.all.return_value = []
-        mock_scalars.unique.return_value = mock_unique
-        mock_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(return_value=mock_result)
-        result = await order_service.get_my_approvals(mock_db, user)
-        assert result == []
 
 
 # ==================== API 端点测试 ====================
@@ -381,37 +299,5 @@ class TestOrderEndpoints:
 
         with patch('fastapi_app.services.order.commands.get_product_for_update', new_callable=AsyncMock, return_value=product):
             response = await client.delete("/api/v1/orders/delete/1")
-        assert response.status_code == 200
-        assert response.json()['success'] is True
-
-    async def test_cancel_approval_success(self, client, mock_db):
-        approval = MagicMock()
-        approval.requester_id = 1
-        approval.status = ApprovalRequest.STATUS_PENDING
-        approval.order_id = 1
-
-        order_obj = MagicMock()
-        order_obj.is_locked = True
-        order_obj.is_deleted = False
-
-        _stub_approval_lookup(mock_db, approval)
-        mock_db.get = AsyncMock(return_value=order_obj)
-        mock_db.add = MagicMock()
-        mock_db.commit = AsyncMock()
-
-        with patch('fastapi_app.services.order.approval_flow._create_approval_log_obj'):
-            response = await client.post("/api/v1/orders/cancel-approval/1")
-        assert response.status_code == 200
-        assert response.json()['success'] is True
-
-    async def test_my_approvals(self, client, mock_db):
-        mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_unique = MagicMock()
-        mock_unique.all.return_value = []
-        mock_scalars.unique.return_value = mock_unique
-        mock_result.scalars.return_value = mock_scalars
-        mock_db.execute = AsyncMock(return_value=mock_result)
-        response = await client.get("/api/v1/orders/my-approvals")
         assert response.status_code == 200
         assert response.json()['success'] is True

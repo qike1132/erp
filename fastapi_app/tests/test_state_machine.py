@@ -1,7 +1,6 @@
 """状态机引擎与各域状态机单测（批次1，2026-08-22）
 
 覆盖：
-- 审批域原 API 行为完全不变（回归保护，34 处调用方零改动的前提）
 - 通用 StateMachine 引擎（转移/终态/非法转移）
 - staging 状态机（pending → approved/rejected，终态不可再转移）
 - PurchaseOrderStatus 常量值与 DB 字面量一致

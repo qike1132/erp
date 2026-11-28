@@ -73,7 +73,7 @@ async def test_aggregate_production_can_read_all_departments():
 async def test_empty_scope_returns_empty_cards_without_business_queries(monkeypatch):
     db = _db()
     monkeypatch.setattr(database, 'get_async_db_context', MagicMock(side_effect=AssertionError('不可取独立数据库会话')))
-    user = _user('approval_manage')  # 审批模块实际仅超管可读。
+    user = _user('customer_manage')  # 无任何仪表盘来源权限的普通用户。
     scope = DashboardReadScope.for_user(user)
     response = await get_mobile_dashboard(DATE, 1, user, db)
     assert response.success is True
@@ -134,4 +134,4 @@ async def test_superuser_retains_all_required_module_reads():
     assert scope.factory == ''
     assert scope.departments is None
     assert all((scope.orders, scope.stockin, scope.stockout, scope.inventory, scope.warehouse,
-                scope.plans, scope.approvals, scope.purchases, scope.materials, scope.amounts))
+                scope.plans, scope.purchases, scope.materials, scope.amounts))

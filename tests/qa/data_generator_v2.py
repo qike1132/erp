@@ -10,12 +10,11 @@ ERP系统全板块测试数据生成器 v2
   3. 客户管理       customers           20,000
   4. 供应商管理     suppliers           20,000
   5. 用户管理       users               20,000
-  6. 审批管理       approvals           20,000
-  7. 入库管理       stock_in            20,000
-  8. 出库管理       stock_out           20,000
-  9. 采购中心       purchase_orders     20,000
- 10. 来料登记       material_registration 20,000
- 11. 采购计划       purchase_plans      20,000
+  6. 入库管理       stock_in            20,000
+  7. 出库管理       stock_out            20,000
+  8. 采购中心       purchase_orders     20,000
+  9. 来料登记       material_registration 20,000
+ 10. 采购计划       purchase_plans      20,000
  12. 生产报表       daily_productions   20,000
  13. 出货计划       production_summaries 20,000
  14. 皮套管理       cases               20,000
@@ -155,27 +154,6 @@ def generate_users(count: int) -> list[dict[str, Any]]:
             "phone": fake.phone_number(),
             "role": fake.random_element(roles),
             "status": fake.random_element(["active", "active", "active", "inactive"]),
-        })
-    return rows
-
-
-def generate_approvals(count: int) -> list[dict[str, Any]]:
-    """审批管理 - Approval schema
-    审批单据关联各类业务
-    """
-    types = ["订单审批", "采购审批", "入库审批", "出库审批", "退款审批", "调拨审批"]
-    statuses = ["待审批", "已通过", "已驳回", "已撤回"]
-    rows = []
-    for i in range(count):
-        rows.append({
-            "approval_type": fake.random_element(types),
-            "status": fake.random_element(statuses),
-            "applicant": fake.name(),
-            "approver": fake.name() if fake.boolean(70) else None,
-            "comment": fake.sentence()[:300] if fake.boolean(60) else "",
-            "apply_date": _rand_date(365),
-            "approval_no": f"APR{datetime.now().strftime('%Y%m')}{80000 + i:06d}",
-            "reference_id": fake.random_int(min=1, max=99999),
         })
     return rows
 
@@ -415,7 +393,6 @@ if __name__ == "__main__":
         ("客户管理", "customers", generate_customers),
         ("供应商管理", "suppliers", generate_suppliers),
         ("用户管理", "users", generate_users),
-        ("审批管理", "approvals", generate_approvals),
         ("入库管理", "stock_in", generate_stock_in),
         ("出库管理", "stock_out", generate_stock_out),
         ("采购中心", "purchase_orders", generate_purchase_orders),

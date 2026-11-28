@@ -41,7 +41,6 @@ SMOKE_TESTS = [
     ("系统管理", "GET", "/api/v1/permissions/list", None),
     ("用户管理", "GET", "/api/v1/users/list", None),
     ("客户管理", "GET", "/api/v1/customers/list", None),
-    ("审批管理", "GET", "/api/v1/approvals/list", None),
     ("数据备份", "GET", "/api/v1/backup/list", None),
 ]
 

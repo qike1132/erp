@@ -10,7 +10,6 @@
     "data.low_stock_count:int",
     "data.order_today:int",
     "data.order_yesterday:int",
-    "data.pending_approvals:int",
     "data.pending_materials:int",
     "data.pending_purchases:int",
     "data.pending_shipments:int",

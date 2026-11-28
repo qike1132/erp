@@ -42,27 +42,17 @@ def test_admin_permission_code_is_not_used_anywhere():
 
 
 # ------------------------------------------------------------------ A-29
-def test_approval_nav_is_superuser_only():
-    """审批管理只能超管用（业务 2026-10-02 已定），所以导航项要标成超管专属，
-    否则勾了 approval_manage 的人会看到一个点开全 403 的假入口（审计 A-29）。"""
-    from fastapi_app.core import nav_context
-
-    assert 'approval_manage' in nav_context.SUPERUSER_ONLY_NAV_CODES
-
-    # 导航载荷必须把该标记透出去（前端 filteredNavSections 靠它过滤）
-    src = _src('fastapi_app/core/nav_context.py')
-    assert "'superuser_only': item.code in SUPERUSER_ONLY_NAV_CODES" in src
-
-    # 且该导航项仍留在库里（超管还要用它），只是对非超管隐藏
-    assert 'approval_manage' in _src('scripts/seed_nav.py')
-
-
 def test_user_manage_nav_is_superuser_only():
     """用户管理接口全部 require_superuser，导航层也必须标超管专属，
     否则被直接改库勾选 user_manage 的非超管会看到点开全 403 的假入口。"""
     from fastapi_app.core import nav_context
 
     assert 'user_manage' in nav_context.SUPERUSER_ONLY_NAV_CODES
+
+    # 导航载荷必须把该标记透出去（前端 filteredNavSections 靠它过滤）
+    src = _src('fastapi_app/core/nav_context.py')
+    assert "'superuser_only': item.code in SUPERUSER_ONLY_NAV_CODES" in src
+
     assert 'user_manage' in _src('scripts/seed_nav.py')
 
 
@@ -74,11 +64,11 @@ def test_outsource_fine_grained_codes_are_in_authoritative_seed():
 
 
 def test_superuser_only_flag_does_not_leak_into_permission_codes():
-    """超管专属标记不得顺手把 approval_manage 从 permission_codes 里删掉 ——
+    """超管专属标记不得顺手把 user_manage 从 permission_codes 里删掉 ——
     权限码本身要保留（存量授权不破坏），隐藏是前端按 is_super 做的一层。"""
     from fastapi_app.core.nav_context import nav_permission_codes
 
-    assert 'approval_manage' in nav_permission_codes('approval_manage')
+    assert 'user_manage' in nav_permission_codes('user_manage')
 
 
 # ------------------------------------------------------------------ 回归护栏

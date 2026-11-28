@@ -25,7 +25,6 @@ tests = [
     ("supplier_active_names", "SELECT name FROM supplier WHERE status = true ORDER BY name"),
     ("stock_in_paged", "SELECT * FROM stock_in ORDER BY stockin_date DESC LIMIT 50 OFFSET 0"),
     ("stock_out_paged", "SELECT * FROM stock_out ORDER BY stockout_date DESC LIMIT 50 OFFSET 0"),
-    ("approval_paged", "SELECT * FROM approval_request ORDER BY request_time DESC LIMIT 50 OFFSET 0"),
     ("purchase_order_paged", "SELECT * FROM purchase_order ORDER BY create_time DESC LIMIT 50 OFFSET 0"),
     ("case_paged", "SELECT * FROM \"case\" ORDER BY create_time DESC LIMIT 50 OFFSET 0"),
     ("daily_prod_paged", "SELECT * FROM daily_production_record ORDER BY production_date DESC LIMIT 50 OFFSET 0"),

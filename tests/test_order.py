@@ -5,12 +5,11 @@
 - 订单列表查询（分页、多维度筛选、工厂隔离）
 - 订单详情查询（含关联数据）
 - 订单创建（业务规则校验、库存日志、事件发布）
-- 订单编辑（超管直接修改、普通用户提交审批）
-- 订单删除（抵扣回滚、关联清理、审批流程）
+- 订单编辑（权限门控下直改）
+- 订单删除（抵扣回滚、关联清理）
 - 订单抵扣管理（增加抵扣 FIFO、减少抵扣、状态计算）
-- 审批取消
 - 湖北订单合并列表
-- 边界条件（负数数量、不存在的产品、锁定冲突、审批状态检查）
+- 边界条件（负数数量、不存在的产品）
 """
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,11 +18,9 @@ from uuid import uuid4
 import pytest
 
 from fastapi_app.services.order_crud import (
-    cancel_approval,
     create_order,
     delete_order,
     get_beile_orders_with_stockins,
-    get_my_approvals,
     get_order_by_id,
     get_orders,
     update_deduct_quantity,
@@ -379,10 +376,8 @@ class TestUpdateOrder:
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.order.commands.cache_mgr')
-    @patch('fastapi_app.services.order.commands._check_order_lock')
-    async def test_update_order_super_admin_direct(self, mock_check_lock, mock_cache,
-                                                     mock_async_db):
-        """超管直接编辑订单（无需审批）"""
+    async def test_update_order_super_admin_direct(self, mock_cache, mock_async_db):
+        """超管直接编辑订单"""
         order = make_mock_order()
         data_result = MagicMock()
         data_result.scalar_one_or_none.return_value = order
@@ -394,8 +389,7 @@ class TestUpdateOrder:
         super_user.is_super = True
 
         with patch('fastapi_app.services.order.commands._update_order_directly',
-                   return_value={'success': True, 'message': '订单编辑成功！',
-                                'requires_approval': False}):
+                   return_value={'success': True, 'message': '订单编辑成功！'}):
             result = await update_order(
                 mock_async_db, order_id=1, quantity=30,
                 customer='新客户', note='新备注',
@@ -406,11 +400,10 @@ class TestUpdateOrder:
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.order.commands.cache_mgr')
-    @patch('fastapi_app.services.order.commands._check_order_lock')
-    @patch('fastapi_app.services.order.commands._submit_edit_approval')
-    async def test_update_order_normal_user_approval(self, mock_submit, mock_check_lock,
-                                                       mock_cache, mock_async_db):
-        """普通用户编辑订单 - 走审批流程"""
+    @patch('fastapi_app.services.order.commands._update_order_directly')
+    async def test_update_order_normal_user_direct(self, mock_direct, mock_cache,
+                                                   mock_async_db):
+        """普通用户编辑订单 - 直改（审批流已下线，权限门控在端点层）"""
         order = make_mock_order()
         data_result = MagicMock()
         data_result.scalar_one_or_none.return_value = order
@@ -421,11 +414,7 @@ class TestUpdateOrder:
         normal_user.username = 'user1'
         normal_user.is_super = False
 
-        mock_submit.return_value = {
-            'success': True,
-            'message': '已提交编辑审批请求',
-            'requires_approval': True
-        }
+        mock_direct.return_value = {'success': True, 'message': '订单编辑成功！'}
 
         result = await update_order(
             mock_async_db, order_id=1, quantity=20,
@@ -433,7 +422,8 @@ class TestUpdateOrder:
             current_user=normal_user
         )
 
-        assert result['requires_approval'] is True
+        mock_direct.assert_awaited_once()
+        assert result['success'] is True
 
 
 class TestDeleteOrder:
@@ -454,11 +444,10 @@ class TestDeleteOrder:
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.order.commands.cache_mgr')
-    @patch('fastapi_app.services.order.commands._check_order_lock')
-    @patch('fastapi_app.services.order.commands._submit_delete_approval')
-    async def test_delete_order_normal_user(self, mock_submit, mock_check_lock,
-                                              mock_cache, mock_async_db):
-        """普通用户删除订单 - 走审批"""
+    @patch('fastapi_app.services.order.commands._delete_order_directly')
+    async def test_delete_order_normal_user_direct(self, mock_direct, mock_cache,
+                                              mock_async_db):
+        """普通用户删除订单 - 直删（审批流已下线，权限门控在端点层）"""
         order = make_mock_order()
         # 2026-10-19 OCR 第三轮 H2 对齐 M4 重构后的调用序列——
         # _prelock_order_products：① select(Order.product_id) 无锁预读；
@@ -483,24 +472,19 @@ class TestDeleteOrder:
         normal_user.id = 2
         normal_user.is_super = False
 
-        mock_submit.return_value = {
-            'success': True,
-            'message': '已提交删除审批请求',
-            'requires_approval': True
-        }
+        mock_direct.return_value = {'success': True, 'message': '删除成功'}
 
         result = await delete_order(mock_async_db, 1, normal_user)
 
-        assert result['requires_approval'] is True
+        mock_direct.assert_awaited_once()
+        assert result['success'] is True
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.order.commands.cache_mgr')
-    @patch('fastapi_app.services.order.commands._check_order_lock')
     @patch('fastapi_app.services.order.commands._delete_order_directly')
     @patch('fastapi_app.services.order._common._safe_publish_event')
     async def test_delete_order_super_admin(self, mock_publish, mock_direct,
-                                              mock_check_lock, mock_cache,
-                                              mock_async_db):
+                                              mock_cache, mock_async_db):
         """超管直接删除订单"""
         order = make_mock_order()
         # 2026-10-19 OCR 第三轮 H2：取数顺序同 test_delete_order_normal_user
@@ -523,15 +507,14 @@ class TestDeleteOrder:
         super_user.id = 1
         super_user.is_super = True
 
-        mock_direct.return_value = {'success': True, 'message': '删除成功', 'requires_approval': False}
+        mock_direct.return_value = {'success': True, 'message': '删除成功'}
 
         result = await delete_order(mock_async_db, 1, super_user)
 
         assert result['success'] is True
 
     @pytest.mark.asyncio
-    @patch('fastapi_app.services.order.commands._check_order_lock')
-    async def test_delete_order_with_linked_return_blocked(self, mock_check_lock, mock_async_db):
+    async def test_delete_order_with_linked_return_blocked(self, mock_async_db):
         """有退货记录的订单不可删除：前置拒绝并说明原因（迁移 072 RESTRICT 的应用层前置）
 
         回归 2026-10-08：鲨鱼订单 68927 因 stock_return.stockout_id RESTRICT 外键，
@@ -569,38 +552,6 @@ class TestDeleteOrder:
         with pytest.raises(ValueError, match='退货记录'):
             await delete_order(mock_async_db, 1, super_user)
 
-
-class TestCancelApproval:
-    """审批取消"""
-
-    @pytest.mark.asyncio
-    async def test_cancel_approval_not_found(self, mock_async_db, mock_user):
-        """取消不存在的审批"""
-        # cancel_approval 自 2026-10-02 起用 select(...).with_for_update() 取审批行（原 db.get），
-        # 与 approve/reject 同锁串行；mock 按新调用形状打桩。
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = None
-        mock_async_db.execute = AsyncMock(return_value=result)
-
-        with pytest.raises(ValueError, match='审批请求不存在'):
-            await cancel_approval(mock_async_db, 999, mock_user)
-
-    @pytest.mark.asyncio
-    @patch('fastapi_app.services.order.approval_flow.can_transition')
-    async def test_cancel_approval_invalid_status(self, mock_can_transition,
-                                                    mock_async_db, mock_user):
-        """取消已审批的记录"""
-        approval = MagicMock()
-        approval.id = 1
-        approval.status = 'approved'
-        approval.requester_id = 1
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = approval
-        mock_async_db.execute = AsyncMock(return_value=result)
-        mock_can_transition.return_value = False
-
-        with pytest.raises(ValueError, match='无法取消'):
-            await cancel_approval(mock_async_db, 1, mock_user)
 
 
 class TestGetBeileOrders:
@@ -849,8 +800,7 @@ class TestUpdateDeductQuantity:
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.order.deduction.cache_mgr')
-    @patch('fastapi_app.services.order.deduction._check_order_lock')
-    async def test_update_deduct_negative(self, mock_check_lock, mock_cache,
+    async def test_update_deduct_negative(self, mock_cache,
                                             mock_async_db, mock_user):
         """抵扣数量为负"""
         order = make_mock_order()
@@ -863,9 +813,8 @@ class TestUpdateDeductQuantity:
 
     @pytest.mark.asyncio
     @patch('fastapi_app.services.order.deduction.cache_mgr')
-    @patch('fastapi_app.services.order.deduction._check_order_lock')
     @patch('fastapi_app.services.order.deduction._batch_deduct_quantities')
-    async def test_update_deduct_no_change(self, mock_batch, mock_check_lock,
+    async def test_update_deduct_no_change(self, mock_batch,
                                              mock_cache, mock_async_db, mock_user):
         """抵扣数量无变化"""
         order = make_mock_order()
@@ -880,31 +829,3 @@ class TestUpdateDeductQuantity:
         assert '未变化' in result['message']
 
 
-class TestGetMyApprovals:
-    """我的审批列表"""
-
-    @pytest.mark.asyncio
-    async def test_get_my_approvals_empty(self, mock_async_db, mock_user):
-        """空审批列表"""
-        data_result = MagicMock()
-        data_result.scalars.return_value.unique.return_value.all.return_value = []
-        mock_async_db.execute = AsyncMock(return_value=data_result)
-
-        result = await get_my_approvals(mock_async_db, mock_user)
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_my_approvals_with_data(self, mock_async_db, mock_user):
-        """有审批数据"""
-        approval = MagicMock()
-        approval.to_dict.return_value = {'id': 1, 'status': 'pending'}
-
-        data_result = MagicMock()
-        data_result.scalars.return_value.unique.return_value.all.return_value = [approval]
-        mock_async_db.execute = AsyncMock(return_value=data_result)
-
-        result = await get_my_approvals(mock_async_db, mock_user)
-
-        assert len(result) == 1
-        assert result[0]['status'] == 'pending'

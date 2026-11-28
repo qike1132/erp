@@ -1,7 +1,7 @@
 """非管理员的写端点必须在真实 ASGI 请求下被 403 拒绝（审计 P2 3.1）。
 
 现状（2026-10-17 审计）：203 个根测试文件里只有 5 处断言了**业务性** 403，且集中在
-stock_return / approval / outsource 等少数端点。根套件的 `auth_headers` 夹具只用 admin
+stock_return / outsource 等少数端点。根套件的 `auth_headers` 夹具只用 admin
 （`is_super=True`）→ 绝大多数用例跑在超管身份下，**权限依赖是否正确根本不参与判定**：
 某端点漏写 `require_permission`、或把 `_manage` 写成 `_view`，根套件不会变红，而线上
 表现是「普通员工能删单 / 能改采购单」。

@@ -40,7 +40,6 @@ tests = [
     ("order_paged_50", "SELECT * FROM \"order\" ORDER BY order_date DESC LIMIT 50 OFFSET 0"),
     ("stock_in_paged_50", "SELECT * FROM stock_in ORDER BY stockin_date DESC LIMIT 50 OFFSET 0"),
     ("stock_out_paged_50", "SELECT * FROM stock_out ORDER BY stockout_date DESC LIMIT 50 OFFSET 0"),
-    ("approval_paged_50", "SELECT * FROM approval_request ORDER BY request_time DESC LIMIT 50 OFFSET 0"),
     ("purchase_order_paged_50", "SELECT * FROM purchase_order ORDER BY create_time DESC LIMIT 50 OFFSET 0"),
     ("purchase_plan_paged_50", "SELECT * FROM purchase_plans ORDER BY create_time DESC LIMIT 50 OFFSET 0"),
     ("daily_prod_paged_50", "SELECT * FROM daily_production_record ORDER BY production_date DESC LIMIT 50 OFFSET 0"),
@@ -121,20 +120,18 @@ with open(outpath, "w", encoding="utf-8") as f:
     f.write("6. 库存接口: 全量返回 → 服务端分页+国家过滤 (P0)\n")
     f.write("7. 库存日志: 全量返回 → 分页50条/页 (P0)\n")
     f.write("8. available-stockins: 无limit → 限制100条 (P0)\n")
-    f.write("9. 审批列表: 全量返回 → 服务端分页+搜索 (P1)\n")
-    f.write("10. 用户列表: 全量返回 → 服务端分页 (P1)\n")
-    f.write("11. 客户订单: 全量加载客户 → active-names轻量接口 (P1)\n")
-    f.write("12. 订单列表: 无page参数 → 分页20条/页 (P1)\n")
+    f.write("9. 用户列表: 全量返回 → 服务端分页 (P1)\n")
+    f.write("10. 客户订单: 全量加载客户 → active-names轻量接口 (P1)\n")
+    f.write("11. 订单列表: 无page参数 → 分页20条/页 (P1)\n")
     f.write("13. 入库列表: 无page参数 → 分页20条/页 (P1)\n")
 
     f.write("\n【前端优化】\n")
     f.write("1. InventoryTab: 全量渲染 → 服务端分页+国家过滤+_custom_details预处理 (P0)\n")
     f.write("2. CustomerView: 客户端分页+过滤 → 服务端分页+搜索防抖300ms (P0)\n")
     f.write("3. SupplierView: 无分页 → 服务端分页+搜索防抖300ms (P0)\n")
-    f.write("4. ApprovalView: 全量渲染+客户端过滤 → 服务端分页+搜索防抖300ms (P1)\n")
-    f.write("5. UserView: 全量渲染 → 服务端分页 (P1)\n")
-    f.write("6. CustomerOrderView: 全量客户加载 → active-names轻量接口 (P1)\n")
-    f.write("7. 所有大数据useQuery: 添加 gcTime: 60_000 防止缓存长期驻留 (P1)\n")
+    f.write("4. UserView: 全量渲染 → 服务端分页 (P1)\n")
+    f.write("5. CustomerOrderView: 全量客户加载 → active-names轻量接口 (P1)\n")
+    f.write("6. 所有大数据useQuery: 添加 gcTime: 60_000 防止缓存长期驻留 (P1)\n")
 
     f.write("\n【安全修复】\n")
     f.write("1. 供应商搜索: 添加 escape_like() 防止 LIKE 通配符注入 (P0)\n")
@@ -153,7 +150,6 @@ with open(outpath, "w", encoding="utf-8") as f:
     f.write("| 同步库存查询        | 171,238ms   | <2,000ms  | 85x+   |\n")
     f.write("| 客户列表(50条)      | 全量20,000+ | ~8ms      | 数千倍 |\n")
     f.write("| 供应商列表(50条)    | 全量20,000+ | ~8ms      | 数千倍 |\n")
-    f.write("| 审批列表(50条)      | 全量20,000+ | ~8ms      | 数千倍 |\n")
     f.write("| 用户列表(50条)      | 全量20,000+ | ~8ms      | 数千倍 |\n")
     f.write("| 前端DOM节点(库存)   | 20,000+ tr  | 50 tr     | 400x   |\n")
     f.write("| customOrderDetails  | 40,000次    | 1次预处理 | 40kx   |\n")

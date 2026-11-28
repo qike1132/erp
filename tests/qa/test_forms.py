@@ -168,13 +168,6 @@ class TestUserForm:
         assert_list_shape(resp, '用户列表')
 
 
-class TestApprovalForm:
-    @pytest.mark.asyncio
-    async def test_approval_list(self, client, auth_headers):
-        resp = await client.get("/api/v1/approvals/list", headers=auth_headers)
-        assert_list_shape(resp, '审批列表')
-
-
 class TestStockForm:
     @pytest.mark.asyncio
     async def test_stock_in_list(self, client, auth_headers):

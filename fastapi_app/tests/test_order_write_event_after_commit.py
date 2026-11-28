@@ -15,8 +15,7 @@
 于是表现为「删除/改数量后关联页面延迟约 30 秒才更新」。
 
 本文件锁死不变量：**实时事件发布发生在 commit 之后**。
-对照的正确写法见 `api/v1/endpoints/approval.py` 与 `services/auxiliary_service.py`
-（都是先提交、后发事件）。
+对照的正确写法见 `services/auxiliary_service.py`（先提交、后发事件）。
 """
 from unittest.mock import AsyncMock, patch
 
