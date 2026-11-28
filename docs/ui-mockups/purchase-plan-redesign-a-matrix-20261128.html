@@ -194,7 +194,8 @@ tbody tr:hover td.sel-col{background:var(--accent-100) !important}
     </div>
     <div class="table-scroll">
       <table aria-label="客户×SKU×日 透视矩阵">
-        <thead id="thead"></thead>
+        <!-- 静态占位表头（S5256）：运行时 renderMatrix() 会整体重写 thead -->
+        <thead id="thead"><tr><th>客户</th><th>产品 / 条码</th><th>1</th><th>31</th><th>月合计</th></tr></thead>
         <tbody id="tbody"></tbody>
         <tfoot id="tfoot"></tfoot>
       </table>
