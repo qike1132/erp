@@ -2,6 +2,11 @@
 订单序列化器测试
 
 验证 OrderSerializer 的正确性和一致性。
+
+审批系统下线（迁移 pg_standalone_123）删除了 OrderSerializer 的 is_locked /
+locked_by_name 输出与 SerializerConfig.include_locked_by 配置——本文件随
+2026-11-28 推送前评审（F-A1）补改，摘除全部锁字段断言（原文件漏在
+6c7f8e10 测试重写批次外，按新序列化器实测 10 failed）。
 """
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
@@ -29,14 +34,7 @@ class TestOrderSerializer:
         return product
 
     @pytest.fixture
-    def mock_user(self):
-        """Mock 用户对象"""
-        user = MagicMock()
-        user.username = "admin"
-        return user
-
-    @pytest.fixture
-    def mock_order(self, mock_product, mock_user):
+    def mock_order(self, mock_product):
         """Mock 订单对象"""
         order = MagicMock()
         order.id = 1
@@ -51,8 +49,6 @@ class TestOrderSerializer:
         order.quantity = 50
         order.status = "待备货"
         order.note = "测试备注"
-        order.is_locked = False
-        order.locked_by = mock_user
         order.batch_no = "BATCH-001"
         order.batch_completed_at = datetime(2026, 1, 15, 14, 0)
         return order
@@ -70,8 +66,6 @@ class TestOrderSerializer:
         order.quantity = 10
         order.status = None
         order.note = None
-        order.is_locked = True
-        order.locked_by = None
         order.batch_no = None
         order.batch_completed_at = None
         return order
@@ -87,7 +81,6 @@ class TestOrderSerializer:
         assert result["quantity"] == 50
         assert result["status"] == "待备货"
         assert result["note"] == "测试备注"
-        assert result["is_locked"] is False
         assert result["deduct_quantity"] == 0
 
     def test_list_config_with_deduct_quantity(self, mock_order):
@@ -107,11 +100,6 @@ class TestOrderSerializer:
         assert result["product"]["barcode"] == "6901234567890"
         assert result["product"]["image"] == "test.jpg"
 
-    def test_list_config_locked_by(self, mock_order):
-        """测试列表配置锁定人信息"""
-        result = OrderSerializer.serialize(mock_order, OrderSerializer.LIST_CONFIG)
-        assert result["locked_by_name"] == "admin"
-
     def test_batch_config(self, mock_order):
         """测试批次配置序列化"""
         result = OrderSerializer.serialize(mock_order, OrderSerializer.BATCH_CONFIG)
@@ -126,7 +114,6 @@ class TestOrderSerializer:
         assert result["status"] == "待备货"
         assert result["batch_no"] == "BATCH-001"
         assert result["batch_completed_at"] == "2026-01-15T14:00:00"
-        assert result["is_locked"] is False
 
     def test_detail_config(self, mock_order):
         """测试详情配置序列化"""
@@ -137,7 +124,6 @@ class TestOrderSerializer:
         assert result["id"] == 1
         assert result["deduct_quantity"] == 30
         assert result["product"] is not None
-        assert result["locked_by_name"] == "admin"
         assert result["batch_no"] == "BATCH-001"
         assert result["batch_completed_at"] == "2026-01-15T14:00:00"
 
@@ -149,7 +135,6 @@ class TestOrderSerializer:
 
         assert result["order_date"] == ""
         assert result["product"] is None
-        assert result["locked_by_name"] is None
         assert result["note"] == ""
 
     def test_custom_config(self, mock_order):
@@ -157,7 +142,6 @@ class TestOrderSerializer:
         config = SerializerConfig(
             fields=[OrderField.ID, OrderField.ORDER_NO, OrderField.CUSTOMER],
             include_product=False,
-            include_locked_by=False,
         )
         result = OrderSerializer.serialize(mock_order, config)
 
@@ -165,7 +149,6 @@ class TestOrderSerializer:
         assert "order_no" in result
         assert "customer" in result
         assert "product" not in result
-        assert "locked_by_name" not in result
 
     def test_none_product(self, mock_order_minimal):
         """测试无产品时的序列化"""
@@ -175,14 +158,6 @@ class TestOrderSerializer:
 
         assert result["product_name"] is None
         assert "product" not in result
-
-    def test_none_locked_by(self, mock_order_minimal):
-        """测试无锁定人时的序列化"""
-        result = OrderSerializer.serialize(
-            mock_order_minimal, OrderSerializer.LIST_CONFIG
-        )
-
-        assert result["locked_by_name"] is None
 
     def test_date_formatting(self, mock_order):
         """测试日期格式化"""
@@ -226,7 +201,6 @@ class TestOrderSerializer:
             OrderField.QUANTITY,
             OrderField.STATUS,
             OrderField.NOTE,
-            OrderField.IS_LOCKED,
             OrderField.BATCH_NO,
             OrderField.BATCH_COMPLETED_AT,
         ]
@@ -260,17 +234,15 @@ class TestSerializerConfig:
         config = SerializerConfig(
             fields=[OrderField.ID, OrderField.ORDER_NO],
             include_product=True,
-            include_locked_by=True,
         )
         assert len(config.fields) == 2
         assert config.include_product is True
-        assert config.include_locked_by is True
 
     def test_config_defaults(self):
         """测试配置默认值"""
         config = SerializerConfig(fields=[OrderField.ID])
         assert config.include_product is False
-        assert config.include_locked_by is False
+        assert config.include_items is False
 
     def test_frozen_config(self):
         """测试配置冻结"""

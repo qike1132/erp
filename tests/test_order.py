@@ -82,14 +82,12 @@ def make_mock_order(id_val=1, order_no='ORD-001', customer='测试客户',
     order.status = status
     order.order_type = order_type
     order.is_deleted = False
-    order.is_locked = False
     order.note = ''
     order.country = None
     order.product_id = 1
     order.product = MagicMock()
     order.product.name = '测试产品'
     order.product.barcode = 'TEST001'
-    order.locked_by = None
     order.items = []
     order.order_date = datetime.now(UTC)
     return order

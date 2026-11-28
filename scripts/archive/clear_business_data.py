@@ -77,9 +77,7 @@ BUSINESS_TABLES = [
     'modification_log',
     'saved_query',
 
-    # 审批记录
-    'approval_log',
-    'approval_request',
+    # 审批记录两表已由迁移 pg_standalone_123 下线（2026-11-28），不再清理
 ]
 
 # 保留的系统表（不清空）

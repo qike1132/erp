@@ -117,8 +117,6 @@ const props = defineProps<{
   filtered: Row[]
   skuDateIndex: Record<string, SkuDateItem[]>
   sel: string
-  /** 当前工厂筛选（具体工厂名或 'all'） */
-  factory: string
   /** 当月客户汇总（已按工厂收敛），供 chips 与配色排序 */
   customers: CustSumItem[]
   riskItems: RiskItem[]

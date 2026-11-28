@@ -835,10 +835,14 @@ export function useSummaryModal() {
    * 并发调用者共享同一个「排空循环」句柄，故本轮成败对全部参与者一致。
    */
   async function applyLossRateAndSave(rate: number) {
+    // 无目标采购单时**零副作用**早退（2026-11-28 推送前评审 F-B1）：close()/快照
+    // 作废后残留的 flush（卸载兜底）会走到这里——若先 applyLossRate 置
+    // lossRateTouched/lossRate，会把 close() 刚清掉的陈旧率复活，用户随后对
+    // 无关订单点完成会把上个会话的率随 spare_rate 落库。故先于一切状态写入返回。
+    if (orderIds.value.length === 0) return
     // 1) 先更新本地展示所依赖的率状态（数量为派生值，无需改写数据）
     applyLossRate(rate)
     // 2) 无目标采购单时不打网络，也不改变保存状态
-    if (orderIds.value.length === 0) return
 
     // 3) 已有排空循环在跑：合并为最新待发值，复用同一句柄等待本轮结束
     if (drainPromise) {
@@ -936,6 +940,10 @@ export function useSummaryModal() {
    * 成功后同步该行的「已落库基线」（供取消编辑时恢复）。
    */
   async function applyFabricLossRateAndSave(gi: number, si: number, fi: number, rate: number) {
+    // F-B1 同口径：close()/快照作废后残留的 flush 静默返回——既不更新行展示值，
+    // 也不弹「物料不在采购明细中」（close 清态后该提示只会误导）。正常路径
+    // orderIds 非空、明细兜底 toast 保持原语义。
+    if (orderIds.value.length === 0) return
     applyFabricLossRate(gi, si, fi, rate)
     const targetItemIds = fabricItemIds.value?.[gi]?.[si]?.[fi] || []
     if (targetItemIds.length === 0) {

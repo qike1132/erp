@@ -61,7 +61,6 @@ for name, sql in [
     ('stock_out', 'DELETE FROM stock_out WHERE customer=:c'),
     ('stock_in', 'DELETE FROM stock_in WHERE customer=:c'),
     ('order_item', f'DELETE FROM order_item WHERE order_id IN {oset}'),
-    ('approval_request', f'DELETE FROM approval_request WHERE order_id IN {oset}'),
     ('order', 'DELETE FROM "order" WHERE customer=:c'),
     ('product_customer', f'DELETE FROM product_customer WHERE product_id IN {pset}'),
     ('product', f'DELETE FROM product WHERE id IN {pset}'),

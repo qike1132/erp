@@ -101,7 +101,6 @@ function mountBoard(over: Record<string, unknown> = {}): VueWrapper {
       filtered: ROWS,
       skuDateIndex: SKU_INDEX,
       sel: '',
-      factory: '东莞',
       customers: CUSTOMERS,
       riskItems: RISKS,
       custFilter: '',

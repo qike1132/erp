@@ -36,7 +36,6 @@
         v-model:sku-page="skuPage"
         :y="y"
         :m="m"
-        :factory="factory"
         :is-loading="isLoading"
         :is-error="isError"
         :is-fetching="isFetching"
@@ -243,7 +242,9 @@ function onImported(month?: string) {
 const { runExport } = useExport({ start: false });
 
 function exportCSV() {
-  const rl = filtered.value;
+  // 行集口径与同屏「导出SKU」一致：防抖搜索（filtered）+ 客户 chips（custFilter）。
+  // 评审 F-B5：合并单视图后两个导出必须吃同一套筛选，否则「导出SKU 有数、日汇总导出为空」。
+  const rl = filtered.value.filter(r => !custFilter.value || r.customerNames.includes(custFilter.value));
   if (!rl.length) { showToast('无数据', 'error'); return; }
   const h = buildCsvRow(['日期', '星期', '客户数', '计划条目数', '总量(件)', '客户']);
   const ls = [h];

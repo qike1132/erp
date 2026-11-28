@@ -864,6 +864,16 @@ async def import_orders_from_data(
         # 「是」一度折算 1 件、'3.0' 一度静默丢弃 —— 同一列多种语义）。
         deduct_on, deduct_value = _parse_deduct_flag(deduct_flag, qty)
 
+        # A-M1 残留收口（2026-11-28 推送前评审 F-A3）：抵扣行在建单前先取产品行锁。
+        # 契约见 order/import_creation.py：综合导入原先「先 INSERT Order（对 Product 持
+        # FK KEY SHARE）→ 再 process_order_deduction 升级 FOR UPDATE」，与单 Sheet /
+        # create_order 的「先 FOR UPDATE 再建单」在同一产品行交错即成 40P01 死锁环。
+        # 仅抵扣行需要升级锁；非抵扣行只持 KEY SHARE、从不升级，不构成环。
+        # get_product_for_update 带 populate_existing，重绑 product 让下游 SKU 快照
+        # 读到的是已加锁行（与 batch_import_service 单 Sheet 路径同构）。
+        if deduct_on:
+            product = await deps.get_product_for_update(db, product_id)
+
         # 建单收敛到唯一服务（审计 O-30 / D-H2）：Order + OrderItem + InventoryLog +
         # 外发工序一并写入。此前这里内联建单且漏 OrderItem → 湖北页看不到导入订单。
         # 订单**不影响物理库存** —— 与另外三条下单路径一致：

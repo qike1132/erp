@@ -501,7 +501,8 @@ describe('C. 自动保存可见反馈（lossRateSaveState）', () => {
 
     expect(purchaseApi.saveFactoryEdits).not.toHaveBeenCalled()
     expect(m.lossRateSaveState).toBe('idle')
-    expect(m.lossRateTouched).toBe(true)
+    // F-B1（2026-11-28 评审）：空目标 = 零副作用（不置 touched），见 useSummaryModal.applyLossRateAndSave
+    expect(m.lossRateTouched).toBe(false)
   })
 
   it('C5 openSummary 后状态复位为 idle', async () => {

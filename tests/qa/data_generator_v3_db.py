@@ -222,7 +222,6 @@ def insert_orders(session, count, product_ids, user_ids):
                 note=fake.sentence()[:200] if random.random() < 0.5 else None,
                 order_type=otype,
                 country=random.choice(countries) if otype == "custom" else None,
-                is_locked=False,
                 is_deleted=False,
             ))
         session.add_all(objs)
