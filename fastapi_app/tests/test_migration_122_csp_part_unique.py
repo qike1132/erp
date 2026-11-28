@@ -50,9 +50,12 @@ def test_migration_is_single_head_revising_121():
     cfg.set_main_option('script_location', str(_REPO / 'migrations'))
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ['pg_standalone_122_csp_part_unique_index'], (
+    # 2026-11-28 迁移 pg_standalone_123（摘审批系统）上线后 head 前进到 123；
+    # 122 回归为中间节点。断言 head 唯一且是最新迁移，并锁 121→122→123 的链。
+    assert len(script.get_heads()) == 1, (
         '迁移图出现多 head —— alembic upgrade head 会直接失败'
     )
+    assert script.get_heads()[0] == 'pg_standalone_123_remove_approval_system'
     rev = script.get_revision('pg_standalone_122_csp_part_unique_index')
     assert rev.down_revision == 'pg_standalone_121_seed_outsource_preset_manage'
 

@@ -148,7 +148,7 @@ class TestEventConstants:
     def test_stock_event_constants(self):
         assert StockEvent.STOCK_CHANGED == "stock_changed"
         assert StockEvent.SHIPMENT_PLAN_UPLOADED == "shipment_plan_uploaded"
-        assert StockEvent.ORDER_LOCKED == "order_locked"
+        # ORDER_LOCKED 已随审批系统下线（迁移 pg_standalone_123）从 StockEvent 摘除
 
     def test_display_messages_keys(self):
         assert "stock_changed" in EVENT_DISPLAY_MESSAGES

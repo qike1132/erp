@@ -7,10 +7,13 @@
  * - 挂起值保存在本 composable，失焦（flushLossRate / flushFabricLossRate）、
  *   返回按钮（flushAllPendingRateEdits → emit close 之前）、卸载兜底都能立即提交；
  * - emit 回调由调用方注入（组件的 emits 契约留在组件层）。
+ * - 损耗率落库的 HTTP 发送封装（2026-11-28 从 useSummaryModal 拆出：该文件撞
+ *   TS 模块体积棘轮快照，发送函数与本文件的「提交链路」语义同源）。
  *
  * 防抖定时器**必须留在整页外壳**（组件随页签 v-if 卸载，定时器放子组件会在
  * 切页签时丢输入——见 SummaryPanel.vue 2026-10-31 注）。
  */
+import { purchaseApi } from '@/api'
 
 const RATE_DEBOUNCE_MS = 300
 
@@ -19,6 +22,58 @@ export interface SummaryRateFlushOptions {
   onUnified: (rate: number) => void
   /** 布料行率到期/flush 时提交（落库坐标 gi/si/fi） */
   onFabric: (gi: number, si: number, fi: number, rate: number) => void
+}
+
+export interface SaveFactoryEditsResponse {
+  success: boolean
+  message?: string
+  /** 本次实际递增过 items_version 的采购单 → 新版本（用户编辑也递增版本） */
+  items_versions?: Record<string, number>
+}
+
+/** 统一损耗率落库：以空 edits 覆盖写全部目标单的 spare_rate。 */
+export async function sendLossRateToOrders(
+  rate: number, targetOrderIds: number[],
+): Promise<SaveFactoryEditsResponse> {
+  const res = await purchaseApi.saveFactoryEdits(
+    [],
+    rate,
+    targetOrderIds,
+  ) as unknown as SaveFactoryEditsResponse
+  if (!res.success) {
+    throw new Error(res.message || '损耗率保存失败')
+  }
+  return res
+}
+
+/** 统一损耗率落库（目标单取自当前汇总上下文）。 */
+export async function sendLossRate(
+  rate: number, targetOrderIds: number[],
+): Promise<SaveFactoryEditsResponse> {
+  return sendLossRateToOrders(rate, targetOrderIds)
+}
+
+/**
+ * 单条布料行损耗率落库。
+ * 版本快照必须随行级损耗率一起带上：BOM 同步会「删旧行 + 插新行」换掉明细 id，
+ * 只带旧 id 时后端逐条跳过、仍返回 200，用户以为存上了其实零写入。
+ */
+export async function sendFabricLossRate(
+  itemIds: number[], rate: number,
+  versions: Record<string, number>, targetOrderIds: number[],
+): Promise<SaveFactoryEditsResponse> {
+  const versionArgs: [Record<string, number>?] =
+    Object.keys(versions).length > 0 ? [versions] : []
+  const res = await purchaseApi.saveFactoryEdits(
+    [{ item_ids: itemIds, loss_rate: rate }],
+    undefined,
+    targetOrderIds,
+    ...versionArgs,
+  ) as unknown as SaveFactoryEditsResponse
+  if (!res.success) {
+    throw new Error(res.message || '布料损耗率保存失败')
+  }
+  return res
 }
 
 export function useSummaryRateFlush({ onUnified, onFabric }: SummaryRateFlushOptions) {

@@ -3,6 +3,7 @@ import { purchaseApi } from '@/api'
 import { getErrorCode, getErrorMessage, getErrorStatus } from '@/types/errors'
 import { toast } from '@/composables/useToast'
 import { escapeHtml, printHtml } from '@/utils/print'
+import { sendLossRate, sendFabricLossRate } from './useSummaryRateFlush'
 import { summaryMaterialKey, ceilMagnifiedByLossRate, buildPerSkuRows, buildRowDisplayQuantities, allocateOrderDisplayQuantities, parseQtyInput, computeDiffSnapshot } from './perSkuRows'
 import type { QuantityDiff } from './perSkuRows'
 
@@ -728,24 +729,8 @@ export function useSummaryModal() {
    *
    * `edits` 恒空的理由：数量落库只走编辑态「保存修改」，
    * 自动落库只负责把用户输入的损耗率持久化到本次汇总涉及的采购单。
+   * HTTP 发送封装已随提交链路拆到 useSummaryRateFlush（2026-11-28，TS 体积棘轮）。
    */
-  async function sendLossRateToOrders(
-    rate: number, targetOrderIds: number[],
-  ): Promise<SaveFactoryEditsResponse> {
-    const res = await purchaseApi.saveFactoryEdits(
-      [],
-      rate,
-      targetOrderIds,
-    ) as unknown as SaveFactoryEditsResponse
-    if (!res.success) {
-      throw new Error(res.message || '损耗率保存失败')
-    }
-    return res
-  }
-
-  async function sendLossRate(rate: number): Promise<SaveFactoryEditsResponse> {
-    return sendLossRateToOrders(rate, orderIds.value)
-  }
 
   /**
    * 把「刚成功落库的损耗率」同步为新的已落库基线。
@@ -863,7 +848,7 @@ export function useSummaryModal() {
           const sentEpoch = lossRateEpoch
           const versionsAtSend = new Map(fabricRateVersions)
           const busyAtSend = currentBusyFabricKeys()
-          const res = await sendLossRate(sent)
+          const res = await sendLossRate(sent, orderIds.value)
           // 本次发送该率已成功落库 → 同步「已落库」基线（供取消编辑时恢复），
           // 并清掉「各单不一致」标记（本次已把所有涉及单统一为该值）。
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得回写（取消编辑不增代数，仍正常回写）
@@ -901,26 +886,8 @@ export function useSummaryModal() {
   /**
    * 单次布料损耗率落库请求：只提交该布料行对应明细的 loss_rate。
    * 数量落库仍只走编辑态「保存修改」，此处不携带 quantity。
+   * HTTP 发送封装已随提交链路拆到 useSummaryRateFlush（2026-11-28，TS 体积棘轮）。
    */
-  async function sendFabricLossRate(
-    itemIds: number[], rate: number,
-  ): Promise<SaveFactoryEditsResponse> {
-    // 版本快照必须随行级损耗率一起带上：BOM 同步会「删旧行 + 插新行」换掉明细 id，
-    // 只带旧 id 时后端逐条跳过、仍返回 200，用户以为存上了其实零写入。
-    const versions = { ...itemsVersions.value }
-    const versionArgs: [Record<string, number>?] =
-      Object.keys(versions).length > 0 ? [versions] : []
-    const res = await purchaseApi.saveFactoryEdits(
-      [{ item_ids: itemIds, loss_rate: rate }],
-      undefined,
-      orderIds.value,
-      ...versionArgs,
-    ) as unknown as SaveFactoryEditsResponse
-    if (!res.success) {
-      throw new Error(res.message || '布料损耗率保存失败')
-    }
-    return res
-  }
 
   /**
    * 单独修改某个布料行的损耗率：仅更新该行展示值（不触碰全局/其它行）。
@@ -971,7 +938,7 @@ export function useSummaryModal() {
           lossRateSaveState.value = 'saving'
           const sent = next
           const sentEpoch = lossRateEpoch
-          const res = await sendFabricLossRate(ids, sent)
+          const res = await sendFabricLossRate(ids, sent, { ...itemsVersions.value }, orderIds.value)
           // 弹窗已关闭：这批回写属于被丢弃的批次，不得复活已清空的基线
           if (sentEpoch === lossRateEpoch) {
             // 逐行损耗率编辑同样递增 items_version（spec 同步算法-7），版本快照前移
