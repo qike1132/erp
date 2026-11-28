@@ -328,7 +328,6 @@ async def _serialize_batch_stockins(db: AsyncSession, page_stockin_ids: list[int
                 'computed_status': None,
                 'batch_no': s.batch_no,
                 'batch_completed_at': format_local_time(s.batch_completed_at, '%Y-%m-%d %H:%M', none_value=None),
-                'is_locked': None,
                 'record_type': 'stockin',
             }
     return serialized_stockins

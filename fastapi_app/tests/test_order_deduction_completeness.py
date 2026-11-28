@@ -279,7 +279,6 @@ def _stubbed_side_effects():
         return stub.numbers[-1]
 
     with (
-        patch('fastapi_app.services.order.deduction._check_order_lock', new=AsyncMock()),
         patch('fastapi_app.services.order.deduction.cache_mgr', new=cache),
         patch('fastapi_app.services.order.deduction._safe_invalidate_purchase_cache', new=AsyncMock()),
         patch('fastapi_app.services.numbering.generate_stockout_number', new=_next_number),

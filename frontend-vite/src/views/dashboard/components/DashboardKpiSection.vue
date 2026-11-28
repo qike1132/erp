@@ -1,6 +1,6 @@
 <template>
   <!-- KPI 指标卡片区（自 DashboardView.vue 原样搬移） -->
-  <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
     <KpiCard
       v-for="(card, index) in kpiCards"
       :key="card.key"

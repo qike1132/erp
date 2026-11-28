@@ -241,7 +241,7 @@ export const useAuthStore = defineStore('auth', () => {
       .map((section) => ({
         ...section,
         items: section.items.filter((item) => {
-          // 超管专属入口（如审批管理）：非超管即使被勾了权限码也不显示，
+          // 超管专属入口（如用户管理）：非超管即使被勾了权限码也不显示，
           // 否则点开是清一色 403（审计 A-29）。
           if (item.superuserOnly && !user.value?.is_super) return false
           const codes = item.permissionCodes ?? (item.permission ? [item.permission] : [])

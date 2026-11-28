@@ -46,8 +46,6 @@ export interface OrderRecord {
   /** 备货行为 null（后端 /orders/records 统一记录契约） */
   status: string | null
   note?: string
-  is_locked?: boolean
-  locked_by_name?: string
   /** 订单关联的工厂名列表（从 items 聚合，去重排序） */
   factories?: string[]
   items?: Array<{

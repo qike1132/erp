@@ -44,7 +44,7 @@ class StateMachine:
                 f"允许的操作: {allowed_actions}"
             )
         new_state = allowed[action]
-        logger.debug("[%s]状态转换: '%s' --%s--> '%s'", current_status, action, new_state)
+        logger.debug("[%s]状态转换: '%s' --%s--> '%s'", self.name, current_status, action, new_state)
         return new_state
 
     def is_terminal(self, status: str) -> bool:
