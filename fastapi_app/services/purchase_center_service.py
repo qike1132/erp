@@ -89,7 +89,7 @@ logger = logging.getLogger(__name__)
 
 
 # ===== 领域事件订阅注册 =====
-# 订阅 order_service/approval_service 发布的 ORDER_DELETED 事件，
+# 订阅 order_service 发布的 ORDER_DELETED 事件，
 # 异步清理关联的 pending 采购订单，解耦 order ↔ purchase_order 的循环依赖。
 # 事件处理器使用独立的数据库会话（get_async_db_context），不阻塞订单删除主流程。
 def _register_order_event_subscriptions():

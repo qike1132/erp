@@ -26,8 +26,7 @@ async def sync_single_item_quantity(db: AsyncSession, order_id: int, quantity: i
     `record['quantity'] = first_item.quantity`），主表与明细不一致会让贝莱/外包/采购页
     一直显示旧数量——实测改 10000→8888 后主表已变、明细仍 10000。
 
-    直改（order/commands._update_order_directly）与审批通过（approval_service
-    ._handle_edit_approval）两条写路径都必须调用。
+    整单直改路径（order/commands._update_order_directly）必须调用。
 
     多 SKU 订单「改哪一个」的语义未定（两处均有 TODO），此时不擅自改动，仅记日志留痕。
     不走 `order.items` 关系：异步下会触发同步 lazy load（MissingGreenlet），故显式按 order_id 查。
@@ -104,9 +103,9 @@ async def assert_no_linked_returns(db: AsyncSession, order_id: int) -> None:
     删订单会级联物理删其 stock_out；出货行只要被退货记录引用（RESTRICT 外键）就删不掉。
     **已取消**（status='cancelled'）的退货不构成阻碍——删订单时由
     `detach_cancelled_returns_for_order` 解除其对外键的引用（退货行本身保留，可追溯）；
-    仍为 active 的退货才拒绝。直删（order/commands._delete_order_directly）与审批通过
-    （approval_service._handle_delete_approval）两条路径都先过此校验，否则会退化成 DB 层
-    IntegrityError 被映射成 409「订单存在关联数据」的含糊报错（2026-10-08 鲨鱼订单 68927）。
+    仍为 active 的退货才拒绝。直删（order/commands._delete_order_directly）路径先过
+    此校验，否则会退化成 DB 层 IntegrityError 被映射成 409「订单存在关联数据」的
+    含糊报错（2026-10-08 鲨鱼订单 68927）。
     """
     result = await db.execute(
         select(StockReturn.return_no).where(

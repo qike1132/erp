@@ -1,6 +1,6 @@
 """订单 CRUD Facade（批次1-3 拆分，2026-08-22）
 
-按职责拆分至 services/order/ 子包：queries / commands / deduction / approval_flow。
+按职责拆分至 services/order/ 子包：queries / commands / deduction。
 本模块保留全部原名称 re-export（含 beile 转发），既有 52 处引用零改动；
 新增代码请直接 import 对应子模块。
 """
@@ -10,14 +10,6 @@ import logging
 from fastapi_app.services.order._common import (  # 兼容：调用方曾经 order_crud 隐式再导出
     PermissionDeniedError,
     _safe_invalidate_purchase_cache,
-)
-from fastapi_app.services.order.approval_flow import (
-    _check_order_lock,
-    _create_approval_log_obj,
-    _ensure_no_pending_request,
-    _submit_delete_approval,
-    _submit_edit_approval,
-    cancel_approval,
 )
 from fastapi_app.services.order.beile import (
     _build_beile_order_record,
@@ -48,7 +40,6 @@ from fastapi_app.services.order.queries import (
     _fetch_orders_page,
     _parse_date_condition,
     _serialize_orders,
-    get_my_approvals,
     get_order_by_id,
     get_orders,
 )

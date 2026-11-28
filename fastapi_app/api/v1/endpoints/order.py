@@ -3,7 +3,6 @@
 
 职责：
 - 提供订单的增删改查接口
-- 处理订单审批流程（创建、取消）
 - 管理订单批次号与抵扣备货数量
 - 协调缓存失效与领域事件发布
 """
@@ -25,8 +24,6 @@ from fastapi_app.core.domain_events import publish as publish_domain_event
 from fastapi_app.core.exceptions import AppError, NotFoundError, db_transaction
 from fastapi_app.core.response import success_response
 from fastapi_app.schemas.order import (
-    ApprovalCancelResponse,
-    ApprovalListResponse,
     OrderActionResponse,
     OrderCreate,
     OrderDetailResponse,
@@ -194,24 +191,6 @@ async def confirm_beile_stockin(
     return OrderActionResponse(**result)
 
 
-@router.get("/my-approvals", response_model=ApprovalListResponse)
-async def my_approvals(
-    db: AsyncSession = Depends(get_async_read_db),
-    user: User = Depends(require_permission("order_manage")),
-) -> ApprovalListResponse:
-    """查看当前用户提交的审批请求列表。
-
-    Args:
-        db: 异步数据库会话（只读副本）。
-        user: 当前登录用户，用于筛选其提交的审批。
-
-    Returns:
-        ApprovalListResponse: 包含审批列表和总数的响应。
-    """
-    approvals = await order_service.get_my_approvals(db, user)
-    return ApprovalListResponse(data=approvals, total=len(approvals))
-
-
 @router.get("/records", response_model=OrderListResponse)
 async def list_unified_records(
     page: int = Query(1, ge=1, description="页码"),
@@ -363,15 +342,13 @@ async def edit_order(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_any_permission("order_manage", "order_edit")),
 ) -> OrderActionResponse:
-    """编辑订单（管理员直接编辑，非管理员提交审批）。
-
-    未提供的字段沿用订单原值，实现部分更新语义。
+    """编辑订单（未提供的字段沿用原值，实现部分更新语义）。
 
     Args:
         order_id: 订单 ID。
         data: 订单更新参数（仅包含需要修改的字段）。
         db: 异步数据库会话（读写主库）。
-        user: 当前登录用户，用于权限判断和审批流程。
+        user: 当前登录用户，用于权限判断。
 
     Returns:
         OrderActionResponse: 包含成功标志和提示消息的响应。
@@ -409,8 +386,7 @@ async def edit_order_item(
 ) -> OrderActionResponse:
     """编辑单个订单明细（SKU）：改数量/备注后重算订单兼容数量与状态。
 
-    报表流水行内编辑（2026-10-13）：item 级直改、不走审批（owner 裁决），
-    但仍过 `_check_order_lock`（被他人锁定/审批中的订单不可改）。
+    报表流水行内编辑（2026-10-13）：item 级直改（owner 裁决）。
     ValueError（订单/明细不存在、数量越界）由 db_transaction 默认映射为 400。
 
     Args:
@@ -438,8 +414,7 @@ async def edit_order_item(
 async def _publish_order_deleted(order_id: int) -> None:
     """订单确已删除后发布 ORDER_DELETED（采购中心据此撤回该订单的 pending 采购单）。
 
-    必须在事务提交后调用。非超管删除只是提交审批（requires_approval=True），订单并未
-    删除，不得发布——否则会误撤该订单仍在使用的采购单。
+    必须在事务提交后调用：提交前发布会让客户端重取到删除前的旧数据。
     """
     try:
         await publish_domain_event(DomainEvent(
@@ -461,7 +436,7 @@ async def delete_order_item(
 ) -> OrderActionResponse:
     """删除单个订单明细（SKU）。
 
-    删到空等价删整张订单（复用整单删除的审批/锁定/备份，非超管会变成提交审批）；
+    删到空等价删整张订单（复用整单删除的备份路径）；
     已被备货抵扣的 SKU 拒删。error_map 与整单删除端点同口径。
 
     Args:
@@ -491,7 +466,7 @@ async def delete_order_item(
     await cache_mgr.invalidate_dashboard()
     # 末项删除会转成整单删除（service 回传 order_id）：与整单删除端点同口径发布
     # ORDER_DELETED，否则采购中心订阅不到、不会撤回该订单已生成的 pending 采购单。
-    if result.get('success') and not result.get('requires_approval'):
+    if result.get('success'):
         deleted_order_id = result.get('order_id')
         if deleted_order_id is not None:
             await _publish_order_deleted(int(deleted_order_id))
@@ -504,7 +479,7 @@ async def delete_order(
     db: AsyncSession = Depends(get_async_db),
     user: User = Depends(require_any_permission("order_manage", "order_delete")),
 ) -> OrderActionResponse:
-    """删除订单（管理员直接删除，非管理员提交审批）。
+    """删除订单（备份→级联清理→软删除，同事务完成）。
 
     事务模式：db_transaction + error_map（TRANSACTION_BOUNDARY_GUIDE §2.3：
     端点层无 commit 例外）。提交在响应返回前完成，200 与「已落库」保持一致；
@@ -554,42 +529,9 @@ async def delete_order(
     await cache_mgr.invalidate_dashboard()
     # 领域事件：ORDER_DELETED 在事务提交后发布（订阅者使用独立 session，需可见已提交变更）；
     # 面向前端的实时广播已由 service 的 schedule_post_commit_event 注册并执行。
-    # 仅订单真的被删除才发；非超管提交审批时订单仍在，发事件会误撤其 pending 采购单。
-    if result.get('success') and not result.get('requires_approval'):
+    if result.get('success'):
         await _publish_order_deleted(order_id)
     return OrderActionResponse(success=result['success'], message=result['message'])
-
-
-@router.post("/cancel-approval/{approval_id}", response_model=ApprovalCancelResponse)
-async def cancel_approval(
-    approval_id: int,
-    db: AsyncSession = Depends(get_async_db),
-    user: User = Depends(require_permission("order_manage")),
-) -> ApprovalCancelResponse:
-    """取消审批请求（仅审批发起者或超级用户可取消）。
-
-    Args:
-        approval_id: 审批记录 ID。
-        db: 异步数据库会话（读写主库）。
-        user: 当前登录用户，用于权限校验。
-
-    Returns:
-        ApprovalCancelResponse: 包含成功标志和提示消息的响应。
-
-    Raises:
-        HTTPException: 权限不足时抛出 403。
-    """
-    try:
-        async with db_transaction(db):
-            await order_service.cancel_approval(db, approval_id, user)
-    except PermissionDeniedError as e:
-        raise HTTPException(status_code=403, detail=settings.sanitize_business_error(e)) from e
-    await cache_mgr.invalidate(
-        InvalidationStrategy.DOMAIN,
-        CacheDomain.ORDER_AND_INVENTORY | CacheDomain.REPORT,
-    )
-    await cache_mgr.invalidate_dashboard()
-    return ApprovalCancelResponse(success=True, message="审批请求已取消")
 
 
 @router.put("/batch-no/{order_id}", response_model=OrderActionResponse)

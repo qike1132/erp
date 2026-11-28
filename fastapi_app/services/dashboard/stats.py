@@ -19,7 +19,6 @@ from fastapi_app.core.cache import cache_result
 from fastapi_app.core.float_utils import round_qty
 from fastapi_app.services.dashboard.scope import DashboardReadScope, dashboard_cache_key
 from fastapi_app.shared_models import (
-    ApprovalRequest,
     MaterialRegistration,
     Order,
     OrderItem,
@@ -169,15 +168,13 @@ async def _fetch_independent_stats(today_start: datetime, scope: DashboardReadSc
         if scope.factory:
             low_stock_stmt = low_stock_stmt.where(Product.factory == scope.factory)
         counts['low_stock_count'] = low_stock_stmt
-    if scope.approvals and not scope.factory:
-        counts['pending_approvals'] = select(func.count(ApprovalRequest.id)).where(ApprovalRequest.status == 'pending')
     if scope.purchases and not scope.factory:
         counts['pending_purchases'] = select(func.count(PurchaseOrder.id)).where(PurchaseOrder.status.in_(['pending', 'partial']))
     if scope.materials and not scope.factory:
         counts['pending_materials'] = select(func.count(MaterialRegistration.id)).where(MaterialRegistration.status.in_(['pending', 'partial']))
     can_query_legacy_plans = scope.plans and not scope.factory
     data: dict = {
-        'low_stock_count': 0, 'pending_approvals': 0, 'pending_purchases': 0, 'pending_materials': 0,
+        'low_stock_count': 0, 'pending_purchases': 0, 'pending_materials': 0,
         'production_completion_rate': 0.0, 'pending_shipments': 0,
     }
     if not counts and not can_query_legacy_plans:
@@ -205,14 +202,14 @@ async def fetch_dashboard_stats(db: AsyncSession, scope: DashboardReadScope) -> 
 
         # 并行执行：
         # - 主链路（传入 db）：MV 存在性 → today/yesterday 基表 → MV resolve
-        # - 独立组（新 session）：4 count scalar_subquery + 生产排产
+        # - 独立组（新 session）：3 count scalar_subquery + 生产排产
         # 主链路内部有依赖（MV resolve 依赖 MV 存在性 + 基表值），无法进一步并行；
         # 独立组与主链路无表关联，安全并行。
         # asyncio.gather 返回 2 个结果（每个协程 1 个），需二次解包：
         #   base_result = (order_today, order_yesterday_base, stockin_today,
         #                  stockin_yesterday_base, stockout_today,
         #                  stockout_yesterday_base, mv_flags)
-        #   independent = {pending_approvals, low_stock_count, ...}
+        #   independent = {low_stock_count, pending_purchases, ...}
         base_result, independent = await asyncio.gather(
             _query_today_yesterday_base_with_mv(
                 db, today_start, today_end, yesterday_start, scope,
@@ -232,7 +229,6 @@ async def fetch_dashboard_stats(db: AsyncSession, scope: DashboardReadScope) -> 
             "order_today": order_today,
             "stockin_today": stockin_today,
             "stockout_today": stockout_today,
-            "pending_approvals": independent["pending_approvals"],
             "order_yesterday": order_yesterday,
             "stockin_yesterday": stockin_yesterday,
             "stockout_yesterday": stockout_yesterday,

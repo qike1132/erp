@@ -9,7 +9,6 @@ class DashboardStats(BaseModel):
     stockin_yesterday: int = 0    # 昨日备货商品总件数
     stockout_today: int = 0       # 今日出货商品总件数
     stockout_yesterday: int = 0   # 昨日出货商品总件数
-    pending_approvals: int = 0
     low_stock_count: int = 0
     pending_purchases: int = 0
     pending_materials: int = 0

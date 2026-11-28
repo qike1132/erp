@@ -1,4 +1,4 @@
-"""订单查询（详情/列表分页/筛选/序列化/我的审批请求）
+"""订单查询（详情/列表分页/筛选/序列化）
 
 自 order_crud.py 拆分（批次1-3），函数原文零改动。"""
 # ruff: noqa: F401 - 拆分过渡期沿用完整导入块，待按模块收敛未用导入
@@ -16,7 +16,6 @@ from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
-from fastapi_app.core.state_machine import can_transition
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services import escape_like
 from fastapi_app.services.enhanced_pagination import (
@@ -43,8 +42,6 @@ from fastapi_app.services.serializers.order_serializer import (
 )
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
-    ApprovalLog,
-    ApprovalRequest,
     InventoryLog,
     Notification,
     Order,
@@ -79,7 +76,6 @@ async def get_order_by_id(db: AsyncSession, order_id: int, factory: str | None =
 
     query = select(Order).options(
         joinedload(Order.product),
-        joinedload(Order.locked_by),
         selectinload(Order.items),
     ).where(*conditions)
 
@@ -263,7 +259,6 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
     # 基础查询（移除 selectinload(order_stockouts)，改用 SQL 聚合）
     query = select(Order).options(
         joinedload(Order.product),
-        joinedload(Order.locked_by),
         selectinload(Order.items),
     ).where(Order.is_deleted.isnot(True))
     count_query = select(func.count(Order.id)).where(Order.is_deleted.isnot(True))
@@ -291,14 +286,3 @@ async def get_orders(db: AsyncSession, page: int = 1, per_page: int = 50,
 
     orders_data = _serialize_orders(orders, deduct_map, factory_map, factory=factory)
     return {'items': orders_data, 'total': total, 'page': page, 'per_page': per_page}
-
-async def get_my_approvals(db: AsyncSession, current_user: User) -> list[dict]:
-    """获取我的审批请求"""
-    result = await db.execute(
-        select(ApprovalRequest)
-        .options(joinedload(ApprovalRequest.order), joinedload(ApprovalRequest.requester))
-        .where(ApprovalRequest.requester_id == current_user.id)
-        .order_by(ApprovalRequest.request_time.desc())
-    )
-    approvals = result.scalars().unique().all()
-    return [a.to_dict() for a in approvals]

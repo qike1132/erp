@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_app.schemas.dashboard import Activity
 from fastapi_app.services.dashboard.scope import DashboardReadScope, dashboard_cache_key
-from fastapi_app.shared_models import ApprovalRequest, Order, OrderItem, Product, StockIn, StockOut
+from fastapi_app.shared_models import Order, OrderItem, Product, StockIn, StockOut
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def _set_cached_activities(key: str, data):
 
 async def fetch_dashboard_activities(db: AsyncSession, scope: DashboardReadScope) -> list[Activity]:
     """仅查询有读取权限的活动来源，按授权范围缓存。"""
-    if not (scope.orders or scope.stockin or scope.stockout or scope.approvals):
+    if not (scope.orders or scope.stockin or scope.stockout):
         return []
     key = f'{_CACHE_KEY_ACTIVITIES}:{dashboard_cache_key(scope=scope)}'
     cached_activities = await _get_cached_activities(key)
@@ -68,12 +68,6 @@ async def fetch_dashboard_activities(db: AsyncSession, scope: DashboardReadScope
             for so in stockout_rows.scalars().all():
                 activities.append({"type": "stockout", "time": str(so.stockout_date) if so.stockout_date else "",
                                    "status": "已出货", "title": f"出库 {so.stockout_no}", "desc": f"出库 {so.stockout_no}"})
-
-        if scope.approvals:
-            approval_rows = await db.execute(select(ApprovalRequest).order_by(ApprovalRequest.request_time.desc()).limit(3))
-            for a in approval_rows.scalars().all():
-                activities.append({"type": "approval", "time": str(a.request_time) if a.request_time else "",
-                                   "status": a.status or "待审批", "title": "审批请求", "desc": "审批请求"})
 
         activities.sort(key=lambda x: x["time"], reverse=True)
         activities = activities[:8]

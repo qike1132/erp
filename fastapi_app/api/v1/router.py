@@ -4,7 +4,6 @@ API V1 路由注册
 
 from fastapi import APIRouter, Depends
 
-from fastapi_app.api.v1.endpoints.approval import router as approval_router
 from fastapi_app.api.v1.endpoints.auth import router as auth_router
 from fastapi_app.api.v1.endpoints.auxiliary import router as auxiliary_router
 from fastapi_app.api.v1.endpoints.backup import router as backup_router
@@ -159,14 +158,6 @@ api_router.include_router(
     supplier_router,
     prefix="/suppliers",
     tags=["供应商管理"],
-    dependencies=[Depends(get_current_user_id_write_strict)],
-)
-
-# 审批管理路由 - 前缀 /api/v1/approvals
-api_router.include_router(
-    approval_router,
-    prefix="/approvals",
-    tags=["审批管理"],
     dependencies=[Depends(get_current_user_id_write_strict)],
 )
 

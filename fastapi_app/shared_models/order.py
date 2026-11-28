@@ -79,9 +79,6 @@ class Order(Base):
     status: Mapped[str | None] = mapped_column(String(20), default=None, nullable=True, comment='订单状态')
     note: Mapped[str | None] = mapped_column(Text, comment='备注')
     batch_no: Mapped[str | None] = mapped_column(String(100), comment='批次号')
-    is_locked: Mapped[bool | None] = mapped_column(Boolean, default=False, comment='是否被审批锁定')
-    locked_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='锁定人ID')
-    lock_time: Mapped[datetime | None] = mapped_column(DateTime, comment='锁定时间')
 
     batch_completed_at: Mapped[datetime | None] = mapped_column(DateTime, comment='批次完成时间')
     batch_completed_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('user.id', ondelete='SET NULL'), comment='批次完成操作人ID')
@@ -98,7 +95,6 @@ class Order(Base):
 
 
     product: Mapped[Product] = relationship('Product', backref='orders')
-    locked_by: Mapped[User | None] = relationship('User', foreign_keys=[locked_by_id], backref='locked_orders')
     deleted_by: Mapped[User | None] = relationship('User', foreign_keys=[deleted_by_id], backref='deleted_orders')
     batch_completed_by: Mapped[User | None] = relationship('User', foreign_keys=[batch_completed_by_id], backref='batch_completed_orders')
     confirmed_by: Mapped[User | None] = relationship('User', foreign_keys=[confirmed_by_id], backref='confirmed_orders')
@@ -125,7 +121,6 @@ class Order(Base):
         Index('idx_order_product_status', 'product_id', 'status'),
         Index('idx_order_status_date', 'status', 'order_date'),
         Index('idx_order_batch_no', 'batch_no'),
-        Index('idx_order_locked_by', 'locked_by_id'),
         Index('idx_order_customer_trgm', 'customer', postgresql_using='gin',
               postgresql_ops={'customer': 'gin_trgm_ops'}),
         # 2026-10-31 索引对齐（pg_standalone_106）：谓词从 `= false` 改为
@@ -166,7 +161,6 @@ class Order(Base):
             'quantity': self.quantity,
             'status': self.status,
             'note': self.note,
-            'is_locked': self.is_locked,
             'is_deleted': self.is_deleted,
             'created_at': self.order_date.isoformat() if self.order_date else None,
             'deleted_at': self.deleted_at.isoformat() if self.deleted_at else None,

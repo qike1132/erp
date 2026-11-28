@@ -16,7 +16,6 @@ from fastapi_app.core.cache import CacheDomain, cache_result
 from fastapi_app.core.cache_invalidation import InvalidationStrategy, cache_mgr, schedule_post_commit_invalidation
 from fastapi_app.core.exception_handler import INFRA_EXCEPTIONS
 from fastapi_app.core.exceptions import BusinessError, NotFoundError
-from fastapi_app.core.state_machine import can_transition
 from fastapi_app.core.validators import validate_not_empty, validate_quantity_range
 from fastapi_app.services import escape_like
 from fastapi_app.services.enhanced_pagination import (
@@ -47,8 +46,6 @@ from fastapi_app.services.serializers.order_serializer import (
 from fastapi_app.shared.order_stock_rollback import rollback_order_stock_by_sku
 from fastapi_app.shared.stock_concurrency import get_product_for_update
 from fastapi_app.shared_models import (
-    ApprovalLog,
-    ApprovalRequest,
     AuditLog,
     InventoryLog,
     Notification,
@@ -109,15 +106,6 @@ async def _assert_no_outsource_ledger(db: AsyncSession, order_id: int, product_i
     )).scalar_one()
     if int(flow_count or 0) > 0:
         raise ValueError('该产品存在外发发货/收货流水，删除明细会抹掉台账；请改为删除整单（有备份）')
-
-
-
-from fastapi_app.services.order.approval_flow import (
-    _check_order_lock,
-    _ensure_no_pending_request,
-    _submit_delete_approval,
-    _submit_edit_approval,
-)
 
 
 async def create_order(db: AsyncSession, product_id: int, quantity: int,
@@ -227,24 +215,16 @@ async def update_order(db: AsyncSession, order_id: int, quantity: int,
     if not order or order.is_deleted:
         raise ValueError('订单不存在')
 
-    await _check_order_lock(db, order_id, order, current_user, '编辑')
-
-    if current_user.is_super:
-        return await _update_order_directly(
-            db, order, order_id, quantity, customer, note, current_user
-        )
-    else:
-        return await _submit_edit_approval(
-            db, order, order_id, quantity, customer, note, current_user
-        )
+    return await _update_order_directly(
+        db, order, order_id, quantity, customer, note, current_user
+    )
 
 
 async def update_order_item(db: AsyncSession, item_id: int, quantity: int | None,
                             note: str | None, current_user: User) -> dict:
     """编辑单个订单明细（SKU）：改数量/备注后重算订单兼容数量与状态。
 
-    报表流水行内编辑（2026-10-13）：item 级直改、不走审批（owner 裁决），
-    但仍过 `_check_order_lock`（被他人锁定/审批中的订单不可改）。
+    报表流水行内编辑（2026-10-13）：item 级直改（owner 裁决）。
 
     锁序 Product→Order→Item：与 `update_order`（P→O）一致，避免与出库创建
     （create_stockout_core 先锁产品再扫订单）互等行锁死锁。
@@ -262,7 +242,6 @@ async def update_order_item(db: AsyncSession, item_id: int, quantity: int | None
     )).scalar_one_or_none()
     if not order or order.is_deleted:
         raise ValueError('订单不存在')
-    await _check_order_lock(db, order.id, order, current_user, '编辑')
     item = (await db.execute(
         select(OrderItem).where(OrderItem.id == item_id).with_for_update()
     )).scalar_one_or_none()
@@ -322,15 +301,15 @@ async def update_order_item(db: AsyncSession, item_id: int, quantity: int | None
     await _safe_invalidate_purchase_cache()
     schedule_post_commit_event(db, StockEvent.ORDER_UPDATED,
                                {'order_id': order.id, 'order_no': order.order_no})
-    return {'success': True, 'message': '明细修改成功', 'requires_approval': False}
+    return {'success': True, 'message': '明细修改成功'}
 
 
 async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) -> dict:
     """删除单个订单明细（SKU）。
 
-    - 非末项：删该 item、重算订单兼容数量与状态；item 级直改、不走审批。
-    - 末项：等价删整张订单 —— 复用 `delete_order`（含审批/锁定/备份），**透传其返回值**
-      （非超管会变成提交审批，订单不立即删除，故不能硬编码成功文案）。
+    - 非末项：删该 item、重算订单兼容数量与状态；item 级直改。
+    - 末项：等价删整张订单 —— 复用 `delete_order`（备份+级联清理），**透传其返回值**
+      （订单已删除，成功文案由整单删除路径给出）。
     - 已被备货抵扣（该订单+该产品存在 stockin_id 非空的出货）时拒删。
 
     锁序 Product→Order→Item：末项分支会进 delete_order（_load_order_for_delete
@@ -355,7 +334,6 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     )).scalar_one_or_none()
     if not order or order.is_deleted:
         raise ValueError('订单不存在')
-    await _check_order_lock(db, order.id, order, current_user, '删除')
 
     deducted = (await db.execute(
         select(func.coalesce(func.sum(StockOut.quantity - StockOut.returned_quantity), 0))
@@ -423,7 +401,7 @@ async def delete_order_item(db: AsyncSession, item_id: int, current_user: User) 
     await _safe_invalidate_purchase_cache()
     schedule_post_commit_event(db, StockEvent.ORDER_UPDATED,
                                {'order_id': order.id, 'order_no': order.order_no})
-    return {'success': True, 'message': '明细删除成功', 'requires_approval': False}
+    return {'success': True, 'message': '明细删除成功'}
 
 
 async def _order_quantity_floor(db: AsyncSession, order: Order) -> int:
@@ -527,7 +505,7 @@ async def _update_order_directly(
         'quantity': quantity,
     })
 
-    return {'success': True, 'message': '订单编辑成功！', 'requires_approval': False}
+    return {'success': True, 'message': '订单编辑成功！'}
 
 _DELETE_BATCH_SIZE = 500
 _ORDER_BACKUP_SUBDIR = 'order_deletions'
@@ -635,7 +613,7 @@ async def _prelock_order_products(
     stockout_pids = (await db.execute(
         select(StockOut.product_id).where(StockOut.order_id == order_id).distinct()
     )).scalars().all()
-    # 多 SKU：编辑类审批可能改动 OrderItem 的 product_id，也必须纳入预锁集合，
+    # 多 SKU：回滚/直改路径涉及 OrderItem 的 product_id，也必须纳入预锁集合，
     # 否则会在持 Order 锁后再锁更小 id 的产品行（O→P 逆序，P1-03）。
     item_pids = (await db.execute(
         select(OrderItem.product_id).where(OrderItem.order_id == order_id).distinct()
@@ -687,17 +665,12 @@ async def delete_order(db: AsyncSession, order_id: int, current_user: User) -> d
     if not order or order.is_deleted:
         raise ValueError('订单不存在')
 
-    await _check_order_lock(db, order_id, order, current_user, '删除')
-
     # 有退货记录的订单不可删除（迁移 072 RESTRICT 的应用层前置）：
     # 删除会级联物理删 stock_out，撞 RESTRICT 外键；此处前置拒绝并说明原因，
-    # 避免退化成正删/审批两条路径都报含糊 409。置于分支前，非超管不会创建注定失败的审批。
+    # 避免退化成删一半才报含糊 409。
     await assert_no_linked_returns(db, order_id)
 
-    if current_user.is_super:
-        return await _delete_order_directly(db, order, order_id, current_user)
-    else:
-        return await _submit_delete_approval(db, order, order_id, current_user)
+    return await _delete_order_directly(db, order, order_id, current_user)
 
 async def _collect_order_deletion_graph(db: AsyncSession, order: Order, order_id: int) -> dict:
     """收集删除订单需要备份与清理的全部关联行（分批 IN，避免循环单查）。"""
@@ -705,20 +678,11 @@ async def _collect_order_deletion_graph(db: AsyncSession, order: Order, order_id
         db, OrderOutsourceProcess, OrderOutsourceProcess.order_id == order.id,
     )
     process_ids = [p.id for p in processes]
-    approvals = await _fetch_model_rows(
-        db, ApprovalRequest, ApprovalRequest.order_id == order_id,
-    )
-    approval_ids = [ar.id for ar in approvals]
     return {
         'processes': processes,
         'process_ids': process_ids,
-        'approvals': approvals,
-        'approval_ids': approval_ids,
         'flows': await _fetch_by_ids(
             db, OrderOutsourceProcessFlow, OrderOutsourceProcessFlow.process_id, process_ids,
-        ),
-        'approval_logs': await _fetch_by_ids(
-            db, ApprovalLog, ApprovalLog.approval_request_id, approval_ids,
         ),
         'shipment_items': await _fetch_by_ids(
             db, OutsourceShipmentItem, OutsourceShipmentItem.process_id, process_ids,
@@ -753,8 +717,6 @@ def _order_deletion_flow_count(graph: dict) -> int:
     return (
         len(graph['processes'])
         + len(graph['flows'])
-        + len(graph['approvals'])
-        + len(graph['approval_logs'])
         + len(graph['status_logs'])
         + len(graph['retry_records'])
     )
@@ -779,8 +741,6 @@ def _order_deletion_backup_payload(
         'stockouts': _serialize_model_rows(graph['stockouts'], StockOut),
         'outsource_processes': _serialize_model_rows(graph['processes'], OrderOutsourceProcess),
         'outsource_process_flows': _serialize_model_rows(graph['flows'], OrderOutsourceProcessFlow),
-        'approval_requests': _serialize_model_rows(graph['approvals'], ApprovalRequest),
-        'approval_logs': _serialize_model_rows(graph['approval_logs'], ApprovalLog),
         'order_sync_records': _serialize_model_rows(graph['sync_records'], OrderSyncRecord),
         'sync_retry_queue': _serialize_model_rows(graph['retry_records'], SyncRetryQueue),
         'order_status_logs': _serialize_model_rows(graph['status_logs'], OrderStatusLog),
@@ -813,12 +773,8 @@ async def _purge_outsource_processes(db: AsyncSession, process_ids: list[int]) -
 
 async def _purge_order_related_rows(
     db: AsyncSession, order: Order, order_id: int, graph: dict,
-    keep_approval_id: int | None = None,
 ) -> dict:
-    """删除/解绑订单的全部关联记录（出库、同步、审批、工序、状态日志、明细）。
-
-    keep_approval_id：审批删单传入当前审批行 ID，保留它及其日志供审批流程收尾；
-    直删传 None，全部审批一并清理。
+    """删除/解绑订单的全部关联记录（出库、同步、工序、状态日志、明细）。
 
     返回出货计划级联清理结果（供删除消息透出）。
     """
@@ -828,12 +784,6 @@ async def _purge_order_related_rows(
     await db.execute(delete(StockOut).where(StockOut.order_id == order.id))
     await db.execute(delete(OrderSyncRecord).where(OrderSyncRecord.source_order_id == order_id))
     await db.execute(delete(SyncRetryQueue).where(SyncRetryQueue.source_order_id == order_id))
-    approval_ids = [aid for aid in graph['approval_ids'] if aid != keep_approval_id]
-    await _delete_in_batches(db, ApprovalLog, approval_ids, ApprovalLog.approval_request_id)
-    approval_delete = delete(ApprovalRequest).where(ApprovalRequest.order_id == order_id)
-    if keep_approval_id is not None:
-        approval_delete = approval_delete.where(ApprovalRequest.id != keep_approval_id)
-    await db.execute(approval_delete)
     await _purge_outsource_processes(db, graph['process_ids'])
     await db.execute(update(OutsourceShipment).where(OutsourceShipment.order_id == order_id).values(order_id=None))
     await db.execute(delete(OrderStatusLog).where(OrderStatusLog.order_no == order.order_no))
@@ -864,8 +814,8 @@ async def _delete_order_directly(
 
     # 2026-10-19 OCR 第三轮 M3：接收**实际回滚量**（正组求和、跳过缺失产品后的
     # 落账值），下方日志与用户消息改用之——total_deducted 只是「全部出库行净量
-    # 之和」，含负组/缺失 SKU 组时与实际回滚量发散（审批路径 _handle_delete_approval
-    # 在任务 #27 已同样修过，此处对齐口径）。
+    # 之和」，含负组/缺失 SKU 组时与实际回滚量发散（任务 #27 已修过同款缺陷，
+    # 此处对齐口径）。
     total_rolled_back = await rollback_order_stock_by_sku(db, order, order_stockouts)
 
     plan_purge = await _purge_order_related_rows(db, order, order_id, graph)
@@ -922,5 +872,4 @@ async def _delete_order_directly(
     return {
         'success': True,
         'message': message,
-        'requires_approval': False,
     }

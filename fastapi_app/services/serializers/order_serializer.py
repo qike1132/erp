@@ -31,8 +31,6 @@ class OrderField(Enum):
     DEDUCT_QUANTITY = "deduct_quantity"
     STATUS = "status"
     NOTE = "note"
-    IS_LOCKED = "is_locked"
-    LOCKED_BY_NAME = "locked_by_name"
     BATCH_NO = "batch_no"
     BATCH_COMPLETED_AT = "batch_completed_at"
     ITEMS = "items"
@@ -46,13 +44,11 @@ class SerializerConfig:
     Attributes:
         fields: 需要序列化的字段列表
         include_product: 是否包含产品详情对象
-        include_locked_by: 是否包含锁定人信息
         include_items: 是否包含订单 SKU 明细列表
     """
 
     fields: list[OrderField]
     include_product: bool = False
-    include_locked_by: bool = False
     include_items: bool = False
 
 
@@ -86,13 +82,10 @@ class OrderSerializer:
             OrderField.DEDUCT_QUANTITY,
             OrderField.STATUS,
             OrderField.NOTE,
-            OrderField.IS_LOCKED,
-            OrderField.LOCKED_BY_NAME,
             OrderField.ITEMS,
             OrderField.FACTORIES,
         ],
         include_product=True,
-        include_locked_by=True,
         include_items=True,
     )
 
@@ -109,7 +102,6 @@ class OrderSerializer:
             OrderField.STATUS,
             OrderField.BATCH_NO,
             OrderField.BATCH_COMPLETED_AT,
-            OrderField.IS_LOCKED,
         ]
     )
 
@@ -125,14 +117,11 @@ class OrderSerializer:
             OrderField.DEDUCT_QUANTITY,
             OrderField.STATUS,
             OrderField.NOTE,
-            OrderField.IS_LOCKED,
-            OrderField.LOCKED_BY_NAME,
             OrderField.BATCH_NO,
             OrderField.BATCH_COMPLETED_AT,
             OrderField.ITEMS,
         ],
         include_product=True,
-        include_locked_by=True,
         include_items=True,
     )
 
@@ -146,7 +135,6 @@ class OrderSerializer:
         OrderField.QUANTITY: "quantity",
         OrderField.STATUS: "status",
         OrderField.NOTE: "note",
-        OrderField.IS_LOCKED: "is_locked",
         OrderField.BATCH_NO: "batch_no",
         OrderField.BATCH_COMPLETED_AT: "batch_completed_at",
     }
@@ -194,12 +182,6 @@ class OrderSerializer:
                 result["product_name"] = order.product.name
             else:
                 result["product_name"] = None
-
-        if OrderField.LOCKED_BY_NAME in config.fields:
-            if config.include_locked_by and order.locked_by:
-                result["locked_by_name"] = order.locked_by.username
-            else:
-                result["locked_by_name"] = None
 
         if OrderField.ITEMS in config.fields and config.include_items:
             result["items"] = [

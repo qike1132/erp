@@ -65,10 +65,6 @@ def _register_domain_event_subscriptions():
 class StockEvent:
     STOCK_CHANGED = "stock_changed"
     SHIPMENT_PLAN_UPLOADED = "shipment_plan_uploaded"
-    ORDER_LOCKED = "order_locked"
-    ORDER_UNLOCKED = "order_unlocked"
-    APPROVAL_REQUESTED = "approval_requested"
-    APPROVAL_RESOLVED = "approval_resolved"
     ORDER_CREATED = "order_created"
     ORDER_UPDATED = "order_updated"
     ORDER_DELETED = "order_deleted"
@@ -107,8 +103,6 @@ _EVENT_REQUIRED_PERMISSIONS: dict[str, tuple[str, ...]] = {
     StockEvent.SHIPMENT_PLAN_UPLOADED: (
         'production_plan_view', 'production_plan_manage', 'stockout_manage',
     ),
-    StockEvent.ORDER_LOCKED: ('order_manage',),
-    StockEvent.ORDER_UNLOCKED: ('order_manage',),
     StockEvent.ORDER_CREATED: (
         'order_manage', 'beile_order_view', 'purchase_center_manage',
         'production_plan_view', 'production_plan_manage', 'stockout_manage',
@@ -128,7 +122,6 @@ _EVENT_REQUIRED_PERMISSIONS: dict[str, tuple[str, ...]] = {
     StockEvent.MATERIAL_UPDATED: ('product_manage', 'material_registration'),
     StockEvent.CASE_STOCK_CHANGED: ('case_manage',),
 }
-_SUPER_ONLY_EVENTS = {StockEvent.APPROVAL_REQUESTED, StockEvent.APPROVAL_RESOLVED}
 _WS_SEND_TIMEOUT_SECONDS = 2.0
 
 # 共享异步 Redis 客户端已上提至 core.redis_client（批次1 解耦 core↔services）：
@@ -259,8 +252,6 @@ class ConnectionManager:
             return False
         event_type = event.get('type', '')
         is_super = bool(getattr(principal, 'is_super', False))
-        if event_type in _SUPER_ONLY_EVENTS:
-            return is_super
         required = _EVENT_REQUIRED_PERMISSIONS.get(event_type)
         if not required:
             return False

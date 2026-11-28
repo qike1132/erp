@@ -102,13 +102,12 @@ uvicorn fastapi_app.main:app --host 127.0.0.1 --port 5002 --reload
 | 模块 | 端点前缀 | 说明 |
 |---|---|---|
 | 认证与上传 | `/api/v1/auth` | 登录/登出/刷新/用户信息/图片上传 |
-| 订单 | `/api/v1/orders` | 订单 CRUD、审批流、库存扣减（FIFO） |
+| 订单 | `/api/v1/orders` | 订单 CRUD、库存扣减（FIFO） |
 | 产品 | `/api/v1/products` | 产品与物料/面料/配件 BOM |
 | 库存 | `/api/v1/stock` | 出入库、退货、盘点 |
 | 采购 | `/api/v1/purchase-center`、`/api/v1/plans` | 采购订单/计划/供应商汇总 |
 | 生产 | `/api/v1/production-plans`、`/api/v1/daily-production` | 排产计划与生产报表 |
 | 板房打样 | `/api/v1/pattern-room` | 按客户分类打样（客户分组+部位布料+版本快照） |
-| 审批 | `/api/v1/approvals` | 审批流 |
 | 报表 | `/api/v1/reports` | 报表统计 |
 | 备份 | `/api/v1/backup` | 数据库备份/恢复/演练 |
 | 通知 | `/api/v1/notifications` + `/ws/notifications` | WebSocket 实时通知 |

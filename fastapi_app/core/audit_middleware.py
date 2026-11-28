@@ -42,7 +42,6 @@ RESOURCE_MAP = {
     '/api/v1/suppliers': 'supplier',
     '/api/v1/users': 'user',
     '/api/v1/permissions': 'permission',
-    '/api/v1/approvals': 'approval',
     '/api/v1/backup': 'backup',
     '/api/v1/batch': 'order_batch',
     '/api/v1/cases': 'case',

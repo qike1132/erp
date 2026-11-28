@@ -58,12 +58,11 @@ STATUS_NEGATIVE = 'negative'
 #:     ——同文件 0 处 ``current_stock`` / ``apply_stock_delta_locked``；
 #:   - ``订单修改``：``services/order/commands.py``（明细改量 / 明细删除 / 整单改量）
 #:     ——该文件全篇无库存写调用；
-#:   - ``订单修改(审批)``：``services/approval_service.py:377``（审批通过改单量，同上）；
+#:   - ``订单修改(审批)``：历史审批路径写入（审批系统已于 2026-11-28 下线，仅存量流水）；
 #:   - ``订单删除``：``shared/order_stock_rollback.py:113`` 的订单级汇总行——真实物理
 #:     变动已由同函数逐个产品的 ``抵扣回滚`` 行（``apply_stock_delta_locked``）记账，
 #:     这行是同额汇总，计入即重复计数；
-#:   - ``订单删除(审批)``：``services/approval_service.py:557``——同上（审批删单自写
-#:     汇总，rollback 的汇总行被显式关掉），同样重复计数。
+#:   - ``订单删除(审批)``：同上（历史审批删单自写汇总；审批系统已下线，仅存量流水）。
 #:
 #: 刻意**不**排除的相邻类型（它们真的改了 ``current_stock``，排除会造成反向漂移）：
 #: ``订单抵扣`` / ``取消抵扣``（``services/order/deduction.py``、
