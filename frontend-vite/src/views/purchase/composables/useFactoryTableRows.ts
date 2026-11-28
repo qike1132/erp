@@ -63,6 +63,14 @@ export type FactoryTabEmit = {
   lossRateInput: [rate: number]
   /** 单个布料行损耗率输入的归一化值（已夹取到 0..1000）。防抖由父组件负责。 */
   fabricLossRateInput: [gi: number, si: number, fi: number, rate: number]
+  /**
+   * 立即提交挂起的损耗率（失焦 / Enter）。防抖在父组件；输入可能「输了就刷新/返回」，
+   * 300ms 窗口内的最终值会被 onUnmounted 作废而静默丢失（2026-11-28 生产事故：
+   * 用户输入自定义损耗率后刷新，值未落库）。blur/Enter 时父组件应立即 flush。
+   */
+  lossRateCommit: []
+  /** 单行的立即提交（失焦 / Enter），坐标由子组件按落库坐标解析。 */
+  fabricLossRateCommit: [gi: number, si: number, fi: number]
 }
 
 /**
@@ -360,6 +368,21 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     emit('fabricLossRateInput', item.gi, c.si, c.fi, Number.isNaN(val) || val < 0 ? 0 : Math.min(val, 1000))
   }
 
+  /** 该行损耗率输入是否应渲染：有落库坐标**且**该行有可写明细。
+   *  缺 itemIds 的行（legacy 回退模式下 BOM 新增物料）此前照样渲染输入框，
+   *  但保存时 composable 按 itemIds 为空静默 return——用户以为存上了其实零写入
+   *  （2026-11-28 生产事故）；与 canEditQty 同口径收紧。 */
+  function canEditRate(item: RowItem): boolean {
+    return !!rowCoord(item) && item.row.itemIds.length > 0
+  }
+
+  /** 行率立即提交（失焦 / Enter）：解析落库坐标后交父组件 flush 该行挂起值。 */
+  function onRowRateCommit(item: RowItem): void {
+    const c = rowCoord(item)
+    if (!c) return
+    emit('fabricLossRateCommit', item.gi, c.si, c.fi)
+  }
+
   /** 该行草稿的稳定键（落库坐标）；无坐标 → null。 */
   function qtyDraftKey(item: RowItem): string | null {
     const c = rowCoord(item)
@@ -454,5 +477,7 @@ export function useFactoryTableRows(props: FactoryTabProps, emit: EmitFn<Factory
     qtyEditTitle,
     isRowRateMixed,
     onRowRateInput,
+    canEditRate,
+    onRowRateCommit,
   }
 }

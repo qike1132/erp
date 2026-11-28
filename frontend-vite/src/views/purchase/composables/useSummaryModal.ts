@@ -938,7 +938,13 @@ export function useSummaryModal() {
   async function applyFabricLossRateAndSave(gi: number, si: number, fi: number, rate: number) {
     applyFabricLossRate(gi, si, fi, rate)
     const targetItemIds = fabricItemIds.value?.[gi]?.[si]?.[fi] || []
-    if (targetItemIds.length === 0) return
+    if (targetItemIds.length === 0) {
+      // 2026-11-28 生产事故：无落库明细的行曾静默 return（展示值更新、零写入、零提示），
+      // 用户以为存上了，刷新后回到旧值。输入框已按 canEditRate 收紧到有明细的行，
+      // 此处兜底（坐标越界/异常数据仍可能走到）：明确告知而不是装作成功。
+      toast.warning('该行物料不在采购明细中，损耗率无法保存')
+      return
+    }
 
     const key = fabricKey(gi, si, fi)
     const existing = fabricDrainPromises.get(key)
